@@ -1,0 +1,23 @@
+name: QuantVault CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  release-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run release:gates
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quantvault-release-reports
+          path: dist/reports

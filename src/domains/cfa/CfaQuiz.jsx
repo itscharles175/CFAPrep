@@ -1,0 +1,501 @@
+import { useMemo, useState } from 'react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { getCfaTopicContent, getCfaTopicKey } from './cfaLevels';
+import {
+  ArrowLeft,
+  CheckCircle2,
+  XCircle,
+  ChevronRight,
+  RotateCcw,
+  Trophy,
+  Target,
+  BrainCircuit,
+  CalendarClock,
+  Calculator,
+  ClipboardList,
+} from 'lucide-react';
+import { recordQuizAttempt, toggleBookmark } from '../../lib/learning';
+import { useProgressSummary } from '../../hooks/useProgress';
+
+function currentTimestampMs() {
+  return Date.now();
+}
+
+const quizModes = [
+  { id: 'review-due', label: 'Review Due', icon: CalendarClock },
+  { id: 'weak-areas', label: 'Weak Areas', icon: BrainCircuit },
+  { id: 'topic-drill', label: 'Topic Drill', icon: Target },
+  { id: 'mock-section', label: 'Mock Section', icon: ClipboardList },
+  { id: 'formula-drill', label: 'Formula Drill', icon: Calculator },
+];
+
+const confidenceOptions = [
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+];
+
+const errorOptions = [
+  { id: 'concept', label: 'Concept gap' },
+  { id: 'calculation', label: 'Calculation' },
+  { id: 'formula', label: 'Formula recall' },
+  { id: 'ethics-judgment', label: 'Ethics judgment' },
+  { id: 'misread', label: 'Misread' },
+  { id: 'time-pressure', label: 'Time pressure' },
+  { id: 'none', label: 'No error' },
+];
+
+function buildQuestionSet({ baseQuestions, mode, summary, topic, topicKey, objectiveParam }) {
+  if (objectiveParam) {
+    const objectiveQuestions = baseQuestions.filter((question) => question.learningObjective === objectiveParam);
+    return { questions: objectiveQuestions.length ? objectiveQuestions : baseQuestions, usedFallback: objectiveQuestions.length === 0 };
+  }
+
+  if (mode === 'review-due') {
+    const dueObjectives = new Set(
+      summary.dueReviews
+        .filter((item) => item.topic === topic || item.topic === topicKey)
+        .map((item) => item.learningObjective),
+    );
+    const dueQuestions = baseQuestions.filter((question) => dueObjectives.has(question.learningObjective));
+    return { questions: dueQuestions.length ? dueQuestions : baseQuestions, usedFallback: dueQuestions.length === 0 };
+  }
+
+  if (mode === 'weak-areas') {
+    const weakObjectives = new Set(
+      summary.weakObjectives
+        .filter((item) => item.topic === topic || item.topic === topicKey)
+        .map((item) => item.learningObjective),
+    );
+    const weakQuestions = baseQuestions.filter((question) => weakObjectives.has(question.learningObjective));
+    return { questions: weakQuestions.length ? weakQuestions : baseQuestions, usedFallback: weakQuestions.length === 0 };
+  }
+
+  if (mode === 'formula-drill') {
+    const formulaQuestions = baseQuestions.filter((question) => question.formula || question.tags?.includes('formula'));
+    return { questions: formulaQuestions.length ? formulaQuestions : baseQuestions, usedFallback: formulaQuestions.length === 0 };
+  }
+
+  if (mode === 'mock-section') {
+    const order = { foundation: 1, intermediate: 2, advanced: 3 };
+    return {
+      questions: [...baseQuestions].sort((a, b) => order[a.difficulty] - order[b.difficulty]).slice(0, 12),
+      usedFallback: false,
+    };
+  }
+
+  return { questions: baseQuestions, usedFallback: false };
+}
+
+function nextDefaultError(selected, correct) {
+  return selected === correct ? 'none' : 'concept';
+}
+
+export default function CfaQuiz() {
+  const { level, topic } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const summary = useProgressSummary();
+  const mode = searchParams.get('mode') || 'topic-drill';
+  const objectiveParam = searchParams.get('objective');
+  const topicData = useMemo(() => getCfaTopicContent(level, topic), [level, topic]);
+  const topicKey = useMemo(() => getCfaTopicKey(level, topic), [level, topic]);
+  const baseQuestions = useMemo(() => topicData?.questions || [], [topicData]);
+  const objectives = useMemo(() => topicData?.learningObjectives || [], [topicData]);
+  const objectiveById = useMemo(() => new Map(objectives.map((objective) => [objective.id, objective])), [objectives]);
+  const { questions, usedFallback } = useMemo(
+    () => buildQuestionSet({ baseQuestions, mode, summary, topic, topicKey, objectiveParam }),
+    [baseQuestions, mode, objectiveParam, summary, topic, topicKey],
+  );
+
+  const [current, setCurrent] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const [answers, setAnswers] = useState([]);
+  const [startTime, setStartTime] = useState(currentTimestampMs);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const [confidence, setConfidence] = useState('medium');
+  const [errorCategory, setErrorCategory] = useState('none');
+
+  const safeCurrent = Math.min(current, Math.max(questions.length - 1, 0));
+  const q = questions[safeCurrent];
+  const letters = ['A', 'B', 'C', 'D'];
+  const modeLabel = quizModes.find((item) => item.id === mode)?.label || 'Topic Drill';
+
+  const score = useMemo(() => answers.filter((answer) => answer.correct).length, [answers]);
+
+  function resetQuiz() {
+    setCurrent(0);
+    setSelected(null);
+    setConfirmed(false);
+    setAnswers([]);
+    setFinished(false);
+    setElapsedSeconds(0);
+    setConfidence('medium');
+    setErrorCategory('none');
+    setStartTime(currentTimestampMs());
+  }
+
+  function handleModeChange(nextMode) {
+    setSearchParams(nextMode === 'topic-drill' ? {} : { mode: nextMode });
+    resetQuiz();
+  }
+
+  function handleSelect(idx) {
+    if (confirmed) return;
+    setSelected(idx);
+  }
+
+  function handleConfirm() {
+    if (selected === null) return;
+    setConfirmed(true);
+    setConfidence(selected === q.correct ? 'high' : 'low');
+    setErrorCategory(nextDefaultError(selected, q.correct));
+  }
+
+  function buildAnswer() {
+    const objective = objectiveById.get(q.learningObjective);
+    return {
+      domain: 'cfa',
+      level,
+      topic: topicKey,
+      questionId: q.id,
+      learningObjective: q.learningObjective,
+      objectiveTitle: objective?.title || q.learningObjective,
+      correct: selected === q.correct,
+      confidence,
+      errorCategory,
+      difficulty: q.difficulty,
+      selected,
+      correctIndex: q.correct,
+      formula: q.formula,
+      path: `/cfa/${level}/${topic}/quiz?mode=${mode}`,
+      itemType: mode === 'formula-drill' ? 'formula-drill' : mode === 'mock-section' ? 'mock-section' : q.itemType || 'single',
+    };
+  }
+
+  function handleNext() {
+    const nextAnswers = [...answers, buildAnswer()];
+    setAnswers(nextAnswers);
+
+    if (safeCurrent < questions.length - 1) {
+      setCurrent(safeCurrent + 1);
+      setSelected(null);
+      setConfirmed(false);
+      setConfidence('medium');
+      setErrorCategory('none');
+    } else {
+      const elapsed = Math.round((currentTimestampMs() - startTime) / 1000);
+      const finalScore = nextAnswers.filter((answer) => answer.correct).length;
+      setElapsedSeconds(elapsed);
+      recordQuizAttempt({
+        domain: 'cfa',
+        topic: topicKey,
+        title: topicData?.title || topic,
+        mode,
+        score: finalScore,
+        total: questions.length,
+        elapsedSeconds: elapsed,
+        answers: nextAnswers,
+      });
+      setFinished(true);
+    }
+  }
+
+  async function bookmarkQuestion(question) {
+    await toggleBookmark({
+      type: 'question',
+      domain: 'cfa',
+      moduleId: `${level}:${topic}`,
+      questionId: question.id,
+      title: question.question,
+      path: `/cfa/${level}/${topic}/quiz?mode=${mode}`,
+    });
+  }
+
+  if (!questions.length) {
+    return (
+      <div className="page-container">
+        <div className="glass-card no-hover" style={{ textAlign: 'center', padding: 'var(--space-16)' }}>
+          <h2>Quiz Coming Soon</h2>
+          <p style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-3)' }}>Questions for this topic are being developed.</p>
+          <Link to="/cfa" className="btn btn-primary" style={{ marginTop: 'var(--space-6)' }}>Back to CFA</Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (finished) {
+    const pct = Math.round((score / questions.length) * 100);
+    const missed = answers.filter((answer) => !answer.correct);
+
+    return (
+      <div className="page-container">
+        <div className="quiz-container">
+          <div className="glass-card no-hover animate-scale" style={{ textAlign: 'center', padding: 'var(--space-12)' }}>
+            <div style={{
+              width: 80,
+              height: 80,
+              borderRadius: '50%',
+              margin: '0 auto var(--space-6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: pct >= 70 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+            }}>
+              <Trophy size={36} color={pct >= 70 ? 'var(--success)' : 'var(--danger)'} />
+            </div>
+            <h2 style={{ fontSize: 'var(--fs-3xl)', fontWeight: 800, marginBottom: 'var(--space-2)' }}>
+              {pct >= 70 ? 'Strong pass' : pct >= 50 ? 'Useful reps logged' : 'Review queue updated'}
+            </h2>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-8)' }}>
+              {topicData?.title || topic} - {modeLabel}
+            </p>
+            {topicData?.runtimeMode === 'validated-beta' && (
+              <div className="badge badge-amber" style={{ marginBottom: 'var(--space-6)' }}>
+                Authored beta content · release gate remains editorial
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-8)', marginBottom: 'var(--space-8)', flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800, color: pct >= 70 ? 'var(--success)' : 'var(--danger)' }}>{pct}%</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Score</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800 }}>{score}/{questions.length}</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Correct</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800 }}>{missed.length}</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Scheduled weak reps</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800 }}>{elapsedSeconds}s</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Time</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 'var(--space-4)', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary" onClick={resetQuiz}>
+                <RotateCcw size={16} /> Retry Mode
+              </button>
+              <Link to={`/cfa/${level}/${topic}`} className="btn btn-primary">
+                <ArrowLeft size={16} /> Back to Module
+              </Link>
+            </div>
+          </div>
+
+          <div className="glass-card no-hover" style={{ marginTop: 'var(--space-6)' }}>
+            <div className="flex-between" style={{ marginBottom: 'var(--space-4)' }}>
+              <h3 style={{ margin: 0 }}>Answer Review</h3>
+              <span className="badge badge-blue">{missed.length ? 'Missed questions first' : 'Clean run'}</span>
+            </div>
+            {[...answers]
+              .sort((a, b) => Number(a.correct) - Number(b.correct))
+              .map((answer, index) => {
+                const question = questions.find((item) => item.id === answer.questionId);
+                const objective = objectiveById.get(answer.learningObjective);
+                if (!question) return null;
+                return (
+                  <div
+                    key={`${answer.questionId}-${index}`}
+                    style={{
+                      borderTop: index ? '1px solid var(--border)' : 0,
+                      paddingTop: index ? 'var(--space-4)' : 0,
+                      marginTop: index ? 'var(--space-4)' : 0,
+                    }}
+                  >
+                    <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+                      {answer.correct ? <CheckCircle2 size={18} color="var(--success)" /> : <XCircle size={18} color="var(--danger)" />}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700 }}>{question.question}</div>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginTop: 'var(--space-2)' }}>
+                          Your answer: {letters[answer.selected]} · Correct answer: {letters[answer.correctIndex]} · Confidence: {answer.confidence} · Error: {answer.errorCategory}
+                        </div>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', lineHeight: 1.6 }}>{question.explanation}</p>
+                        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <span className="badge badge-purple">{objective?.title || answer.learningObjective}</span>
+                          {question.formula && <span className="badge badge-blue">Formula: {question.formula}</span>}
+                          <Link to={`/cfa/${level}/${topic}`} className="btn btn-secondary" style={{ padding: 'var(--space-2) var(--space-3)' }}>
+                            Related lesson
+                          </Link>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ padding: 'var(--space-2) var(--space-3)' }}
+                            onClick={() => bookmarkQuestion(question)}
+                          >
+                            Bookmark
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page-container">
+      <Link to={`/cfa/${level}/${topic}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-6)' }}>
+        <ArrowLeft size={16} /> Back to {topicData?.title || topic}
+      </Link>
+      {topicData?.runtimeMode === 'validated-beta' && (
+        <div className="badge badge-amber" style={{ marginBottom: 'var(--space-4)' }}>
+          Validated authored beta · not public exam-ready
+        </div>
+      )}
+
+      <div className="quiz-container">
+        <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-5)', padding: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }} role="tablist" aria-label="Quiz mode">
+            {quizModes.map((item) => {
+              const Icon = item.icon;
+              const active = item.id === mode;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => handleModeChange(item.id)}
+                >
+                  <Icon size={16} /> {item.label}
+                </button>
+              );
+            })}
+          </div>
+          {usedFallback && (
+            <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 'var(--space-3) 0 0' }}>
+              No targeted items are currently queued for this mode, so the full topic bank is loaded.
+            </p>
+          )}
+        </div>
+
+        <div className="quiz-header">
+          <div>
+            <div style={{ fontWeight: 700 }}>{topicData?.title || topic}</div>
+            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Level {level?.toUpperCase()} · {modeLabel}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+            <span className={`badge ${q.difficulty === 'foundation' ? 'badge-green' : q.difficulty === 'intermediate' ? 'badge-blue' : 'badge-purple'}`}>
+              {q.difficulty?.toUpperCase()}
+            </span>
+            <span style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
+              {safeCurrent + 1} / {questions.length}
+            </span>
+          </div>
+        </div>
+
+        <div className="quiz-progress-bar">
+          <div className="quiz-progress-fill" style={{ width: `${((safeCurrent + (confirmed ? 1 : 0)) / questions.length) * 100}%` }} />
+        </div>
+
+        <div className="glass-card no-hover animate-fade" key={`${mode}-${safeCurrent}`}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+            <div className="quiz-question">{q.question}</div>
+            <span className="badge badge-purple">{objectiveById.get(q.learningObjective)?.title || q.learningObjective}</span>
+          </div>
+
+          <div className="quiz-options">
+            {q.options.map((opt, idx) => {
+              let cls = 'quiz-option';
+              if (confirmed && idx === q.correct) cls += ' correct';
+              else if (confirmed && idx === selected && idx !== q.correct) cls += ' incorrect';
+              else if (!confirmed && idx === selected) cls += ' selected';
+
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  className={cls}
+                  onClick={() => handleSelect(idx)}
+                  aria-pressed={idx === selected}
+                  disabled={confirmed}
+                >
+                  <span className="quiz-option-letter">{letters[idx]}</span>
+                  <span style={{ flex: 1, textAlign: 'left' }}>{opt}</span>
+                  {confirmed && idx === q.correct && <CheckCircle2 size={18} color="var(--success)" />}
+                  {confirmed && idx === selected && idx !== q.correct && <XCircle size={18} color="var(--danger)" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {confirmed && (
+            <div className="quiz-explanation">
+              <h4>{selected === q.correct ? 'Correct' : 'Incorrect'}</h4>
+              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.6 }}>{q.explanation}</p>
+              {q.formula && <div className="badge badge-blue" style={{ marginTop: 'var(--space-3)' }}>Related formula: {q.formula}</div>}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginTop: 'var(--space-5)' }}>
+                <div>
+                  <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 'var(--space-2)', fontWeight: 700 }}>
+                    CONFIDENCE
+                  </div>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                    {confidenceOptions.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`btn ${confidence === item.id ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setConfidence(item.id)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <label style={{ display: 'block' }}>
+                  <span style={{ display: 'block', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 'var(--space-2)', fontWeight: 700 }}>
+                    ERROR TYPE
+                  </span>
+                  <select
+                    value={errorCategory}
+                    onChange={(event) => setErrorCategory(event.target.value)}
+                    style={{
+                      width: '100%',
+                      minHeight: 44,
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--border)',
+                      background: 'var(--surface)',
+                      color: 'var(--text-primary)',
+                      padding: '0 var(--space-3)',
+                    }}
+                  >
+                    {errorOptions
+                      .filter((item) => q.errorCategories?.includes(item.id) || item.id === 'none')
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>{item.label}</option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--space-6)', gap: 'var(--space-3)' }}>
+          {!confirmed ? (
+            <button className="btn btn-primary btn-lg" onClick={handleConfirm} disabled={selected === null} style={{ opacity: selected === null ? 0.5 : 1 }}>
+              Confirm Answer
+            </button>
+          ) : (
+            <button className="btn btn-primary btn-lg" onClick={handleNext}>
+              {safeCurrent < questions.length - 1 ? (
+                <>Next Question <ChevronRight size={16} /></>
+              ) : (
+                <>View Results <Trophy size={16} /></>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

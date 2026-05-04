@@ -1,0 +1,182 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Activity, CalendarClock, Gauge, ListChecks, Wrench } from 'lucide-react';
+import { PageHeader, MetricCard, ReviewItemCard, SegmentedControl } from '../components/ui/Primitives';
+import {
+  forecastReviewLoad,
+  getReadinessByTopic,
+  getReviewInbox,
+  getStudyPlan,
+  repairVaultData,
+  saveStudyPlanSettings,
+} from '../lib/learning';
+
+const filters = [
+  { value: 'all', label: 'All' },
+  { value: 'due-review', label: 'Due' },
+  { value: 'weak-objective', label: 'Weak' },
+  { value: 'missed-question', label: 'Missed' },
+  { value: 'flashcard-review', label: 'Cards' },
+  { value: 'mock-review', label: 'Mocks' },
+  { value: 'stale-topic', label: 'Stale' },
+  { value: 'bookmark', label: 'Bookmarks' },
+  { value: 'unfinished-lesson', label: 'Lessons' },
+];
+
+export default function ReviewInbox() {
+  const [items, setItems] = useState([]);
+  const [readiness, setReadiness] = useState([]);
+  const [studyPlan, setStudyPlan] = useState(null);
+  const [forecast, setForecast] = useState([]);
+  const [filter, setFilter] = useState('all');
+  const [message, setMessage] = useState('');
+  const [targetLevel, setTargetLevel] = useState('level1');
+  const [dailyTarget, setDailyTarget] = useState('45');
+  const [examDate, setExamDate] = useState('');
+  const [mockCadence, setMockCadence] = useState('14');
+
+  async function refresh() {
+    const [nextItems, nextReadiness, nextPlan, nextForecast] = await Promise.all([
+      getReviewInbox(),
+      getReadinessByTopic(),
+      getStudyPlan(),
+      forecastReviewLoad(10),
+    ]);
+    setItems(nextItems);
+    setReadiness(nextReadiness);
+    setStudyPlan(nextPlan);
+    setForecast(nextForecast);
+    setTargetLevel(nextPlan.targetLevel || 'level1');
+    setDailyTarget(String(nextPlan.dailyTargetMinutes));
+    setExamDate(nextPlan.examDate || '');
+    setMockCadence(String(nextPlan.mockCadenceDays || 14));
+  }
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([getReviewInbox(), getReadinessByTopic(), getStudyPlan(), forecastReviewLoad(10)]).then(
+      ([nextItems, nextReadiness, nextPlan, nextForecast]) => {
+        if (!active) return;
+        setItems(nextItems);
+        setReadiness(nextReadiness);
+        setStudyPlan(nextPlan);
+        setForecast(nextForecast);
+        setTargetLevel(nextPlan.targetLevel || 'level1');
+        setDailyTarget(String(nextPlan.dailyTargetMinutes));
+        setExamDate(nextPlan.examDate || '');
+        setMockCadence(String(nextPlan.mockCadenceDays || 14));
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleRepair() {
+    const preview = await repairVaultData();
+    setMessage(`Vault repair complete. ${Object.values(preview.counts).reduce((sum, count) => sum + count, 0)} rows checked.`);
+    refresh();
+  }
+
+  async function handleSavePlan(event) {
+    event.preventDefault();
+    await saveStudyPlanSettings({
+      targetLevel,
+      dailyTargetMinutes: Number(dailyTarget),
+      examDate: examDate || null,
+      mockCadenceDays: Number(mockCadence),
+      restDays: studyPlan?.restDays || [],
+    });
+    setMessage('Study plan settings saved.');
+    refresh();
+  }
+
+  const visibleItems = filter === 'all' ? items : items.filter((item) => item.type === filter);
+  const weakest = readiness[0];
+
+  return (
+    <div className="page-container">
+      <PageHeader
+        badge="REVIEW INBOX"
+        title="Review Inbox"
+        subtitle="Due reviews, weak objectives, missed questions, bookmarks, stale topics, and unfinished lessons in one queue."
+        actions={<button className="btn btn-secondary" onClick={handleRepair}><Wrench size={16} /> Repair Vault</button>}
+      />
+
+      <div className="grid-4" style={{ marginBottom: 'var(--space-6)' }}>
+        <MetricCard label="Due Today" value={studyPlan?.dueToday ?? 0} detail="Scheduled review items" icon={CalendarClock} />
+        <MetricCard label="Forecast" value={studyPlan?.forecastReviewCount ?? 0} detail="Next 14 days" icon={Activity} tone="warning" />
+        <MetricCard label="Weakest Topic" value={weakest ? `${weakest.readinessScore}%` : '-'} detail={weakest?.topic || 'No attempts yet'} icon={Gauge} tone="success" />
+        <MetricCard label="Queue" value={items.length} detail="Total actionable items" icon={ListChecks} tone="accent" />
+      </div>
+
+      {studyPlan?.nextActions?.length > 0 && (
+        <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
+          <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+            <div>
+              <h3 style={{ marginTop: 0 }}>What To Do Next</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)' }}>
+                {studyPlan.daysToExam === null ? 'No exam date set.' : `${studyPlan.daysToExam} days to exam.`} Daily target: {studyPlan.dailyTargetMinutes} minutes.
+              </p>
+            </div>
+            <form onSubmit={handleSavePlan} className="planner-form">
+              <label>
+                <span>Target level</span>
+                <select value={targetLevel} onChange={(event) => setTargetLevel(event.target.value)}>
+                  <option value="level1">Level I</option>
+                  <option value="level2">Level II</option>
+                  <option value="level3">Level III</option>
+                </select>
+              </label>
+              <label>
+                <span>Daily minutes</span>
+                <input type="number" min="10" max="360" value={dailyTarget} onChange={(event) => setDailyTarget(event.target.value)} />
+              </label>
+              <label>
+                <span>Exam date</span>
+                <input type="date" value={examDate} onChange={(event) => setExamDate(event.target.value)} />
+              </label>
+              <label>
+                <span>Mock cadence</span>
+                <input type="number" min="3" max="60" value={mockCadence} onChange={(event) => setMockCadence(event.target.value)} />
+              </label>
+              <button className="btn btn-primary" type="submit">Save Plan</button>
+            </form>
+          </div>
+          <div className="grid-2">
+            {studyPlan.nextActions.map((action) => (
+              <Link key={`${action.label}:${action.path}`} to={action.path} className="glass-card" style={{ textDecoration: 'none', color: 'inherit' }}>
+                <span className="badge badge-blue">{action.label}</span>
+                <h3>{action.title}</h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)' }}>{action.reason}</p>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
+        <h3 style={{ marginTop: 0 }}>Review Forecast</h3>
+        <div className="forecast-strip">
+          {forecast.map((day) => (
+            <div key={day.date}>
+              <small>{day.date.slice(5)}</small>
+              <strong>{day.count}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <SegmentedControl label="Review inbox filter" options={filters} value={filter} onChange={setFilter} />
+      {message && <p style={{ color: 'var(--text-secondary)' }}>{message}</p>}
+
+      <div className="review-list">
+        {visibleItems.length ? (
+          visibleItems.map((item) => <ReviewItemCard key={item.id} item={item} />)
+        ) : (
+          <div className="glass-card no-hover">No items in this slice yet. Complete a lesson or quiz to populate the queue.</div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,17 @@
+{
+  "name": "QuantVault",
+  "short_name": "QuantVault",
+  "description": "CFA, quantitative finance, and Excel training command center.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B1120",
+  "theme_color": "#3B82F6",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "64x64",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

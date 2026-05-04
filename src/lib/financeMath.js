@@ -1,0 +1,379 @@
+export function toFiniteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+export function periodicRate(annualRate, frequency = 1) {
+  const periodsPerYear = Math.max(1, toFiniteNumber(frequency, 1));
+  return toFiniteNumber(annualRate, 0) / periodsPerYear;
+}
+
+export function periodCount(years, frequency = 1) {
+  return Math.max(0, toFiniteNumber(years, 0) * Math.max(1, toFiniteNumber(frequency, 1)));
+}
+
+function futureAnnuityFactor(rate, periods) {
+  if (periods === 0) return 0;
+  if (rate === 0) return periods;
+  return (Math.pow(1 + rate, periods) - 1) / rate;
+}
+
+function presentAnnuityFactor(rate, periods) {
+  if (periods === 0) return 0;
+  if (rate === 0) return periods;
+  return (1 - Math.pow(1 + rate, -periods)) / rate;
+}
+
+export function futureValue({ presentValue = 0, payment = 0, annualRate = 0, years = 0, frequency = 1 }) {
+  const rate = periodicRate(annualRate, frequency);
+  const periods = periodCount(years, frequency);
+  return presentValue * Math.pow(1 + rate, periods) + payment * futureAnnuityFactor(rate, periods);
+}
+
+export function presentValue({ futureValue: fv = 0, payment = 0, annualRate = 0, years = 0, frequency = 1 }) {
+  const rate = periodicRate(annualRate, frequency);
+  const periods = periodCount(years, frequency);
+  return fv / Math.pow(1 + rate, periods) + payment * presentAnnuityFactor(rate, periods);
+}
+
+export function payment({ presentValue: pv = 0, futureValue: fv = 0, annualRate = 0, years = 0, frequency = 1 }) {
+  const rate = periodicRate(annualRate, frequency);
+  const periods = periodCount(years, frequency);
+  if (periods === 0) return NaN;
+  if (rate === 0) return (fv - pv) / periods;
+  return (fv - pv * Math.pow(1 + rate, periods)) / futureAnnuityFactor(rate, periods);
+}
+
+export function normalPdf(x) {
+  return Math.exp(-(x * x) / 2) / Math.sqrt(2 * Math.PI);
+}
+
+export function normalCdf(x) {
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const p = 0.3275911;
+  const sign = x < 0 ? -1 : 1;
+  const z = Math.abs(x) / Math.sqrt(2);
+  const t = 1 / (1 + p * z);
+  const erf = 1 - (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-z * z));
+  return 0.5 * (1 + sign * erf);
+}
+
+export function blackScholes({ spot, strike, years, annualRate, volatility }) {
+  const s = toFiniteNumber(spot, NaN);
+  const k = toFiniteNumber(strike, NaN);
+  const t = toFiniteNumber(years, NaN);
+  const r = toFiniteNumber(annualRate, NaN);
+  const vol = toFiniteNumber(volatility, NaN);
+
+  if (s <= 0 || k <= 0 || t <= 0 || vol <= 0 || !Number.isFinite(r)) {
+    return null;
+  }
+
+  const sqrtT = Math.sqrt(t);
+  const d1 = (Math.log(s / k) + (r + (vol * vol) / 2) * t) / (vol * sqrtT);
+  const d2 = d1 - vol * sqrtT;
+  const discount = Math.exp(-r * t);
+  const call = s * normalCdf(d1) - k * discount * normalCdf(d2);
+  const put = k * discount * normalCdf(-d2) - s * normalCdf(-d1);
+  const pdfD1 = normalPdf(d1);
+
+  return {
+    call,
+    put,
+    d1,
+    d2,
+    deltaCall: normalCdf(d1),
+    deltaPut: normalCdf(d1) - 1,
+    gamma: pdfD1 / (s * vol * sqrtT),
+    thetaCallPerDay: (-(s * pdfD1 * vol) / (2 * sqrtT) - r * k * discount * normalCdf(d2)) / 365,
+    thetaPutPerDay: (-(s * pdfD1 * vol) / (2 * sqrtT) + r * k * discount * normalCdf(-d2)) / 365,
+    vega: (s * pdfD1 * sqrtT) / 100,
+  };
+}
+
+export function bondAnalytics({ faceValue = 1000, couponRate = 0.05, yieldRate = 0.05, years = 5, frequency = 2 }) {
+  const face = toFiniteNumber(faceValue, 1000);
+  const coupon = face * toFiniteNumber(couponRate, 0) / Math.max(1, toFiniteNumber(frequency, 1));
+  const y = periodicRate(yieldRate, frequency);
+  const periods = Math.round(periodCount(years, frequency));
+
+  if (face <= 0 || periods <= 0) return null;
+
+  let price = 0;
+  let weightedPv = 0;
+  let convexityNumerator = 0;
+
+  for (let i = 1; i <= periods; i += 1) {
+    const cashFlow = coupon + (i === periods ? face : 0);
+    const discount = Math.pow(1 + y, i);
+    const pv = cashFlow / discount;
+    const yearsAtCashFlow = i / Math.max(1, toFiniteNumber(frequency, 1));
+    price += pv;
+    weightedPv += yearsAtCashFlow * pv;
+    convexityNumerator += yearsAtCashFlow * (yearsAtCashFlow + 1 / Math.max(1, toFiniteNumber(frequency, 1))) * pv;
+  }
+
+  const macaulayDuration = weightedPv / price;
+  const modifiedDuration = macaulayDuration / (1 + y);
+  const convexity = convexityNumerator / (price * Math.pow(1 + y, 2));
+
+  return { price, macaulayDuration, modifiedDuration, convexity };
+}
+
+export function bondYieldToMaturity({ price = 1000, faceValue = 1000, couponRate = 0.05, years = 5, frequency = 2 }) {
+  const target = toFiniteNumber(price, NaN);
+  if (!Number.isFinite(target) || target <= 0) return NaN;
+
+  let low = -0.95;
+  let high = 1;
+  for (let i = 0; i < 100; i += 1) {
+    const mid = (low + high) / 2;
+    const analytics = bondAnalytics({ faceValue, couponRate, yieldRate: mid, years, frequency });
+    if (!analytics) return NaN;
+    if (analytics.price > target) low = mid;
+    else high = mid;
+  }
+  return (low + high) / 2;
+}
+
+export function amortizationSchedule({ principal = 100000, annualRate = 0.06, years = 30, frequency = 12 }) {
+  const balanceStart = toFiniteNumber(principal, 0);
+  const rate = periodicRate(annualRate, frequency);
+  const periods = Math.round(periodCount(years, frequency));
+  if (balanceStart <= 0 || periods <= 0) return { payment: 0, totalInterest: 0, rows: [] };
+
+  const paymentAmount =
+    rate === 0
+      ? balanceStart / periods
+      : (balanceStart * rate) / (1 - Math.pow(1 + rate, -periods));
+
+  let balance = balanceStart;
+  let totalInterest = 0;
+  const rows = [];
+  for (let period = 1; period <= periods; period += 1) {
+    const interest = balance * rate;
+    const principalPaid = Math.min(balance, paymentAmount - interest);
+    balance = Math.max(0, balance - principalPaid);
+    totalInterest += interest;
+    rows.push({
+      period,
+      payment: paymentAmount,
+      interest,
+      principal: principalPaid,
+      balance,
+    });
+  }
+
+  return { payment: paymentAmount, totalInterest, rows };
+}
+
+export function npv(rate, cashFlows = []) {
+  return cashFlows.reduce((sum, cashFlow, index) => sum + toFiniteNumber(cashFlow, 0) / Math.pow(1 + rate, index), 0);
+}
+
+export function irr(cashFlows = [], guess = 0.1) {
+  const flows = cashFlows.map((value) => toFiniteNumber(value, 0));
+  const hasPositive = flows.some((value) => value > 0);
+  const hasNegative = flows.some((value) => value < 0);
+  if (!hasPositive || !hasNegative) return NaN;
+
+  let rate = guess;
+  for (let i = 0; i < 60; i += 1) {
+    const value = npv(rate, flows);
+    const derivative = flows.reduce((sum, cashFlow, index) => {
+      if (index === 0) return sum;
+      return sum - (index * cashFlow) / Math.pow(1 + rate, index + 1);
+    }, 0);
+    if (Math.abs(derivative) < 1e-10) break;
+    const next = rate - value / derivative;
+    if (!Number.isFinite(next) || next <= -0.9999) break;
+    if (Math.abs(next - rate) < 1e-8) return next;
+    rate = next;
+  }
+
+  let low = -0.9999;
+  let high = 10;
+  for (let i = 0; i < 120; i += 1) {
+    const mid = (low + high) / 2;
+    const value = npv(mid, flows);
+    if (value > 0) low = mid;
+    else high = mid;
+  }
+  return (low + high) / 2;
+}
+
+export function xirr(cashFlows = [], dates = [], guess = 0.1) {
+  if (cashFlows.length !== dates.length || cashFlows.length < 2) return NaN;
+  const start = new Date(dates[0]).getTime();
+  if (!Number.isFinite(start)) return NaN;
+  const yearFractions = dates.map((date) => (new Date(date).getTime() - start) / (365 * 24 * 60 * 60 * 1000));
+  if (yearFractions.some((value) => !Number.isFinite(value))) return NaN;
+
+  function valueAt(rate) {
+    return cashFlows.reduce((sum, cashFlow, index) => sum + toFiniteNumber(cashFlow, 0) / Math.pow(1 + rate, yearFractions[index]), 0);
+  }
+
+  let rate = guess;
+  for (let i = 0; i < 80; i += 1) {
+    const value = valueAt(rate);
+    const derivative = cashFlows.reduce((sum, cashFlow, index) => {
+      const t = yearFractions[index];
+      return sum - (t * toFiniteNumber(cashFlow, 0)) / Math.pow(1 + rate, t + 1);
+    }, 0);
+    if (Math.abs(derivative) < 1e-10) break;
+    const next = rate - value / derivative;
+    if (!Number.isFinite(next) || next <= -0.9999) break;
+    if (Math.abs(next - rate) < 1e-8) return next;
+    rate = next;
+  }
+  return rate;
+}
+
+export function capm({ riskFreeRate = 0.03, beta = 1, marketReturn = 0.08 }) {
+  return toFiniteNumber(riskFreeRate, 0) + toFiniteNumber(beta, 1) * (toFiniteNumber(marketReturn, 0) - toFiniteNumber(riskFreeRate, 0));
+}
+
+export function gordonGrowth({ dividendNext = 1, requiredReturn = 0.1, growthRate = 0.03 }) {
+  const r = toFiniteNumber(requiredReturn, NaN);
+  const g = toFiniteNumber(growthRate, NaN);
+  if (!Number.isFinite(r) || !Number.isFinite(g) || r <= g) return NaN;
+  return toFiniteNumber(dividendNext, 0) / (r - g);
+}
+
+export function portfolioStatistics({ weights = [], expectedReturns = [], volatilities = [], correlationMatrix = [], riskFreeRate = 0 }) {
+  const n = Math.min(weights.length, expectedReturns.length, volatilities.length);
+  if (n === 0) return null;
+  const rawWeights = weights.slice(0, n).map((value) => toFiniteNumber(value, 0));
+  const totalWeight = rawWeights.reduce((sum, value) => sum + value, 0) || 1;
+  const normalizedWeights = rawWeights.map((value) => value / totalWeight);
+  const returns = expectedReturns.slice(0, n).map((value) => toFiniteNumber(value, 0));
+  const vols = volatilities.slice(0, n).map((value) => Math.max(0, toFiniteNumber(value, 0)));
+  const expectedReturn = normalizedWeights.reduce((sum, weight, index) => sum + weight * returns[index], 0);
+
+  let variance = 0;
+  for (let i = 0; i < n; i += 1) {
+    for (let j = 0; j < n; j += 1) {
+      const corr = i === j ? 1 : toFiniteNumber(correlationMatrix[i]?.[j], 0);
+      variance += normalizedWeights[i] * normalizedWeights[j] * vols[i] * vols[j] * corr;
+    }
+  }
+  const volatility = Math.sqrt(Math.max(0, variance));
+  const sharpe = volatility > 0 ? (expectedReturn - toFiniteNumber(riskFreeRate, 0)) / volatility : NaN;
+
+  return {
+    weights: normalizedWeights,
+    expectedReturn,
+    variance,
+    volatility,
+    sharpe,
+  };
+}
+
+export function binomialOptionPrice({
+  spot = 100,
+  strike = 100,
+  years = 1,
+  annualRate = 0.05,
+  volatility = 0.2,
+  steps = 3,
+  type = 'call',
+}) {
+  const s = toFiniteNumber(spot, NaN);
+  const k = toFiniteNumber(strike, NaN);
+  const t = toFiniteNumber(years, NaN);
+  const r = toFiniteNumber(annualRate, NaN);
+  const vol = toFiniteNumber(volatility, NaN);
+  const n = Math.max(1, Math.min(100, Math.round(toFiniteNumber(steps, 3))));
+  if (s <= 0 || k <= 0 || t <= 0 || vol <= 0 || !Number.isFinite(r)) return null;
+
+  const dt = t / n;
+  const up = Math.exp(vol * Math.sqrt(dt));
+  const down = 1 / up;
+  const discount = Math.exp(-r * dt);
+  const probability = (Math.exp(r * dt) - down) / (up - down);
+  if (probability < 0 || probability > 1) return null;
+  const payoff = (price) => (type === 'put' ? Math.max(0, k - price) : Math.max(0, price - k));
+  let values = Array.from({ length: n + 1 }, (_, index) => payoff(s * Math.pow(up, n - index) * Math.pow(down, index)));
+  const tree = [{ step: n, values: values.map((value) => Number(value.toFixed(4))) }];
+  for (let step = n - 1; step >= 0; step -= 1) {
+    values = Array.from({ length: step + 1 }, (_, index) => discount * (probability * values[index] + (1 - probability) * values[index + 1]));
+    tree.unshift({ step, values: values.map((value) => Number(value.toFixed(4))) });
+  }
+  return { price: values[0], up, down, probability, tree };
+}
+
+export function parametricVarCvar({ portfolioValue = 1000000, annualVolatility = 0.18, days = 10, confidence = 0.95 }) {
+  const value = toFiniteNumber(portfolioValue, NaN);
+  const vol = toFiniteNumber(annualVolatility, NaN);
+  const horizonDays = Math.max(1, toFiniteNumber(days, 10));
+  const alpha = Math.min(0.999, Math.max(0.5, toFiniteNumber(confidence, 0.95)));
+  if (value <= 0 || vol < 0) return null;
+  const z = alpha >= 0.99 ? 2.326347874 : alpha >= 0.975 ? 1.959963985 : 1.644853627;
+  const horizonVol = (vol / Math.sqrt(252)) * Math.sqrt(horizonDays);
+  const varValue = value * z * horizonVol;
+  const cvarValue = value * (normalPdf(z) / (1 - alpha)) * horizonVol;
+  return { varValue, cvarValue, horizonVol, z, confidence: alpha };
+}
+
+export function durationShock({
+  price = 100,
+  modifiedDuration = 5,
+  convexity = 30,
+  shockBps = 100,
+}) {
+  const p = toFiniteNumber(price, NaN);
+  const duration = toFiniteNumber(modifiedDuration, NaN);
+  const conv = toFiniteNumber(convexity, 0);
+  const dy = toFiniteNumber(shockBps, 0) / 10000;
+  if (p <= 0 || !Number.isFinite(duration)) return null;
+  const pctChange = -duration * dy + 0.5 * conv * dy * dy;
+  return {
+    pctChange,
+    priceChange: p * pctChange,
+    shockedPrice: p * (1 + pctChange),
+  };
+}
+
+export function weightedAverageCostOfCapital({ equityWeight, debtWeight, costOfEquity, costOfDebt, taxRate }) {
+  const e = toFiniteNumber(equityWeight, 0);
+  const d = toFiniteNumber(debtWeight, 0);
+  const total = e + d || 1;
+  return (e / total) * toFiniteNumber(costOfEquity, 0) + (d / total) * toFiniteNumber(costOfDebt, 0) * (1 - toFiniteNumber(taxRate, 0));
+}
+
+export function dcfValue({ cashFlows = [], discountRate = 0.1, terminalGrowth = 0.02 }) {
+  const r = toFiniteNumber(discountRate, 0.1);
+  const g = toFiniteNumber(terminalGrowth, 0.02);
+  const flows = cashFlows.map((value) => toFiniteNumber(value, 0));
+
+  const pvCashFlows = flows.reduce((sum, cashFlow, index) => sum + cashFlow / Math.pow(1 + r, index + 1), 0);
+  const lastCashFlow = flows.at(-1) || 0;
+  const terminalValue = r > g ? (lastCashFlow * (1 + g)) / (r - g) : NaN;
+  const pvTerminalValue = Number.isFinite(terminalValue) ? terminalValue / Math.pow(1 + r, flows.length) : NaN;
+
+  return {
+    pvCashFlows,
+    terminalValue,
+    pvTerminalValue,
+    enterpriseValue: pvCashFlows + pvTerminalValue,
+  };
+}
+
+export function currency(value, digits = 2) {
+  if (!Number.isFinite(value)) return '-';
+  return value.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+export function percent(value, digits = 2) {
+  if (!Number.isFinite(value)) return '-';
+  return `${(value * 100).toFixed(digits)}%`;
+}
