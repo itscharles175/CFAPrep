@@ -19,31 +19,38 @@ import type {
   FlashcardAttempt,
   FormulaDrillAttempt,
   LessonProgress,
+  LearningEventEnvelope,
   MasterySnapshot,
   MockSectionState,
   MockAttempt,
   ConstructedResponseAttempt,
   ObjectiveReadiness,
+  ObjectiveReadinessV2,
   QuestionResult,
   QuizAttempt,
+  RetentionForecast,
   ResultArtifact,
   ReviewEvent,
   ReviewQueueItem,
   ReviewItem,
+  ReviewReason,
   SkillLabAttempt,
-  StudyPlan,
+  StudySessionPlan,
   StudyPlanSettings,
   StudySession,
   TopicReadiness,
   VignetteAttempt,
   VaultBookmark,
+  VaultHealthReport,
+  VaultHealthSnapshot,
+  VaultImportHistoryEntry,
   VaultNote,
 } from './learningTypes';
 
 export const PROGRESS_EVENT = 'quantvault:progress';
 const PROGRESS_CHANNEL = 'quantvault:progress-channel';
-export const VAULT_SCHEMA_VERSION = 6;
-export const VAULT_SCHEMA_HASH = 'qv-v6-local-first-fsrs-export-meta';
+export const VAULT_SCHEMA_VERSION = 8;
+export const VAULT_SCHEMA_HASH = 'qv-v8-local-first-event-log-health';
 export const VAULT_CONTENT_VERSION = 'cfa-2026-local-pack-v1';
 
 type SettingRow = { key: string; value: unknown; updatedAt: string };
@@ -83,6 +90,8 @@ export type VaultDataStores = {
   flashcardAttempts: FlashcardAttempt[];
   resultArtifacts: ResultArtifact[];
   mockSectionState: MockSectionState[];
+  learningEvents: LearningEventEnvelope[];
+  vaultHealthSnapshots: VaultHealthSnapshot[];
   notes: VaultNote[];
   bookmarks: VaultBookmark[];
   settings: SettingRow[];
@@ -104,6 +113,31 @@ export type VaultExport = {
   stores: VaultDataStores;
 };
 
+export type EncryptedVaultExport = Omit<VaultExport, 'stores' | 'encryption'> & {
+  encryption: {
+    encrypted: true;
+    algorithm: 'AES-GCM';
+    keyDerivation: 'PBKDF2';
+    iterations: number;
+    salt: string;
+    iv: string;
+    hash: 'SHA-256';
+  };
+  payload: string;
+};
+
+export type VaultExportOptions = {
+  encryption?: {
+    passphrase: string;
+  };
+};
+
+export type VaultImportOptions = {
+  mode?: 'merge' | 'replace';
+  passphrase?: string;
+  conflictPolicy?: 'keep-existing' | 'prefer-import' | 'replace';
+};
+
 type VaultDatabase = Dexie & {
   lessonProgress: Table<LessonProgress, string>;
   quizAttempts: Table<QuizAttemptRow, number>;
@@ -123,6 +157,8 @@ type VaultDatabase = Dexie & {
   flashcardAttempts: Table<FlashcardAttempt, number>;
   resultArtifacts: Table<ResultArtifact, string>;
   mockSectionState: Table<MockSectionState, string>;
+  learningEvents: Table<LearningEventEnvelope, string>;
+  vaultHealthSnapshots: Table<VaultHealthSnapshot, string>;
   notes: Table<VaultNote, string>;
   bookmarks: Table<VaultBookmark, string>;
   settings: Table<SettingRow, string>;
@@ -147,6 +183,8 @@ const STORE_NAMES = [
   'flashcardAttempts',
   'resultArtifacts',
   'mockSectionState',
+  'learningEvents',
+  'vaultHealthSnapshots',
   'notes',
   'bookmarks',
   'settings',
@@ -269,7 +307,7 @@ db.version(5).stores({
   settings: 'key',
 });
 
-/* D1: Current schema v6 — explicit FSRS difficulty and export metadata */
+/* D1: Current schema v8 — persisted event envelopes and vault health snapshots */
 db.version(VAULT_SCHEMA_VERSION).stores({
   lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
   quizAttempts: '++id, domain, topic, pct, createdAt, mode',
@@ -289,6 +327,8 @@ db.version(VAULT_SCHEMA_VERSION).stores({
   flashcardAttempts: '++id, domain, topic, cardId, outcome, createdAt',
   resultArtifacts: 'id, type, domain, topic, createdAt',
   mockSectionState: 'id, status, updatedAt, expiresAt',
+  learningEvents: 'id, recordedAt',
+  vaultHealthSnapshots: 'id, generatedAt, status',
   notes: 'id, type, domain, moduleId, questionId, formulaName, updatedAt',
   bookmarks: 'id, type, domain, moduleId, questionId, formulaName, createdAt',
   settings: 'key',
@@ -1007,7 +1047,7 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function checksumForExport(payload: Omit<VaultExport, 'checksum'>) {
+function checksumForStablePayload(payload: unknown) {
   const source = stableStringify(payload);
   let hash = 0x811c9dc5;
   for (let index = 0; index < source.length; index += 1) {
@@ -1015,6 +1055,10 @@ function checksumForExport(payload: Omit<VaultExport, 'checksum'>) {
     hash = Math.imul(hash, 0x01000193);
   }
   return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function checksumForExport(payload: Omit<VaultExport, 'checksum'>) {
+  return checksumForStablePayload(payload);
 }
 
 function exportIdFor(timestamp: string) {
@@ -1045,7 +1089,96 @@ function buildVaultExport(stores: VaultDataStores, exportedAt = nowIso()): Vault
   });
 }
 
-export async function exportVaultData(): Promise<VaultExport> {
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function requireCryptoSubtle() {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) throw new Error('Web Crypto is required for encrypted vault exports.');
+  return subtle;
+}
+
+async function deriveVaultKey(passphrase: string, salt: Uint8Array, iterations: number) {
+  if (!passphrase) throw new Error('Encrypted vault exports require a passphrase.');
+  const subtle = requireCryptoSubtle();
+  const material = await subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  const saltBytes = new Uint8Array(salt);
+  return subtle.deriveKey(
+    { name: 'PBKDF2', salt: saltBytes, iterations, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+async function encryptVaultExport(payload: VaultExport, passphrase: string): Promise<EncryptedVaultExport> {
+  const subtle = requireCryptoSubtle();
+  const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const iterations = 210_000;
+  const key = await deriveVaultKey(passphrase, salt, iterations);
+  const encrypted = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(stableStringify(payload))));
+  const encryptedPayload: Omit<EncryptedVaultExport, 'checksum'> = {
+    app: 'QuantVault',
+    exportId: payload.exportId,
+    schemaVersion: payload.schemaVersion,
+    schemaHash: payload.schemaHash,
+    contentVersion: payload.contentVersion,
+    exportedAt: payload.exportedAt,
+    encryption: {
+      encrypted: true,
+      algorithm: 'AES-GCM',
+      keyDerivation: 'PBKDF2',
+      iterations,
+      salt: bytesToBase64(salt),
+      iv: bytesToBase64(iv),
+      hash: 'SHA-256',
+    },
+    payload: bytesToBase64(encrypted),
+  };
+  return {
+    ...encryptedPayload,
+    checksum: checksumForStablePayload(encryptedPayload),
+  };
+}
+
+async function decryptVaultExport(payload: EncryptedVaultExport, passphrase?: string): Promise<VaultExport> {
+  if (!passphrase) throw new Error('Encrypted QuantVault exports require a passphrase.');
+  const { checksum, ...payloadForChecksum } = payload;
+  if (checksum !== checksumForStablePayload(payloadForChecksum)) {
+    throw new Error('Encrypted vault export checksum does not match its payload.');
+  }
+  const key = await deriveVaultKey(passphrase, base64ToBytes(payload.encryption.salt), payload.encryption.iterations);
+  try {
+    const decrypted = await requireCryptoSubtle().decrypt(
+      { name: 'AES-GCM', iv: base64ToBytes(payload.encryption.iv) },
+      key,
+      base64ToBytes(payload.payload),
+    );
+    return migrateVaultData(JSON.parse(new TextDecoder().decode(decrypted)));
+  } catch {
+    throw new Error('Unable to decrypt vault export. Check the passphrase and payload integrity.');
+  }
+}
+
+function isEncryptedVaultExport(payload: unknown): payload is EncryptedVaultExport {
+  return isObject(payload) && isObject(payload.encryption) && payload.encryption.encrypted === true && payload.encryption.algorithm === 'AES-GCM' && typeof payload.payload === 'string';
+}
+
+export async function exportVaultData(): Promise<VaultExport>;
+export async function exportVaultData(options: { encryption: { passphrase: string } }): Promise<EncryptedVaultExport>;
+export async function exportVaultData(options: VaultExportOptions = {}): Promise<VaultExport | EncryptedVaultExport> {
   const [
     lessonProgress,
     quizAttempts,
@@ -1065,6 +1198,8 @@ export async function exportVaultData(): Promise<VaultExport> {
     flashcardAttempts,
     resultArtifacts,
     mockSectionState,
+    learningEvents,
+    vaultHealthSnapshots,
     notes,
     bookmarks,
     settings,
@@ -1087,12 +1222,14 @@ export async function exportVaultData(): Promise<VaultExport> {
     db.flashcardAttempts.toArray(),
     db.resultArtifacts.toArray(),
     db.mockSectionState.toArray(),
+    db.learningEvents.toArray(),
+    db.vaultHealthSnapshots.toArray(),
     db.notes.toArray(),
     db.bookmarks.toArray(),
     db.settings.toArray(),
   ]);
 
-  return buildVaultExport({
+  const vaultExport = buildVaultExport({
     lessonProgress,
     quizAttempts,
     questionResults,
@@ -1111,10 +1248,14 @@ export async function exportVaultData(): Promise<VaultExport> {
     flashcardAttempts,
     resultArtifacts,
     mockSectionState,
+    learningEvents,
+    vaultHealthSnapshots,
     notes,
     bookmarks,
     settings,
   });
+  if (options.encryption) return encryptVaultExport(vaultExport, options.encryption.passphrase);
+  return vaultExport;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -1141,6 +1282,8 @@ function emptyVaultStores(): VaultDataStores {
     flashcardAttempts: [],
     resultArtifacts: [],
     mockSectionState: [],
+    learningEvents: [],
+    vaultHealthSnapshots: [],
     notes: [],
     bookmarks: [],
     settings: [],
@@ -1258,14 +1401,28 @@ export function validateVaultData(payload: unknown): { valid: boolean; errors: s
 export function previewVaultImport(payload: unknown) {
   const validation = validateVaultData(payload);
   if (!validation.valid) {
-    return { valid: false, errors: validation.errors, schemaVersion: null, counts: emptyVaultStores() };
+    return {
+      valid: false,
+      errors: validation.errors,
+      schemaVersion: null,
+      schemaHash: null,
+      contentVersion: null,
+      exportId: null,
+      checksumValid: false,
+      counts: emptyVaultStores(),
+    };
   }
 
   const migrated = migrateVaultData(payload);
+  const { checksum: _checksum, ...checksumPayload } = migrated;
   return {
     valid: true,
     errors: [],
     schemaVersion: migrated.schemaVersion,
+    schemaHash: migrated.schemaHash,
+    contentVersion: migrated.contentVersion,
+    exportId: migrated.exportId,
+    checksumValid: migrated.checksum === checksumForExport(checksumPayload),
     counts: STORE_NAMES.reduce(
       (counts, storeName) => ({
         ...counts,
@@ -1292,13 +1449,110 @@ function remapMergeIds(stores: VaultDataStores): VaultDataStores {
   );
 }
 
-export async function importVaultData(payload: unknown, mode: 'merge' | 'replace' = 'merge') {
-  const exportPayload = migrateVaultData(payload);
-  const validation = validateVaultData(payload);
+function normalizeVaultImportOptions(options: 'merge' | 'replace' | VaultImportOptions = 'merge'): Required<Pick<VaultImportOptions, 'mode' | 'conflictPolicy'>> &
+  Pick<VaultImportOptions, 'passphrase'> {
+  if (typeof options === 'string') {
+    return { mode: options, conflictPolicy: options === 'replace' ? 'replace' : 'prefer-import' };
+  }
+  const conflictPolicy = options.conflictPolicy || (options.mode === 'replace' ? 'replace' : 'prefer-import');
+  return {
+    mode: conflictPolicy === 'replace' ? 'replace' : options.mode || 'merge',
+    conflictPolicy,
+    passphrase: options.passphrase,
+  };
+}
+
+function primaryKeyPathForStore(storeName: (typeof STORE_NAMES)[number]) {
+  const keyPath = db[storeName].schema.primKey.keyPath;
+  return typeof keyPath === 'string' ? keyPath : null;
+}
+
+function rowKey(row: unknown, keyPath: string | null) {
+  return keyPath && isObject(row) ? row[keyPath] : undefined;
+}
+
+async function filterKeepExisting(stores: VaultDataStores): Promise<VaultDataStores> {
+  const entries = await Promise.all(
+    STORE_NAMES.map(async (storeName) => {
+      if (AUTO_ID_STORES.has(storeName)) return [storeName, stores[storeName]] as const;
+      const keyPath = primaryKeyPathForStore(storeName);
+      const rows = stores[storeName];
+      const keys = rows.map((row) => rowKey(row, keyPath));
+      const existing = await db[storeName].bulkGet(keys.filter((key) => key !== undefined) as any[]);
+      const existingKeys = new Set<unknown>(
+        existing
+          .filter(Boolean)
+          .map((row) => rowKey(row, keyPath))
+          .filter((key) => key !== undefined),
+      );
+      return [storeName, rows.filter((row) => !existingKeys.has(rowKey(row, keyPath)))] as const;
+    }),
+  );
+  return entries.reduce(
+    (nextStores, [storeName, rows]) => ({
+      ...nextStores,
+      [storeName]: rows,
+    }),
+    emptyVaultStores(),
+  );
+}
+
+async function resolveVaultImportPayload(payload: unknown, passphrase?: string): Promise<VaultExport> {
+  if (isEncryptedVaultExport(payload)) return decryptVaultExport(payload, passphrase);
+  return migrateVaultData(payload);
+}
+
+async function appendVaultImportHistory({
+  exportPayload,
+  mode,
+  conflictPolicy,
+  encrypted,
+}: {
+  exportPayload: VaultExport;
+  mode: 'merge' | 'replace';
+  conflictPolicy: 'keep-existing' | 'prefer-import' | 'replace';
+  encrypted: boolean;
+}) {
+  const key = 'vault:import-history';
+  const existing = await db.settings.get(key);
+  const current = Array.isArray(existing?.value) ? (existing.value as VaultImportHistoryEntry[]) : [];
+  const entry: VaultImportHistoryEntry = {
+    exportId: exportPayload.exportId,
+    importedAt: nowIso(),
+    exportedAt: exportPayload.exportedAt,
+    schemaVersion: exportPayload.schemaVersion,
+    schemaHash: exportPayload.schemaHash,
+    contentVersion: exportPayload.contentVersion,
+    mode,
+    conflictPolicy,
+    encrypted,
+  };
+  await db.settings.put({
+    key,
+    updatedAt: nowIso(),
+    value: [entry, ...current].slice(0, 20),
+  });
+}
+
+export async function getVaultImportHistory(): Promise<VaultImportHistoryEntry[]> {
+  const existing = await db.settings.get('vault:import-history');
+  return Array.isArray(existing?.value) ? (existing.value as VaultImportHistoryEntry[]) : [];
+}
+
+export async function importVaultData(payload: unknown, mode?: 'merge' | 'replace'): Promise<void>;
+export async function importVaultData(payload: unknown, options?: VaultImportOptions): Promise<void>;
+export async function importVaultData(payload: unknown, options: 'merge' | 'replace' | VaultImportOptions = 'merge') {
+  const importOptions = normalizeVaultImportOptions(options);
+  const exportPayload = await resolveVaultImportPayload(payload, importOptions.passphrase);
+  const validation = validateVaultData(exportPayload);
   if (!validation.valid) {
     throw new Error(validation.errors.join(' '));
   }
-  const storesToWrite = mode === 'merge' ? remapMergeIds(exportPayload.stores) : exportPayload.stores;
+  const mergeStores = importOptions.mode === 'merge' ? remapMergeIds(exportPayload.stores) : exportPayload.stores;
+  const storesToWrite =
+    importOptions.mode === 'merge' && importOptions.conflictPolicy === 'keep-existing'
+      ? await filterKeepExisting(mergeStores)
+      : mergeStores;
 
   await db.transaction(
     'rw',
@@ -1321,12 +1575,14 @@ export async function importVaultData(payload: unknown, mode: 'merge' | 'replace
       db.flashcardAttempts,
       db.resultArtifacts,
       db.mockSectionState,
+      db.learningEvents,
+      db.vaultHealthSnapshots,
       db.notes,
       db.bookmarks,
       db.settings,
     ],
     async () => {
-      if (mode === 'replace') {
+      if (importOptions.mode === 'replace') {
         await Promise.all(STORE_NAMES.map((storeName) => db[storeName].clear()));
       }
 
@@ -1349,6 +1605,8 @@ export async function importVaultData(payload: unknown, mode: 'merge' | 'replace
         db.flashcardAttempts.bulkPut(storesToWrite.flashcardAttempts),
         db.resultArtifacts.bulkPut(storesToWrite.resultArtifacts),
         db.mockSectionState.bulkPut(storesToWrite.mockSectionState),
+        db.learningEvents.bulkPut(storesToWrite.learningEvents),
+        db.vaultHealthSnapshots.bulkPut(storesToWrite.vaultHealthSnapshots),
         db.notes.bulkPut(storesToWrite.notes),
         db.bookmarks.bulkPut(storesToWrite.bookmarks),
         db.settings.bulkPut(storesToWrite.settings),
@@ -1356,6 +1614,12 @@ export async function importVaultData(payload: unknown, mode: 'merge' | 'replace
     },
   );
 
+  await appendVaultImportHistory({
+    exportPayload,
+    mode: importOptions.mode,
+    conflictPolicy: importOptions.conflictPolicy,
+    encrypted: isEncryptedVaultExport(payload),
+  });
   await rebuildLearningIndexes({ emit: false });
   emitProgressChange();
 }
@@ -1386,6 +1650,31 @@ export async function recordSession({
 
 export async function recordStudyEvent(event: Omit<StudySession, 'id'>) {
   return recordSession(event);
+}
+
+export async function recordLearningEventEnvelope(envelope: LearningEventEnvelope) {
+  await db.transaction('rw', [db.learningEvents, db.studySessions, db.reviewEvents], async () => {
+    await db.learningEvents.put(envelope);
+    await db.studySessions.add({
+      domain: envelope.event.domain,
+      topic: envelope.event.topic,
+      mode: envelope.event.mode,
+      startedAt: envelope.event.createdAt,
+      endedAt: envelope.event.createdAt,
+      elapsedSeconds: envelope.event.elapsedSeconds || 0,
+      questionsAnswered: envelope.event.total || 0,
+      score: envelope.event.total ? Math.round(((envelope.event.score || 0) / envelope.event.total) * 100) : envelope.event.score || 0,
+    });
+    await db.reviewEvents.add({
+      domain: envelope.event.domain,
+      topic: envelope.event.topic,
+      learningObjective: envelope.sourceIds[0] || envelope.event.sourceId || `${envelope.event.sourceType}:unmapped`,
+      eventType: 'completed',
+      reviewItemId: envelope.event.sourceId || envelope.id,
+      createdAt: envelope.recordedAt,
+    });
+  });
+  emitProgressChange();
 }
 
 export async function recordContentVersion(version: Omit<ContentVersion, 'updatedAt'>) {
@@ -1629,7 +1918,7 @@ export async function getReadinessByTopic(date = new Date()): Promise<TopicReadi
     .sort((a, b) => a.readinessScore - b.readinessScore);
 }
 
-export async function forecastReviewLoad(days = 14, date = new Date()) {
+export async function forecastReviewLoad(days = 14, date = new Date()): Promise<RetentionForecast[]> {
   const reviewItems = await db.reviewItems.toArray();
   return Array.from({ length: days }, (_, index) => {
     const day = new Date(date);
@@ -1643,6 +1932,7 @@ export async function forecastReviewLoad(days = 14, date = new Date()) {
       date: key,
       count: dueItems.length,
       averageRetention: retention,
+      atRiskCount: dueItems.filter((item) => predictRetention(item, day) < 0.72).length,
     };
   });
 }
@@ -1717,7 +2007,7 @@ export async function getStudyPlan({
   examDate?: string | null;
   dailyTargetMinutes?: number;
   targetLevel?: string;
-} = {}): Promise<StudyPlan> {
+} = {}): Promise<StudySessionPlan> {
   const [settings, dueReviews, forecast, readiness, recommendation] = await Promise.all([
     getStudyPlanSettings(),
     getDueReviews(),
@@ -1757,10 +2047,17 @@ export async function getStudyPlan({
               title: weakest.title,
               path: defaultPathFor(weakest.domain, weakest.topic, 'weak-areas'),
               reason: `Topic readiness is ${weakest.readinessScore}%.`,
+              reviewReason: 'weak-objective' as ReviewReason,
+              estimatedMinutes: Math.min(30, Math.max(12, Math.round(effectiveDailyTarget * 0.35))),
             },
           ]
         : []),
     ],
+    planVersion: 2,
+    generatedForDate: new Date().toISOString().slice(0, 10),
+    focusLevel: effectiveTargetLevel,
+    budgetMinutes: effectiveDailyTarget,
+    reviewLoad: forecast,
     updatedAt: nowIso(),
   };
 }
@@ -1809,6 +2106,9 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       priority: 100 - item.ease * 10,
       dueAt: item.dueAt,
       topic: item.topic,
+      reason: 'due-review' as const,
+      retentionPct: Math.round(predictRetention(item, new Date()) * 100),
+      sourceIds: [item.id, item.learningObjective],
     })),
     ...mastery.weakObjectives.map((item) => ({
       id: `weak:${item.id}`,
@@ -1818,6 +2118,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       path: defaultPathFor(item.domain, item.topic, 'weak-areas'),
       priority: 85 - item.score,
       topic: item.topic,
+      reason: 'weak-objective' as const,
+      sourceIds: [item.id],
     })),
     ...[...latestWrongByQuestion.values()].slice(0, 12).map((item) => ({
       id: `miss:${item.domain}:${item.topic}:${item.questionId}`,
@@ -1827,6 +2129,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       path: item.path || defaultPathFor(item.domain, item.topic, 'review-due'),
       priority: 72,
       topic: item.topic,
+      reason: 'missed-question' as const,
+      sourceIds: [item.questionId, item.learningObjective],
     })),
     ...bookmarks.map((item) => ({
       id: `bookmark:${item.id}`,
@@ -1836,6 +2140,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       path: item.path,
       priority: 45,
       topic: item.moduleId,
+      reason: 'saved-artifact' as const,
+      sourceIds: [item.id],
     })),
     ...readiness
       .filter((item) => item.retentionDecay >= 14 || item.reviewDebt > 0)
@@ -1848,6 +2154,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: defaultPathFor(item.domain, item.topic, 'review-due'),
         priority: 60 - item.readinessScore,
         topic: item.topic,
+        reason: 'stale-topic' as const,
+        sourceIds: [item.id],
       })),
     ...mockAttempts
       .filter((attempt) => attempt.pct < 70 || attempt.flaggedQuestionIds.length > 0)
@@ -1860,6 +2168,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: '/cfa/mock',
         priority: 68 - attempt.pct * 0.25 + attempt.flaggedQuestionIds.length,
         topic: 'mock',
+        reason: attempt.flaggedQuestionIds.length ? ('flagged-mock-item' as const) : ('missed-question' as const),
+        sourceIds: attempt.flaggedQuestionIds,
       })),
     ...vignetteAttempts
       .filter((attempt) => attempt.pct < 72)
@@ -1872,6 +2182,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: `/cfa/${attempt.level}/${attempt.topic.split(':').at(-1)}/vignette`,
         priority: 70 - attempt.pct * 0.2,
         topic: attempt.topic,
+        reason: 'missed-question' as const,
+        sourceIds: [attempt.vignetteId],
       })),
     ...constructedResponseAttempts
       .filter((attempt) => attempt.pct < 75)
@@ -1884,6 +2196,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: `/cfa/${attempt.level}/${attempt.topic.split(':').at(-1)}/constructed-response`,
         priority: 74 - attempt.pct * 0.2,
         topic: attempt.topic,
+        reason: 'rubric-miss' as const,
+        sourceIds: [attempt.itemId],
       })),
     ...formulaDrillAttempts
       .filter((attempt) => !attempt.correct)
@@ -1896,6 +2210,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: '/flashcards',
         priority: 66,
         topic: attempt.topic,
+        reason: 'flashcard-decay' as const,
+        sourceIds: [attempt.formulaName],
       })),
     ...skillLabAttempts
       .filter((attempt) => (attempt.score ?? 100) < 75)
@@ -1908,6 +2224,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: defaultPathFor(attempt.domain, attempt.topic, 'weak-areas'),
         priority: 52,
         topic: attempt.topic,
+        reason: 'skill-lab-gap' as const,
+        sourceIds: [attempt.labId, attempt.artifactId].filter(Boolean) as string[],
       })),
     ...artifacts.slice(0, 6).map((artifact) => ({
       id: `artifact:${artifact.id}`,
@@ -1917,6 +2235,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       path: artifact.path || '/vault',
       priority: 38,
       topic: artifact.topic,
+      reason: 'saved-artifact' as const,
+      sourceIds: [artifact.id],
     })),
     ...lessonProgress
       .filter((item) => !item.completed)
@@ -1929,6 +2249,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: item.path,
         priority: 35,
         topic: item.moduleId,
+        reason: 'unfinished-lesson' as const,
+        sourceIds: [item.id],
       })),
   ];
 
@@ -2531,6 +2853,64 @@ export async function getReadinessByObjective(): Promise<ObjectiveReadiness[]> {
     .sort((a, b) => a.readinessScore - b.readinessScore);
 }
 
+function reasonForObjective(readinessScore: number, retentionForecastPct?: number): ReviewReason {
+  if (retentionForecastPct !== undefined && retentionForecastPct < 72) return 'due-review';
+  if (readinessScore < 55) return 'weak-objective';
+  if (readinessScore < 75) return 'stale-topic';
+  return 'unfinished-lesson';
+}
+
+export async function getReadinessByObjectiveV2(): Promise<ObjectiveReadinessV2[]> {
+  const [objectives, reviewItems, results, settings] = await Promise.all([
+    getReadinessByObjective(),
+    db.reviewItems.toArray(),
+    db.questionResults.toArray(),
+    getStudyPlanSettings(),
+  ]);
+
+  return objectives
+    .map((objective) => {
+      const review = reviewItems.find((item) => item.id === objective.id);
+      const objectiveResults = results.filter(
+        (result) =>
+          result.domain === objective.domain &&
+          result.topic === objective.topic &&
+          result.learningObjective === objective.learningObjective,
+      );
+      const itemTypeWeight = Math.max(
+        1,
+        ...objectiveResults.map((result) =>
+          result.itemType === 'constructed-response'
+            ? 1.35
+            : result.itemType === 'mock'
+              ? 1.25
+              : result.itemType === 'vignette'
+                ? 1.15
+                : result.itemType === 'skill-lab'
+                  ? 1.1
+                  : 1,
+        ),
+      );
+      const topicWeight = topicWeightFor(settings.topicWeights, objective.topic);
+      const retentionForecastPct = review ? Math.round(predictRetention(review, new Date()) * 100) : undefined;
+      const weightedScore = Math.max(
+        0,
+        Math.min(100, Math.round(objective.readinessScore - Math.max(0, 78 - (retentionForecastPct ?? 78)) * 0.25 - topicWeight * 0.05 + (itemTypeWeight - 1) * 6)),
+      );
+      return {
+        ...objective,
+        readinessVersion: 2 as const,
+        readinessScore: weightedScore,
+        itemTypeWeight,
+        topicWeight,
+        retentionForecastPct,
+        evidenceCount: objectiveResults.length,
+        primaryReason: reasonForObjective(weightedScore, retentionForecastPct),
+      };
+    })
+    .sort((a, b) => a.readinessScore - b.readinessScore);
+}
+
 export async function getReadinessByLevel() {
   const readiness = await getReadinessByTopic();
   const levels = [...new Set(readiness.map((item) => (item.topic.includes(':') ? item.topic.split(':')[0] : 'level1')))];
@@ -2635,6 +3015,75 @@ export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean }
   };
 }
 
+async function storageEstimate() {
+  if (typeof navigator === 'undefined') return undefined;
+  const estimate = await navigator.storage?.estimate?.().catch(() => null);
+  const persisted = await navigator.storage?.persisted?.().catch(() => undefined);
+  if (!estimate && persisted === undefined) return undefined;
+  return {
+    usage: estimate?.usage,
+    quota: estimate?.quota,
+    persisted,
+  };
+}
+
+function buildVaultHealthSnapshot(exported: VaultExport, validationErrors: string[]): VaultHealthSnapshot {
+  const totalRows = STORE_NAMES.reduce((sum, storeName) => sum + exported.stores[storeName].length, 0);
+  const malformedQuestionRows = exported.stores.questionResults.filter(
+    (row) => !row.domain || !row.topic || !row.questionId || !row.learningObjective || !isValidIsoDate(row.createdAt),
+  ).length;
+  const malformedReviewRows = exported.stores.reviewItems.filter(
+    (row) => !row.id || !row.dueAt || Number.isNaN(new Date(row.dueAt).getTime()),
+  ).length;
+  const objectiveKeys = new Set(
+    exported.stores.questionResults.map((row) => objectiveId(row.domain, row.topic, row.learningObjective)),
+  );
+  const orphanedReviews = exported.stores.reviewItems.filter(
+    (row) => row.learningObjective && row.topic && !objectiveKeys.has(objectiveId(row.domain, row.topic, row.learningObjective)),
+  ).length;
+  const indexedObjectives = new Set(exported.stores.masterySnapshots.map((row) => row.id));
+  const staleIndexes = [...objectiveKeys].filter((key) => !indexedObjectives.has(key)).length;
+  const checksumIssues = validationErrors.filter((error) => /checksum/i.test(error)).length;
+  const repairActions = [
+    malformedQuestionRows || malformedReviewRows ? `Remove or normalize ${malformedQuestionRows + malformedReviewRows} malformed learning row(s).` : '',
+    orphanedReviews ? `Rebuild ${orphanedReviews} orphaned review row(s) from canonical attempts.` : '',
+    staleIndexes ? `Rebuild ${staleIndexes} stale mastery/review index row(s).` : '',
+    checksumIssues ? 'Reject the payload or regenerate it from a trusted local vault export.' : '',
+  ].filter(Boolean);
+
+  return {
+    id: `vault-health:${exported.exportId}`,
+    generatedAt: nowIso(),
+    status: checksumIssues || malformedQuestionRows || malformedReviewRows ? 'repair-needed' : orphanedReviews || staleIndexes ? 'warning' : 'ok',
+    totalRows,
+    malformedRows: malformedQuestionRows + malformedReviewRows,
+    orphanedReviews,
+    staleIndexes,
+    checksumIssues,
+    repairActions,
+  };
+}
+
+export async function getVaultHealthReport(): Promise<VaultHealthReport> {
+  const exported = await exportVaultData();
+  const validation = validateVaultData(exported);
+  const snapshot = buildVaultHealthSnapshot(exported, validation.errors);
+  const report: VaultHealthReport = {
+    ...snapshot,
+    schemaVersion: VAULT_SCHEMA_VERSION,
+    schemaHash: VAULT_SCHEMA_HASH,
+    contentVersion: VAULT_CONTENT_VERSION,
+    importHistory: await getVaultImportHistory(),
+    storageEstimate: await storageEstimate(),
+  };
+  await db.vaultHealthSnapshots.put(snapshot);
+  return report;
+}
+
+export async function previewVaultRepair(): Promise<VaultHealthReport> {
+  return getVaultHealthReport();
+}
+
 export async function repairVaultData() {
   const exported = await exportVaultData();
   const seenNotes = new Set<string>();
@@ -2661,6 +3110,7 @@ export async function repairVaultData() {
   };
   await importVaultData(repaired, 'replace');
   await rebuildLearningIndexes({ emit: false });
+  await getVaultHealthReport();
   return previewVaultImport(repaired);
 }
 
@@ -2682,6 +3132,7 @@ export async function resetVaultData(scope: 'attempts' | 'progress' | 'full' = '
       db.resultArtifacts.clear(),
       db.mockSectionState.clear(),
       db.studySessions.clear(),
+      db.learningEvents.clear(),
     ]);
   } else if (scope === 'progress') {
     await Promise.all([db.lessonProgress.clear(), db.quizAttempts.clear(), db.vignetteAttempts.clear(), db.studySessions.clear()]);

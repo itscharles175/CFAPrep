@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Download, Flag, ListChecks, PenLine, Timer, Trophy } from 'lucide-react';
 import { loadCfaLevelContent, loadCfaMockExam } from '../domains/cfa/cfaLoaders';
-import { PageHeader, MetricCard } from '../components/ui/Primitives';
+import { CaseViewer, MetricCard, PageHeader, ProgressRail, QuestionStage, RubricPanel, StatusBadge, Surface } from '../components/ui/Primitives';
 import {
   clearMockSectionState,
   getMockSectionState,
@@ -73,9 +73,12 @@ function questionRowsFromItem(item) {
 function MockQuestion({ question, selected, submitted = false, onSelect }) {
   const letters = ['A', 'B', 'C', 'D'];
   return (
-    <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-5)' }}>
-      <span className="badge badge-purple">{question.difficulty}</span>
-      <h2 style={{ marginTop: 'var(--space-3)' }}>{question.question}</h2>
+    <QuestionStage
+      badge={question.difficulty}
+      objective={question.learningObjective}
+      question={question.question}
+      status={submitted ? (selected === question.correct ? 'success' : 'danger') : 'exam'}
+    >
       <div className="quiz-options">
         {question.options.map((option, index) => {
           const picked = selected === index;
@@ -96,14 +99,14 @@ function MockQuestion({ question, selected, submitted = false, onSelect }) {
         })}
       </div>
       {submitted && <p style={{ color: 'var(--text-secondary)' }}>{question.explanation}</p>}
-    </div>
+    </QuestionStage>
   );
 }
 
 function ConstructedItem({ item, response, scores, onResponse, onScore }) {
   return (
-    <div className="glass-card no-hover">
-      <span className="badge badge-gold">Constructed Response</span>
+    <Surface tone="study" status="exam">
+      <StatusBadge tone="exam">Constructed Response</StatusBadge>
       <h2>{item.title}</h2>
       <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>{item.prompt}</p>
       <textarea
@@ -113,30 +116,20 @@ function ConstructedItem({ item, response, scores, onResponse, onScore }) {
         placeholder="Write a concise bullet response..."
         style={{ width: '100%', minHeight: 180, resize: 'vertical', marginTop: 'var(--space-4)' }}
       />
-      <div className="analytics-table" style={{ marginTop: 'var(--space-5)' }}>
-        {item.rubric.criteria.map((criterion) => (
-          <label key={criterion.id} className="analytics-row">
-            <span>
-              <strong>{criterion.label}</strong>
-              <small style={{ display: 'block', color: 'var(--text-secondary)' }}>{criterion.description}</small>
-            </span>
-            <input
-              type="number"
-              min="0"
-              max={criterion.points}
-              value={scores?.[criterion.id] ?? 0}
-              onChange={(event) => onScore(criterion.id, Number(event.target.value))}
-              style={{ width: 80 }}
-            />
-            <span>/ {criterion.points}</span>
-          </label>
-        ))}
+      <div style={{ marginTop: 'var(--space-5)' }}>
+        <RubricPanel
+          title={item.rubric.title}
+          criteria={item.rubric.criteria}
+          scores={scores || {}}
+          maxPoints={item.rubric.maxPoints}
+          onScore={onScore}
+        />
       </div>
       <details style={{ marginTop: 'var(--space-5)' }}>
         <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Model answer</summary>
         <p style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-3)' }}>{item.modelAnswer}</p>
       </details>
-    </div>
+    </Surface>
   );
 }
 
@@ -232,6 +225,29 @@ export default function MockExam() {
       status: paused ? 'paused' : 'in-progress',
     });
   }, [constructedResponses, current, flags, finished, hydrated, items, level, mock, paused, pausedAt, pausedMs, rubricScores, selected, startTime]);
+
+  useEffect(() => {
+    function handleKeyboard(event) {
+      const target = event.target;
+      if (target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (paused || finished || !items.length) return;
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        setCurrent((value) => Math.min(items.length - 1, value + 1));
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        setCurrent((value) => Math.max(0, value - 1));
+      }
+      if (event.key.toLowerCase() === 'f' && item) {
+        event.preventDefault();
+        toggleFlag();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  });
 
   function toggleFlag() {
     const id = itemId(item);
@@ -423,6 +439,9 @@ export default function MockExam() {
         <MetricCard label="Item" value={current + 1} detail={topicTitleMap.get(itemTopic(item)) || itemTopic(item)} icon={Timer} tone="success" />
         <MetricCard label="Progress" value={`${Math.round(((current + 1) / items.length) * 100)}%`} detail="Section navigation" icon={Trophy} />
       </div>
+      <div style={{ marginBottom: 'var(--space-6)' }}>
+        <ProgressRail value={current + 1} max={items.length} label="Mock navigation" detail={`${current + 1}/${items.length}`} tone="exam" />
+      </div>
 
       {paused && (
         <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)', textAlign: 'center' }}>
@@ -476,20 +495,9 @@ export default function MockExam() {
         )}
         {item.type === 'vignette' && (
           <>
-            <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-5)' }}>
-              <h3 style={{ marginTop: 0 }}>Case Facts</h3>
-              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>{item.vignette.stem}</p>
-              {item.vignette.exhibits?.length > 0 && (
-                <div className="coverage-grid">
-                  {item.vignette.exhibits.map((exhibit) => (
-                    <div key={exhibit.id}>
-                      <strong>{exhibit.title}</strong>
-                      <small>{exhibit.content}</small>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <CaseViewer title="Case Facts" exhibits={item.vignette.exhibits || []}>
+              <p>{item.vignette.stem}</p>
+            </CaseViewer>
             {item.vignette.questions.map((question) => (
               <MockQuestion
                 key={question.id}
@@ -520,7 +528,7 @@ export default function MockExam() {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', marginTop: 'var(--space-6)' }}>
           <button className="btn btn-secondary" onClick={() => setCurrent((value) => Math.max(0, value - 1))} disabled={current === 0}>Previous</button>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div className="mock-nav-grid">
             {items.map((mockItem, index) => (
               <button
                 key={itemId(mockItem)}

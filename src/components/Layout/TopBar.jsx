@@ -143,7 +143,13 @@ export default function TopBar({ collapsed, onMenuToggle }) {
         <Menu size={18} />
       </button>
 
-      <div className="topbar-search" role="combobox" aria-expanded={searchOpen} aria-haspopup="listbox" aria-owns="command-palette-results">
+      <div
+        className="topbar-search"
+        role="combobox"
+        aria-expanded={searchOpen}
+        aria-haspopup="listbox"
+        aria-owns={searchOpen ? 'command-palette-results' : undefined}
+      >
         <Search />
         <input
           ref={inputRef}
@@ -151,8 +157,8 @@ export default function TopBar({ collapsed, onMenuToggle }) {
           type="text"
           placeholder="Search modules, formulas, topics..."
           aria-label="Command palette"
-          aria-controls="command-palette-results"
-          aria-activedescendant={results[selectedIndex] ? `command-result-${results[selectedIndex].id}` : undefined}
+          aria-controls={searchOpen ? 'command-palette-results' : undefined}
+          aria-activedescendant={searchOpen && results[selectedIndex] ? `command-result-${results[selectedIndex].id}` : undefined}
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);

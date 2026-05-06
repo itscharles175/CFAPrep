@@ -1,9 +1,10 @@
-import { getCfaLevelContent as getRuntimeLevelContent } from './cfaLevels';
+import { buildRuntimeLevelFromAuthoredPacks, runtimeStatusForPacks } from './cfaRuntimeBuilder';
+import { level3AuthoredContentPacks, level3TopicIds } from './level3Packs';
 
 let levelContent;
 
 export function getCfaLevelContent() {
-  if (!levelContent) levelContent = getRuntimeLevelContent('level3');
+  if (!levelContent) levelContent = buildRuntimeLevelFromAuthoredPacks('level3', level3AuthoredContentPacks, getCfaRuntimeStatus().mode);
   return levelContent;
 }
 
@@ -17,16 +18,5 @@ export function getCfaMockExam(mockId) {
 }
 
 export function getCfaRuntimeStatus() {
-  return {
-    level: 'level3',
-    mode: 'generated',
-    label: 'Generated scaffold',
-    releaseEligible: false,
-    topicCount: getCfaLevelContent().topics.length,
-    authoredPackCount: 0,
-    validatedTopics: 0,
-    examReadyTopics: 0,
-    blockers: ['Level III remains a future-roadmap diagnostic, not an active release gate.'],
-    warnings: ['Level III runtime is generated draft content.'],
-  };
+  return runtimeStatusForPacks('level3', level3AuthoredContentPacks, level3TopicIds);
 }

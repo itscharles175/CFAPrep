@@ -11,17 +11,22 @@ export default function ContentOps() {
   const report = useMemo(() => generateCoverageReport(), []);
   const curriculumReport = useMemo(() => generateCurriculumCoverageReport(), []);
   const activeCurriculumWarnings = useMemo(
-    () => generateCurriculumCoverageReport('level1').totals.warnings + generateCurriculumCoverageReport('level2').totals.warnings,
+    () =>
+      generateCurriculumCoverageReport('level1').totals.warnings +
+      generateCurriculumCoverageReport('level2').totals.warnings +
+      generateCurriculumCoverageReport('level3').totals.warnings,
     [],
   );
-  const futureDiagnostics = useMemo(() => generateCurriculumCoverageReport('level3').totals.warnings, []);
   const level1Progress = useMemo(() => getLevel1BatchProgress(), []);
   const level2Progress = useMemo(() => getContentBatchProgress('level2'), []);
+  const level3Progress = useMemo(() => getContentBatchProgress('level3'), []);
   const level1Release = useMemo(() => generateContentReleaseReport('level1'), []);
   const level2Release = useMemo(() => generateContentReleaseReport('level2'), []);
+  const level3Release = useMemo(() => generateContentReleaseReport('level3'), []);
   const runtimeReport = useMemo(() => getCfaRuntimeReport(), []);
   const level1Runtime = runtimeReport.levels.find((item) => item.level === 'level1');
   const level2Runtime = runtimeReport.levels.find((item) => item.level === 'level2');
+  const level3Runtime = runtimeReport.levels.find((item) => item.level === 'level3');
   const releaseSections = [
     {
       title: 'Level I Saturation Release',
@@ -38,6 +43,14 @@ export default function ContentOps() {
       runtime: level2Runtime,
       vignetteLabel: 'item-set vignettes',
       sprint: 'Strict active gate: no partial public Level II exam-ready claim ships.',
+    },
+    {
+      title: 'Level III Constructed-Response Release',
+      release: level3Release,
+      progress: level3Progress,
+      runtime: level3Runtime,
+      vignetteLabel: 'item-set vignettes',
+      sprint: 'Strict active gate: no partial public Level III exam-ready claim ships.',
     },
   ];
   const hasErrors = report.totals.errors > 0;
@@ -59,7 +72,7 @@ export default function ContentOps() {
         <MetricCard label="Levels" value={report.totals.levels ?? 1} detail={`${report.totals.topics} topics`} icon={FileSearch} />
         <MetricCard label="Questions" value={report.totals.questions} detail="Question bank rows" icon={ShieldCheck} tone="success" />
         <MetricCard label="Errors" value={report.totals.errors} detail="Must fix before release" icon={TriangleAlert} tone={hasErrors ? 'danger' : 'success'} />
-        <MetricCard label="Exam-ready maps" value={curriculumReport.totals.examReadyTopics} detail={`${activeCurriculumWarnings} active warnings · ${futureDiagnostics} future diagnostics`} icon={CheckCircle2} tone={curriculumHasErrors ? 'danger' : activeCurriculumWarnings ? 'warning' : 'success'} />
+        <MetricCard label="Exam-ready maps" value={curriculumReport.totals.examReadyTopics} detail={`${activeCurriculumWarnings} active warnings · 0 future diagnostics`} icon={CheckCircle2} tone={curriculumHasErrors ? 'danger' : activeCurriculumWarnings ? 'warning' : 'success'} />
       </div>
 
       {releaseSections.map(({ title, release, progress, runtime, vignetteLabel, sprint }) => (

@@ -5,6 +5,7 @@ import {
   getLevel1AuthoredRuntimeMode,
   getLevel1RuntimeStatus,
   getLevel2RuntimeStatus,
+  getLevel3RuntimeStatus,
 } from './contentPacks';
 import { cfaContent, cfaLearningObjectives, cfaQuizzes } from './cfaData';
 
@@ -24,19 +25,6 @@ const level1Topics = cfaTopics.map((topic) => ({
   weight: topic.weight,
   summary: `Level I foundation coverage for ${topic.label}, focused on recognition, calculation, and exam-day traps.`,
 }));
-
-const level3Topics = [
-  ['ethics', 'Ethics & Professional Standards', '10-15%', 'portfolio-manager judgment, conflicts, suitability, and professional conduct cases'],
-  ['asset-allocation', 'Asset Allocation', '15-20%', 'capital market expectations, strategic allocation, and rebalancing policy'],
-  ['portfolio-construction', 'Portfolio Construction', '10-15%', 'risk budgets, active risk, manager selection, and portfolio design'],
-  ['wealth-planning', 'Private Wealth Management', '10-15%', 'IPS construction, taxes, concentrated wealth, and behavioral constraints'],
-  ['institutional-ips', 'Institutional Portfolio Management', '10-15%', 'pension, endowment, foundation, insurance, and bank objectives'],
-  ['fixed-income-pm', 'Fixed Income Portfolio Management', '10-15%', 'duration targeting, curve strategy, credit, and liability matching'],
-  ['equity-pm', 'Equity Portfolio Management', '5-10%', 'active equity process, factor tilts, and attribution'],
-  ['derivatives-risk', 'Derivatives And Risk Management', '5-10%', 'overlay strategy, hedging, option-based protection, and risk control'],
-  ['alternatives-pm', 'Alternative Investments In Portfolios', '5-10%', 'allocation roles, liquidity, fees, and appraisal risk'],
-  ['performance', 'Performance Evaluation', '5-10%', 'return attribution, appraisal, manager monitoring, and reporting'],
-].map(([id, title, weight, summary]) => ({ id, title, weight, summary }));
 
 const objectiveThemes = [
   ['concepts', 'Explain core concepts and vocabulary'],
@@ -498,13 +486,7 @@ const generatedLevel1 = buildLevel(
 export const cfaLevelContent = [
   getLevel1AuthoredRuntimeMode() === 'generated' ? generatedLevel1 : buildRuntimeLevelFromPacks('level1'),
   buildRuntimeLevelFromPacks('level2'),
-  buildLevel(
-    'level3',
-    'CFA Level III',
-    'Constructed response and item-set cases focused on portfolio management judgment.',
-    'The Level III bundle adds command-word drills, rubrics, IPS-style cases, and portfolio construction tools.',
-    level3Topics,
-  ),
+  buildRuntimeLevelFromPacks('level3'),
 ];
 
 export const cfaLevels = cfaLevelContent.map((level) => ({
@@ -533,18 +515,7 @@ export const cfaRuntimeReport = {
   levels: [
     getLevel1RuntimeStatus(),
     getLevel2RuntimeStatus(),
-    {
-      level: 'level3',
-      mode: 'generated',
-      label: 'Generated scaffold',
-      releaseEligible: false,
-      topicCount: cfaLevelContent.find((level) => level.id === 'level3')?.topics.length || 0,
-      authoredPackCount: 0,
-      validatedTopics: 0,
-      examReadyTopics: 0,
-      blockers: ['Level III remains draft scaffold content until core and pathway taxonomy is reconciled.'],
-      warnings: ['Level III runtime is generated draft content.'],
-    },
+    getLevel3RuntimeStatus(),
   ],
 };
 

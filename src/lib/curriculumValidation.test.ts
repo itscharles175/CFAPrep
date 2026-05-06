@@ -11,6 +11,7 @@ import {
   level1AuthoredContentPacks,
   level1ValidatedContentPacks,
   level2AuthoredContentPacks,
+  level3AuthoredContentPacks,
 } from '../domains/cfa/contentPacks';
 import {
   generateContentReleaseReport,
@@ -28,6 +29,7 @@ import {
   validateCurriculumMap,
   validateLevel1SaturationBatch,
   validateLevel2SaturationBatch,
+  validateLevel3SaturationBatch,
   validateObjectiveMappings,
   validateSkillLabMappings,
   validateStudyUnitCoverage,
@@ -186,6 +188,39 @@ describe('CFA curriculum mapping', () => {
     expect(release.topics.every((topic) => topic.promotionEvidence.length > 0)).toBe(true);
   });
 
+  it('validates Level III as a strict all-or-nothing constructed-response release', () => {
+    const release = generateContentReleaseReport('level3');
+    const ethics = level3AuthoredContentPacks.find((pack) => pack.topicId === 'ethics')!;
+    const counts = getAuthoredContentPackCounts(ethics);
+
+    [1, 3, 5].forEach((readyCount) => {
+      const partialPacks = level3AuthoredContentPacks.map((pack, index) =>
+        index < readyCount
+          ? pack
+          : {
+              ...pack,
+              maturity: 'validated' as const,
+              sourceMeta: { ...pack.sourceMeta, authoringStatus: 'validated' as const },
+              authoringReview: { ...pack.authoringReview, status: 'validated' as const },
+            },
+      );
+      const partialRelease = generateContentReleaseReportForPacks('level3', partialPacks);
+
+      expect(partialRelease.status).toBe('validated');
+      expect(partialRelease.topics.filter((topic) => topic.status === 'exam-ready')).toHaveLength(readyCount);
+    });
+
+    expect(level3AuthoredContentPacks).toHaveLength(6);
+    expect(counts.authoredConstructedResponses).toBe(3);
+    expect(ethics.authoredConstructedResponses?.every((item) => item.provenance.promotionEvidence?.length && item.commandWords.length && item.rubric.maxPoints > 0)).toBe(true);
+    expect(validateLevel3SaturationBatch().filter((issue) => issue.severity === 'error')).toEqual([]);
+    expect(validateAuthoredContentPack(ethics).filter((issue) => issue.severity === 'error')).toEqual([]);
+    expect(release.status).toBe('exam-ready');
+    expect(release.templateRowsRemaining).toBe(0);
+    expect(release.topics.every((topic) => topic.editorialRows === topic.totalRows && topic.missingEvidence === 0)).toBe(true);
+    expect(release.topics.every((topic) => topic.promotionEvidence.length > 0)).toBe(true);
+  });
+
   it('validates curriculum map structure, objectives, assessments, and skill labs without release-blocking errors', () => {
     expect(validateCurriculumMap().filter((issue) => issue.severity === 'error')).toEqual([]);
     expect(validateStudyUnitCoverage('level1', 'fixed-income').filter((issue) => issue.severity === 'error')).toEqual([]);
@@ -233,7 +268,7 @@ describe('CFA curriculum mapping', () => {
 
     expect(report.totals.levels).toBe(3);
     expect(report.totals.topics).toBe(26);
-    expect(report.totals.examReadyTopics).toBe(20);
+    expect(report.totals.examReadyTopics).toBe(26);
     expect(report.totals.errors).toBe(0);
     expect(allObjectiveText.toLowerCase()).not.toContain('candidate should be able to');
     expect(cfaCurriculumMap.sourceMeta.publicReferences.every((reference) => reference.url.startsWith('https://www.cfainstitute.org/'))).toBe(true);

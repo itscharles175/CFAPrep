@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ClipboardCheck, PenLine, Trophy } from 'lucide-react';
 import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
-import { PageHeader, MetricCard } from '../../components/ui/Primitives';
+import { CommandHint, MetricCard, PageHeader, ProgressRail, RubricPanel, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
 import { recordConstructedResponseAttempt } from '../../lib/learning';
 
 function nowMs() {
@@ -44,6 +44,18 @@ export default function CfaConstructedResponse() {
       cancelled = true;
     };
   }, [level, requestKey, topic]);
+
+  useEffect(() => {
+    function handleKeyboard(event) {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && response.trim() && !submitted) {
+        event.preventDefault();
+        submit();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  });
 
   if (loading) {
     return (
@@ -108,26 +120,22 @@ export default function CfaConstructedResponse() {
         <MetricCard label="Set" value={`${safeIndex + 1}/${visibleItems.length}`} detail={`${allItems.length} total prompts`} icon={ClipboardCheck} tone="accent" />
       </div>
 
-      <div className="segmented-row" role="tablist" aria-label="Constructed response command word filter">
-        {['all', ...commandWords].map((command) => (
-          <button
-            key={command}
-            type="button"
-            role="tab"
-            aria-selected={commandFilter === command}
-            className={`btn ${commandFilter === command ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => {
-              setCommandFilter(command);
-              resetForNextItem(0);
-            }}
-          >
-            {command}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        label="Constructed response command word filter"
+        options={['all', ...commandWords].map((command) => ({ value: command, label: command }))}
+        value={commandFilter}
+        onChange={(command) => {
+          setCommandFilter(command);
+          resetForNextItem(0);
+        }}
+        density="compact"
+      />
 
-      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
-        <h2 style={{ marginTop: 0 }}>Prompt</h2>
+      <Surface tone="study" status="exam" style={{ marginBottom: 'var(--space-6)' }}>
+        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+          <h2 style={{ margin: 0 }}>Prompt</h2>
+          <CommandHint keys={['Ctrl', 'Enter']} label="submit response" />
+        </div>
         <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>{item.prompt}</p>
         <textarea
           aria-label="Constructed response answer"
@@ -144,38 +152,29 @@ export default function CfaConstructedResponse() {
             color: 'var(--text-primary)',
             padding: 'var(--space-3)',
             lineHeight: 1.6,
-          }}
+            }}
         />
-      </div>
+      </Surface>
 
-      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
-        <h2 style={{ marginTop: 0 }}>Rubric</h2>
-        <div className="analytics-table">
-          {item.rubric.criteria.map((criterion) => (
-            <label key={criterion.id} className="analytics-row">
-              <span>
-                <strong>{criterion.label}</strong>
-                <small style={{ display: 'block', color: 'var(--text-secondary)' }}>{criterion.description}</small>
-              </span>
-              <input
-                type="number"
-                min="0"
-                max={criterion.points}
-                value={scores[criterion.id] ?? 0}
-                onChange={(event) => setScores((existing) => ({ ...existing, [criterion.id]: Number(event.target.value) }))}
-                style={{ width: 80 }}
-              />
-              <span>/ {criterion.points}</span>
-            </label>
-          ))}
+      <div style={{ marginBottom: 'var(--space-6)' }}>
+        <RubricPanel
+          title={item.rubric.title}
+          criteria={item.rubric.criteria}
+          scores={scores}
+          maxPoints={item.rubric.maxPoints}
+          onScore={(criterionId, value) => setScores((existing) => ({ ...existing, [criterionId]: value }))}
+        />
+        <div style={{ marginTop: 'var(--space-4)' }}>
+          <ProgressRail value={earnedPoints} max={item.rubric.maxPoints} label="Rubric points" detail={`${earnedPoints}/${item.rubric.maxPoints}`} tone="exam" />
         </div>
       </div>
 
       {submitted && (
-        <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
-          <h2 style={{ marginTop: 0 }}>Model Answer</h2>
+        <Surface tone="study" status="success" style={{ marginBottom: 'var(--space-6)' }}>
+          <StatusBadge tone="success">Model answer revealed</StatusBadge>
+          <h2>Model Answer</h2>
           <p style={{ color: 'var(--text-secondary)' }}>{item.modelAnswer}</p>
-        </div>
+        </Surface>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', flexWrap: 'wrap' }}>

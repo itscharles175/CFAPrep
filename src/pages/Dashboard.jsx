@@ -9,6 +9,7 @@ import {
 import { domains } from '../data/catalog';
 import { useProgressSummary } from '../hooks/useProgress';
 import { exportVaultData, importVaultData, previewVaultImport, resetVaultData } from '../lib/learning';
+import { MetricTile, PageHeader, StatusBadge, Surface } from '../components/ui/Primitives';
 
 const domainIcons = {
   cfa: GraduationCap,
@@ -28,6 +29,7 @@ const quickTools = [
 
 function DomainCard({ domain, index }) {
   const Icon = domainIcons[domain.id] || BookOpen;
+  const readableColor = domain.id === 'cfa' ? 'var(--exam)' : domain.id === 'quant' ? 'var(--quant)' : 'var(--excel)';
 
   return (
     <Link to={domain.path} className="glass-card animate-fade" style={{ animationDelay: `${index * 80}ms`, textDecoration: 'none', color: 'inherit' }}>
@@ -57,13 +59,13 @@ function DomainCard({ domain, index }) {
       <div style={{ display: 'flex', gap: 'var(--space-6)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
         {Object.entries(domain.stats).map(([key, val]) => (
           <div key={key}>
-            <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: domain.color }}>{val}</div>
+            <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: readableColor }}>{val}</div>
             <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', textTransform: 'capitalize' }}>{key}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ marginTop: 'var(--space-5)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: domain.color, fontSize: 'var(--fs-sm)', fontWeight: 600 }}>
+      <div style={{ marginTop: 'var(--space-5)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: readableColor, fontSize: 'var(--fs-sm)', fontWeight: 600 }}>
         Start Learning <ChevronRight size={16} />
       </div>
     </Link>
@@ -143,41 +145,30 @@ export default function Dashboard() {
 
   return (
     <div className="page-container">
-      {/* Hero */}
-      <div style={{ marginBottom: 'var(--space-12)', animation: 'fadeIn 0.4s var(--ease-out)' }}>
-        <div className="flex-between" style={{ marginBottom: 'var(--space-2)' }}>
-          <div>
-            <h1 style={{
-              fontSize: 'var(--fs-4xl)', fontWeight: 900, lineHeight: 1.1,
-              background: 'linear-gradient(135deg, var(--text-primary) 0%, var(--slate-300) 50%, var(--blue-400) 100%)',
-              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-              backgroundSize: '200% 100%', animation: 'gradientShift 6s ease infinite',
-            }}>
-              QuantVault
-            </h1>
-            <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-lg)', marginTop: 'var(--space-2)' }}>
-              CFA · Quantitative Finance · Excel — Your personal finance knowledge command center.
-            </p>
-          </div>
-        </div>
+      <PageHeader
+        tone="study"
+        badge="LOCAL STUDY COMMAND"
+        title="QuantVault"
+        subtitle="CFA, quantitative finance, and Excel practice organized around today’s next action, local vault safety, and exam readiness."
+        meta={
+          <>
+            <StatusBadge tone="exam">Exam cockpit</StatusBadge>
+            <StatusBadge tone="vault">Browser-local</StatusBadge>
+          </>
+        }
+        actions={
+          <>
+            <button className="btn btn-secondary" onClick={handleExport}><Download size={16} /> Export</button>
+            <button className="btn btn-primary" onClick={() => importRef.current?.click()}><Upload size={16} /> Import</button>
+          </>
+        }
+      />
 
-        {/* Quick Stats */}
-        <div style={{ display: 'flex', gap: 'var(--space-6)', marginTop: 'var(--space-6)' }}>
-          {[
-            { icon: Flame, label: 'Study Streak', value: `${summary.streakDays} day${summary.streakDays === 1 ? '' : 's'}`, color: 'var(--amber-500)' },
-            { icon: Zap, label: 'Questions Answered', value: summary.questionsAnswered.toLocaleString(), color: 'var(--blue-400)' },
-            { icon: Clock, label: 'Study Time', value: formatStudyTime(summary.studyTimeSeconds), color: 'var(--emerald-400)' },
-            { icon: Trophy, label: 'Mastery Score', value: summary.masteryScore === null ? '-' : `${summary.masteryScore}%`, color: 'var(--gold)' },
-          ].map((stat, i) => (
-            <div key={i} className="glass-card no-hover" style={{ flex: 1, padding: 'var(--space-4) var(--space-5)', display: 'flex', alignItems: 'center', gap: 'var(--space-4)', animationDelay: `${i * 60}ms` }}>
-              <stat.icon size={20} color={stat.color} />
-              <div>
-                <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>{stat.value}</div>
-                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>{stat.label}</div>
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="cockpit-grid cockpit-grid-4" style={{ marginBottom: 'var(--space-8)' }}>
+        <MetricTile label="Study Streak" value={`${summary.streakDays} day${summary.streakDays === 1 ? '' : 's'}`} detail="Current momentum" icon={Flame} tone="warning" />
+        <MetricTile label="Questions" value={summary.questionsAnswered.toLocaleString()} detail="Answered locally" icon={Zap} tone="accent" />
+        <MetricTile label="Study Time" value={formatStudyTime(summary.studyTimeSeconds)} detail="Recorded sessions" icon={Clock} tone="success" />
+        <MetricTile label="Mastery" value={summary.masteryScore === null ? '-' : `${summary.masteryScore}%`} detail="Readiness snapshot" icon={Trophy} tone="exam" />
       </div>
 
       {(pendingImport || pendingReset) && (
@@ -228,14 +219,14 @@ export default function Dashboard() {
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 'var(--space-6)', alignItems: 'stretch' }}>
-          <Link to={summary.todayRecommendation.path} className="glass-card animate-fade" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <Surface as={Link} to={summary.todayRecommendation.path} tone="study" status="exam" interactive className="animate-fade">
             <div className="badge badge-blue" style={{ marginBottom: 'var(--space-3)' }}>{summary.todayRecommendation.label}</div>
             <h3 style={{ fontSize: 'var(--fs-2xl)', margin: 0 }}>{summary.todayRecommendation.title}</h3>
             <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>{summary.todayRecommendation.reason}</p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--accent)', fontWeight: 700 }}>
               Start session <ChevronRight size={16} />
             </div>
-          </Link>
+          </Surface>
 
           <div className="glass-card no-hover">
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', fontWeight: 700 }}>

@@ -11,6 +11,7 @@ import {
   Inbox, NotebookTabs, BadgeCheck, ClipboardList, FileSearch, HardDrive,
 } from 'lucide-react';
 import { cfaTopics, excelModules, quantModules } from '../../data/catalog';
+import { appRoutes } from '../../routes/routeManifest';
 
 const cfaIconMap = {
   ethics: Shield,
@@ -41,6 +42,23 @@ const excelIconMap = {
   'dcf-modeling': TrendingUp,
   'vba-macros': Code,
 };
+
+const routeIconMap = {
+  inbox: Inbox,
+  'notebook-tabs': NotebookTabs,
+  'badge-check': BadgeCheck,
+  'clipboard-list': ClipboardList,
+  'bar-chart-3': BarChart3,
+  calculator: Calculator,
+  library: Library,
+  'file-search': FileSearch,
+  'hard-drive': HardDrive,
+};
+
+const sidebarToolRouteIds = ['review', 'flashcards', 'vault', 'mock', 'analytics', 'calculators', 'formulas', 'content-ops', 'system'];
+const sidebarToolRoutes = appRoutes
+  .filter((route) => sidebarToolRouteIds.includes(route.id))
+  .sort((a, b) => sidebarToolRouteIds.indexOf(a.id) - sidebarToolRouteIds.indexOf(b.id));
 
 function SidebarSection({ label, icon: Icon, basePath, items, collapsed, onNavigate }) {
   const location = useLocation();
@@ -152,42 +170,15 @@ export default function Sidebar({ collapsed, open, onToggle, onNavigate }) {
         {!collapsed && <div className="sidebar-section-label">Tools</div>}
 
         <div className="sidebar-section">
-          <NavLink to="/review" onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <Inbox />
-            {!collapsed && <span>Review Inbox</span>}
-          </NavLink>
-          <NavLink to="/flashcards" onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <BadgeCheck />
-            {!collapsed && <span>Flashcards</span>}
-          </NavLink>
-          <NavLink to="/vault" onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <NotebookTabs />
-            {!collapsed && <span>Notes & Bookmarks</span>}
-          </NavLink>
-          <NavLink to="/cfa/mock" onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <ClipboardList />
-            {!collapsed && <span>Mock Exam</span>}
-          </NavLink>
-          <NavLink to="/analytics" onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <BarChart3 />
-            {!collapsed && <span>Analytics</span>}
-          </NavLink>
-          <NavLink to="/calculators" onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <Calculator />
-            {!collapsed && <span>Calculators</span>}
-          </NavLink>
-          <NavLink to="/formulas" onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <Library />
-            {!collapsed && <span>Formula Library</span>}
-          </NavLink>
-          <NavLink to="/content-ops" onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <FileSearch />
-            {!collapsed && <span>Content QA</span>}
-          </NavLink>
-          <NavLink to="/system" onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <HardDrive />
-            {!collapsed && <span>System Health</span>}
-          </NavLink>
+          {sidebarToolRoutes.map((route) => {
+            const Icon = routeIconMap[route.iconKey] || Gauge;
+            return (
+              <NavLink key={route.id} to={route.path} onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+                <Icon />
+                {!collapsed && <span>{route.navLabel}</span>}
+              </NavLink>
+            );
+          })}
         </div>
       </nav>
     </aside>

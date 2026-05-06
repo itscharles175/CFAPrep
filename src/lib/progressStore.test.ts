@@ -9,15 +9,19 @@ import {
   getReadinessByTopic,
   getReadinessByLevel,
   getReadinessByObjective,
+  getReadinessByObjectiveV2,
   getProgressSummary,
   getResultArtifacts,
   getReviewInbox,
   getStudyPlan,
   getStudyPlanSettings,
+  getVaultHealthReport,
+  getVaultImportHistory,
   importVaultData,
   migrateVaultData,
   previewVaultImport,
   recordFlashcardResult,
+  recordLearningEventEnvelope,
   recordConstructedResponseAttempt,
   recordFormulaDrillAttempt,
   recordMockAttempt,
@@ -111,6 +115,8 @@ describe('local vault progress store', () => {
     expect(exported.exportId).toMatch(/^qv-/);
     expect(exported.checksum).toMatch(/^fnv1a32:/);
     expect(exported.stores.reviewItems[0].fsrsDifficulty).toBeTypeOf('number');
+    expect(exported.stores.learningEvents).toEqual([]);
+    expect(exported.stores.vaultHealthSnapshots).toEqual([]);
     expect(validateVaultData(exported)).toEqual({ valid: true, errors: [] });
 
     await resetVaultData('full');
@@ -118,6 +124,47 @@ describe('local vault progress store', () => {
 
     await importVaultData(exported, 'replace');
     expect((await getProgressSummary()).questionsAnswered).toBe(1);
+  });
+
+  it('encrypts vault backups and rejects the wrong passphrase', async () => {
+    await saveStudyPlanSettings({ dailyTargetMinutes: 75, targetLevel: 'level3' });
+
+    const encrypted = await exportVaultData({ encryption: { passphrase: 'correct horse battery staple' } });
+    expect(encrypted.encryption).toMatchObject({
+      encrypted: true,
+      algorithm: 'AES-GCM',
+      keyDerivation: 'PBKDF2',
+      hash: 'SHA-256',
+    });
+    expect(encrypted.payload).toBeTypeOf('string');
+    expect('stores' in encrypted).toBe(false);
+    expect(validateVaultData(encrypted).valid).toBe(false);
+
+    await resetVaultData('full');
+    await expect(importVaultData(encrypted, { mode: 'replace', passphrase: 'wrong passphrase' })).rejects.toThrow(/decrypt/i);
+    await importVaultData(encrypted, { mode: 'replace', passphrase: 'correct horse battery staple' });
+
+    const restored = await getStudyPlanSettings();
+    const history = await getVaultImportHistory();
+    expect(restored.dailyTargetMinutes).toBe(75);
+    expect(restored.targetLevel).toBe('level3');
+    expect(history[0]).toMatchObject({ schemaVersion: VAULT_SCHEMA_VERSION, encrypted: true, mode: 'replace' });
+  });
+
+  it('supports keep-existing and prefer-import merge conflict policies', async () => {
+    await saveStudyPlanSettings({ dailyTargetMinutes: 30, targetLevel: 'level1' });
+    const exported = await exportVaultData();
+
+    await resetVaultData('full');
+    await saveStudyPlanSettings({ dailyTargetMinutes: 90, targetLevel: 'level2' });
+
+    await importVaultData(exported, { mode: 'merge', conflictPolicy: 'keep-existing' });
+    expect((await getStudyPlanSettings()).dailyTargetMinutes).toBe(90);
+    expect((await getStudyPlanSettings()).targetLevel).toBe('level2');
+
+    await importVaultData(exported, { mode: 'merge', conflictPolicy: 'prefer-import' });
+    expect((await getStudyPlanSettings()).dailyTargetMinutes).toBe(30);
+    expect((await getStudyPlanSettings()).targetLevel).toBe('level1');
   });
 
   it('rebuilds derived review indexes after import and repair-style cleanup', async () => {
@@ -227,10 +274,14 @@ describe('local vault progress store', () => {
     const forecast = await forecastReviewLoad(7);
 
     expect(inbox.some((item) => item.type === 'weak-objective')).toBe(true);
+    expect(inbox.every((item) => item.reason)).toBe(true);
     expect(readiness[0].topic).toBe('fixed-income');
     expect(plan.dailyTargetMinutes).toBe(60);
+    expect(plan.planVersion).toBe(2);
+    expect(plan.reviewLoad).toHaveLength(14);
     expect(plan.nextActions.length).toBeGreaterThan(0);
     expect(forecast).toHaveLength(7);
+    expect(forecast[0]).toHaveProperty('atRiskCount');
     expect(forecast.some((day) => day.count > 0 && typeof day.averageRetention === 'number')).toBe(true);
   });
 
@@ -312,7 +363,15 @@ describe('local vault progress store', () => {
     expect(migrated.stores.flashcardAttempts).toEqual([]);
     expect(migrated.stores.resultArtifacts).toEqual([]);
     expect(migrated.stores.mockSectionState).toEqual([]);
-    expect(previewVaultImport(oldExport).valid).toBe(true);
+    expect(migrated.stores.learningEvents).toEqual([]);
+    expect(migrated.stores.vaultHealthSnapshots).toEqual([]);
+    expect(previewVaultImport(oldExport)).toMatchObject({
+      valid: true,
+      schemaVersion: VAULT_SCHEMA_VERSION,
+      schemaHash: VAULT_SCHEMA_HASH,
+      contentVersion: VAULT_CONTENT_VERSION,
+      checksumValid: true,
+    });
   });
 
   it('rejects invalid import payloads', () => {
@@ -366,16 +425,35 @@ describe('local vault progress store', () => {
       questionsAnswered: 0,
       score: 0,
     });
+    await recordLearningEventEnvelope({
+      id: 'event:lesson:ethics',
+      schemaVersion: 1,
+      event: {
+        domain: 'cfa',
+        topic: 'ethics',
+        mode: 'reading',
+        sourceType: 'lesson',
+        sourceId: 'ethics-lesson-1',
+        score: 1,
+        total: 1,
+        elapsedSeconds: 600,
+        createdAt: '2026-05-04T13:00:00.000Z',
+      },
+      sourceIds: ['ethics-lesson-1'],
+      recordedAt: '2026-05-04T13:10:00.000Z',
+    });
 
     const settings = await getStudyPlanSettings();
     const plan = await getStudyPlan();
     const summary = await getProgressSummary();
+    const exported = await exportVaultData();
 
     expect(settings.dailyTargetMinutes).toBe(90);
     expect(settings.restDays).toEqual([0, 6]);
     expect(plan.examDate).toBe('2026-11-15');
     expect(plan.dailyTargetMinutes).toBe(90);
-    expect(summary.studyTimeSeconds).toBe(1800);
+    expect(summary.studyTimeSeconds).toBe(2400);
+    expect(exported.stores.learningEvents).toHaveLength(1);
   });
 
   it('feeds flashcard outcomes into reviews, mastery, analytics, and calibration', async () => {
@@ -614,8 +692,10 @@ describe('local vault progress store', () => {
     const inbox = await getReviewInbox();
     const analytics = await getAnalyticsSummary();
     const objectives = await getReadinessByObjective();
+    const objectivesV2 = await getReadinessByObjectiveV2();
     const csv = await exportArtifactCsv('quant-lab');
     const plan = await getExamPlan();
+    const vaultHealth = await getVaultHealthReport();
 
     expect(exported.stores.constructedResponseAttempts).toHaveLength(1);
     expect(exported.stores.formulaDrillAttempts).toHaveLength(1);
@@ -627,9 +707,12 @@ describe('local vault progress store', () => {
     expect(analytics.totals.skillLabAttempts).toBe(2);
     expect(analytics.essayRubrics?.find((row) => row.criterion === 'justify')?.averagePct).toBe(0);
     expect(objectives.length).toBeGreaterThan(0);
+    expect(objectivesV2[0]).toMatchObject({ readinessVersion: 2, primaryReason: expect.any(String) });
     expect(csv).toContain('Risk Budget Lab');
     expect(exportMockSummary(exported.stores.constructedResponseAttempts[0])).toContain('Portfolio Construction Response');
     expect(plan.targetLevel).toBe('level1');
+    expect(vaultHealth.schemaVersion).toBe(VAULT_SCHEMA_VERSION);
+    expect(vaultHealth.importHistory).toEqual(expect.any(Array));
     expect(await rebuildLearningIndexes()).toMatchObject({ reviewItems: expect.any(Number) });
   });
 });

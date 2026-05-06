@@ -1,5 +1,5 @@
 import { access } from 'node:fs/promises';
-import { createServer } from 'vite';
+import { preview } from 'vite';
 import { chromium } from 'playwright-core';
 
 /* global document, window */
@@ -47,19 +47,22 @@ async function assertNoRuntimeErrors(page, label) {
   }
 }
 
-const server = await createServer({
-  server: {
+await access('dist/index.html').catch(() => {
+  throw new Error('Production dist is missing. Run npm run build before browser:regression.');
+});
+
+const server = await preview({
+  preview: {
     host: '127.0.0.1',
-    port: 5173,
+    port: 4173,
     strictPort: false,
     open: false,
   },
 });
-await server.listen();
-const address = server.resolvedUrls?.local?.[0] || 'http://127.0.0.1:5173/';
+const address = server.resolvedUrls?.local?.[0] || 'http://127.0.0.1:4173/';
 const executablePath = await firstExistingPath(browserCandidates);
 if (!executablePath) {
-  await server.close();
+  await new Promise((resolve) => server.httpServer.close(resolve));
   throw new Error('No local Chromium-compatible browser executable found for browser regression checks.');
 }
 
@@ -73,7 +76,7 @@ try {
   const options = page.locator('.quiz-option');
   const optionCount = await options.count();
   if (optionCount < 4) throw new Error('Level II vignette did not render answer choices.');
-  const questionCards = page.locator('.quiz-container .glass-card');
+  const questionCards = page.locator('.quiz-container .question-stage, .quiz-container .glass-card');
   const questionCardCount = await questionCards.count();
   for (let index = 0; index < questionCardCount; index += 1) {
     const firstOption = questionCards.nth(index).locator('.quiz-option').first();
@@ -83,6 +86,21 @@ try {
   await waitForBodyText(page, /Next Vignette/, 'submitted Level II vignette');
   await assertNoRuntimeErrors(page, 'Level II vignette flow');
   console.log('OK Level II async vignette flow');
+
+  await page.goto(new URL('/cfa/level3/performance/constructed-response', address).toString(), { waitUntil: 'networkidle' });
+  await waitForBodyText(page, /Performance Measurement/, 'Level III constructed-response content');
+  await waitForBodyText(page, /LEVEL III RESPONSE/, 'Level III constructed-response shell');
+  await page.getByLabel(/constructed response answer/i).fill('Recommend the monitoring action because the benchmark evidence controls the decision and the portfolio facts support a concise implementation response.');
+  const scoreInputs = page.locator('.rubric-row input, .analytics-row input');
+  const scoreInputCount = await scoreInputs.count();
+  if (scoreInputCount < 3) throw new Error('Level III constructed-response rubric did not render scoring inputs.');
+  for (let index = 0; index < scoreInputCount; index += 1) {
+    await scoreInputs.nth(index).fill('1');
+  }
+  await page.getByRole('button', { name: /submit response/i }).click();
+  await waitForBodyText(page, /Model Answer/, 'submitted Level III constructed response');
+  await assertNoRuntimeErrors(page, 'Level III constructed-response flow');
+  console.log('OK Level III constructed-response flow');
 
   await page.goto(new URL('/cfa/level2/mock', address).toString(), { waitUntil: 'networkidle' });
   await waitForBodyText(page, /MOCK SECTION/, 'Level II mock section');
@@ -100,6 +118,31 @@ try {
   await waitForBodyText(page, /Offline/, 'offline app-shell badge');
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   console.log('OK offline badge path');
+
+  await page.goto(new URL('/', address).toString(), { waitUntil: 'networkidle' });
+  let serviceWorkerReady = await page.evaluate(async () => {
+    if (!('serviceWorker' in navigator)) return false;
+    await navigator.serviceWorker.ready;
+    return Boolean(navigator.serviceWorker.controller);
+  }).catch(() => false);
+  if (!serviceWorkerReady) {
+    await page.reload({ waitUntil: 'networkidle' });
+    serviceWorkerReady = await page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return false;
+      await navigator.serviceWorker.ready;
+      return Boolean(navigator.serviceWorker.controller);
+    }).catch(() => false);
+  }
+  if (serviceWorkerReady) {
+    await page.waitForLoadState('networkidle').catch(() => undefined);
+    await page.context().setOffline(true);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForBodyText(page, /QuantVault/, 'production offline reload');
+    await page.context().setOffline(false);
+    console.log('OK production offline reload');
+  } else {
+    throw new Error('Service worker did not become ready in production preview.');
+  }
 
   await page.evaluate(() => {
     window.__qvUpdateApplied = false;
@@ -124,5 +167,5 @@ try {
   console.log('OK system health surface');
 } finally {
   await browser.close();
-  await server.close();
+  await new Promise((resolve) => server.httpServer.close(resolve));
 }

@@ -1,12 +1,10 @@
-import {
-  buildRuntimeLevelFromPacks,
-  getLevel2RuntimeStatus,
-} from './contentPacks';
+import { buildRuntimeLevelFromAuthoredPacks, runtimeStatusForPacks } from './cfaRuntimeBuilder';
+import { level2AuthoredContentPacks, level2TopicIds } from './level2Packs';
 
 let levelContent;
 
 export function getCfaLevelContent() {
-  if (!levelContent) levelContent = buildRuntimeLevelFromPacks('level2');
+  if (!levelContent) levelContent = buildRuntimeLevelFromAuthoredPacks('level2', level2AuthoredContentPacks, getCfaRuntimeStatus().mode);
   return levelContent;
 }
 
@@ -20,5 +18,5 @@ export function getCfaMockExam(mockId) {
 }
 
 export function getCfaRuntimeStatus() {
-  return getLevel2RuntimeStatus();
+  return runtimeStatusForPacks('level2', level2AuthoredContentPacks, level2TopicIds);
 }

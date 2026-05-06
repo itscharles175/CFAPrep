@@ -5,6 +5,7 @@ import { ArrowLeft, Target, BookOpen, Lightbulb, ChevronRight, Bookmark, StickyN
 import FormulaBlock from '../../components/FormulaBlock';
 import { useModuleProgress } from '../../hooks/useProgress';
 import { getBookmark, getNote, saveNote, toggleBookmark } from '../../lib/learning';
+import { PageHeader, ProgressRail, StatusBadge, Surface } from '../../components/ui/Primitives';
 
 export default function CfaModule() {
   const { level, topic } = useParams();
@@ -115,22 +116,14 @@ export default function CfaModule() {
         <Link to="/cfa" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-4)' }}>
           <ArrowLeft size={16} /> Back to CFA Dashboard
         </Link>
-        <div className="flex-between">
-          <div>
-            <div className="badge badge-gold" style={{ marginBottom: 'var(--space-2)' }}>
-              {level?.replace('level', 'Level ')} · Weight: {data.weight}
-            </div>
-            {data.runtimeMode === 'exam-ready' && (
-              <div className="badge badge-green" style={{ marginBottom: 'var(--space-2)' }}>
-                Editorial exam-ready
-              </div>
-            )}
-            <h1 className="section-title" style={{ fontSize: 'var(--fs-3xl)' }}>{data.title}</h1>
-            <p className="section-subtitle" style={{ marginBottom: 0 }}>
-              {data.learningObjectives.length} objectives · {data.questions.length} questions · {data.vignettes.length} vignettes · {data.flashcards.length} cards
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+        <PageHeader
+          tone="exam"
+          badge={`${level?.replace('level', 'Level ')} · ${data.weight}`}
+          title={data.title}
+          subtitle={`${data.learningObjectives.length} objectives · ${data.questions.length} questions · ${data.vignettes.length} vignettes · ${data.flashcards.length} cards`}
+          meta={data.runtimeMode === 'exam-ready' && <StatusBadge tone="success">Editorial exam-ready</StatusBadge>}
+          actions={
+            <>
             <button className={`btn ${completed ? 'btn-success' : 'btn-secondary'} btn-lg`} onClick={toggleComplete}>
               {completed ? 'Completed' : 'Mark Complete'}
             </button>
@@ -145,15 +138,32 @@ export default function CfaModule() {
                 <PenLine size={18} /> Response
               </Link>
             )}
-          </div>
-        </div>
+            </>
+          }
+        />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 'var(--space-8)', alignItems: 'start' }}>
+      <div className="study-shell">
         {/* Main Content */}
         <div className="module-content">
+          <Surface tone="study" status="exam" className="objective-rail" style={{ marginBottom: 'var(--space-6)' }}>
+            <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-2)' }}>
+              <h2 style={{ margin: 0 }}>Objective Rail</h2>
+              <StatusBadge tone="exam">{data.learningObjectives.length} mapped</StatusBadge>
+            </div>
+            <ProgressRail value={completed ? data.sections.length : Math.max(1, Math.floor(data.sections.length / 3))} max={data.sections.length} label="Reading progress" tone="exam" />
+            <div className="objective-rail" style={{ marginTop: 'var(--space-4)' }}>
+              {data.learningObjectives.slice(0, 8).map((objective, index) => (
+                <div key={objective.id || index} className="objective-row">
+                  <strong>{objective.title || objective.id || `Objective ${index + 1}`}</strong>
+                  <small>{objective.commandWord ? `${objective.commandWord} · ` : ''}{objective.id}</small>
+                </div>
+              ))}
+            </div>
+          </Surface>
+
           {data.sections.map((section, i) => (
-            <div key={i} className="glass-card no-hover animate-fade" style={{ marginBottom: 'var(--space-6)', animationDelay: `${i * 80}ms` }}>
+            <Surface key={i} tone="study" className="animate-fade" style={{ marginBottom: 'var(--space-6)', animationDelay: `${i * 80}ms` }}>
               <h2 style={{ marginTop: 0 }}>{section.title}</h2>
               {section.content.split('\n\n').map((para, j) => (
                 <p key={j} style={{ whiteSpace: 'pre-line' }}>{para}</p>
@@ -169,10 +179,10 @@ export default function CfaModule() {
                   </ul>
                 </div>
               )}
-            </div>
+            </Surface>
           ))}
           {data.examples?.length > 0 && (
-            <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
+            <Surface tone="study" status="success" style={{ marginBottom: 'var(--space-6)' }}>
               <h2 style={{ marginTop: 0 }}>Worked Examples</h2>
               {data.examples.slice(0, 4).map((example) => (
                 <div key={example.id} style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)', marginTop: 'var(--space-4)' }}>
@@ -182,13 +192,13 @@ export default function CfaModule() {
                   <p style={{ color: 'var(--text-secondary)' }}>{example.walkthrough}</p>
                 </div>
               ))}
-            </div>
+            </Surface>
           )}
         </div>
 
         {/* Sidebar — Formulas */}
-        <div style={{ position: 'sticky', top: 'calc(var(--topbar-height) + var(--space-8))' }}>
-          <div className="glass-card no-hover">
+        <div className="study-sidebar">
+          <Surface tone="study" density="compact">
             <h3 style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
               <Target size={18} color="var(--accent)" /> Skill Labs
             </h3>
@@ -203,9 +213,9 @@ export default function CfaModule() {
                 </Link>
               ))}
             </div>
-          </div>
+          </Surface>
 
-          <div className="glass-card no-hover" style={{ marginTop: 'var(--space-4)' }}>
+          <Surface tone="study" density="compact">
             <h3 style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
               <BookOpen size={18} color="var(--accent)" /> Formula Reference
             </h3>
@@ -216,9 +226,9 @@ export default function CfaModule() {
             ) : (
               <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>No formulas for this topic.</p>
             )}
-          </div>
+          </Surface>
 
-          <div className="glass-card no-hover" style={{ marginTop: 'var(--space-4)' }}>
+          <Surface tone="vault" density="compact">
             <div className="flex-between" style={{ marginBottom: 'var(--space-3)' }}>
               <h3 style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
                 <StickyNote size={18} color="var(--accent)" /> Local Notes
@@ -250,13 +260,13 @@ export default function CfaModule() {
               </span>
               <button className="btn btn-primary" onClick={handleSaveNote}>Save Note</button>
             </div>
-          </div>
+          </Surface>
 
           <Link
             to={`/cfa/${level}/${topic}/quiz`}
-            className="glass-card"
+            className="surface surface-study surface-interactive"
             style={{
-              marginTop: 'var(--space-4)', textDecoration: 'none', color: 'inherit',
+              textDecoration: 'none', color: 'inherit',
               display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
               background: 'rgba(59,130,246,0.08)', borderColor: 'rgba(59,130,246,0.2)',
             }}

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Database, Download, HardDrive, ShieldCheck, WifiOff, XCircle } from 'lucide-react';
-import { PageHeader, MetricCard } from '../components/ui/Primitives';
-import { exportVaultData } from '../lib/learning';
+import { AlertTriangle, CheckCircle2, Clock, Database, Download, HardDrive, ShieldCheck, WifiOff, Wrench, XCircle } from 'lucide-react';
+import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
+import { exportVaultData, getVaultHealthReport, previewVaultRepair } from '../lib/learning';
+import { cacheCriticalOfflineRoutes, getOfflineReadinessReport } from '../lib/offlineContentCache';
 import { buildReleaseGateReport } from '../lib/releaseHealth';
 
 function downloadJson(payload) {
@@ -33,6 +34,9 @@ export default function SystemHealth() {
   const [cacheNames, setCacheNames] = useState([]);
   const [message, setMessage] = useState('');
   const [releaseReport, setReleaseReport] = useState(() => buildReleaseGateReport());
+  const [vaultHealth, setVaultHealth] = useState(null);
+  const [offlineReadiness, setOfflineReadiness] = useState(null);
+  const [persisted, setPersisted] = useState(null);
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -41,15 +45,34 @@ export default function SystemHealth() {
     Promise.all([
       navigator.storage?.estimate?.() || Promise.resolve(null),
       cacheReady ? caches.keys() : Promise.resolve([]),
-    ]).then(([estimate, names]) => {
+      navigator.storage?.persisted?.() || Promise.resolve(null),
+    ]).then(([estimate, names, nextPersisted]) => {
       if (!active) return;
       setStorage(estimate);
       setCacheNames(names);
+      setPersisted(nextPersisted);
     });
     return () => {
       active = false;
     };
   }, [cacheReady]);
+
+  useEffect(() => {
+    let active = true;
+    getVaultHealthReport()
+      .then((report) => {
+        if (active) setVaultHealth(report);
+      })
+      .catch(() => undefined);
+    getOfflineReadinessReport()
+      .then((report) => {
+        if (active) setOfflineReadiness(report);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -71,6 +94,25 @@ export default function SystemHealth() {
     setMessage('Backup exported. Keep it somewhere safe before long study blocks or browser cleanup.');
   }
 
+  async function handleRepairPreview() {
+    const report = await previewVaultRepair();
+    setVaultHealth(report);
+    setMessage(report.repairActions.length ? `Repair preview found ${report.repairActions.length} action(s).` : 'Repair preview found no required action.');
+  }
+
+  async function handlePersistStorage() {
+    const granted = await navigator.storage?.persist?.();
+    setPersisted(Boolean(granted));
+    setMessage(granted ? 'Browser persistent storage requested successfully.' : 'Browser did not grant persistent storage yet.');
+  }
+
+  async function handleCacheCriticalRoutes() {
+    const result = await cacheCriticalOfflineRoutes();
+    const report = await getOfflineReadinessReport();
+    setOfflineReadiness(report);
+    setMessage(`Offline cache refreshed: ${result.cached} critical route(s) cached, ${result.failed} failed.`);
+  }
+
   const usageMb = storage?.usage ? Math.round(storage.usage / 1024 / 1024) : 0;
   const quotaMb = storage?.quota ? Math.round(storage.quota / 1024 / 1024) : 0;
   const usagePct = quotaMb ? Math.round((usageMb / quotaMb) * 100) : 0;
@@ -88,20 +130,21 @@ export default function SystemHealth() {
         <MetricCard label="IndexedDB Storage" value={`${usageMb} MB`} detail={`${usagePct}% of estimated quota`} icon={Database} />
         <MetricCard label="Quota" value={`${quotaMb || '-'} MB`} detail="Browser estimate" icon={HardDrive} tone="warning" />
         <MetricCard label="Service Worker" value={serviceWorkerReady ? 'Ready' : 'Unavailable'} detail="Offline shell support" icon={ShieldCheck} tone={serviceWorkerReady ? 'success' : 'danger'} />
-        <MetricCard label="Caches" value={cacheNames.length} detail="Named cache buckets" icon={WifiOff} tone="accent" />
+        <MetricCard label="Offline Routes" value={`${offlineReadiness?.cachedCount ?? 0}/${offlineReadiness?.totalCriticalRoutes ?? 0}`} detail="Critical local routes cached" icon={WifiOff} tone={offlineReadiness?.cachedCount === offlineReadiness?.totalCriticalRoutes ? 'success' : 'warning'} />
+        <MetricCard label="Vault Safety" value={vaultHealth?.status || 'Checking'} detail={`${vaultHealth?.totalRows ?? 0} local rows`} icon={Database} tone={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} />
       </div>
 
-      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
+      <Surface tone="ops" status={releaseReport.status === 'ok' ? 'success' : releaseReport.status} style={{ marginBottom: 'var(--space-6)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)', flexWrap: 'wrap', marginBottom: 'var(--space-4)' }}>
           <div>
             <h3 style={{ margin: 0 }}>Release Health</h3>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
-              Generated {new Date(releaseReport.generatedAt).toLocaleString()} · {releaseReport.summary.level1ExamReadyTopics}/{releaseReport.summary.level1TopicCount} Level I and {releaseReport.summary.level2ExamReadyTopics}/{releaseReport.summary.level2TopicCount} Level II topics exam-ready
+              Generated {new Date(releaseReport.generatedAt).toLocaleString()} · {releaseReport.summary.level1ExamReadyTopics}/{releaseReport.summary.level1TopicCount} Level I, {releaseReport.summary.level2ExamReadyTopics}/{releaseReport.summary.level2TopicCount} Level II, and {releaseReport.summary.level3ExamReadyTopics}/{releaseReport.summary.level3TopicCount} Level III topics exam-ready
             </p>
           </div>
-          <div className={`badge ${releaseReport.status === 'ok' ? 'badge-green' : releaseReport.status === 'blocked' ? 'badge-red' : 'badge-amber'}`}>
+          <StatusBadge tone={releaseReport.status === 'ok' ? 'success' : releaseReport.status === 'blocked' ? 'danger' : 'warning'}>
             {releaseReport.status}
-          </div>
+          </StatusBadge>
         </div>
 
         <div className="coverage-grid">
@@ -111,9 +154,17 @@ export default function SystemHealth() {
                 <GateIcon status={gate.status} />
                 <strong>{gate.label}</strong>
               </div>
-              <small style={{ color: `var(--${gateTone(gate.status)})`, textTransform: 'uppercase', fontWeight: 800 }}>{gate.status}</small>
+              <small style={{ color: `var(--${gateTone(gate.status)})`, textTransform: 'uppercase', fontWeight: 800 }}>
+                {gate.status} · {gate.category}
+                {typeof gate.ageHours === 'number' ? ` · ${gate.ageHours}h old` : ''}
+              </small>
               <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', margin: 'var(--space-2) 0 0' }}>{gate.detail}</p>
               {gate.command && <code style={{ display: 'inline-block', marginTop: 'var(--space-2)' }}>{gate.command}</code>}
+              {gate.artifactPaths?.length > 0 && (
+                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: 'var(--space-2)' }}>
+                  Artifacts: {gate.artifactPaths.join(', ')}
+                </small>
+              )}
             </div>
           ))}
         </div>
@@ -128,10 +179,56 @@ export default function SystemHealth() {
             </ul>
           </div>
         )}
-      </div>
+      </Surface>
 
-      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
-        <h3 style={{ marginTop: 0 }}>Cache Buckets</h3>
+      <Surface tone="vault" status={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} style={{ marginBottom: 'var(--space-6)' }}>
+        <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+          <div>
+            <StatusBadge tone="vault">Vault Safety</StatusBadge>
+            <h3>Local Vault Health</h3>
+            <p style={{ color: 'var(--text-secondary)' }}>
+              Schema v{vaultHealth?.schemaVersion || '-'} · {vaultHealth?.schemaHash || 'checking'} · persistent storage {persisted === null ? 'unknown' : persisted ? 'granted' : 'not granted'}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary" onClick={handleRepairPreview}><Wrench size={16} /> Repair Preview</button>
+            <button className="btn btn-secondary" onClick={handlePersistStorage}>Persist Storage</button>
+          </div>
+        </div>
+        <div className="coverage-grid" style={{ marginTop: 'var(--space-4)' }}>
+          <div><strong>{vaultHealth?.malformedRows ?? 0}</strong><small>Malformed rows</small></div>
+          <div><strong>{vaultHealth?.orphanedReviews ?? 0}</strong><small>Orphaned reviews</small></div>
+          <div><strong>{vaultHealth?.staleIndexes ?? 0}</strong><small>Stale indexes</small></div>
+          <div><strong>{vaultHealth?.checksumIssues ?? 0}</strong><small>Checksum issues</small></div>
+        </div>
+        {vaultHealth?.repairActions?.length > 0 && (
+          <ul style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-4)' }}>
+            {vaultHealth.repairActions.map((action) => <li key={action}>{action}</li>)}
+          </ul>
+        )}
+      </Surface>
+
+      <Surface tone="ops" style={{ marginBottom: 'var(--space-6)' }}>
+        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+          <div>
+            <h3 style={{ marginTop: 0 }}>Offline Readiness</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+              {offlineReadiness?.cacheName || 'quantvault-offline-content'} · {offlineReadiness?.cachedCount ?? 0}/{offlineReadiness?.totalCriticalRoutes ?? 0} critical routes cached
+            </p>
+          </div>
+          <button className="btn btn-secondary" onClick={handleCacheCriticalRoutes}>Cache Critical Routes</button>
+        </div>
+        {offlineReadiness?.criticalRoutes?.length > 0 && (
+          <div className="coverage-grid" style={{ marginBottom: 'var(--space-4)' }}>
+            {offlineReadiness.criticalRoutes.slice(0, 8).map((route) => (
+              <div key={route.routeId}>
+                <strong>{route.label}</strong>
+                <small>{route.cached ? 'cached' : 'not cached'} · {route.path}</small>
+              </div>
+            ))}
+          </div>
+        )}
+        <h3>Cache Buckets</h3>
         {cacheNames.length ? (
           <div className="coverage-grid">
             {cacheNames.map((name) => (
@@ -144,15 +241,15 @@ export default function SystemHealth() {
         ) : (
           <p style={{ color: 'var(--text-secondary)' }}>No cache buckets are currently visible in this browser context.</p>
         )}
-      </div>
+      </Surface>
 
-      <div className="glass-card no-hover">
+      <Surface tone="vault">
         <h3 style={{ marginTop: 0 }}>Backup Reminder</h3>
         <p style={{ color: 'var(--text-secondary)' }}>
           QuantVault is local-first. Export a backup before clearing browser data, moving devices, or starting a long mock-exam cycle.
         </p>
         {message && <p style={{ color: 'var(--success)' }}>{message}</p>}
-      </div>
+      </Surface>
     </div>
   );
 }

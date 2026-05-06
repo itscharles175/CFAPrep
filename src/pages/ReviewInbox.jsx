@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, CalendarClock, Gauge, ListChecks, Wrench } from 'lucide-react';
-import { PageHeader, MetricCard, ReviewItemCard, SegmentedControl } from '../components/ui/Primitives';
+import { MetricCard, PageHeader, ReviewItemCard, SegmentedControl, StatusBadge, Surface } from '../components/ui/Primitives';
 import {
   forecastReviewLoad,
   getReadinessByTopic,
@@ -10,6 +10,7 @@ import {
   repairVaultData,
   saveStudyPlanSettings,
 } from '../lib/learning';
+import { getTutorProvider, isTutorEnabledFromEnv } from '../lib/aiTutorContracts';
 
 const filters = [
   { value: 'all', label: 'All' },
@@ -30,6 +31,7 @@ export default function ReviewInbox() {
   const [forecast, setForecast] = useState([]);
   const [filter, setFilter] = useState('all');
   const [message, setMessage] = useState('');
+  const [tutorResponse, setTutorResponse] = useState(null);
   const [targetLevel, setTargetLevel] = useState('level1');
   const [dailyTarget, setDailyTarget] = useState('45');
   const [examDate, setExamDate] = useState('');
@@ -50,6 +52,18 @@ export default function ReviewInbox() {
     setDailyTarget(String(nextPlan.dailyTargetMinutes));
     setExamDate(nextPlan.examDate || '');
     setMockCadence(String(nextPlan.mockCadenceDays || 14));
+    if (isTutorEnabledFromEnv() && nextReadiness[0]) {
+      const provider = getTutorProvider();
+      setTutorResponse(
+        await provider.summarizeWeakTopic({
+          domain: nextReadiness[0].domain,
+          topic: nextReadiness[0].topic,
+          sourceIds: [nextReadiness[0].id],
+        }),
+      );
+    } else {
+      setTutorResponse(null);
+    }
   }
 
   useEffect(() => {
@@ -65,6 +79,17 @@ export default function ReviewInbox() {
         setDailyTarget(String(nextPlan.dailyTargetMinutes));
         setExamDate(nextPlan.examDate || '');
         setMockCadence(String(nextPlan.mockCadenceDays || 14));
+        if (isTutorEnabledFromEnv() && nextReadiness[0]) {
+          getTutorProvider()
+            .summarizeWeakTopic({
+              domain: nextReadiness[0].domain,
+              topic: nextReadiness[0].topic,
+              sourceIds: [nextReadiness[0].id],
+            })
+            .then((response) => {
+              if (active) setTutorResponse(response);
+            });
+        }
       },
     );
     return () => {
@@ -111,10 +136,11 @@ export default function ReviewInbox() {
       </div>
 
       {studyPlan?.nextActions?.length > 0 && (
-        <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
+        <Surface tone="vault" status="vault" style={{ marginBottom: 'var(--space-6)' }}>
           <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
             <div>
-              <h3 style={{ marginTop: 0 }}>What To Do Next</h3>
+              <StatusBadge tone="vault">Adaptive task board</StatusBadge>
+              <h3 style={{ marginTop: 'var(--space-3)' }}>What To Do Next</h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)' }}>
                 {studyPlan.daysToExam === null ? 'No exam date set.' : `${studyPlan.daysToExam} days to exam.`} Daily target: {studyPlan.dailyTargetMinutes} minutes.
               </p>
@@ -143,19 +169,28 @@ export default function ReviewInbox() {
               <button className="btn btn-primary" type="submit">Save Plan</button>
             </form>
           </div>
-          <div className="grid-2">
+          <div className="cockpit-grid cockpit-grid-2" style={{ marginTop: 'var(--space-5)' }}>
             {studyPlan.nextActions.map((action) => (
-              <Link key={`${action.label}:${action.path}`} to={action.path} className="glass-card" style={{ textDecoration: 'none', color: 'inherit' }}>
-                <span className="badge badge-blue">{action.label}</span>
+              <Link key={`${action.label}:${action.path}`} to={action.path} className="objective-row" style={{ textDecoration: 'none', color: 'inherit' }}>
+                <StatusBadge tone="accent">{action.label}</StatusBadge>
                 <h3>{action.title}</h3>
                 <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)' }}>{action.reason}</p>
               </Link>
             ))}
           </div>
-        </div>
+        </Surface>
       )}
 
-      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
+      {tutorResponse && !tutorResponse.blockedReason && (
+        <Surface tone="study" status="exam" style={{ marginBottom: 'var(--space-6)' }}>
+          <StatusBadge tone="accent">Local Tutor</StatusBadge>
+          <h3>Weak Topic Summary</h3>
+          <p style={{ color: 'var(--text-secondary)' }}>{tutorResponse.text}</p>
+          <small>Sources: {tutorResponse.sourceIds.join(', ')}</small>
+        </Surface>
+      )}
+
+      <Surface tone="analytics" style={{ marginBottom: 'var(--space-6)' }}>
         <h3 style={{ marginTop: 0 }}>Review Forecast</h3>
         <div className="forecast-strip">
           {forecast.map((day) => (
@@ -165,7 +200,7 @@ export default function ReviewInbox() {
             </div>
           ))}
         </div>
-      </div>
+      </Surface>
 
       <SegmentedControl label="Review inbox filter" options={filters} value={filter} onChange={setFilter} />
       {message && <p style={{ color: 'var(--text-secondary)' }}>{message}</p>}

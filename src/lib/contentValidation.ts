@@ -24,7 +24,7 @@ export interface ContentValidationIssue {
 const levelTargets = {
   level1: { objectives: 8, sections: 12, formulas: 10, questions: 80, vignettes: 6, flashcards: 80, skillLabs: 1 },
   level2: { objectives: 8, sections: 10, formulas: 8, questions: 24, vignettes: 12, flashcards: 40, skillLabs: 1 },
-  level3: { objectives: 8, sections: 8, formulas: 6, questions: 12, vignettes: 4, flashcards: 32, skillLabs: 1, constructedResponses: 3 },
+  level3: { objectives: 8, sections: 12, formulas: 6, questions: 12, vignettes: 4, flashcards: 32, skillLabs: 4, constructedResponses: 3 },
 } as const;
 
 function selectedLevels(level?: string | null): CfaLevelContent[] {
@@ -130,6 +130,7 @@ export function validateQuestionBank(level?: string): ContentValidationIssue[] {
   const levels = selectedLevels(level);
   const objectives = new Set(levels.flatMap((item) => item.topics.flatMap((topic) => topic.learningObjectives.map((objective) => objective.id))));
   const questions = levels.flatMap((item) => item.topics.flatMap((topic) => [...topic.questions, ...topic.vignettes.flatMap((vignette) => vignette.questions)]));
+  const constructedResponses = levels.flatMap((item) => item.topics.flatMap((topic) => topic.constructedResponses));
   const seenIds = new Set<string>();
   const seenPrompts = new Map<string, string>();
   const countsByObjective = new Map<string, number>();
@@ -182,6 +183,14 @@ export function validateQuestionBank(level?: string): ContentValidationIssue[] {
     if (!question.errorCategories?.length) {
       issues.push({ severity: 'warning', area: 'question-bank', id: question.id, message: 'Question has no error category options.' });
     }
+  });
+
+  constructedResponses.forEach((item) => {
+    item.learningObjectives.forEach((objectiveId) => {
+      if (objectives.has(objectiveId)) {
+        countsByObjective.set(objectiveId, (countsByObjective.get(objectiveId) || 0) + 1);
+      }
+    });
   });
 
   objectives.forEach((objectiveId) => {

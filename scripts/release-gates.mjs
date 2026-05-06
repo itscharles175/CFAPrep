@@ -1,16 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { executableReleaseGateDefinitions } from '../src/lib/releaseGateManifest.ts';
 
-const gates = [
-  { id: 'verify', command: 'npm run verify' },
-  { id: 'audit', command: 'npm run audit' },
-  { id: 'content-validation', command: 'npm run content:validate' },
-  { id: 'bundle-report', command: 'npm run bundle:report' },
-  { id: 'smoke', command: 'npm run smoke' },
-  { id: 'browser-regression', command: 'npm run browser:regression' },
-  { id: 'fresh-import', command: 'npm run fresh-import:check' },
-  { id: 'content-report', command: 'npm run content:report' },
-];
+const gates = executableReleaseGateDefinitions.filter((gate) => gate.id !== 'release-checklist');
+const releaseChecklistGate = executableReleaseGateDefinitions.find((gate) => gate.id === 'release-checklist');
 
 function runCommand({ id, command }) {
   return new Promise((resolve) => {
@@ -31,6 +24,7 @@ function runCommand({ id, command }) {
         exitCode,
         durationMs,
         completedAt: new Date().toISOString(),
+        artifactPaths: gateArtifactPaths(id),
         runtime: {
           node: process.version,
           platform: process.platform,
@@ -43,26 +37,22 @@ function runCommand({ id, command }) {
   });
 }
 
+function gateArtifactPaths(id) {
+  return executableReleaseGateDefinitions.find((gate) => gate.id === id)?.artifactPaths || [];
+}
+
 const results = [];
 for (const gate of gates) {
   results.push(await runCommand(gate));
 }
 
-const report = {
-  generatedAt: new Date().toISOString(),
-  runtime: {
-    node: process.version,
-    platform: process.platform,
-    arch: process.arch,
-  },
-  results,
-  resultsById: Object.fromEntries(results.map((result) => [result.id, result])),
-};
-
 await mkdir('dist/reports', { recursive: true });
-await writeFile('dist/reports/release-gate-results.json', `${JSON.stringify(report, null, 2)}\n`);
+await writeGateReport(results);
 
-await runCommand({ id: 'release-checklist', command: 'npm run release:checklist' });
+if (releaseChecklistGate) {
+  results.push(await runCommand(releaseChecklistGate));
+  await writeGateReport(results);
+}
 
 const failures = results.filter((result) => result.status !== 'ok');
 if (failures.length) {
@@ -70,4 +60,18 @@ if (failures.length) {
   process.exitCode = 1;
 } else {
   console.log('All executable release gate commands passed.');
+}
+
+async function writeGateReport(gateResults) {
+  const report = {
+    generatedAt: new Date().toISOString(),
+    runtime: {
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+    },
+    results: gateResults,
+    resultsById: Object.fromEntries(gateResults.map((result) => [result.id, result])),
+  };
+  await writeFile('dist/reports/release-gate-results.json', `${JSON.stringify(report, null, 2)}\n`);
 }

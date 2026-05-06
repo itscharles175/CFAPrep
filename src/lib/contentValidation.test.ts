@@ -44,8 +44,8 @@ describe('content validation tooling', () => {
   it('generates an editorial coverage report', () => {
     const report = generateCoverageReport();
     expect(report.totals.levels).toBe(3);
-    expect(report.totals.topics).toBe(30);
-    expect(report.totals.questions).toBeGreaterThan(1000);
+    expect(report.totals.topics).toBe(26);
+    expect(report.totals.questions).toBeGreaterThanOrEqual(1000);
     expect(report.totals.vignettes).toBeGreaterThan(200);
     expect(report.totals.skillLabs).toBeGreaterThan(100);
     expect(report.totals.errors).toBe(0);

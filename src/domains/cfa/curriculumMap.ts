@@ -630,7 +630,11 @@ function buildLevel2Topics(): CurriculumTopic[] {
 }
 
 function buildLevel3Topics(): CurriculumTopic[] {
-  return level3TopicSeeds.map((seed) => draftTopic('level3', seed, 'integrate-apply', 'constructed-response', 'constructed-response-set'));
+  return level3TopicSeeds.map((seed) => {
+    const authoredPack = getAuthoredContentPack('level3', seed.id);
+    if (authoredPack) return contentPackToCurriculumTopic(authoredPack);
+    return draftTopic('level3', seed, 'integrate-apply', 'constructed-response', 'constructed-response-set');
+  });
 }
 
 export const cfaCurriculumMap = {
@@ -660,7 +664,7 @@ export const cfaCurriculumMap = {
       id: 'level3',
       title: 'CFA Level III',
       examFormat: 'Constructed-response and item-set practice focused on integrating portfolio management decisions with case facts.',
-      examWeightNotes: 'Core topics plus Portfolio Management pathway first; Private Wealth and Private Markets remain future shells.',
+      examWeightNotes: 'Six active Level III topics use an all-or-nothing authored gate before public exam-ready release.',
       topics: buildLevel3Topics(),
     },
   ],

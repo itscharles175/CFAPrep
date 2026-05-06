@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { recordQuizAttempt, toggleBookmark } from '../../lib/learning';
 import { useProgressSummary } from '../../hooks/useProgress';
+import { CommandHint, ProgressRail, QuestionStage, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
 
 function currentTimestampMs() {
   return Date.now();
@@ -169,6 +170,28 @@ export default function CfaQuiz() {
     setConfidence(selected === q.correct ? 'high' : 'low');
     setErrorCategory(nextDefaultError(selected, q.correct));
   }
+
+  useEffect(() => {
+    function handleKeyboard(event) {
+      const target = event.target;
+      if (target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (!q || finished) return;
+      const key = event.key.toLowerCase();
+      const optionIndex = letters.findIndex((letter) => letter.toLowerCase() === key);
+      if (!confirmed && optionIndex >= 0 && optionIndex < q.options.length) {
+        event.preventDefault();
+        handleSelect(optionIndex);
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (!confirmed) handleConfirm();
+        else handleNext();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  });
 
   function buildAnswer() {
     const objective = objectiveById.get(q.learningObjective);
@@ -377,31 +400,20 @@ export default function CfaQuiz() {
       )}
 
       <div className="quiz-container">
-        <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-5)', padding: 'var(--space-4)' }}>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }} role="tablist" aria-label="Quiz mode">
-            {quizModes.map((item) => {
-              const Icon = item.icon;
-              const active = item.id === mode;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => handleModeChange(item.id)}
-                >
-                  <Icon size={16} /> {item.label}
-                </button>
-              );
-            })}
-          </div>
+        <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-5)' }}>
+          <SegmentedControl
+            label="Quiz mode"
+            options={quizModes.map((item) => ({ value: item.id, label: item.label, icon: item.icon }))}
+            value={mode}
+            onChange={handleModeChange}
+            density="compact"
+          />
           {usedFallback && (
             <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 'var(--space-3) 0 0' }}>
               No targeted items are currently queued for this mode, so the full topic bank is loaded.
             </p>
           )}
-        </div>
+        </Surface>
 
         <div className="quiz-header">
           <div>
@@ -418,15 +430,22 @@ export default function CfaQuiz() {
           </div>
         </div>
 
-        <div className="quiz-progress-bar">
-          <div className="quiz-progress-fill" style={{ width: `${((safeCurrent + (confirmed ? 1 : 0)) / questions.length) * 100}%` }} />
-        </div>
+        <ProgressRail
+          value={safeCurrent + (confirmed ? 1 : 0)}
+          max={questions.length}
+          label="Question progress"
+          detail={`${safeCurrent + 1}/${questions.length}`}
+          tone="exam"
+        />
 
-        <div className="glass-card no-hover animate-fade" key={`${mode}-${safeCurrent}`}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)', alignItems: 'flex-start' }}>
-            <div className="quiz-question">{q.question}</div>
-            <span className="badge badge-purple">{objectiveById.get(q.learningObjective)?.title || q.learningObjective}</span>
-          </div>
+        <QuestionStage
+          key={`${mode}-${safeCurrent}`}
+          badge={q.difficulty?.toUpperCase()}
+          objective={objectiveById.get(q.learningObjective)?.title || q.learningObjective}
+          question={q.question}
+          status={confirmed ? (selected === q.correct ? 'success' : 'danger') : 'exam'}
+          footer={<CommandHint keys={['A-D', 'Enter']} label="select and confirm" />}
+        >
 
           <div className="quiz-options">
             {q.options.map((opt, idx) => {
@@ -442,6 +461,7 @@ export default function CfaQuiz() {
                   className={cls}
                   onClick={() => handleSelect(idx)}
                   aria-pressed={idx === selected}
+                  aria-keyshortcuts={letters[idx]}
                   disabled={confirmed}
                 >
                   <span className="quiz-option-letter">{letters[idx]}</span>
@@ -457,7 +477,7 @@ export default function CfaQuiz() {
             <div className="quiz-explanation">
               <h4>{selected === q.correct ? 'Correct' : 'Incorrect'}</h4>
               <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.6 }}>{q.explanation}</p>
-              {q.formula && <div className="badge badge-blue" style={{ marginTop: 'var(--space-3)' }}>Related formula: {q.formula}</div>}
+              {q.formula && <StatusBadge tone="accent" style={{ marginTop: 'var(--space-3)' }}>Related formula: {q.formula}</StatusBadge>}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginTop: 'var(--space-5)' }}>
                 <div>
@@ -504,7 +524,7 @@ export default function CfaQuiz() {
               </div>
             </div>
           )}
-        </div>
+        </QuestionStage>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--space-6)', gap: 'var(--space-3)' }}>
           {!confirmed ? (

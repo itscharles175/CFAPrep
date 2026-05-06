@@ -259,6 +259,12 @@ export interface AuthoredFlashcard extends Flashcard {
   provenance: ContentProvenance;
 }
 
+export interface AuthoredConstructedResponse extends ConstructedResponseItem {
+  objectiveIds: string[];
+  datasetIds: string[];
+  provenance: ContentProvenance;
+}
+
 export interface AuthoredContentPack extends ContentPack {
   provenance: ContentProvenance;
   datasets: TopicDataset[];
@@ -266,6 +272,7 @@ export interface AuthoredContentPack extends ContentPack {
   authoredExamples: AuthoredExample[];
   authoredQuestions: AuthoredQuestion[];
   authoredVignettes: AuthoredVignette[];
+  authoredConstructedResponses?: AuthoredConstructedResponse[];
   authoredFlashcards: AuthoredFlashcard[];
 }
 

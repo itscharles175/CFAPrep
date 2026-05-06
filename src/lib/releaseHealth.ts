@@ -4,6 +4,12 @@ import {
   generateCurriculumCoverageReport,
   getLevel1BatchProgress,
 } from './curriculumValidation';
+import {
+  releaseGateDefinitionById,
+  type ReleaseGateCategory,
+  type ReleaseGateDefinition,
+  type ReleaseGateId,
+} from './releaseGateManifest';
 
 export type ReleaseGateStatus = 'ok' | 'warning' | 'blocked' | 'pending';
 
@@ -23,12 +29,14 @@ export interface BundleReportInput {
 }
 
 export interface ReleaseCommandResult {
-  id: string;
+  id: ReleaseGateId;
   command: string;
   status: 'ok' | 'blocked';
   exitCode: number | null;
   durationMs: number;
   completedAt: string;
+  artifactPaths?: string[];
+  routeFailures?: Array<{ routeId: string; path: string; message: string }>;
   runtime?: {
     node: string;
     platform: string;
@@ -37,12 +45,18 @@ export interface ReleaseCommandResult {
 }
 
 export interface ReleaseGate {
-  id: string;
+  id: ReleaseGateId;
   label: string;
   command?: string;
+  category: ReleaseGateCategory;
   status: ReleaseGateStatus;
   detail: string;
   required: boolean;
+  artifactPaths: string[];
+  completedAt?: string;
+  durationMs?: number;
+  exitCode?: number | null;
+  ageHours?: number;
 }
 
 export interface ReleaseGateReport {
@@ -58,6 +72,8 @@ export interface ReleaseGateReport {
     level1TopicCount: number;
     level2ExamReadyTopics: number;
     level2TopicCount: number;
+    level3ExamReadyTopics: number;
+    level3TopicCount: number;
     activeCurriculumWarnings: number;
     futureDiagnostics: number;
     releaseBlockers: number;
@@ -78,64 +94,64 @@ function worstStatus(statuses: ReleaseGateStatus[]): ReleaseGateStatus {
   return 'ok';
 }
 
-function bundleGate(bundle?: BundleReportInput | null): ReleaseGate {
-  if (!bundle) {
-    return {
-      id: 'bundle-report',
-      label: 'Bundle thresholds',
-      command: 'npm run build && npm run bundle:report',
-      status: 'pending',
-      detail: 'Bundle report has not been generated for this build.',
-      required: true,
-    };
-  }
+function gateAgeHours(completedAt?: string) {
+  if (!completedAt) return undefined;
+  const completed = new Date(completedAt).getTime();
+  if (Number.isNaN(completed)) return undefined;
+  return Math.max(0, Math.round(((Date.now() - completed) / (60 * 60 * 1000)) * 10) / 10);
+}
 
-  const failures = (bundle.checks || []).filter((check) => check.status === 'missing' || check.status === 'over-threshold');
+function baseGate(definition: ReleaseGateDefinition, status: ReleaseGateStatus, detail: string, result?: ReleaseCommandResult): ReleaseGate {
   return {
-    id: 'bundle-report',
-    label: 'Bundle thresholds',
-    command: 'npm run build && npm run bundle:report',
-    status: failures.length ? 'blocked' : 'ok',
-    detail: failures.length
-      ? `${failures.length} route bundle threshold check${failures.length === 1 ? '' : 's'} failed.`
-      : `${bundle.checks?.length || 0} tracked route bundle checks passed.`,
-    required: true,
+    id: definition.id,
+    label: definition.label,
+    command: definition.command,
+    category: definition.category,
+    status,
+    detail,
+    required: definition.required,
+    artifactPaths: result?.artifactPaths || definition.artifactPaths,
+    completedAt: result?.completedAt,
+    durationMs: result?.durationMs,
+    exitCode: result?.exitCode,
+    ageHours: gateAgeHours(result?.completedAt),
   };
 }
 
-function commandGate({
-  id,
-  label,
-  command,
-  fallbackDetail,
-  gateResults,
-}: {
-  id: string;
-  label: string;
-  command: string;
-  fallbackDetail: string;
-  gateResults?: Record<string, ReleaseCommandResult>;
-}): ReleaseGate {
-  const result = gateResults?.[id];
-  if (!result) {
-    return {
-      id,
-      label,
-      command,
-      status: 'pending',
-      detail: fallbackDetail,
-      required: true,
-    };
+function bundleGate(bundle?: BundleReportInput | null, gateResults?: Record<string, ReleaseCommandResult>): ReleaseGate {
+  const definition = releaseGateDefinitionById('bundle-report') as ReleaseGateDefinition;
+  const result = gateResults?.['bundle-report'];
+  if (result?.status === 'blocked') {
+    return baseGate(definition, 'blocked', `${result.command} exited ${result.exitCode ?? 'unknown'} in ${Math.round(result.durationMs / 1000)}s.`, result);
+  }
+  if (!bundle) {
+    return baseGate(definition, 'pending', 'Bundle report has not been generated for this build.', result);
   }
 
-  return {
-    id,
-    label,
-    command,
-    status: result.status,
-    detail: `${result.command} exited ${result.exitCode ?? 'unknown'} in ${Math.round(result.durationMs / 1000)}s.`,
-    required: true,
-  };
+  const failures = (bundle.checks || []).filter((check) => check.status === 'missing' || check.status === 'over-threshold');
+  return baseGate(
+    definition,
+    failures.length ? 'blocked' : 'ok',
+    failures.length
+      ? `${failures.length} route bundle threshold check${failures.length === 1 ? '' : 's'} failed.`
+      : `${bundle.checks?.length || 0} tracked route bundle checks passed.`,
+    result,
+  );
+}
+
+function commandGate(definition: ReleaseGateDefinition, gateResults?: Record<string, ReleaseCommandResult>): ReleaseGate {
+  const result = gateResults?.[definition.id];
+  if (!result) {
+    return baseGate(definition, 'pending', definition.fallbackDetail);
+  }
+
+  const routeFailureDetail = result.routeFailures?.length ? ` ${result.routeFailures.length} route-level failure${result.routeFailures.length === 1 ? '' : 's'} recorded.` : '';
+  return baseGate(
+    definition,
+    result.status,
+    `${result.command} exited ${result.exitCode ?? 'unknown'} in ${Math.round(result.durationMs / 1000)}s.${routeFailureDetail}`,
+    result,
+  );
 }
 
 export function buildReleaseGateReport({
@@ -148,11 +164,16 @@ export function buildReleaseGateReport({
   generatedAt?: string;
 } = {}): ReleaseGateReport {
   const catalog = generateCoverageReport();
-  const activeCurriculumReports = [generateCurriculumCoverageReport('level1'), generateCurriculumCoverageReport('level2')];
-  const futureCurriculumReports = [generateCurriculumCoverageReport('level3')];
+  const activeCurriculumReports = [
+    generateCurriculumCoverageReport('level1'),
+    generateCurriculumCoverageReport('level2'),
+    generateCurriculumCoverageReport('level3'),
+  ];
+  const futureCurriculumReports: ReturnType<typeof generateCurriculumCoverageReport>[] = [];
   const progress = getLevel1BatchProgress();
   const release = generateContentReleaseReport('level1');
   const level2Release = generateContentReleaseReport('level2');
+  const level3Release = generateContentReleaseReport('level3');
   const bundleFailures = bundle?.checks
     ? bundle.checks.filter((check) => check.status === 'missing' || check.status === 'over-threshold').length
     : null;
@@ -164,81 +185,63 @@ export function buildReleaseGateReport({
   const futureDiagnostics = futureCurriculumReports.reduce((sum, report) => sum + report.totals.warnings + report.totals.errors, 0);
   const level1PublicReady = progress.topicCount > 0 && progress.examReadyTopics === progress.topicCount && release.status === 'exam-ready';
   const level2PublicReady = level2Release.topicIds.length > 0 && level2Release.topics.every((topic) => topic.status === 'exam-ready') && level2Release.status === 'exam-ready';
+  const level3PublicReady = level3Release.topicIds.length > 0 && level3Release.topics.every((topic) => topic.status === 'exam-ready') && level3Release.status === 'exam-ready';
   const contentHasErrors = catalogErrors + curriculumErrors > 0;
+  const definition = (id: ReleaseGateId) => releaseGateDefinitionById(id) as ReleaseGateDefinition;
+  const contentValidationResult = gateResults?.['content-validation'];
 
   const gates: ReleaseGate[] = [
-    commandGate({
-      id: 'verify',
-      label: 'Verify command',
-      command: 'npm run verify',
-      fallbackDetail: 'Must be run before release; covers lint, tests, TypeScript, and production build.',
-      gateResults,
-    }),
-    commandGate({
-      id: 'audit',
-      label: 'Dependency audit',
-      command: 'npm run audit',
-      fallbackDetail: 'Must report 0 production dependency vulnerabilities before release.',
-      gateResults,
-    }),
-    {
-      id: 'content-validation',
-      label: 'Content validation',
-      command: 'npm run content:validate',
-      status: contentHasErrors || gateResults?.['content-validation']?.status === 'blocked' ? 'blocked' : catalogWarnings + curriculumWarnings ? 'warning' : 'ok',
-      detail: `${catalogErrors + curriculumErrors} errors and ${catalogWarnings + curriculumWarnings} warnings across content and curriculum validators.`,
-      required: true,
-    },
-    {
-      id: 'level1-editorial',
-      label: 'Level I editorial gate',
-      command: 'npm run content:validate',
-      status: level1PublicReady ? 'ok' : 'blocked',
-      detail: `${progress.examReadyTopics}/${progress.topicCount} topics exam-ready; ${release.templateRowsRemaining} template rows remaining; ${release.warnings} release warnings.`,
-      required: true,
-    },
-    {
-      id: 'level2-editorial',
-      label: 'Level II editorial gate',
-      command: 'npm run content:validate',
-      status: level2PublicReady ? 'ok' : 'blocked',
-      detail: `${level2Release.topics.filter((topic) => topic.status === 'exam-ready').length}/${level2Release.topicIds.length} topics exam-ready; ${level2Release.templateRowsRemaining} template rows remaining; ${level2Release.warnings} release warnings.`,
-      required: true,
-    },
-    bundleGate(bundle),
-    commandGate({
-      id: 'smoke',
-      label: 'Route smoke',
-      command: 'npm run smoke',
-      fallbackDetail: 'Must pass dashboard, CFA, quiz, mock, flashcards, vault, analytics, tools, and system routes.',
-      gateResults,
-    }),
-    commandGate({
-      id: 'browser-regression',
-      label: 'Browser regression',
-      command: 'npm run browser:regression',
-      fallbackDetail: 'Must pass async CFA loading, Level II item-set, mock resume, offline badge, and update-prompt browser checks.',
-      gateResults,
-    }),
-    commandGate({
-      id: 'fresh-import',
-      label: 'Fresh-profile import',
-      command: 'npm run fresh-import:check',
-      fallbackDetail: 'Export/import must be verified in a clean IndexedDB profile before public release.',
-      gateResults,
-    }),
+    commandGate(definition('verify'), gateResults),
+    commandGate(definition('audit'), gateResults),
+    baseGate(
+      definition('content-validation'),
+      contentHasErrors || contentValidationResult?.status === 'blocked' ? 'blocked' : catalogWarnings + curriculumWarnings ? 'warning' : 'ok',
+      `${catalogErrors + curriculumErrors} errors and ${catalogWarnings + curriculumWarnings} warnings across content and curriculum validators.`,
+      contentValidationResult,
+    ),
+    baseGate(
+      definition('level1-editorial'),
+      level1PublicReady ? 'ok' : 'blocked',
+      `${progress.examReadyTopics}/${progress.topicCount} topics exam-ready; ${release.templateRowsRemaining} template rows remaining; ${release.warnings} release warnings.`,
+      contentValidationResult,
+    ),
+    baseGate(
+      definition('level2-editorial'),
+      level2PublicReady ? 'ok' : 'blocked',
+      `${level2Release.topics.filter((topic) => topic.status === 'exam-ready').length}/${level2Release.topicIds.length} topics exam-ready; ${level2Release.templateRowsRemaining} template rows remaining; ${level2Release.warnings} release warnings.`,
+      contentValidationResult,
+    ),
+    baseGate(
+      definition('level3-editorial'),
+      level3PublicReady ? 'ok' : 'blocked',
+      `${level3Release.topics.filter((topic) => topic.status === 'exam-ready').length}/${level3Release.topicIds.length} topics exam-ready; ${level3Release.templateRowsRemaining} template rows remaining; ${level3Release.warnings} release warnings.`,
+      contentValidationResult,
+    ),
+    bundleGate(bundle, gateResults),
+    commandGate(definition('smoke'), gateResults),
+    commandGate(definition('browser-regression'), gateResults),
+    commandGate(definition('visual-regression'), gateResults),
+    commandGate(definition('accessibility'), gateResults),
+    commandGate(definition('fresh-import'), gateResults),
+    commandGate(definition('content-report'), gateResults),
+    commandGate(definition('release-checklist'), gateResults),
   ];
 
   const blockers = [
     ...(contentHasErrors ? ['Content or curriculum validators have blocking errors.'] : []),
     ...(!level1PublicReady ? [`Level I remains blocked from public exam-ready release until all template-derived rows are editorially replaced (${release.templateRowsRemaining} remaining).`] : []),
     ...(!level2PublicReady ? [`Level II remains blocked from public exam-ready release until all item-set packs are editorially replaced (${level2Release.templateRowsRemaining} template rows remaining).`] : []),
+    ...(!level3PublicReady ? [`Level III remains blocked from public exam-ready release until all constructed-response packs are editorially replaced (${level3Release.templateRowsRemaining} template rows remaining).`] : []),
     ...(bundleFailures ? [`${bundleFailures} tracked route bundle thresholds failed.`] : []),
+    ...gates
+      .filter((gate) => gate.status === 'blocked' && !gate.id.includes('editorial') && gate.id !== 'bundle-report' && gate.id !== 'content-validation')
+      .map((gate) => `${gate.label} failed: ${gate.detail}`),
   ];
   const warnings = [
     ...(catalogWarnings + curriculumWarnings ? [`${catalogWarnings + curriculumWarnings} content/curriculum warnings need triage.`] : []),
     ...(release.warnings ? [`Level I release report has ${release.warnings} warnings.`] : []),
     ...(level2Release.warnings ? [`Level II release report has ${level2Release.warnings} warnings.`] : []),
+    ...(level3Release.warnings ? [`Level III release report has ${level3Release.warnings} warnings.`] : []),
   ];
 
   return {
@@ -254,16 +257,18 @@ export function buildReleaseGateReport({
       level1TopicCount: progress.topicCount,
       level2ExamReadyTopics: level2Release.topics.filter((topic) => topic.status === 'exam-ready').length,
       level2TopicCount: level2Release.topicIds.length,
+      level3ExamReadyTopics: level3Release.topics.filter((topic) => topic.status === 'exam-ready').length,
+      level3TopicCount: level3Release.topicIds.length,
       activeCurriculumWarnings: curriculumWarnings,
       futureDiagnostics,
-      releaseBlockers: release.blockingIssues + level2Release.blockingIssues + blockers.length,
-      releaseWarnings: release.warnings + level2Release.warnings,
+      releaseBlockers: release.blockingIssues + level2Release.blockingIssues + level3Release.blockingIssues + blockers.length,
+      releaseWarnings: release.warnings + level2Release.warnings + level3Release.warnings,
       bundleFailures,
     },
     gates,
     blockers,
     warnings,
-    activeLevels: ['level1', 'level2'],
+    activeLevels: ['level1', 'level2', 'level3'],
     futureDiagnostics: futureCurriculumReports.flatMap((report) => report.issues.map((issue) => `${issue.area}:${issue.id} - ${issue.message}`)),
   };
 }

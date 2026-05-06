@@ -21,7 +21,7 @@ export default function FormulaBlock({ latex, name, description, compact = false
   }, [latex]);
 
   return (
-    <div className={compact ? 'formula-card compact' : 'formula-block'}>
+    <div className={compact ? 'formula-card compact' : 'formula-block'} tabIndex={0} aria-label={name ? `${name} formula` : 'Formula'}>
       {name && <div className="formula-title">{name}</div>}
       <div ref={ref} className="formula-render" />
       {description && <div className="formula-description">{description}</div>}

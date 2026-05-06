@@ -2,6 +2,7 @@ export {
   recordConstructedResponseAttempt,
   recordFlashcardResult,
   recordFormulaDrillAttempt,
+  recordLearningEventEnvelope,
   recordMockAttempt,
   recordQuestionResult,
   recordQuizAttempt,
@@ -10,4 +11,3 @@ export {
   recordStudyEvent,
   recordVignetteAttempt,
 } from '../progressStore';
-

@@ -31,8 +31,7 @@ export default defineConfig({
           const normalized = id.replace(/\\/g, '/');
           if (normalized.includes('level1Packs')) return 'cfa-level1-content';
           if (normalized.includes('level2Packs')) return 'cfa-level2-content';
-          if (normalized.includes('/src/domains/cfa/cfaLevels') || normalized.includes('/src/domains/cfa/cfaData')) return 'cfa-level3-scaffold';
-          if (normalized.includes('/src/domains/cfa/contentPacks') || normalized.includes('/src/domains/cfa/curriculumMap')) return 'cfa-content-core';
+          if (normalized.includes('level3Packs')) return 'cfa-level3-content';
           if (!id.includes('node_modules')) return undefined;
           if (id.includes('lucide-react')) return 'lucide-vendor';
           if (id.includes('recharts')) return 'recharts-vendor';

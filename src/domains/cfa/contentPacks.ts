@@ -34,6 +34,7 @@ import type {
 import type { Difficulty, ErrorCategory, Formula, LessonSection } from '../../lib/learningTypes';
 import { buildLevel1EditorialPacks } from './level1Packs';
 import { level2AuthoredContentPacks, level2TopicIds } from './level2Packs';
+import { level3AuthoredContentPacks, level3TopicIds } from './level3Packs';
 
 const CONTENT_PACK_EXAM_YEAR = 2026;
 const LEVEL1_TOPIC_IDS = [
@@ -570,15 +571,22 @@ function flashcardPackForLesson(lesson: LessonBlueprint, index: number): Flashca
 }
 
 function assessmentFromQuestionPack(pack: QuestionPack): AssessmentBlueprint {
+  const isConstructedResponse = pack.itemType === 'constructed-response';
   return {
     id: `${pack.id}-assessment`,
-    itemType: 'single',
-    scope: 'standalone',
+    itemType: pack.itemType,
+    scope: isConstructedResponse ? 'constructed-response-set' : 'standalone',
     count: pack.count,
     objectiveIds: pack.objectiveIds,
     difficultyMix: pack.difficultyMix,
-    promptStyle: 'Original Level I standalone item with three choices, one best answer, and distractor rationales.',
-    notes: 'Authored question rows are required before an exam-ready release.',
+    promptStyle: isConstructedResponse
+      ? 'Original Level III constructed response with explicit command words, model answer, and point-scored rubric.'
+      : 'Original Level I standalone item with three choices, one best answer, and distractor rationales.',
+    notes: isConstructedResponse
+      ? 'Constructed-response rows are required before a Level III exam-ready release.'
+      : 'Authored question rows are required before an exam-ready release.',
+    commandWords: isConstructedResponse ? ['determine', 'justify', 'recommend'] : undefined,
+    rubricBands: isConstructedResponse ? ['identify', 'apply', 'justify', 'communicate'] : undefined,
   };
 }
 
@@ -615,6 +623,7 @@ export function contentPackToCurriculumTopic(pack: ContentPack): CurriculumTopic
     title: pack.title,
     examWeight: pack.examWeight,
     maturity: pack.maturity,
+    pathway: pack.level === 'level3' && pack.topicId === 'pm-pathway' ? 'portfolio-management' : pack.level === 'level3' ? 'core' : undefined,
     sourceMeta: pack.sourceMeta,
     objectiveBlueprints: pack.objectiveBlueprints,
     formulaBlueprints: pack.formulaBlueprints,
@@ -1007,7 +1016,7 @@ function buildAuthoredContentPack(spec: Level1TopicSpec): AuthoredContentPack {
 export const level1ValidatedContentPacks: AuthoredContentPack[] = level1TopicSpecs.map(buildAuthoredContentPack);
 export const level1AuthoredContentPacks: AuthoredContentPack[] = buildLevel1EditorialPacks(level1ValidatedContentPacks);
 export const fsaLevel1ContentPack = level1AuthoredContentPacks.find((pack) => pack.topicId === 'fsa') as AuthoredContentPack;
-export { level2AuthoredContentPacks };
+export { level2AuthoredContentPacks, level3AuthoredContentPacks };
 
 export const level1SaturationBatch: CfaContentBatch = {
   id: 'level1-saturation-batch-2026',
@@ -1040,7 +1049,22 @@ export const level2SaturationBatch: CfaContentBatch = {
   ],
 };
 
-export const cfaContentBatches: CfaContentBatch[] = [level1SaturationBatch, level2SaturationBatch];
+export const level3SaturationBatch: CfaContentBatch = {
+  id: 'level3-saturation-batch-2026',
+  title: 'Level III Constructed Response Saturation Batch',
+  sequence: 3,
+  level: 'level3',
+  topicIds: [...level3TopicIds],
+  maturity: 'exam-ready',
+  packs: level3AuthoredContentPacks,
+  acceptanceCriteria: [
+    'Every Level III topic has a strict authored content pack with 8 objectives, command-word study units, 4 item-set vignettes, 3 constructed-response cases, rubrics, datasets, flashcards, and mapped labs.',
+    'All Level III constructed responses and item sets use original QuantVault wording and public CFA sources only for structure, format, and topic weights.',
+    'Level III public exam-ready status is all-or-nothing across all six active topics.',
+  ],
+};
+
+export const cfaContentBatches: CfaContentBatch[] = [level1SaturationBatch, level2SaturationBatch, level3SaturationBatch];
 
 export function getContentPacks(level?: string, topicId?: string): ContentPack[] {
   return cfaContentBatches
@@ -1135,7 +1159,7 @@ export function buildRuntimeTopicFromPack(
     formulas,
     questions: pack.authoredQuestions,
     vignettes: pack.authoredVignettes,
-    constructedResponses: [],
+    constructedResponses: pack.authoredConstructedResponses || [],
     flashcards: pack.authoredFlashcards,
     skillLabs,
     toolMappings,
@@ -1175,7 +1199,10 @@ function buildAuthoredMocks(level: CurriculumLevel['id'], topics: CfaTopicConten
     topics: topics.map((topic) => topic.id),
     questionIds: topics.flatMap((topic) => topic.questions.slice(index * 2, index * 2 + 2).map((question) => question.id)),
     vignetteIds: topics.flatMap((topic) => topic.vignettes.slice(index, index + 2).map((vignette) => vignette.id)),
-    constructedResponseIds: [],
+    constructedResponseIds:
+      level === 'level3'
+        ? topics.flatMap((topic) => topic.constructedResponses.slice(index % 3, (index % 3) + 1).map((item) => item.id))
+        : [],
     itemTypes: level === 'level2' ? ['vignette'] : ['constructed-response', 'vignette'],
   }));
 }
@@ -1196,7 +1223,7 @@ export function buildRuntimeLevelFromPacks(
         : 'Validated beta authored runtime generated from topic-owned content packs, including lessons, examples, questions, vignettes, flashcards, datasets, and mapped tools.',
     topics,
     mockExams: buildAuthoredMocks(level, topics),
-    constructedResponses: [],
+    constructedResponses: topics.flatMap((topic) => topic.constructedResponses),
     sourceMeta: {
       original: true,
       curriculumMap: level,
@@ -1224,6 +1251,7 @@ export function hasCompleteLevel1ValidatedRuntime(): boolean {
 function expectedTopicIdsForLevel(level: CurriculumLevel['id']) {
   if (level === 'level1') return [...LEVEL1_TOPIC_IDS];
   if (level === 'level2') return [...level2TopicIds];
+  if (level === 'level3') return [...level3TopicIds];
   return [];
 }
 
@@ -1293,4 +1321,8 @@ export function getLevel1RuntimeStatus() {
 
 export function getLevel2RuntimeStatus() {
   return getRuntimeStatus('level2');
+}
+
+export function getLevel3RuntimeStatus() {
+  return getRuntimeStatus('level3');
 }

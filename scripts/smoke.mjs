@@ -1,7 +1,7 @@
 import { access } from 'node:fs/promises';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { smokeRoutes as routes } from '../src/routes/routeManifest.js';
+import { smokeRoutes as routes } from '../src/routes/routeManifest.ts';
 
 /* global document */
 

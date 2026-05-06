@@ -83,6 +83,7 @@ export interface LearningEvent {
     | 'quiz'
     | 'vignette'
     | 'constructed-response'
+    | 'formula-drill'
     | 'mock'
     | 'flashcard'
     | 'skill-lab'
@@ -92,6 +93,27 @@ export interface LearningEvent {
   elapsedSeconds?: number;
   createdAt: string;
 }
+
+export interface LearningEventEnvelope<TPayload = unknown> {
+  id: string;
+  schemaVersion: 1;
+  event: LearningEvent;
+  payload?: TPayload;
+  sourceIds: string[];
+  recordedAt: string;
+}
+
+export type ReviewReason =
+  | 'due-review'
+  | 'weak-objective'
+  | 'missed-question'
+  | 'flagged-mock-item'
+  | 'rubric-miss'
+  | 'stale-topic'
+  | 'unfinished-lesson'
+  | 'flashcard-decay'
+  | 'skill-lab-gap'
+  | 'saved-artifact';
 
 export interface QuestionAttempt extends QuestionResult {
   id?: number;
@@ -210,6 +232,22 @@ export interface ObjectiveReadiness {
   trend: 'new' | 'up' | 'flat' | 'down';
 }
 
+export interface ObjectiveReadinessV2 extends ObjectiveReadiness {
+  readinessVersion: 2;
+  itemTypeWeight: number;
+  topicWeight: number;
+  retentionForecastPct?: number;
+  evidenceCount: number;
+  primaryReason: ReviewReason;
+}
+
+export interface RetentionForecast {
+  date: string;
+  count: number;
+  averageRetention: number | null;
+  atRiskCount: number;
+}
+
 export interface StudyPlan {
   id: string;
   targetLevel?: string;
@@ -226,8 +264,18 @@ export interface StudyPlan {
     title: string;
     path: string;
     reason: string;
+    reviewReason?: ReviewReason;
+    estimatedMinutes?: number;
   }>;
   updatedAt: string;
+}
+
+export interface StudySessionPlan extends StudyPlan {
+  planVersion: 2;
+  generatedForDate: string;
+  focusLevel: string;
+  budgetMinutes: number;
+  reviewLoad: RetentionForecast[];
 }
 
 export interface StudyPlanSettings {
@@ -258,7 +306,12 @@ export interface ReviewQueueItem {
   priority: number;
   dueAt?: string;
   topic?: string;
+  reason: ReviewReason;
+  retentionPct?: number;
+  sourceIds?: string[];
 }
+
+export type ReviewAction = ReviewQueueItem;
 
 export interface MockAttempt {
   id?: number;
@@ -416,6 +469,42 @@ export interface ContentVersion {
   version: number;
   checksum?: string;
   updatedAt: string;
+}
+
+export interface VaultImportHistoryEntry {
+  exportId: string;
+  importedAt: string;
+  exportedAt: string;
+  schemaVersion: number;
+  schemaHash: string;
+  contentVersion: string;
+  mode: 'merge' | 'replace';
+  conflictPolicy: 'keep-existing' | 'prefer-import' | 'replace';
+  encrypted: boolean;
+}
+
+export interface VaultHealthSnapshot {
+  id: string;
+  generatedAt: string;
+  status: 'ok' | 'warning' | 'repair-needed';
+  totalRows: number;
+  malformedRows: number;
+  orphanedReviews: number;
+  staleIndexes: number;
+  checksumIssues: number;
+  repairActions: string[];
+}
+
+export interface VaultHealthReport extends VaultHealthSnapshot {
+  schemaVersion: number;
+  schemaHash: string;
+  contentVersion: string;
+  importHistory: VaultImportHistoryEntry[];
+  storageEstimate?: {
+    usage?: number;
+    quota?: number;
+    persisted?: boolean;
+  };
 }
 
 export interface ConfidenceCalibrationSummary {

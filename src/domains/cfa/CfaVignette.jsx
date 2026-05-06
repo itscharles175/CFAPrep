@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Layers, Trophy } from 'lucide-react';
 import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
-import { PageHeader, MetricCard } from '../../components/ui/Primitives';
+import { CaseViewer, CommandHint, MetricCard, PageHeader, QuestionStage, StatusBadge } from '../../components/ui/Primitives';
 import { recordVignetteAttempt } from '../../lib/learning';
 
 function nowMs() {
@@ -36,6 +36,20 @@ export default function CfaVignette() {
       cancelled = true;
     };
   }, [level, requestKey, topic]);
+
+  useEffect(() => {
+    function handleKeyboard(event) {
+      const target = event.target;
+      if (target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (event.ctrlKey && event.key === 'Enter' && !submitted && vignette && Object.keys(selected).length === vignette.questions.length) {
+        event.preventDefault();
+        submit();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  });
 
   if (loading) {
     return (
@@ -117,16 +131,20 @@ export default function CfaVignette() {
         <MetricCard label="Score" value={submitted ? `${pct}%` : '-'} detail={submitted ? `${score}/${vignette.questions.length}` : 'Submit to score'} icon={Trophy} tone="warning" />
       </div>
 
-      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
-        <h2 style={{ marginTop: 0 }}>Case Facts</h2>
-        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>{vignette.stem}</p>
-      </div>
+      <CaseViewer title="Case Facts" exhibits={vignette.exhibits || []}>
+        <p>{vignette.stem}</p>
+      </CaseViewer>
 
-      <div className="quiz-container">
+      <div className="quiz-container" style={{ marginTop: 'var(--space-6)' }}>
         {vignette.questions.map((question, index) => (
-          <div key={question.id} className="glass-card no-hover" style={{ marginBottom: 'var(--space-5)' }}>
-            <span className="badge badge-purple">Question {index + 1}</span>
-            <h3>{question.question}</h3>
+          <QuestionStage
+            key={question.id}
+            badge={`Question ${index + 1}`}
+            objective={question.learningObjective}
+            question={question.question}
+            status={submitted ? (selected[question.id] === question.correct ? 'success' : 'danger') : 'exam'}
+            footer={!submitted && index === 0 ? <CommandHint keys="Ctrl+Enter" label="submit once complete" /> : null}
+          >
             <div className="quiz-options">
               {question.options.map((option, optionIndex) => {
                 const picked = selected[question.id] === optionIndex;
@@ -146,8 +164,15 @@ export default function CfaVignette() {
                 );
               })}
             </div>
-            {submitted && <p style={{ color: 'var(--text-secondary)' }}>{question.explanation}</p>}
-          </div>
+            {submitted && (
+              <div className="quiz-explanation">
+                <StatusBadge tone={selected[question.id] === question.correct ? 'success' : 'danger'}>
+                  {selected[question.id] === question.correct ? 'Correct' : 'Review'}
+                </StatusBadge>
+                <p style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-3)' }}>{question.explanation}</p>
+              </div>
+            )}
+          </QuestionStage>
         ))}
       </div>
 

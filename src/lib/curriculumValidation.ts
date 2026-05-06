@@ -8,6 +8,8 @@ import {
   level1SaturationTargets,
   level2AuthoredContentPacks,
   level2SaturationBatch,
+  level3AuthoredContentPacks,
+  level3SaturationBatch,
 } from '../domains/cfa/contentPacks';
 import {
   DEFAULT_CFA_EXAM_YEAR,
@@ -62,7 +64,7 @@ const examReadyTargets = {
   },
   level3: {
     studyUnits: 8,
-    lessonSections: 8,
+    lessonSections: 12,
     objectives: 8,
     formulas: 6,
     examples: 8,
@@ -70,7 +72,7 @@ const examReadyTargets = {
     vignettes: 4,
     constructedResponses: 3,
     flashcards: 32,
-    skillLabs: 1,
+    skillLabs: 4,
   },
 } as const;
 
@@ -145,6 +147,7 @@ export function getContentPackCounts(pack: ContentPack) {
     objectives: pack.objectiveBlueprints.length,
     formulas: pack.formulaBlueprints.length,
     standaloneQuestions: pack.questionPacks.filter((questionPack) => questionPack.itemType === 'single').reduce((sum, questionPack) => sum + questionPack.count, 0),
+    constructedResponses: pack.questionPacks.filter((questionPack) => questionPack.itemType === 'constructed-response').reduce((sum, questionPack) => sum + questionPack.count, 0),
     vignettes: pack.vignettePacks.reduce((sum, vignettePack) => sum + vignettePack.count, 0),
     flashcards: pack.flashcardPacks.reduce((sum, flashcardPack) => sum + flashcardPack.count, 0),
     skillLabs: pack.skillLabMappings.length,
@@ -164,6 +167,7 @@ export function getAuthoredContentPackCounts(pack: AuthoredContentPack) {
     authoredExamples: pack.authoredExamples.length,
     authoredQuestions: pack.authoredQuestions.length,
     authoredVignettes: pack.authoredVignettes.length,
+    authoredConstructedResponses: pack.authoredConstructedResponses?.length ?? 0,
     authoredFlashcards: pack.authoredFlashcards.length,
   };
 }
@@ -207,6 +211,7 @@ export function validateContentPack(pack: ContentPack): CurriculumValidationIssu
     ['objectives', target.objectives],
     ['formulas', target.formulas],
     ['standaloneQuestions', target.standaloneQuestions],
+    ...('constructedResponses' in target ? ([['constructedResponses', target.constructedResponses]] as Array<[keyof ReturnType<typeof getContentPackCounts>, number]>) : []),
     ['vignettes', target.vignettes],
     ['flashcards', target.flashcards],
     ['skillLabs', target.skillLabs],
@@ -337,6 +342,7 @@ function collectAuthoredProvenanceRows(pack: AuthoredContentPack): ProvenanceRow
     ...pack.authoredVignettes.flatMap((vignette) =>
       vignette.questions.map((question) => ({ id: question.id, kind: 'vignette-question', provenance: question.provenance })),
     ),
+    ...(pack.authoredConstructedResponses || []).map((item) => ({ id: item.id, kind: 'constructed-response', provenance: item.provenance })),
     ...pack.authoredFlashcards.map((flashcard) => ({ id: flashcard.id, kind: 'flashcard', provenance: flashcard.provenance })),
   ];
 }
@@ -440,6 +446,53 @@ function validateAuthoredQuestionRow(
   return issues;
 }
 
+function validateConstructedResponseRow(
+  item: NonNullable<AuthoredContentPack['authoredConstructedResponses']>[number],
+  {
+    objectiveIds,
+    datasetIds,
+  }: {
+    objectiveIds: Set<string>;
+    datasetIds: Set<string>;
+  },
+): CurriculumValidationIssue[] {
+  const issues: CurriculumValidationIssue[] = [];
+  if (item.level !== 'level3' || !item.topic.startsWith('level3:')) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Constructed responses must use Level III runtime identifiers.' });
+  }
+  if (!item.commandWords.length || item.commandWords.some((word) => word.length < 4)) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Constructed responses need explicit command words.' });
+  }
+  const mappedObjectives = new Set([...item.learningObjectives, ...item.objectiveIds]);
+  if (mappedObjectives.size < 2) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Constructed responses need at least two objective mappings.' });
+  }
+  mappedObjectives.forEach((objectiveId) => {
+    if (!objectiveIds.has(objectiveId)) {
+      issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: `Constructed response maps to unknown objective ${objectiveId}.` });
+    }
+  });
+  item.datasetIds.forEach((datasetId) => {
+    if (!datasetIds.has(datasetId)) {
+      issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: `Constructed response references unknown dataset ${datasetId}.` });
+    }
+  });
+  if (!item.prompt || item.prompt.length < 160) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Constructed-response prompt is too thin for exam-ready review.' });
+  }
+  if (!item.modelAnswer || item.modelAnswer.length < 220) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Constructed-response model answer needs deeper case-grounded support.' });
+  }
+  const criterionPoints = item.rubric.criteria.reduce((sum, criterion) => sum + criterion.points, 0);
+  if (item.rubric.maxPoints <= 0 || criterionPoints !== item.rubric.maxPoints) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Rubric criterion points must sum to maxPoints.' });
+  }
+  if (item.rubric.criteria.length < 3 || item.rubric.criteria.some((criterion) => !criterion.label || !criterion.description || criterion.points <= 0)) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Rubric needs point-bearing criteria with labels and descriptions.' });
+  }
+  return issues;
+}
+
 export function validateAuthoredContentPack(pack: AuthoredContentPack): CurriculumValidationIssue[] {
   const issues = [...validateContentPack(pack)];
   const counts = getAuthoredContentPackCounts(pack);
@@ -457,6 +510,9 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
     authoredDepthIssue(pack, 'objectives', counts.objectives, target.objectives),
     authoredDepthIssue(pack, 'authoredQuestions', counts.authoredQuestions, target.standaloneQuestions),
     authoredDepthIssue(pack, 'authoredVignettes', counts.authoredVignettes, target.vignettes),
+    'constructedResponses' in target
+      ? authoredDepthIssue(pack, 'authoredConstructedResponses', counts.authoredConstructedResponses, target.constructedResponses)
+      : null,
     authoredDepthIssue(pack, 'authoredFlashcards', counts.authoredFlashcards, target.flashcards),
     authoredDepthIssue(pack, 'skillLabs', counts.skillLabs, target.skillLabs),
     authoredDepthIssue(pack, 'datasets', counts.datasets, 1),
@@ -484,6 +540,14 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
     ...pack.authoredExamples.flatMap((example) => [example.title, example.prompt, example.walkthrough]),
     ...pack.authoredQuestions.flatMap((question) => [question.question, question.explanation, ...question.options, question.answerRationale.correct, ...question.answerRationale.distractors]),
     ...pack.authoredVignettes.flatMap((vignette) => [vignette.title, vignette.stem, ...vignette.exhibits.map((exhibit) => `${exhibit.title} ${exhibit.content}`)]),
+    ...(pack.authoredConstructedResponses || []).flatMap((item) => [
+      item.title,
+      item.prompt,
+      item.modelAnswer,
+      ...item.commandWords,
+      item.rubric.title,
+      ...item.rubric.criteria.flatMap((criterion) => [criterion.label, criterion.description]),
+    ]),
     ...pack.authoredFlashcards.flatMap((flashcard) => [flashcard.front, flashcard.back]),
   ].join(' ');
   if (hasOfficialOutcomeLanguage(authoredText)) {
@@ -500,6 +564,7 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
       ...pack.authoredExamples.map((example) => example.id),
       ...pack.authoredQuestions.map((question) => question.id),
       ...pack.authoredVignettes.flatMap((vignette) => [vignette.id, ...vignette.exhibits.map((exhibit) => exhibit.id), ...vignette.questions.map((question) => question.id)]),
+      ...(pack.authoredConstructedResponses || []).flatMap((item) => [item.id, item.rubric.id, ...item.rubric.criteria.map((criterion) => criterion.id)]),
       ...pack.authoredFlashcards.map((flashcard) => flashcard.id),
     ]),
   );
@@ -582,6 +647,18 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
     });
   });
 
+  const seenConstructedPrompts = new Map<string, string>();
+  (pack.authoredConstructedResponses || []).forEach((item) => {
+    issues.push(...validateProvenance(item.id, item.provenance, pack.maturity));
+    const promptKey = normalizedText(item.prompt);
+    const prior = seenConstructedPrompts.get(promptKey);
+    if (prior) {
+      issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: `Duplicate constructed-response prompt also used by ${prior}.` });
+    }
+    seenConstructedPrompts.set(promptKey, item.id);
+    issues.push(...validateConstructedResponseRow(item, { objectiveIds, datasetIds }));
+  });
+
   pack.authoredFlashcards.forEach((flashcard) => {
     issues.push(...validateProvenance(flashcard.id, flashcard.provenance, pack.maturity));
     if (!objectiveIds.has(flashcard.objectiveId)) {
@@ -656,6 +733,25 @@ export function validateLevel2SaturationBatch(): CurriculumValidationIssue[] {
   return issues;
 }
 
+export function validateLevel3SaturationBatch(): CurriculumValidationIssue[] {
+  const issues = validateContentBatch(level3SaturationBatch);
+  const expectedTopicIds = new Set(level3SaturationBatch.topicIds);
+  const packTopicIds = new Set(level3AuthoredContentPacks.map((pack) => pack.topicId));
+
+  expectedTopicIds.forEach((topicId) => {
+    if (!packTopicIds.has(topicId)) {
+      issues.push({ severity: 'error', area: 'level3-saturation', id: topicId, message: 'Missing authored Level III constructed-response pack.' });
+    }
+  });
+  level3AuthoredContentPacks.forEach((pack) => {
+    if (pack.maturity !== 'exam-ready') {
+      issues.push({ severity: 'warning', area: 'level3-saturation', id: pack.id, message: 'Pack is saturated but not public Level III exam-ready.' });
+    }
+  });
+
+  return issues;
+}
+
 export function getLevel1BatchProgress(): ContentBatchProgress {
   const packs = getAuthoredContentPacks('level1');
   const counts = packs.map(getAuthoredContentPackCounts);
@@ -682,10 +778,10 @@ export function getLevel1BatchProgress(): ContentBatchProgress {
 export function getContentBatchProgress(level: CurriculumLevel['id']): ContentBatchProgress {
   if (level === 'level1') return getLevel1BatchProgress();
 
-  const batch = level === 'level2' ? level2SaturationBatch : cfaContentBatches.find((item) => item.level === level);
+  const batch = level === 'level2' ? level2SaturationBatch : level === 'level3' ? level3SaturationBatch : cfaContentBatches.find((item) => item.level === level);
   const packs = getAuthoredContentPacks(level);
   const counts = packs.map(getAuthoredContentPackCounts);
-  const issues = level === 'level2' ? validateLevel2SaturationBatch() : packs.flatMap(validateAuthoredContentPack);
+  const issues = level === 'level2' ? validateLevel2SaturationBatch() : level === 'level3' ? validateLevel3SaturationBatch() : packs.flatMap(validateAuthoredContentPack);
 
   return {
     id: batch?.id || `${level}-content-batch`,
@@ -746,7 +842,13 @@ function buildContentReleaseReport(
   const topics = packs.map(getContentPackReleaseTopic);
   const blockingIssues = issues.filter((issue) => issue.severity === 'error').length;
   const expectedTopicCount =
-    level === 'level1' ? level1SaturationBatch.topicIds.length : level === 'level2' ? level2SaturationBatch.topicIds.length : packs.length;
+    level === 'level1'
+      ? level1SaturationBatch.topicIds.length
+      : level === 'level2'
+        ? level2SaturationBatch.topicIds.length
+        : level === 'level3'
+          ? level3SaturationBatch.topicIds.length
+          : packs.length;
   const allExpectedTopicsPresent = packs.length === expectedTopicCount;
   const allTopicsExamReady =
     allExpectedTopicsPresent &&
@@ -795,7 +897,9 @@ export function generateContentReleaseReport(level: CurriculumLevel['id'] = 'lev
       ? validateLevel1SaturationBatch()
       : level === 'level2'
         ? validateLevel2SaturationBatch()
-        : packs.flatMap(validateAuthoredContentPack);
+        : level === 'level3'
+          ? validateLevel3SaturationBatch()
+          : packs.flatMap(validateAuthoredContentPack);
   return buildContentReleaseReport(level, packs, issues);
 }
 
