@@ -58,6 +58,16 @@ describe('learning catalog integrity', () => {
     expect(items.some((item) => item.path === '/calculators')).toBe(true);
   });
 
+  it('projects command palette Level III topics through the selected pathway', () => {
+    const privateMarkets = buildSearchItems({ level3Pathway: 'private-markets' });
+    const privateWealth = buildSearchItems({ level3Pathway: 'private-wealth' });
+
+    expect(privateMarkets.some((item) => item.path === '/cfa/level3/private-markets-pathway')).toBe(true);
+    expect(privateMarkets.some((item) => item.path === '/cfa/level3/private-wealth-pathway')).toBe(false);
+    expect(privateWealth.some((item) => item.path === '/cfa/level3/performance')).toBe(true);
+    expect(privateWealth.some((item) => item.path === '/cfa/level3/private-wealth-pathway')).toBe(true);
+  });
+
   it('keeps route, search, and smoke metadata centralized', () => {
     const routeMatches = (routePath, actualPath) => {
       const pattern = new RegExp(`^${routePath.replace(/:[^/]+/g, '[^/]+')}$`);

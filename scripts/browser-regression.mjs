@@ -1,34 +1,10 @@
-import { access } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import { preview } from 'vite';
 import { chromium } from 'playwright-core';
+import { appRoutes } from '../src/routes/routeManifest.ts';
+import { applySourceState, browserCandidates, firstExistingPath, summarizeRouteFailures, viewports } from './qa-helpers.mjs';
 
 /* global document, window */
-
-const browserCandidates = [
-  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  `${process.env.LOCALAPPDATA || ''}/Google/Chrome/Application/chrome.exe`,
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/google-chrome-stable',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/opt/google/chrome/chrome',
-].filter(Boolean);
-
-async function firstExistingPath(paths) {
-  for (const candidate of paths) {
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {
-      // keep looking
-    }
-  }
-  return null;
-}
 
 async function waitForBodyText(page, pattern, label) {
   await page.waitForFunction(
@@ -67,9 +43,31 @@ if (!executablePath) {
 }
 
 const browser = await chromium.launch({ executablePath, headless: true });
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const page = await browser.newPage({ viewport: viewports.desktop });
+const routeResults = [];
+let currentStep = null;
+let currentStepStartedAt = Date.now();
+let firstFailure = null;
+
+function startBrowserStep(routeId, path, label) {
+  currentStep = { routeId, path, label };
+  currentStepStartedAt = Date.now();
+}
+
+function passBrowserStep() {
+  if (!currentStep) return;
+  routeResults.push({
+    routeId: currentStep.routeId,
+    path: currentStep.path,
+    label: currentStep.label,
+    sourceState: currentStep.sourceState || 'default',
+    status: 'ok',
+    durationMs: Date.now() - currentStepStartedAt,
+  });
+}
 
 try {
+  startBrowserStep('browser:cfa-vignette', '/cfa/level2/equity/vignette', 'Level II async vignette flow');
   await page.goto(new URL('/cfa/level2/equity/vignette', address).toString(), { waitUntil: 'networkidle' });
   await waitForBodyText(page, /Equity Valuation/, 'Level II equity vignette content');
   await waitForBodyText(page, /EXAM-READY/, 'Level II exam-ready badge');
@@ -85,8 +83,10 @@ try {
   await page.getByRole('button', { name: /submit vignette/i }).click();
   await waitForBodyText(page, /Next Vignette/, 'submitted Level II vignette');
   await assertNoRuntimeErrors(page, 'Level II vignette flow');
+  passBrowserStep();
   console.log('OK Level II async vignette flow');
 
+  startBrowserStep('browser:cfa-constructed-response', '/cfa/level3/performance/constructed-response', 'Level III constructed-response flow');
   await page.goto(new URL('/cfa/level3/performance/constructed-response', address).toString(), { waitUntil: 'networkidle' });
   await waitForBodyText(page, /Performance Measurement/, 'Level III constructed-response content');
   await waitForBodyText(page, /LEVEL III RESPONSE/, 'Level III constructed-response shell');
@@ -100,8 +100,10 @@ try {
   await page.getByRole('button', { name: /submit response/i }).click();
   await waitForBodyText(page, /Model Answer/, 'submitted Level III constructed response');
   await assertNoRuntimeErrors(page, 'Level III constructed-response flow');
+  passBrowserStep();
   console.log('OK Level III constructed-response flow');
 
+  startBrowserStep('browser:cfa-mock-resume', '/cfa/level2/mock', 'Level II mock resume flow');
   await page.goto(new URL('/cfa/level2/mock', address).toString(), { waitUntil: 'networkidle' });
   await waitForBodyText(page, /MOCK SECTION/, 'Level II mock section');
   await waitForBodyText(page, /EXAM-READY/, 'Level II mock exam-ready badge');
@@ -112,13 +114,17 @@ try {
   await page.reload({ waitUntil: 'networkidle' });
   await waitForBodyText(page, /Section Paused|Resume/, 'mock resume after reload');
   await assertNoRuntimeErrors(page, 'mock resume flow');
+  passBrowserStep();
   console.log('OK Level II mock resume flow');
 
+  startBrowserStep('browser:offline-badge', '/cfa/level2/mock', 'offline badge path');
   await page.evaluate(() => window.dispatchEvent(new Event('offline')));
   await waitForBodyText(page, /Offline/, 'offline app-shell badge');
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  passBrowserStep();
   console.log('OK offline badge path');
 
+  startBrowserStep('browser:offline-reload', '/', 'production offline reload');
   await page.goto(new URL('/', address).toString(), { waitUntil: 'networkidle' });
   let serviceWorkerReady = await page.evaluate(async () => {
     if (!('serviceWorker' in navigator)) return false;
@@ -143,7 +149,29 @@ try {
   } else {
     throw new Error('Service worker did not become ready in production preview.');
   }
+  passBrowserStep();
 
+  const offlineMatrix = appRoutes
+    .filter((route) => route.offlineCritical)
+    .map((route) => ({
+      id: route.id,
+      path: route.smokeRoute || route.screenshotRoute || route.path,
+      expectedText: route.expectedText,
+    }));
+  for (const route of offlineMatrix) {
+    startBrowserStep(`browser:offline:${route.id}`, route.path, `offline deep route ${route.id}`);
+    await page.context().setOffline(false);
+    await page.goto(new URL(route.path, address).toString(), { waitUntil: 'networkidle' });
+    await waitForBodyText(page, new RegExp(route.expectedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `online warm ${route.id}`);
+    await page.context().setOffline(true);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForBodyText(page, /QuantVault|Offline|CFA|System|Vault|Review|Flashcards|Mock/i, `offline deep route ${route.id}`);
+    await page.context().setOffline(false);
+    passBrowserStep();
+    console.log(`OK offline deep route ${route.id}`);
+  }
+
+  startBrowserStep('browser:pwa-update', '/', 'PWA update prompt path');
   await page.evaluate(() => {
     window.__qvUpdateApplied = false;
     window.dispatchEvent(
@@ -159,13 +187,45 @@ try {
   await page.getByRole('button', { name: /update/i }).click();
   const updateApplied = await page.evaluate(() => window.__qvUpdateApplied);
   if (!updateApplied) throw new Error('PWA update prompt did not invoke applyUpdate.');
+  passBrowserStep();
   console.log('OK PWA update prompt path');
 
+  startBrowserStep('browser:system-health', '/system', 'system health surface');
   await page.goto(new URL('/system', address).toString(), { waitUntil: 'networkidle' });
   await waitForBodyText(page, /Service Worker/, 'system service-worker surface');
   await assertNoRuntimeErrors(page, 'system health surface');
+  passBrowserStep();
   console.log('OK system health surface');
+
+  startBrowserStep('browser:vault-source-state', '/vault?sourceQuery=duration', 'synthetic source-vault browser hook');
+  currentStep.sourceState = 'synthetic-source';
+  await applySourceState(page, address, 'synthetic-source');
+  await page.goto(new URL('/vault?sourceQuery=duration', address).toString(), { waitUntil: 'networkidle' });
+  await waitForBodyText(page, /Synthetic Duration Guide/, 'synthetic source search result');
+  await waitForBodyText(page, /private local only|standard vault exports omit source text/i, 'source privacy messaging');
+  passBrowserStep();
+  console.log('OK synthetic source-vault browser hook');
+} catch (error) {
+  if (currentStep) {
+    routeResults.push({
+      routeId: currentStep.routeId,
+      path: currentStep.path,
+      label: currentStep.label,
+      sourceState: currentStep.sourceState || 'default',
+      status: 'blocked',
+      durationMs: Date.now() - currentStepStartedAt,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  firstFailure = error;
 } finally {
+  await mkdir('dist/reports', { recursive: true });
+  await writeFile(
+    'dist/reports/browser-regression.json',
+    `${JSON.stringify({ generatedAt: new Date().toISOString(), routeResults, routeFailures: summarizeRouteFailures(routeResults) }, null, 2)}\n`,
+  );
   await browser.close();
   await new Promise((resolve) => server.httpServer.close(resolve));
 }
+
+if (firstFailure) throw firstFailure;

@@ -2,9 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Bell, Menu, Moon, RefreshCw, Search, Sun, WifiOff, X } from 'lucide-react';
 import { buildSearchItems } from '../../data/catalog';
+import { level3TopicBelongsToPathway } from '../../domains/cfa/cfaLevel3Pathways';
+import { useLevel3Pathway } from '../../domains/cfa/useLevel3Pathway';
 import { useTheme } from '../../context/ThemeContext';
 import { useProgressSummary } from '../../hooks/useProgress';
 import { exportVaultData, repairVaultData } from '../../lib/learning';
+import { searchCfaSourceVault } from '../../lib/cfaSourceVault';
 import { commandRoutes } from '../../routes/routeManifest';
 
 function normalizeSearch(value) {
@@ -24,6 +27,10 @@ function scoreSearchItem(item, terms) {
   }, 0);
 }
 
+function commandResultDomId(id) {
+  return `command-result-${String(id).replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
+}
+
 function downloadJson(payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -34,10 +41,11 @@ function downloadJson(payload) {
   URL.revokeObjectURL(url);
 }
 
-export default function TopBar({ collapsed, onMenuToggle }) {
+export default function TopBar({ collapsed, navOpen = false, onMenuToggle }) {
   const navigate = useNavigate();
   const { isDark, toggleTheme } = useTheme();
   const summary = useProgressSummary();
+  const [activePathway] = useLevel3Pathway();
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -46,8 +54,10 @@ export default function TopBar({ collapsed, onMenuToggle }) {
   const [cacheVersion, setCacheVersion] = useState(null);
   const [applyUpdate, setApplyUpdate] = useState(null);
   const [commandMessage, setCommandMessage] = useState('');
+  const [sourceResults, setSourceResults] = useState([]);
   const inputRef = useRef(null);
-  const searchItems = useMemo(() => buildSearchItems(), []);
+  const searchRef = useRef(null);
+  const searchItems = useMemo(() => buildSearchItems({ level3Pathway: activePathway }), [activePathway]);
   const commandItems = useMemo(
     () => [
       ...searchItems,
@@ -63,13 +73,58 @@ export default function TopBar({ collapsed, onMenuToggle }) {
     const normalized = normalizeSearch(query);
     if (!normalized) return commandItems.slice(0, 8);
     const terms = normalized.split(' ');
-    return commandItems
+    const routeResults = commandItems
       .map((item) => ({ item, score: scoreSearchItem(item, terms) }))
       .filter((row) => row.score >= 0)
       .sort((a, b) => b.score - a.score)
       .map((row) => row.item)
-      .slice(0, 8);
-  }, [commandItems, query]);
+      .slice(0, 6);
+    return [...sourceResults, ...routeResults].slice(0, 8);
+  }, [commandItems, query, sourceResults]);
+
+  useEffect(() => {
+    let active = true;
+    const normalized = normalizeSearch(query);
+    if (normalized.length < 3) {
+      Promise.resolve().then(() => {
+        if (active) setSourceResults([]);
+      });
+      return () => {
+        active = false;
+      };
+    }
+    searchCfaSourceVault(query, 6).then((matches) => {
+      if (!active) return;
+      setSourceResults(
+        matches
+          .filter((match) => {
+            if (match.document.level !== 'level3') return true;
+            const topicIds = match.chunk.topicIds?.length ? match.chunk.topicIds : match.document.topicIds;
+            return topicIds.some((topicId) => level3TopicBelongsToPathway(topicId, activePathway));
+          })
+          .slice(0, 3)
+          .map((match) => ({
+            id: `source:${match.chunk.id}`,
+            title: match.document.title,
+            subtitle: `${match.document.publisher} · ${match.document.level?.replace('level', 'Level ')} · ${match.chunk.locator} · private source match`,
+            type: 'Source',
+            path: `/vault?sourceQuery=${encodeURIComponent(query)}&chunk=${encodeURIComponent(match.chunk.id)}`,
+            keywords: [match.document.title, match.document.publisher, match.document.level],
+          })),
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, [activePathway, query]);
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      if (!searchRef.current?.contains(event.target)) setSearchOpen(false);
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -139,16 +194,19 @@ export default function TopBar({ collapsed, onMenuToggle }) {
 
   return (
     <header className={`topbar ${collapsed ? 'collapsed' : ''}`}>
-      <button className="btn-icon btn-ghost mobile-menu-button" title="Open navigation" onClick={onMenuToggle}>
+      <button
+        className="btn-icon btn-ghost mobile-menu-button"
+        title="Open navigation"
+        aria-expanded={navOpen}
+        aria-controls="main-sidebar"
+        onClick={onMenuToggle}
+      >
         <Menu size={18} />
       </button>
 
       <div
+        ref={searchRef}
         className="topbar-search"
-        role="combobox"
-        aria-expanded={searchOpen}
-        aria-haspopup="listbox"
-        aria-owns={searchOpen ? 'command-palette-results' : undefined}
       >
         <Search />
         <input
@@ -157,8 +215,11 @@ export default function TopBar({ collapsed, onMenuToggle }) {
           type="text"
           placeholder="Search modules, formulas, topics..."
           aria-label="Command palette"
+          role="combobox"
+          aria-expanded={searchOpen}
+          aria-haspopup="listbox"
           aria-controls={searchOpen ? 'command-palette-results' : undefined}
-          aria-activedescendant={searchOpen && results[selectedIndex] ? `command-result-${results[selectedIndex].id}` : undefined}
+          aria-activedescendant={searchOpen && results[selectedIndex] ? commandResultDomId(results[selectedIndex].id) : undefined}
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -191,14 +252,14 @@ export default function TopBar({ collapsed, onMenuToggle }) {
             <div className="search-palette-title">Command Palette</div>
             {results.length ? (
               results.map((item, index) => (
-                <button
+                <div
                   key={item.id}
-                  id={`command-result-${item.id}`}
-                  type="button"
+                  id={commandResultDomId(item.id)}
                   role="option"
                   aria-selected={index === selectedIndex}
+                  aria-disabled={item.disabled || undefined}
                   className={`search-result ${index === selectedIndex ? 'active' : ''}`}
-                  disabled={item.disabled}
+                  tabIndex={-1}
                   onMouseDown={(event) => event.preventDefault()}
                   onMouseEnter={() => setSelectedIndex(index)}
                   onClick={() => goToResult(item)}
@@ -208,7 +269,7 @@ export default function TopBar({ collapsed, onMenuToggle }) {
                     <strong>{item.title}</strong>
                     <small>{item.disabled ? 'Coming soon' : item.subtitle}</small>
                   </span>
-                </button>
+                </div>
               ))
             ) : (
               <div className="search-empty">No matching modules or formulas.</div>

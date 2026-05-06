@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
+import { useLevel3Pathway } from './useLevel3Pathway';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -16,7 +17,8 @@ import {
 } from 'lucide-react';
 import { recordQuizAttempt, toggleBookmark } from '../../lib/learning';
 import { useProgressSummary } from '../../hooks/useProgress';
-import { CommandHint, ProgressRail, QuestionStage, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
+import { CommandHint, EmptyPanel, ProgressRail, QuestionStage, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
+import { SourceRail } from '../../components/SourceContext';
 
 function currentTimestampMs() {
   return Date.now();
@@ -94,11 +96,12 @@ function nextDefaultError(selected, correct) {
 
 export default function CfaQuiz() {
   const { level, topic } = useParams();
+  const [activePathway] = useLevel3Pathway();
   const [searchParams, setSearchParams] = useSearchParams();
   const summary = useProgressSummary();
   const mode = searchParams.get('mode') || 'topic-drill';
   const objectiveParam = searchParams.get('objective');
-  const requestKey = `${level}:${topic}`;
+  const requestKey = `${level}:${topic}:${level === 'level3' ? activePathway : 'all'}`;
   const [contentState, setContentState] = useState({ key: null, data: null });
   const topicData = contentState.key === requestKey ? contentState.data : null;
   const loading = contentState.key !== requestKey;
@@ -130,7 +133,7 @@ export default function CfaQuiz() {
 
   useEffect(() => {
     let cancelled = false;
-    loadCfaTopicContent(level, topic)
+    loadCfaTopicContent(level, topic, level === 'level3' ? { pathway: activePathway } : {})
       .then((content) => {
         if (!cancelled) setContentState({ key: requestKey, data: content });
       })
@@ -140,7 +143,7 @@ export default function CfaQuiz() {
     return () => {
       cancelled = true;
     };
-  }, [level, requestKey, topic]);
+  }, [activePathway, level, requestKey, topic]);
 
   function resetQuiz() {
     setCurrent(0);
@@ -253,6 +256,22 @@ export default function CfaQuiz() {
     });
   }
 
+  function sourceTargetForQuestion(question) {
+    const objective = objectiveById.get(question.learningObjective);
+    return {
+      kind: 'question',
+      domain: 'cfa',
+      level,
+      topicId: topic,
+      pathway: level === 'level3' ? activePathway : undefined,
+      title: question.question,
+      objectiveIds: [question.learningObjective],
+      formulaNames: question.formula ? [question.formula] : [],
+      keywords: [objective?.title, question.explanation, question.difficulty, mode].filter(Boolean),
+      route: `/cfa/${level}/${topic}/quiz?mode=${mode}`,
+    };
+  }
+
   if (loading) {
     return (
       <div className="page-container" aria-busy="true">
@@ -265,11 +284,12 @@ export default function CfaQuiz() {
   if (!questions.length) {
     return (
       <div className="page-container">
-        <div className="glass-card no-hover" style={{ textAlign: 'center', padding: 'var(--space-16)' }}>
-          <h2>Quiz Coming Soon</h2>
-          <p style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-3)' }}>Questions for this topic are being developed.</p>
-          <Link to="/cfa" className="btn btn-primary" style={{ marginTop: 'var(--space-6)' }}>Back to CFA</Link>
-        </div>
+        <EmptyPanel
+          title="Quiz Coming Soon"
+          description="Questions for this topic are being developed."
+          tone="exam"
+          action={<Link to="/cfa" className="btn btn-primary">Back to CFA</Link>}
+        />
       </div>
     );
   }
@@ -281,7 +301,7 @@ export default function CfaQuiz() {
     return (
       <div className="page-container">
         <div className="quiz-container">
-          <div className="glass-card no-hover animate-scale" style={{ textAlign: 'center', padding: 'var(--space-12)' }}>
+          <Surface className="quiz-result-panel animate-scale">
             <div style={{
               width: 80,
               height: 80,
@@ -333,9 +353,9 @@ export default function CfaQuiz() {
                 <ArrowLeft size={16} /> Back to Module
               </Link>
             </div>
-          </div>
+          </Surface>
 
-          <div className="glass-card no-hover" style={{ marginTop: 'var(--space-6)' }}>
+          <Surface className="quiz-answer-review">
             <div className="flex-between" style={{ marginBottom: 'var(--space-4)' }}>
               <h3 style={{ margin: 0 }}>Answer Review</h3>
               <span className="badge badge-blue">{missed.length ? 'Missed questions first' : 'Clean run'}</span>
@@ -377,12 +397,18 @@ export default function CfaQuiz() {
                             Bookmark
                           </button>
                         </div>
+                        <SourceRail
+                          compact
+                          limit={2}
+                          title="Question Source Context"
+                          target={sourceTargetForQuestion(question)}
+                        />
                       </div>
                     </div>
                   </div>
                 );
               })}
-          </div>
+          </Surface>
         </div>
       </div>
     );
@@ -478,6 +504,13 @@ export default function CfaQuiz() {
               <h4>{selected === q.correct ? 'Correct' : 'Incorrect'}</h4>
               <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.6 }}>{q.explanation}</p>
               {q.formula && <StatusBadge tone="accent" style={{ marginTop: 'var(--space-3)' }}>Related formula: {q.formula}</StatusBadge>}
+              <SourceRail
+                compact
+                limit={2}
+                title="Source Context"
+                subtitle="Shown after confirmation only."
+                target={sourceTargetForQuestion(q)}
+              />
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginTop: 'var(--space-5)' }}>
                 <div>

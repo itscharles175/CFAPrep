@@ -44,11 +44,21 @@ describe('content validation tooling', () => {
   it('generates an editorial coverage report', () => {
     const report = generateCoverageReport();
     expect(report.totals.levels).toBe(3);
-    expect(report.totals.topics).toBe(26);
+    expect(report.totals.topics).toBe(28);
     expect(report.totals.questions).toBeGreaterThanOrEqual(1000);
     expect(report.totals.vignettes).toBeGreaterThan(200);
     expect(report.totals.skillLabs).toBeGreaterThan(100);
     expect(report.totals.errors).toBe(0);
     expect(report.topics.every((topic) => topic.readinessCoverage > 0)).toBe(true);
+  });
+
+  it('credits item-set questions and constructed responses in readiness coverage', () => {
+    const level2 = generateCoverageReport('level2');
+    const level3 = generateCoverageReport('level3');
+
+    expect(level2.topics.every((topic) => topic.questions === 0 && topic.vignettes >= 12)).toBe(true);
+    expect(level2.topics.every((topic) => topic.readinessCoverage === 100)).toBe(true);
+    expect(level3.topics.every((topic) => topic.questions === 0 && topic.constructedResponses === 3)).toBe(true);
+    expect(level3.topics.every((topic) => topic.readinessCoverage === 100)).toBe(true);
   });
 });

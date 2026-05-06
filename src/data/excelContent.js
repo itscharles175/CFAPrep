@@ -30,6 +30,21 @@ export const excelContent = {
           '$A1 locks column only',
         ],
       },
+      {
+        title: 'Audit Trail Setup',
+        content:
+          'A reviewable workbook shows where assumptions enter, where formulas transform them, and where checks validate the result. The first audit layer should be built before the model grows.',
+        keyPoints: [
+          'Use a consistent color convention for inputs, formulas, and checks',
+          'Keep control checks close to the schedules they validate',
+          'Create a summary of unresolved review flags',
+        ],
+      },
+    ],
+    formulas: [
+      { name: 'Absolute Reference', latex: '\\$A\\$1', description: 'Locks row and column when a formula is copied.' },
+      { name: 'Balance Check', latex: '\\text{Check} = \\text{Assets} - \\text{Liabilities} - \\text{Equity}', description: 'Flags whether a balance sheet remains in balance.' },
+      { name: 'Error Flag', latex: '=IF(ABS(check)<tolerance,"OK","Review")', description: 'Converts a numeric model check into an audit flag.' },
     ],
     exercise: 'reference-builder',
   },
@@ -64,6 +79,22 @@ export const excelContent = {
           'LET can make complex formulas easier to read',
         ],
       },
+      {
+        title: 'Formula Review Pattern',
+        content:
+          'Advanced formulas should be reviewed for lookup direction, missing-value behavior, row insert resilience, and whether the formula is easier to audit than a helper column.',
+        keyPoints: [
+          'Define exact-match behavior explicitly',
+          'Use structured references when source tables may grow',
+          'Prefer readable formulas when the model will be reused',
+        ],
+      },
+    ],
+    formulas: [
+      { name: 'XLOOKUP', latex: '\\text{XLOOKUP}(\\text{lookup value}, \\text{lookup array}, \\text{return array}, \\text{"Missing"})', description: 'Readable lookup with explicit missing-value behavior.' },
+      { name: 'INDEX MATCH', latex: '\\text{INDEX}(\\text{return range}, \\text{MATCH}(\\text{id}, \\text{id range}, 0))', description: 'Flexible lookup pattern that separates position from returned value.' },
+      { name: 'SUMIFS', latex: '\\text{SUMIFS}(\\text{amounts}, \\text{region}, \\text{"East"}, \\text{product}, \\text{"Credit"})', description: 'Aggregates values that satisfy multiple criteria.' },
+      { name: 'FILTER', latex: '\\text{FILTER}(\\text{table}, \\text{condition}, \\text{"No rows"})', description: 'Returns a dynamic array of rows that meet a condition.' },
     ],
     exercise: 'formula-chooser',
   },
@@ -98,6 +129,22 @@ export const excelContent = {
           'MIRR can be more realistic for reinvestment assumptions',
         ],
       },
+      {
+        title: 'Date-Aware Cash Flow Checks',
+        content:
+          'Finance-function models need explicit timing checks. The workbook should show whether cash flows are periodic or dated, whether signs are consistent, and which function owns the time-zero flow.',
+        keyPoints: [
+          'Use XNPV and XIRR when dates are irregular',
+          'Keep investment outflows and inflows consistently signed',
+          'Pair return metrics with value metrics before recommending a deal',
+        ],
+      },
+    ],
+    formulas: [
+      { name: 'NPV With Time Zero', latex: 'CF_0 + \\text{NPV}(rate, CF_1:CF_N)', description: 'Keeps the immediate cash flow outside Excel NPV timing.' },
+      { name: 'XNPV', latex: '\\text{XNPV}(\\text{rate}, \\text{cash flows}, \\text{dates})', description: 'Discounts irregular dated cash flows with actual timing.' },
+      { name: 'XIRR', latex: '\\text{XIRR}(\\text{cash flows}, \\text{dates})', description: 'Solves the annualized return for irregular dated cash flows.' },
+      { name: 'PMT', latex: '\\text{PMT}(\\text{rate}, \\text{nper}, \\text{pv})', description: 'Calculates the level payment for a loan or annuity.' },
     ],
     exercise: 'xnpv-builder',
   },
@@ -132,6 +179,22 @@ export const excelContent = {
           'Show valuation ranges, not false precision',
         ],
       },
+      {
+        title: 'Valuation Bridge',
+        content:
+          'A DCF should bridge operating drivers to free cash flow, free cash flow to enterprise value, and enterprise value to equity value. Each bridge needs a visible check so the story and math stay aligned.',
+        keyPoints: [
+          'Tie revenue and margin assumptions to operating narrative',
+          'Show terminal value as a percentage of enterprise value',
+          'Reconcile enterprise value to equity value with net debt and non-operating assets',
+        ],
+      },
+    ],
+    formulas: [
+      { name: 'Free Cash Flow', latex: 'FCF = EBIT(1-T) + D\\&A - Capex - \\Delta NWC', description: 'Operating cash flow available to capital providers.' },
+      { name: 'WACC', latex: 'WACC = w_e r_e + w_d r_d(1-T)', description: 'Weighted required return for equity and after-tax debt capital.' },
+      { name: 'Terminal Value', latex: 'TV = \\frac{FCF_{N+1}}{WACC-g}', description: 'Continuing value under a stable-growth assumption.' },
+      { name: 'Enterprise Value', latex: 'EV = \\sum \\frac{FCF_t}{(1+WACC)^t} + \\frac{TV}{(1+WACC)^N}', description: 'Discounted value of forecast and terminal free cash flows.' },
     ],
     exercise: 'dcf-sensitivity',
   },
@@ -166,6 +229,21 @@ export const excelContent = {
           'Add guardrails before deleting or overwriting data',
         ],
       },
+      {
+        title: 'Automation Controls',
+        content:
+          'Finance macros should be reversible where possible and explicit where not. Logging, confirmation prompts, and workbook-scoped references reduce the risk of damaging the wrong file.',
+        keyPoints: [
+          'Qualify every workbook, worksheet, and range reference',
+          'Restore application settings after errors',
+          'Log destructive actions before they run',
+        ],
+      },
+    ],
+    formulas: [
+      { name: 'Option Explicit', latex: '\\text{Option Explicit}', description: 'Requires declared variables before a macro can run.' },
+      { name: 'Qualified Range', latex: '\\text{ThisWorkbook.Worksheets("Model").Range("A1")}', description: 'Targets a range without relying on the active sheet.' },
+      { name: 'Safe Toggle', latex: '\\text{Application.ScreenUpdating}: False \\rightarrow True', description: 'Pairs performance settings with a restoration step.' },
     ],
     exercise: 'macro-planner',
   },

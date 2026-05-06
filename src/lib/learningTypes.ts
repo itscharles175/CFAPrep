@@ -235,10 +235,17 @@ export interface ObjectiveReadiness {
 export interface ObjectiveReadinessV2 extends ObjectiveReadiness {
   readinessVersion: 2;
   itemTypeWeight: number;
+  itemTypeAdjustedScore: number;
   topicWeight: number;
   retentionForecastPct?: number;
   evidenceCount: number;
   primaryReason: ReviewReason;
+  reasonDetails: string[];
+  weaknessSignals: Array<{
+    type: 'item-type' | 'rubric' | 'artifact' | 'retention' | 'topic-weight' | 'calibration';
+    label: string;
+    impact: number;
+  }>;
 }
 
 export interface RetentionForecast {
@@ -264,6 +271,7 @@ export interface StudyPlan {
     title: string;
     path: string;
     reason: string;
+    reasonDetails?: string[];
     reviewReason?: ReviewReason;
     estimatedMinutes?: number;
   }>;
@@ -309,6 +317,8 @@ export interface ReviewQueueItem {
   reason: ReviewReason;
   retentionPct?: number;
   sourceIds?: string[];
+  reasonDetails?: string[];
+  weaknessSignals?: Array<{ label: string; impact: number }>;
 }
 
 export type ReviewAction = ReviewQueueItem;
@@ -531,7 +541,9 @@ export interface AnalyticsSummary {
   byObjective?: Array<{ objectiveId: string; topic: string; attempts: number; accuracy: number; recentTrend: 'new' | 'up' | 'flat' | 'down' }>;
   byItemType?: Array<{ itemType: string; attempts: number; accuracy: number }>;
   essayRubrics?: Array<{ criterion: string; attempts: number; averagePct: number }>;
-  skillLabs?: Array<{ labId: string; attempts: number; latestScore?: number }>;
+  constructedResponseWeaknesses?: Array<{ criterion: string; attempts: number; averagePct: number; impact: number }>;
+  skillLabs?: Array<{ labId: string; labType?: string; attempts: number; latestScore?: number; impactedObjectives: number; impact: number }>;
+  objectiveImpacts?: Array<{ objectiveId: string; topic?: string; sourceType: string; attempts: number; averageScore: number; impact: number }>;
   byTopic: Array<{
     topic: string;
     attempts: number;

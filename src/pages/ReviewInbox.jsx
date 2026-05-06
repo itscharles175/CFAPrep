@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, CalendarClock, Gauge, ListChecks, Wrench } from 'lucide-react';
-import { MetricCard, PageHeader, ReviewItemCard, SegmentedControl, StatusBadge, Surface } from '../components/ui/Primitives';
+import { EmptyPanel, MetricCard, PageHeader, ReviewItemCard, SegmentedControl, StatusBadge, Surface } from '../components/ui/Primitives';
 import {
   forecastReviewLoad,
   getReadinessByTopic,
@@ -11,6 +11,8 @@ import {
   saveStudyPlanSettings,
 } from '../lib/learning';
 import { getTutorProvider, isTutorEnabledFromEnv } from '../lib/aiTutorContracts';
+import { SourceRail } from '../components/SourceContext';
+import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 
 const filters = [
   { value: 'all', label: 'All' },
@@ -25,6 +27,7 @@ const filters = [
 ];
 
 export default function ReviewInbox() {
+  const [activePathway] = useLevel3Pathway();
   const [items, setItems] = useState([]);
   const [readiness, setReadiness] = useState([]);
   const [studyPlan, setStudyPlan] = useState(null);
@@ -39,10 +42,10 @@ export default function ReviewInbox() {
 
   async function refresh() {
     const [nextItems, nextReadiness, nextPlan, nextForecast] = await Promise.all([
-      getReviewInbox(),
-      getReadinessByTopic(),
-      getStudyPlan(),
-      forecastReviewLoad(10),
+      getReviewInbox({ level3Pathway: activePathway }),
+      getReadinessByTopic({ level3Pathway: activePathway }),
+      getStudyPlan({ level3Pathway: activePathway }),
+      forecastReviewLoad(10, new Date(), { level3Pathway: activePathway }),
     ]);
     setItems(nextItems);
     setReadiness(nextReadiness);
@@ -68,7 +71,12 @@ export default function ReviewInbox() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([getReviewInbox(), getReadinessByTopic(), getStudyPlan(), forecastReviewLoad(10)]).then(
+    Promise.all([
+      getReviewInbox({ level3Pathway: activePathway }),
+      getReadinessByTopic({ level3Pathway: activePathway }),
+      getStudyPlan({ level3Pathway: activePathway }),
+      forecastReviewLoad(10, new Date(), { level3Pathway: activePathway }),
+    ]).then(
       ([nextItems, nextReadiness, nextPlan, nextForecast]) => {
         if (!active) return;
         setItems(nextItems);
@@ -95,7 +103,7 @@ export default function ReviewInbox() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [activePathway]);
 
   async function handleRepair() {
     const preview = await repairVaultData();
@@ -128,7 +136,7 @@ export default function ReviewInbox() {
         actions={<button className="btn btn-secondary" onClick={handleRepair}><Wrench size={16} /> Repair Vault</button>}
       />
 
-      <div className="grid-4" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="grid-4 page-metrics">
         <MetricCard label="Due Today" value={studyPlan?.dueToday ?? 0} detail="Scheduled review items" icon={CalendarClock} />
         <MetricCard label="Forecast" value={studyPlan?.forecastReviewCount ?? 0} detail="Next 14 days" icon={Activity} tone="warning" />
         <MetricCard label="Weakest Topic" value={weakest ? `${weakest.readinessScore}%` : '-'} detail={weakest?.topic || 'No attempts yet'} icon={Gauge} tone="success" />
@@ -175,6 +183,9 @@ export default function ReviewInbox() {
                 <StatusBadge tone="accent">{action.label}</StatusBadge>
                 <h3>{action.title}</h3>
                 <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)' }}>{action.reason}</p>
+                {action.reasonDetails?.length > 0 && (
+                  <small className="muted-copy">{action.reasonDetails.slice(0, 2).join(' ')}</small>
+                )}
               </Link>
             ))}
           </div>
@@ -190,6 +201,25 @@ export default function ReviewInbox() {
         </Surface>
       )}
 
+      {weakest && (
+        <SourceRail
+          compact
+          title="Weak Topic Source Context"
+          subtitle="Official-first snippets mapped to your current review signal."
+          target={{
+            kind: 'review-item',
+            domain: weakest.domain,
+            level: studyPlan?.targetLevel || 'level1',
+            topicId: weakest.topic?.split(':').at(-1) || weakest.topic,
+            pathway: weakest.topic?.startsWith('level3:') ? activePathway : undefined,
+            title: weakest.title || weakest.topic,
+            objectiveIds: [weakest.learningObjective].filter(Boolean),
+            keywords: [weakest.reason, weakest.topic, weakest.title].filter(Boolean),
+            route: weakest.path || '/review',
+          }}
+        />
+      )}
+
       <Surface tone="analytics" style={{ marginBottom: 'var(--space-6)' }}>
         <h3 style={{ marginTop: 0 }}>Review Forecast</h3>
         <div className="forecast-strip">
@@ -203,13 +233,13 @@ export default function ReviewInbox() {
       </Surface>
 
       <SegmentedControl label="Review inbox filter" options={filters} value={filter} onChange={setFilter} />
-      {message && <p style={{ color: 'var(--text-secondary)' }}>{message}</p>}
+      {message && <p className="muted-copy">{message}</p>}
 
       <div className="review-list">
         {visibleItems.length ? (
           visibleItems.map((item) => <ReviewItemCard key={item.id} item={item} />)
         ) : (
-          <div className="glass-card no-hover">No items in this slice yet. Complete a lesson or quiz to populate the queue.</div>
+          <EmptyPanel title="No items in this slice yet" description="Complete a lesson or quiz to populate the queue." tone="vault" />
         )}
       </div>
     </div>

@@ -19,6 +19,7 @@ import {
   getVaultImportHistory,
   importVaultData,
   migrateVaultData,
+  previewVaultImportPayload,
   previewVaultImport,
   recordFlashcardResult,
   recordLearningEventEnvelope,
@@ -31,6 +32,7 @@ import {
   recordVignetteAttempt,
   rebuildLearningIndexes,
   resetVaultData,
+  saveNote,
   saveMockSectionState,
   saveResultArtifact,
   saveStudyPlanSettings,
@@ -43,6 +45,48 @@ import {
   VAULT_SCHEMA_VERSION,
   validateVaultData,
 } from './progressStore';
+import { buildCfaSourceBundle, importCfaSourceBundle } from './cfaSourceVault';
+import type { CfaSourceChunk, CfaSourceDocument } from './cfaSourceTypes';
+
+const sourceImportedAt = '2026-05-06T12:00:00.000Z';
+
+function sourceDocumentRow(overrides: Partial<CfaSourceDocument> = {}): CfaSourceDocument {
+  return {
+    id: 'source:progress-store-doc',
+    title: 'Synthetic Source Fixture',
+    level: 'level1',
+    year: 2026,
+    publisher: 'Synthetic Fixture',
+    sourceKind: 'user-source',
+    format: 'epub',
+    sha256: 'hash-progress-store-doc',
+    logicalHash: 'logical-progress-store-doc',
+    sizeBytes: 256,
+    canonical: true,
+    coverageTags: ['level1', 'ethics'],
+    topicIds: ['ethics'],
+    chunkCount: 1,
+    importedAt: sourceImportedAt,
+    privateUseOnly: true,
+    ...overrides,
+  };
+}
+
+function sourceChunkRow(overrides: Partial<CfaSourceChunk> = {}): CfaSourceChunk {
+  return {
+    id: 'source:progress-store-doc:chunk:0001',
+    documentId: 'source:progress-store-doc',
+    chunkIndex: 0,
+    locator: 'chapter 1',
+    heading: 'Private ethics notes',
+    text: 'Private synthetic source text for explicit backup inclusion tests.',
+    normalizedText: 'private synthetic source text for explicit backup inclusion tests',
+    topicIds: ['ethics'],
+    sourceHash: 'hash-progress-store-doc',
+    importedAt: sourceImportedAt,
+    ...overrides,
+  };
+}
 
 describe('local vault progress store', () => {
   beforeEach(async () => {
@@ -149,6 +193,56 @@ describe('local vault progress store', () => {
     expect(restored.dailyTargetMinutes).toBe(75);
     expect(restored.targetLevel).toBe('level3');
     expect(history[0]).toMatchObject({ schemaVersion: VAULT_SCHEMA_VERSION, encrypted: true, mode: 'replace' });
+  });
+
+  it('keeps source vault text out of exports unless explicitly included', async () => {
+    await importCfaSourceBundle(buildCfaSourceBundle({ documents: [sourceDocumentRow()], chunks: [sourceChunkRow()] }));
+
+    const standardExport = await exportVaultData();
+    const explicitExport = await exportVaultData({ includeSourceVault: true });
+    const encryptedExplicitExport = await exportVaultData({
+      includeSourceVault: true,
+      encryption: { passphrase: 'source backup passphrase' },
+    });
+    const encryptedPreview = await previewVaultImportPayload(encryptedExplicitExport, {
+      passphrase: 'source backup passphrase',
+      includeSourceVault: true,
+    });
+
+    expect(standardExport.sourceVault).toBeUndefined();
+    expect(explicitExport.sourceVault?.sourceChunks[0].text).toContain('Private synthetic source text');
+    expect(encryptedPreview.sourceAvailable).toBe(true);
+    expect(encryptedPreview.sourceIncluded).toBe(true);
+    expect(encryptedPreview.sourceCounts.sourceChunks).toBe(1);
+  });
+
+  it('previews encrypted imports after decryption and reports merge conflicts', async () => {
+    await saveStudyPlanSettings({ dailyTargetMinutes: 45, targetLevel: 'level1' });
+    const encrypted = await exportVaultData({ encryption: { passphrase: 'preview passphrase' } });
+
+    await resetVaultData('full');
+    await saveStudyPlanSettings({ dailyTargetMinutes: 90, targetLevel: 'level2' });
+
+    const lockedPreview = await previewVaultImportPayload(encrypted);
+    const wrongPassphrasePreview = await previewVaultImportPayload(encrypted, { passphrase: 'wrong passphrase' });
+    const preview = await previewVaultImportPayload(encrypted, {
+      mode: 'merge',
+      passphrase: 'preview passphrase',
+      conflictPolicy: 'keep-existing',
+    });
+
+    expect(lockedPreview.valid).toBe(false);
+    expect(lockedPreview.errors[0]).toMatch(/passphrase/i);
+    expect(wrongPassphrasePreview.valid).toBe(false);
+    expect(wrongPassphrasePreview.errors[0]).toMatch(/decrypt/i);
+    expect(preview.valid).toBe(true);
+    expect(preview.encrypted).toBe(true);
+    expect(preview.totalRows).toBeGreaterThan(0);
+    expect(preview.conflicts.byStore.studyPlanSettings).toBe(1);
+    expect(preview.conflictPolicy).toBe('keep-existing');
+
+    await importVaultData(encrypted, { mode: 'merge', passphrase: 'preview passphrase', conflictPolicy: 'keep-existing' });
+    expect((await getStudyPlanSettings()).dailyTargetMinutes).toBe(90);
   });
 
   it('supports keep-existing and prefer-import merge conflict policies', async () => {
@@ -378,6 +472,82 @@ describe('local vault progress store', () => {
     const validation = validateVaultData({ app: 'Other', stores: {} });
     expect(validation.valid).toBe(false);
     expect(validation.errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects source vault links whose citation document does not match the chunk document', async () => {
+    const exported = await exportVaultData();
+    delete (exported as Partial<typeof exported>).checksum;
+    exported.sourceVault = {
+      sourceDocuments: [
+        {
+          id: 'source:doc-a',
+          title: 'Doc A',
+          level: 'level1',
+          publisher: 'Synthetic',
+          sourceKind: 'user-source',
+          format: 'epub',
+          sha256: 'hash-a',
+          sizeBytes: 100,
+          canonical: true,
+          coverageTags: [],
+          topicIds: ['fixed-income'],
+          chunkCount: 1,
+          importedAt: '2026-05-06T00:00:00.000Z',
+          privateUseOnly: true,
+        },
+        {
+          id: 'source:doc-b',
+          title: 'Doc B',
+          level: 'level1',
+          publisher: 'Synthetic',
+          sourceKind: 'user-source',
+          format: 'epub',
+          sha256: 'hash-b',
+          sizeBytes: 100,
+          canonical: true,
+          coverageTags: [],
+          topicIds: ['fixed-income'],
+          chunkCount: 0,
+          importedAt: '2026-05-06T00:00:00.000Z',
+          privateUseOnly: true,
+        },
+      ],
+      sourceChunks: [
+        {
+          id: 'source:doc-a:chunk:0001',
+          documentId: 'source:doc-a',
+          chunkIndex: 0,
+          locator: 'chunk 1',
+          text: 'Fixed income private source text.',
+          normalizedText: 'fixed income private source text',
+          topicIds: ['fixed-income'],
+          sourceHash: 'hash-a',
+          importedAt: '2026-05-06T00:00:00.000Z',
+        },
+      ],
+      sourceIndexes: [],
+      sourceIngestionRuns: [],
+      sourceLinks: [
+        {
+          id: 'target::chunk',
+          targetId: 'target',
+          targetKind: 'module',
+          documentId: 'source:doc-b',
+          chunkId: 'source:doc-a:chunk:0001',
+          score: 1,
+          rank: 1,
+          sourcePriority: 'user-source',
+          matchedTerms: ['fixed'],
+          rankReason: 'fixture',
+          createdAt: '2026-05-06T00:00:00.000Z',
+        },
+      ],
+      sourceLinkOverrides: [],
+    };
+
+    const validation = validateVaultData(exported);
+    expect(validation.valid).toBe(false);
+    expect(validation.errors.some((error) => error.includes('mismatched source document citations'))).toBe(true);
   });
 
   it('rejects tampered v6 vault checksums', async () => {
@@ -714,5 +884,202 @@ describe('local vault progress store', () => {
     expect(vaultHealth.schemaVersion).toBe(VAULT_SCHEMA_VERSION);
     expect(vaultHealth.importHistory).toEqual(expect.any(Array));
     expect(await rebuildLearningIndexes()).toMatchObject({ reviewItems: expect.any(Number) });
+  });
+
+  it('shares Level III common-core progress while isolating inactive pathway analytics and review rows', async () => {
+    await recordQuizAttempt({
+      domain: 'cfa',
+      topic: 'level3:performance',
+      title: 'Performance Measurement',
+      mode: 'topic-drill',
+      score: 0,
+      total: 1,
+      elapsedSeconds: 30,
+      answers: [
+        {
+          level: 'level3',
+          topic: 'level3:performance',
+          questionId: 'level3-performance-common',
+          learningObjective: 'level3-performance-common-lo',
+          objectiveTitle: 'Evaluate performance as common core',
+          correct: false,
+          confidence: 'low',
+          errorCategory: 'concept',
+          difficulty: 'intermediate',
+        },
+      ],
+    });
+    await recordQuizAttempt({
+      domain: 'cfa',
+      topic: 'level3:private-markets-pathway',
+      title: 'Private Markets Pathway',
+      mode: 'topic-drill',
+      score: 0,
+      total: 1,
+      elapsedSeconds: 30,
+      answers: [
+        {
+          level: 'level3',
+          topic: 'level3:private-markets-pathway',
+          questionId: 'level3-private-markets-only',
+          learningObjective: 'level3-private-markets-only-lo',
+          objectiveTitle: 'Evaluate private markets pathway evidence',
+          correct: false,
+          confidence: 'low',
+          errorCategory: 'concept',
+          difficulty: 'advanced',
+        },
+      ],
+    });
+    await recordQuizAttempt({
+      domain: 'cfa',
+      topic: 'level3:private-wealth-pathway',
+      title: 'Private Wealth Pathway',
+      mode: 'topic-drill',
+      score: 0,
+      total: 1,
+      elapsedSeconds: 30,
+      answers: [
+        {
+          level: 'level3',
+          topic: 'level3:private-wealth-pathway',
+          questionId: 'level3-private-wealth-only',
+          learningObjective: 'level3-private-wealth-only-lo',
+          objectiveTitle: 'Evaluate private wealth pathway evidence',
+          correct: false,
+          confidence: 'low',
+          errorCategory: 'concept',
+          difficulty: 'advanced',
+        },
+      ],
+    });
+
+    const privateMarketsAnalytics = await getAnalyticsSummary({ level3Pathway: 'private-markets' });
+    const privateWealthInbox = await getReviewInbox({ level3Pathway: 'private-wealth' });
+
+    expect(privateMarketsAnalytics.byTopic.map((row) => row.topic)).toContain('level3:performance');
+    expect(privateMarketsAnalytics.byTopic.map((row) => row.topic)).toContain('level3:private-markets-pathway');
+    expect(privateMarketsAnalytics.byTopic.map((row) => row.topic)).not.toContain('level3:private-wealth-pathway');
+    expect(privateWealthInbox.map((item) => item.topic)).toContain('level3:performance');
+    expect(privateWealthInbox.map((item) => item.topic)).toContain('level3:private-wealth-pathway');
+    expect(privateWealthInbox.map((item) => item.topic)).not.toContain('level3:private-markets-pathway');
+  });
+
+  it('explains next-best actions with weighted readiness, rubric, and lab evidence', async () => {
+    const artifact = await saveResultArtifact({
+      type: 'calculator',
+      domain: 'cfa',
+      level: 'level3',
+      topic: 'level3:portfolio-construction',
+      title: 'Contribution Calculator',
+      summary: 'Calculator output for portfolio construction objective.',
+      assumptions: { activeRisk: 5 },
+      metrics: { score: 55 },
+      path: '/calculators',
+      objectiveIds: ['level3-portfolio-risk'],
+    });
+
+    await recordConstructedResponseAttempt({
+      domain: 'cfa',
+      level: 'level3',
+      topic: 'level3:portfolio-construction',
+      itemId: 'cr-weighted',
+      title: 'Portfolio Risk Response',
+      earnedPoints: 2,
+      maxPoints: 8,
+      rubricScores: { identify: 1, apply: 0, justify: 0, communicate: 1 },
+      response: 'Risk is high.',
+      elapsedSeconds: 300,
+      learningObjectives: ['level3-portfolio-risk'],
+      path: '/cfa/level3/portfolio-construction/constructed-response',
+    });
+
+    await recordQuizAttempt({
+      domain: 'cfa',
+      topic: 'level3:portfolio-construction',
+      title: 'Portfolio Construction Quiz',
+      mode: 'topic-drill',
+      score: 1,
+      total: 1,
+      elapsedSeconds: 30,
+      answers: [
+        {
+          level: 'level3',
+          questionId: 'pc-standalone',
+          learningObjective: 'level3-portfolio-risk',
+          objectiveTitle: 'Evaluate active risk and constraints',
+          correct: true,
+          confidence: 'high',
+          errorCategory: 'none',
+          difficulty: 'foundation',
+          itemType: 'single',
+        },
+      ],
+    });
+
+    await recordSkillLabAttempt({
+      domain: 'cfa',
+      level: 'level3',
+      topic: 'level3:portfolio-construction',
+      labId: 'Contribution Calculator',
+      labType: 'calculator',
+      objectiveIds: ['level3-portfolio-risk'],
+      artifactId: artifact.id,
+      score: 55,
+      elapsedSeconds: 90,
+    });
+
+    const objectives = await getReadinessByObjectiveV2();
+    const objective = objectives.find((row) => row.learningObjective === 'level3-portfolio-risk');
+    const inbox = await getReviewInbox();
+    const analytics = await getAnalyticsSummary();
+    const plan = await getStudyPlan();
+
+    expect(objective?.itemTypeWeight).toBeGreaterThan(1);
+    expect(objective?.itemTypeAdjustedScore).toBeLessThan(100);
+    expect(objective?.readinessScore).toBeLessThan(objective?.masteryScore ?? 100);
+    expect(objective?.reasonDetails.length).toBeGreaterThan(0);
+    expect(objective?.weaknessSignals.some((signal) => signal.type === 'rubric')).toBe(true);
+    expect(objective?.weaknessSignals.some((signal) => signal.type === 'artifact')).toBe(true);
+    expect(inbox.find((item) => item.reason === 'rubric-miss')?.reasonDetails?.join(' ')).toContain('constructed-response');
+    expect(inbox.find((item) => item.reason === 'skill-lab-gap')?.weaknessSignals?.[0]?.impact).toBeGreaterThan(0);
+    expect(analytics.constructedResponseWeaknesses?.some((row) => row.criterion === 'apply' && row.impact > 0)).toBe(true);
+    expect(analytics.objectiveImpacts?.some((row) => row.objectiveId === 'level3-portfolio-risk' && row.impact > 0)).toBe(true);
+    expect(plan.nextActions.some((action) => action.reasonDetails && action.reasonDetails.length > 0)).toBe(true);
+  });
+
+  it('creates distinct artifact notes and links them back to result artifacts', async () => {
+    const first = await saveResultArtifact({
+      type: 'calculator',
+      domain: 'cfa',
+      level: 'level1',
+      topic: 'quant-methods',
+      title: 'TVM result',
+      summary: 'Future value output.',
+      assumptions: {},
+      metrics: { futureValue: 110 },
+      path: '/calculators',
+      objectiveIds: ['calculator:tvm'],
+    });
+    const second = await saveResultArtifact({
+      type: 'calculator',
+      domain: 'cfa',
+      level: 'level1',
+      topic: 'fixed-income',
+      title: 'Bond result',
+      summary: 'Bond price output.',
+      assumptions: {},
+      metrics: { price: 99 },
+      path: '/calculators',
+      objectiveIds: ['calculator:bond'],
+    });
+
+    await saveNote({ type: 'artifact', domain: 'cfa', title: first.title, body: first.summary, path: first.path, artifactId: first.id });
+    await saveNote({ type: 'artifact', domain: 'cfa', title: second.title, body: second.summary, path: second.path, artifactId: second.id });
+    const exported = await exportVaultData();
+
+    expect(exported.stores.notes.filter((note) => note.type === 'artifact')).toHaveLength(2);
+    expect(exported.stores.resultArtifacts.find((artifact) => artifact.id === first.id)?.noteId).toContain(first.id);
+    expect(exported.stores.resultArtifacts.find((artifact) => artifact.id === second.id)?.noteId).toContain(second.id);
   });
 });

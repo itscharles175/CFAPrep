@@ -48,13 +48,17 @@ jobs:
 
       - name: Audit dependencies
         run: npm audit --omit=dev --audit-level=high
-        continue-on-error: true
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: dist/
+          path: |
+            dist/
+            !dist/source-vault/**
+            !**/*.qvsource
+            !**/*.pdf
+            !**/*.epub
           retention-days: 7
 
       - name: Upload reports
@@ -62,7 +66,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reports
-          path: dist/reports/
+          path: |
+            dist/reports/
+            !**/*.qvsource
+            !**/*.pdf
+            !**/*.epub
           retention-days: 14
 
   release-gates:
@@ -99,5 +107,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-reports
-          path: dist/reports/
+          path: |
+            dist/reports/
+            !**/*.qvsource
+            !**/*.pdf
+            !**/*.epub
           retention-days: 30

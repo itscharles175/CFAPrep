@@ -10,6 +10,8 @@ import { CacheFirst, StaleWhileRevalidate, NetworkFirst } from 'workbox-strategi
 import { ExpirationPlugin } from 'workbox-expiration';
 import { CacheableResponsePlugin } from 'workbox-cacheable-response';
 
+const OFFLINE_CONTENT_CACHE = 'quantvault-offline-content-v1';
+
 // Precache all Vite build output (injected at build time)
 precacheAndRoute(self.__WB_MANIFEST || []);
 cleanupOutdatedCaches();
@@ -49,15 +51,30 @@ registerRoute(
   }),
 );
 
-// SPA navigation — network first, fall back to cached index
+const navigationStrategy = new NetworkFirst({
+  cacheName: 'pages',
+  plugins: [
+    new CacheableResponsePlugin({ statuses: [0, 200] }),
+  ],
+});
+
+// SPA navigation — network first, then explicit offline route cache, then app shell
 registerRoute(
   ({ request }) => request.mode === 'navigate',
-  new NetworkFirst({
-    cacheName: 'pages',
-    plugins: [
-      new CacheableResponsePlugin({ statuses: [0, 200] }),
-    ],
-  }),
+  async ({ event, request }) => {
+    try {
+      return await navigationStrategy.handle({ event, request });
+    } catch {
+      const offlineCache = await caches.open(OFFLINE_CONTENT_CACHE);
+      const url = new URL(request.url);
+      return (
+        (await offlineCache.match(request)) ||
+        (await offlineCache.match(url.pathname)) ||
+        (await caches.match('/index.html')) ||
+        Response.error()
+      );
+    }
+  },
 );
 
 // Static assets (JS, CSS) — stale-while-revalidate

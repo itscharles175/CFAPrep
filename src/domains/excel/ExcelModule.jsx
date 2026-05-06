@@ -2,36 +2,42 @@ import { useMemo, useState } from 'react';
 import { useLocation, useParams, Link } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Lightbulb, PlaySquare } from 'lucide-react';
 import EmptyState from '../../components/EmptyState';
+import FormulaBlock from '../../components/FormulaBlock';
+import { excelModules } from '../../data/catalog';
 import { excelContent } from '../../data/excelContent';
 import { currency, dcfValue, weightedAverageCostOfCapital } from '../../lib/financeMath';
 import { downloadCsv } from '../../lib/exportUtils';
 import { useModuleProgress } from '../../hooks/useProgress';
 import { recordSkillLabAttempt, saveResultArtifact } from '../../lib/learning';
+import { Panel, Surface } from '../../components/ui/Primitives';
+import { SourceRail } from '../../components/SourceContext';
 
 function ExerciseShell({ title, children, assumptions = {}, metrics = {}, csvRows }) {
   const [message, setMessage] = useState('');
 
   async function saveExerciseRep() {
     const topic = window.location.pathname.split('/').at(-1) || 'excel-drill';
+    const sourceMeta = excelModules.find((module) => module.id === topic)?.sourceMeta || { level: 'level1', topicId: 'quant-methods' };
+    const reviewTopic = sourceMeta.level === 'level1' ? sourceMeta.topicId : `${sourceMeta.level}:${sourceMeta.topicId}`;
     const artifact = await saveResultArtifact({
       type: 'excel-grid',
       domain: 'excel',
-      level: 'level1',
-      topic,
+      level: sourceMeta.level,
+      topic: reviewTopic,
       title,
       summary: `${title} completed as a CFA-mapped Excel drill.`,
       assumptions: { route: window.location.pathname, ...assumptions },
       metrics: { score: 100, ...metrics },
       path: window.location.pathname,
-      objectiveIds: [`excel:${topic}`],
+      objectiveIds: [`excel:${topic}:${sourceMeta.topicId}`],
     });
     await recordSkillLabAttempt({
       domain: 'excel',
-      level: 'level1',
-      topic,
+      level: sourceMeta.level,
+      topic: reviewTopic,
       labId: title,
       labType: 'excel-drill',
-      objectiveIds: [`excel:${topic}`],
+      objectiveIds: [`excel:${topic}:${sourceMeta.topicId}`],
       artifactId: artifact.id,
       score: 100,
       elapsedSeconds: 90,
@@ -49,17 +55,22 @@ function ExerciseShell({ title, children, assumptions = {}, metrics = {}, csvRow
   }
 
   return (
-    <div className="glass-card no-hover lab-panel">
-      <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
-        <h3><PlaySquare size={18} color="var(--success)" /> {title}</h3>
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+    <Panel
+      title={title}
+      icon={PlaySquare}
+      tone="excel"
+      status="excel"
+      className="lab-panel"
+      actions={
+        <>
           <button className="btn btn-secondary btn-sm" onClick={exportCsv}>Export CSV</button>
           <button className="btn btn-secondary btn-sm" onClick={saveExerciseRep}>Save Drill Rep</button>
-        </div>
-      </div>
+        </>
+      }
+    >
       {children}
-      {message && <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>{message}</p>}
-    </div>
+      {message && <p className="muted-copy">{message}</p>}
+    </Panel>
   );
 }
 
@@ -303,13 +314,12 @@ function WaccMiniCard() {
   });
 
   return (
-    <div className="glass-card no-hover">
-      <h3>WACC Cross-Check</h3>
-      <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)' }}>
+    <Panel tone="excel" title="WACC Cross-Check">
+      <p className="muted-copy">
         70% equity at 11%, 30% debt at 5.5%, 24% tax rate.
       </p>
       <div className="calc-result-value" style={{ fontSize: 'var(--fs-2xl)' }}>{(wacc * 100).toFixed(2)}%</div>
-    </div>
+    </Panel>
   );
 }
 
@@ -326,6 +336,7 @@ export default function ExcelModule() {
   const { module: modId } = useParams();
   const location = useLocation();
   const data = excelContent[modId];
+  const sourceMeta = excelModules.find((module) => module.id === modId)?.sourceMeta || { level: 'level1', topicId: 'quant-methods' };
   const { completed, toggleComplete } = useModuleProgress({
     domain: 'excel',
     moduleId: data ? modId : null,
@@ -366,7 +377,7 @@ export default function ExcelModule() {
       <div className="learning-layout">
         <div className="module-content">
           {data.sections.map((section, index) => (
-            <div key={section.title} className="glass-card no-hover animate-fade" style={{ marginBottom: 'var(--space-6)', animationDelay: `${index * 80}ms` }}>
+            <Surface key={section.title} tone="excel" className="module-section-panel animate-fade" style={{ animationDelay: `${index * 80}ms` }}>
               <h2 style={{ marginTop: 0 }}>{section.title}</h2>
               <p>{section.content}</p>
               <div className="key-concept">
@@ -375,18 +386,36 @@ export default function ExcelModule() {
                   {section.keyPoints.map((point) => <li key={point}>{point}</li>)}
                 </ul>
               </div>
-            </div>
+            </Surface>
           ))}
         </div>
 
         <aside className="learning-sidebar">
-          <div className="glass-card no-hover">
-            <h3>Outcomes</h3>
+          <Panel tone="excel" title="Outcomes">
             <ul className="outcome-list">
               {data.outcomes.map((outcome) => <li key={outcome}>{outcome}</li>)}
             </ul>
-          </div>
+          </Panel>
+          {data.formulas?.length ? (
+            <Panel tone="excel" title="Formula Reference">
+              {data.formulas.map((formula) => <FormulaBlock key={formula.name} {...formula} />)}
+            </Panel>
+          ) : null}
           {modId === 'dcf-modeling' && <WaccMiniCard />}
+          <SourceRail
+            compact
+            limit={2}
+            title="CFA Source Context"
+            target={{
+              kind: 'tool',
+              domain: 'excel',
+              level: sourceMeta.level,
+              topicId: sourceMeta.topicId,
+              title: data.title,
+              keywords: [data.summary, ...data.outcomes, ...data.sections.map((section) => section.title)],
+              route: location.pathname,
+            }}
+          />
         </aside>
       </div>
 

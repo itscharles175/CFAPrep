@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Layers, Trophy } from 'lucide-react';
 import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
-import { CaseViewer, CommandHint, MetricCard, PageHeader, QuestionStage, StatusBadge } from '../../components/ui/Primitives';
+import { useLevel3Pathway } from './useLevel3Pathway';
+import { CaseViewer, CommandHint, EmptyPanel, MetricCard, PageHeader, QuestionStage, StatusBadge } from '../../components/ui/Primitives';
 import { recordVignetteAttempt } from '../../lib/learning';
+import { SourceRail } from '../../components/SourceContext';
 
 function nowMs() {
   return Date.now();
@@ -11,7 +13,8 @@ function nowMs() {
 
 export default function CfaVignette() {
   const { level, topic } = useParams();
-  const requestKey = `${level}:${topic}`;
+  const [activePathway] = useLevel3Pathway();
+  const requestKey = `${level}:${topic}:${level === 'level3' ? activePathway : 'all'}`;
   const [contentState, setContentState] = useState({ key: null, data: null });
   const data = contentState.key === requestKey ? contentState.data : null;
   const loading = contentState.key !== requestKey;
@@ -25,7 +28,7 @@ export default function CfaVignette() {
 
   useEffect(() => {
     let cancelled = false;
-    loadCfaTopicContent(level, topic)
+    loadCfaTopicContent(level, topic, level === 'level3' ? { pathway: activePathway } : {})
       .then((content) => {
         if (!cancelled) setContentState({ key: requestKey, data: content });
       })
@@ -35,7 +38,7 @@ export default function CfaVignette() {
     return () => {
       cancelled = true;
     };
-  }, [level, requestKey, topic]);
+  }, [activePathway, level, requestKey, topic]);
 
   useEffect(() => {
     function handleKeyboard(event) {
@@ -63,7 +66,7 @@ export default function CfaVignette() {
   if (!data || !vignette) {
     return (
       <div className="page-container">
-        <div className="glass-card no-hover">No vignette set is available for this topic yet.</div>
+        <EmptyPanel title="No vignette set is available for this topic yet." tone="exam" />
       </div>
     );
   }
@@ -134,6 +137,27 @@ export default function CfaVignette() {
       <CaseViewer title="Case Facts" exhibits={vignette.exhibits || []}>
         <p>{vignette.stem}</p>
       </CaseViewer>
+
+      {submitted && (
+        <SourceRail
+          title="Vignette Source Context"
+          subtitle="Private snippets appear after submission and are mapped to the case, objectives, and item-set explanations."
+          target={{
+            kind: 'vignette',
+            domain: 'cfa',
+            level,
+            topicId: topic,
+            pathway: level === 'level3' ? activePathway : undefined,
+            title: vignette.title,
+            objectiveIds: vignette.objectiveIds || vignette.questions.map((question) => question.learningObjective),
+            formulaNames: vignette.questions.map((question) => question.formula).filter(Boolean),
+            keywords: [vignette.stem, ...vignette.questions.map((question) => `${question.question} ${question.explanation}`)],
+            route: `/cfa/${level}/${topic}/vignette`,
+          }}
+          limit={3}
+          compact
+        />
+      )}
 
       <div className="quiz-container" style={{ marginTop: 'var(--space-6)' }}>
         {vignette.questions.map((question, index) => (

@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BadgeCheck, BookOpen, RotateCcw } from 'lucide-react';
-import { PageHeader, MetricCard, SegmentedControl } from '../components/ui/Primitives';
+import { EmptyPanel, MetricCard, PageHeader, Panel, SegmentedControl, StatusBadge } from '../components/ui/Primitives';
 import { buildFlashcards } from '../lib/flashcards';
 import { getBookmarks, recordFlashcardResult } from '../lib/learning';
 import { getCfaRuntimeReport } from '../domains/cfa/cfaSummary';
+import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 
 const filters = [
   { value: 'all', label: 'All' },
   { value: 'formula', label: 'Formulas' },
   { value: 'definition', label: 'Objectives' },
+  { value: 'error-pattern', label: 'Traps' },
   { value: 'bookmark', label: 'Bookmarks' },
 ];
 
 export default function Flashcards() {
+  const [activePathway] = useLevel3Pathway();
   const [bookmarks, setBookmarks] = useState([]);
   const [cards, setCards] = useState([]);
   const [loadingCards, setLoadingCards] = useState(true);
@@ -30,7 +33,7 @@ export default function Flashcards() {
 
   useEffect(() => {
     let cancelled = false;
-    buildFlashcards(bookmarks)
+    buildFlashcards(bookmarks, { level3Pathway: activePathway })
       .then((deck) => {
         if (!cancelled) setCards(deck);
       })
@@ -40,7 +43,7 @@ export default function Flashcards() {
     return () => {
       cancelled = true;
     };
-  }, [bookmarks]);
+  }, [activePathway, bookmarks]);
 
   function nextCard(mode) {
     if (!card) return;
@@ -65,12 +68,12 @@ export default function Flashcards() {
         title="Local Flashcards"
         subtitle={
           level1Runtime?.mode === 'exam-ready'
-            ? 'Generated from editorial exam-ready Level I and II packs, formulas, learning objectives, and your bookmarks. No AI dependency.'
+            ? `Generated from editorial exam-ready CFA packs, formulas, learning objectives, the active Level III pathway (${activePathway.replace(/-/g, ' ')}), and your bookmarks. No AI dependency.`
             : 'Generated from formulas, learning objectives, and your bookmarks. No AI dependency.'
         }
       />
 
-      <div className="grid-3" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="grid-3 page-metrics">
         <MetricCard label="Cards" value={visibleCards.length} detail={`${cards.length} total generated`} icon={BookOpen} />
         <MetricCard label="Mode" value={filter} detail="Current drill type" icon={RotateCcw} tone="warning" />
         <MetricCard label="Progress" value={visibleCards.length ? `${index + 1}/${visibleCards.length}` : '-'} detail="Current deck position" icon={BadgeCheck} tone="success" />
@@ -79,14 +82,14 @@ export default function Flashcards() {
       <SegmentedControl label="Flashcard type" options={filters} value={filter} onChange={(value) => { setFilter(value); setIndex(0); setRevealed(false); }} />
 
       {loadingCards ? (
-        <div className="flashcard-panel glass-card no-hover" aria-busy="true">
+        <Panel className="flashcard-panel" aria-busy="true">
           <div className="skeleton skeleton-heading" />
           <div className="skeleton skeleton-text" />
           <div className="skeleton skeleton-card" />
-        </div>
+        </Panel>
       ) : card ? (
-        <div className="flashcard-panel glass-card no-hover">
-          <div className="badge badge-purple">{card.type}</div>
+        <Panel className="flashcard-panel" tone="study" status="accent">
+          <StatusBadge tone="quant">{card.type}</StatusBadge>
           <h2>{card.front}</h2>
           {revealed ? (
             <>
@@ -100,9 +103,9 @@ export default function Flashcards() {
           ) : (
             <button className="btn btn-primary btn-lg" onClick={() => setRevealed(true)}>Reveal</button>
           )}
-        </div>
+        </Panel>
       ) : (
-        <div className="glass-card no-hover">No cards in this filter yet.</div>
+        <EmptyPanel title="No cards in this filter yet" tone="study" />
       )}
     </div>
   );

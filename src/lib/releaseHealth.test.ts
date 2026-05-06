@@ -22,13 +22,14 @@ describe('release health report', () => {
     expect(report.summary.level1ExamReadyTopics).toBe(10);
     expect(report.summary.level2ExamReadyTopics).toBe(10);
     expect(report.summary.level2TopicCount).toBe(10);
-    expect(report.summary.level3ExamReadyTopics).toBe(6);
-    expect(report.summary.level3TopicCount).toBe(6);
+    expect(report.summary.level3ExamReadyTopics).toBe(8);
+    expect(report.summary.level3TopicCount).toBe(8);
     expect(report.summary.activeCurriculumWarnings).toBe(0);
     expect(report.summary.futureDiagnostics).toBe(0);
     expect(report.gates.find((gate) => gate.id === 'level1-editorial')?.status).toBe('ok');
     expect(report.gates.find((gate) => gate.id === 'level2-editorial')?.status).toBe('ok');
     expect(report.gates.find((gate) => gate.id === 'level3-editorial')?.status).toBe('ok');
+    expect(report.gates.find((gate) => gate.id === 'source-audit')?.status).toBe('pending');
     expect(report.gates.find((gate) => gate.id === 'bundle-report')?.status).toBe('ok');
     expect(report.gates.find((gate) => gate.id === 'visual-regression')?.status).toBe('pending');
     expect(report.gates.find((gate) => gate.id === 'accessibility')?.status).toBe('pending');

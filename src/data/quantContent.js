@@ -31,6 +31,16 @@ export const quantContent = {
           'Residual diagnostics matter as much as coefficients',
         ],
       },
+      {
+        title: 'Risk Workflow',
+        content:
+          'A probability workflow starts by choosing the loss variable, matching the distribution to the decision horizon, and stress-testing the assumption before reporting a single risk number.',
+        keyPoints: [
+          'Document the horizon, confidence level, and data window',
+          'Compare parametric output with at least one scenario loss',
+          'Escalate model risk when tails or regimes dominate the result',
+        ],
+      },
     ],
     formulas: [
       { name: 'Variance', latex: '\\sigma^2 = E[(X-\\mu)^2]', description: 'Expected squared distance from the mean' },
@@ -71,10 +81,21 @@ export const quantContent = {
           'PCA is useful for compression, monitoring, and stress testing',
         ],
       },
+      {
+        title: 'Portfolio Matrix Checks',
+        content:
+          'Before a covariance matrix is used in an optimizer or risk report, confirm that asset ordering, units, symmetry, and diversification logic are correct. Matrix math is unforgiving when the labels drift.',
+        keyPoints: [
+          'Weights, returns, and covariance rows must share the same order',
+          'Covariance matrices should be symmetric and positive semi-definite',
+          'Explain risk contribution, not just total volatility',
+        ],
+      },
     ],
     formulas: [
       { name: 'Portfolio Variance', latex: '\\sigma_p^2 = w^T\\Sigma w', description: 'Portfolio risk from weights and covariance' },
       { name: 'Factor Return', latex: 'r = Xf + \\epsilon', description: 'Return explained by factor exposure plus residual' },
+      { name: 'Correlation From Covariance', latex: '\\rho_{ij}=\\frac{\\Sigma_{ij}}{\\sigma_i\\sigma_j}', description: 'Standardizes covariance into correlation' },
     ],
     lab: 'portfolio-risk',
   },
@@ -110,10 +131,21 @@ export const quantContent = {
           'Simulation helps build intuition before formal derivations',
         ],
       },
+      {
+        title: 'Simulation Discipline',
+        content:
+          'Path simulations are useful only when the time step, random seed, drift convention, and volatility convention are explicit. The desk question is whether path behavior changes the decision.',
+        keyPoints: [
+          'Use annualized inputs consistently with the simulation time step',
+          'Separate real-world drift from risk-neutral drift',
+          'Summarize path dispersion, not just one illustrative path',
+        ],
+      },
     ],
     formulas: [
       { name: 'Geometric Brownian Motion', latex: 'dS_t = \\mu S_t dt + \\sigma S_t dW_t', description: 'Common price process with drift and volatility' },
       { name: 'Ito Lemma', latex: 'df = f_tdt + f_xdX + \\frac{1}{2}f_{xx}(dX)^2', description: 'Chain rule for stochastic processes' },
+      { name: 'Risk-Neutral Drift', latex: 'dS_t = rS_tdt + \\sigma S_tdW_t^Q', description: 'Risk-neutral price process used for derivative valuation' },
     ],
     lab: 'brownian-path',
   },
@@ -149,10 +181,21 @@ export const quantContent = {
           'Greeks are local approximations, not global guarantees',
         ],
       },
+      {
+        title: 'Model Cross-Checks',
+        content:
+          'A pricing workflow compares model value, intrinsic value, payoff, and sensitivity. When those do not tell the same story, the issue is usually inputs, convention, or an overlooked optionality feature.',
+        keyPoints: [
+          'Check moneyness before interpreting price or delta',
+          'Compare Black-Scholes output with payoff intuition',
+          'Treat volatility as an assumption to test, not a fact to accept',
+        ],
+      },
     ],
     formulas: [
       { name: 'Black-Scholes Call', latex: 'C=S_0N(d_1)-Ke^{-rT}N(d_2)', description: 'European call option value' },
       { name: 'Put-Call Parity', latex: 'C + Ke^{-rT}=P+S_0', description: 'No-arbitrage relationship between calls and puts' },
+      { name: 'Black-Scholes d1', latex: 'd_1=\\frac{\\ln(S_0/K)+(r+\\sigma^2/2)T}{\\sigma\\sqrt{T}}', description: 'Moneyness, carry, volatility, and time input to Black-Scholes' },
     ],
     lab: 'option-surface',
   },
@@ -188,10 +231,21 @@ export const quantContent = {
           'Reverse stress tests start with failure and work backward',
         ],
       },
+      {
+        title: 'Risk Communication',
+        content:
+          'Risk output should state what the number measures, what it excludes, and what decision it supports. VaR, expected shortfall, and stress loss belong together because each answers a different governance question.',
+        keyPoints: [
+          'Pair VaR with expected shortfall for tail severity',
+          'Show stress loss beside statistical loss estimates',
+          'Name the model limitations in the same view as the metric',
+        ],
+      },
     ],
     formulas: [
       { name: 'Parametric VaR', latex: 'VaR_\\alpha = V(\\mu - z_\\alpha\\sigma)', description: 'Normal model loss threshold' },
       { name: 'Expected Shortfall', latex: 'ES_\\alpha = E[L | L > VaR_\\alpha]', description: 'Average tail loss beyond VaR' },
+      { name: 'Stress Loss', latex: '\\text{Stress loss}=V\\times\\text{Shock}', description: 'Scenario loss from a stated portfolio shock' },
     ],
     lab: 'stress-var',
   },
@@ -227,10 +281,21 @@ export const quantContent = {
           'Transaction costs can erase theoretical improvements',
         ],
       },
+      {
+        title: 'Implementation Guardrails',
+        content:
+          'An optimized allocation still has to be tradable, explainable, and reviewable. Constraint design, turnover limits, and sensitivity checks turn a fragile efficient-frontier point into an investable recommendation.',
+        keyPoints: [
+          'Run sensitivity on expected returns before trusting weights',
+          'Use constraints to encode liquidity, concentration, and turnover limits',
+          'Translate optimizer output into risk-budget language',
+        ],
+      },
     ],
     formulas: [
       { name: 'Portfolio Return', latex: 'E[R_p] = w^T\\mu', description: 'Weighted expected return' },
       { name: 'Sharpe Ratio', latex: 'S = \\frac{R_p - R_f}{\\sigma_p}', description: 'Excess return per unit of total risk' },
+      { name: 'Portfolio Variance', latex: '\\sigma_p^2=w^T\\Sigma w', description: 'Portfolio variance from weights and covariance matrix' },
     ],
     lab: 'efficient-frontier',
   },

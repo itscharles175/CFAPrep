@@ -13,6 +13,7 @@ import type {
   StudyUnit,
 } from '../../lib/contentTypes';
 import { contentPackToCurriculumTopic, getAuthoredContentPack } from './contentPacks';
+import { enrichCfaFormula } from './formulaLexicon.js';
 
 export const DEFAULT_CFA_EXAM_YEAR = 2026;
 
@@ -79,22 +80,16 @@ function draftObjectives(level: CurriculumLevel['id'], topicId: string, title: s
 }
 
 function draftFormulas(level: CurriculumLevel['id'], topicId: string, title: string, objectiveIds: string[]): FormulaBlueprint[] {
-  return [
-    {
-      id: `${level}-${topicId}-formula-1`,
-      name: `${title} Key Concept Bridge`,
-      latex: '\\text{Input} \\rightarrow \\text{Decision}',
-      description: `Placeholder concept bridge for authored ${title} formulas and decision rules.`,
-      objectiveIds: objectiveIds.slice(0, 2),
-    },
-    {
-      id: `${level}-${topicId}-formula-2`,
-      name: `${title} Review Signal`,
-      latex: '\\text{Signal} = \\text{Fact} - \\text{Distractor}',
-      description: `Placeholder review signal that will be replaced by authored formulas or key concepts.`,
-      objectiveIds: objectiveIds.slice(1, 3),
-    },
-  ];
+  return [`${title} Key Concept Bridge`, `${title} Review Signal`].map((name, index) => {
+    const enrichment = enrichCfaFormula({ level, topicId, name, index });
+    return {
+      id: `${level}-${topicId}-formula-${index + 1}`,
+      name,
+      latex: enrichment.latex,
+      description: `${enrichment.description} This draft row is replaced when an authored topic pack exists.`,
+      objectiveIds: objectiveIds.slice(index, index + 2),
+    };
+  });
 }
 
 function makeAssessmentBlueprint(
@@ -596,6 +591,8 @@ const level3TopicSeeds = [
   { id: 'performance', title: 'Performance Measurement', weight: '5-10%', focus: 'benchmark quality, attribution, appraisal, and manager monitoring', pathway: 'core' as const },
   { id: 'derivatives-risk', title: 'Derivatives And Risk Management', weight: '10-15%', focus: 'overlay strategies, option structures, currency risk, and hedge evaluation', pathway: 'core' as const },
   { id: 'pm-pathway', title: 'Portfolio Management Pathway', weight: '30-35%', focus: 'active equity, fixed-income strategy, index design, risk budgeting, and portfolio implementation', pathway: 'portfolio-management' as const },
+  { id: 'private-markets-pathway', title: 'Private Markets Pathway', weight: '30-35%', focus: 'private equity, private credit, real assets, infrastructure, fund structures, valuation, and GP/LP decisions', pathway: 'private-markets' as const },
+  { id: 'private-wealth-pathway', title: 'Private Wealth Pathway', weight: '30-35%', focus: 'goals-based planning, taxes, estate transfer, concentrated risk, family dynamics, and insurance planning', pathway: 'private-wealth' as const },
 ];
 
 function buildLevel1Topics(): CurriculumTopic[] {
@@ -664,7 +661,7 @@ export const cfaCurriculumMap = {
       id: 'level3',
       title: 'CFA Level III',
       examFormat: 'Constructed-response and item-set practice focused on integrating portfolio management decisions with case facts.',
-      examWeightNotes: 'Six active Level III topics use an all-or-nothing authored gate before public exam-ready release.',
+      examWeightNotes: 'Core Level III topics plus all three pathway topics use an all-or-nothing authored gate before public exam-ready release.',
       topics: buildLevel3Topics(),
     },
   ],

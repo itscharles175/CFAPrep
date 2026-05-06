@@ -13,6 +13,7 @@ import type {
   TopicDataset,
 } from '../../../lib/contentTypes';
 import type { Difficulty, ErrorCategory, LessonSection } from '../../../lib/learningTypes';
+import { enrichCfaFormula } from '../formulaLexicon.js';
 
 export interface Level2TopicSpec {
   id: string;
@@ -53,7 +54,7 @@ function provenance(spec: Level2TopicSpec, kind: string, id: string, qualityNote
     author: 'QuantVault Level II editorial desk',
     reviewer: `QuantVault ${spec.title} Level II reviewer`,
     reviewedAt: reviewerDate,
-    sourceKind: kind === 'dataset' ? 'local-dataset' : kind === 'pack' ? 'expert-review' : 'editorial-authoring',
+    sourceKind: kind === 'dataset' ? 'local-dataset' : kind === 'pack' ? 'expert-review' : 'local-source-digest',
     editorialStatus: 'exam-ready',
     qualityNotes,
     generatedFromTemplate: false,
@@ -62,6 +63,7 @@ function provenance(spec: Level2TopicSpec, kind: string, id: string, qualityNote
       `level2-${spec.id}-2026:item-set-review`,
       `level2-${spec.id}-2026:${kind}:${id}`,
     ],
+    sourceIds: [`cfa-source-digest:level2:${spec.id}:2026`],
   };
 }
 
@@ -88,11 +90,17 @@ function objectives(spec: Level2TopicSpec): ObjectiveBlueprint[] {
 function formulas(spec: Level2TopicSpec, objectiveBlueprints: ObjectiveBlueprint[]): FormulaBlueprint[] {
   return Array.from({ length: 8 }, (_, index) => {
     const name = spec.formulas[index % spec.formulas.length];
+    const enrichment = enrichCfaFormula({
+      level: 'level2',
+      topicId: spec.id,
+      name,
+      index,
+    });
     return {
       id: `level2-${spec.id}-formula-${String(index + 1).padStart(2, '0')}`,
       name,
-      latex: `\\text{${name.replace(/[^a-zA-Z0-9 ]+/g, ' ')}} = \\frac{\\text{Case input ${index + 1}}}{\\text{Decision base ${index + 1}}}`,
-      description: `${name} is used only when the Level II item set supplies the matching inputs and asks for the linked interpretation.`,
+      latex: enrichment.latex,
+      description: `${enrichment.description} Use it only when the Level II item set supplies the matching exhibit facts and asks for the linked interpretation.`,
       objectiveIds: [objectiveBlueprints[index % objectiveBlueprints.length].id, objectiveBlueprints[(index + 2) % objectiveBlueprints.length].id],
     };
   });

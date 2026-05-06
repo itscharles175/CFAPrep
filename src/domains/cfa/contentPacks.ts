@@ -33,6 +33,7 @@ import type {
 } from '../../lib/contentTypes';
 import type { Difficulty, ErrorCategory, Formula, LessonSection } from '../../lib/learningTypes';
 import { buildLevel1EditorialPacks } from './level1Packs';
+import { enrichCfaFormula } from './formulaLexicon.js';
 import { level2AuthoredContentPacks, level2TopicIds } from './level2Packs';
 import { level3AuthoredContentPacks, level3TopicIds } from './level3Packs';
 
@@ -512,13 +513,21 @@ function objectiveBlueprints(spec: Level1TopicSpec): ObjectiveBlueprint[] {
 }
 
 function formulaBlueprints(spec: Level1TopicSpec, objectives: ObjectiveBlueprint[]): FormulaBlueprint[] {
-  return spec.keyConcepts.map((concept, index) => ({
-    id: `level1-${spec.id}-formula-${String(index + 1).padStart(2, '0')}`,
-    name: concept,
-    latex: `\\text{${concept.replace(/[^a-zA-Z0-9 ]+/g, ' ')}} = \\text{Input}_{${index + 1}} \\rightarrow \\text{Decision}_{${index + 1}}`,
-    description: `Original ${spec.title} formula or key concept used to convert provided facts into an exam-ready decision.`,
-    objectiveIds: [objectives[index % objectives.length].id, objectives[(index + 3) % objectives.length].id],
-  }));
+  return spec.keyConcepts.map((concept, index) => {
+    const enrichment = enrichCfaFormula({
+      level: 'level1',
+      topicId: spec.id,
+      name: concept,
+      index,
+    });
+    return {
+      id: `level1-${spec.id}-formula-${String(index + 1).padStart(2, '0')}`,
+      name: concept,
+      latex: enrichment.latex,
+      description: `${enrichment.description} It is linked to original ${spec.title} practice facts and exam-ready decisions.`,
+      objectiveIds: [objectives[index % objectives.length].id, objectives[(index + 3) % objectives.length].id],
+    };
+  });
 }
 
 function lessonBlueprints(spec: Level1TopicSpec, objectives: ObjectiveBlueprint[]): LessonBlueprint[] {
@@ -591,14 +600,15 @@ function assessmentFromQuestionPack(pack: QuestionPack): AssessmentBlueprint {
 }
 
 function assessmentFromVignettePack(pack: VignettePack, level: CurriculumLevel['id'] = 'level1'): AssessmentBlueprint {
+  const isItemSet = level === 'level2' || level === 'level3';
   return {
     id: `${pack.id}-assessment`,
     itemType: 'vignette',
-    scope: level === 'level2' ? 'item-set' : 'mini-vignette',
+    scope: isItemSet ? 'item-set' : 'mini-vignette',
     count: pack.count,
     objectiveIds: pack.objectiveIds,
     difficultyMix: { foundation: 0.25, intermediate: 0.5, advanced: 0.25 },
-    promptStyle: `Original mini-vignette with ${pack.questionsPerVignette} independently scorable questions and structured exhibits.`,
+    promptStyle: `Original ${isItemSet ? 'item set' : 'mini-vignette'} with ${pack.questionsPerVignette} independently scorable questions and structured exhibits.`,
     notes: `Required exhibits: ${pack.exhibitTypes.join(', ')}.`,
   };
 }
@@ -617,13 +627,21 @@ function overlaps(left: string[], right: string[]) {
   return left.some((item) => right.includes(item));
 }
 
+function pathwayForPack(pack: ContentPack): CurriculumTopic['pathway'] {
+  if (pack.level !== 'level3') return undefined;
+  if (pack.topicId === 'pm-pathway') return 'portfolio-management';
+  if (pack.topicId === 'private-markets-pathway') return 'private-markets';
+  if (pack.topicId === 'private-wealth-pathway') return 'private-wealth';
+  return 'core';
+}
+
 export function contentPackToCurriculumTopic(pack: ContentPack): CurriculumTopic {
   return {
     id: pack.topicId,
     title: pack.title,
     examWeight: pack.examWeight,
     maturity: pack.maturity,
-    pathway: pack.level === 'level3' && pack.topicId === 'pm-pathway' ? 'portfolio-management' : pack.level === 'level3' ? 'core' : undefined,
+    pathway: pathwayForPack(pack),
     sourceMeta: pack.sourceMeta,
     objectiveBlueprints: pack.objectiveBlueprints,
     formulaBlueprints: pack.formulaBlueprints,
@@ -1060,7 +1078,7 @@ export const level3SaturationBatch: CfaContentBatch = {
   acceptanceCriteria: [
     'Every Level III topic has a strict authored content pack with 8 objectives, command-word study units, 4 item-set vignettes, 3 constructed-response cases, rubrics, datasets, flashcards, and mapped labs.',
     'All Level III constructed responses and item sets use original QuantVault wording and public CFA sources only for structure, format, and topic weights.',
-    'Level III public exam-ready status is all-or-nothing across all six active topics.',
+    'Level III public exam-ready status is all-or-nothing across core topics and all three pathway topics.',
   ],
 };
 

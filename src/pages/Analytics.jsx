@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Activity, BarChart3, Clock, Gauge, Layers, Target } from 'lucide-react';
-import { PageHeader, MetricCard } from '../components/ui/Primitives';
+import { PageHeader, MetricCard, Panel } from '../components/ui/Primitives';
 import { getAnalyticsSummary } from '../lib/learning';
+import { SourceRail } from '../components/SourceContext';
+import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 
 function pct(value) {
   return Number.isFinite(value) ? `${value}%` : '-';
@@ -14,17 +16,18 @@ function seconds(value) {
 }
 
 export default function Analytics() {
+  const [activePathway] = useLevel3Pathway();
   const [summary, setSummary] = useState(null);
 
   useEffect(() => {
     let active = true;
-    getAnalyticsSummary().then((nextSummary) => {
+    getAnalyticsSummary({ level3Pathway: activePathway }).then((nextSummary) => {
       if (active) setSummary(nextSummary);
     });
     return () => {
       active = false;
     };
-  }, []);
+  }, [activePathway]);
 
   const topWeakTopics = [...(summary?.byTopic || [])].sort((a, b) => a.accuracy - b.accuracy).slice(0, 8);
 
@@ -36,16 +39,15 @@ export default function Analytics() {
         subtitle="Local-only performance telemetry by topic, difficulty, error type, confidence, and recent trend."
       />
 
-      <div className="grid-4" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="grid-4 page-metrics">
         <MetricCard label="Questions" value={summary?.totals.questionsAnswered ?? 0} detail="Recorded answer rows" icon={Target} />
         <MetricCard label="Sessions" value={summary?.totals.sessions ?? 0} detail={seconds(summary?.totals.studyTimeSeconds)} icon={Clock} tone="success" />
         <MetricCard label="Mocks" value={summary?.totals.mockAttempts ?? 0} detail={`${summary?.totals.vignetteAttempts ?? 0} vignettes`} icon={BarChart3} tone="warning" />
         <MetricCard label="Artifacts" value={summary?.totals.artifacts ?? 0} detail="Calculator/lab outputs" icon={Layers} />
       </div>
 
-      <div className="grid-2" style={{ alignItems: 'start', marginBottom: 'var(--space-6)' }}>
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Readiness By Level</h3>
+      <div className="grid-2 analytics-section-grid">
+        <Panel tone="analytics" title="Readiness By Level">
           <div className="analytics-table">
             {(summary?.byLevel || []).map((row) => (
               <div className="analytics-row" key={row.level}>
@@ -54,11 +56,10 @@ export default function Analytics() {
                 <span>{pct(row.accuracy)}</span>
               </div>
             ))}
-            {!summary?.byLevel?.length && <p style={{ color: 'var(--text-secondary)' }}>No level-specific attempts yet.</p>}
+            {!summary?.byLevel?.length && <p className="muted-copy">No level-specific attempts yet.</p>}
           </div>
-        </div>
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Item-Type Performance</h3>
+        </Panel>
+        <Panel tone="analytics" title="Item-Type Performance">
           <div className="analytics-table">
             {(summary?.byItemType || []).map((row) => (
               <div className="analytics-row" key={row.itemType}>
@@ -67,14 +68,31 @@ export default function Analytics() {
                 <span>{pct(row.accuracy)}</span>
               </div>
             ))}
-            {!summary?.byItemType?.length && <p style={{ color: 'var(--text-secondary)' }}>Quiz, vignette, mock, and skill-lab attempts will appear here.</p>}
+            {!summary?.byItemType?.length && <p className="muted-copy">Quiz, vignette, mock, and skill-lab attempts will appear here.</p>}
           </div>
-        </div>
+        </Panel>
       </div>
 
-      <div className="grid-2" style={{ alignItems: 'start' }}>
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Topic Readiness Signals</h3>
+      {topWeakTopics[0] && (
+        <SourceRail
+          compact
+          title="Weakest Analytics Source Context"
+          subtitle="Private snippets mapped to the lowest-accuracy topic in your local telemetry."
+          target={{
+            kind: 'review-item',
+            domain: 'cfa',
+            level: topWeakTopics[0].level || 'level1',
+            topicId: topWeakTopics[0].topic?.split(':').at(-1) || topWeakTopics[0].topic,
+            pathway: topWeakTopics[0].level === 'level3' || topWeakTopics[0].topic?.startsWith('level3:') ? activePathway : undefined,
+            title: topWeakTopics[0].topic,
+            keywords: [topWeakTopics[0].recentTrend, `${topWeakTopics[0].accuracy} accuracy`],
+            route: '/analytics',
+          }}
+        />
+      )}
+
+      <div className="grid-2 analytics-section-grid">
+        <Panel tone="analytics" title="Topic Readiness Signals">
           <div className="analytics-table">
             <div className="analytics-row analytics-head">
               <span>Topic</span>
@@ -92,13 +110,12 @@ export default function Analytics() {
                 </div>
               ))
             ) : (
-              <p style={{ color: 'var(--text-secondary)' }}>Take quizzes or mock sections to populate topic analytics.</p>
+              <p className="muted-copy">Take quizzes or mock sections to populate topic analytics.</p>
             )}
           </div>
-        </div>
+        </Panel>
 
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Confidence Calibration</h3>
+        <Panel tone="analytics" title="Confidence Calibration">
           <div className="analytics-table">
             <div className="analytics-row analytics-head">
               <span>Confidence</span>
@@ -115,10 +132,9 @@ export default function Analytics() {
               </div>
             ))}
           </div>
-        </div>
+        </Panel>
 
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Difficulty Mix</h3>
+        <Panel tone="analytics" title="Difficulty Mix">
           <div className="analytics-table">
             {(summary?.byDifficulty || []).map((row) => (
               <div className="analytics-row" key={row.difficulty}>
@@ -128,10 +144,9 @@ export default function Analytics() {
               </div>
             ))}
           </div>
-        </div>
+        </Panel>
 
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Error Types</h3>
+        <Panel tone="analytics" title="Error Types">
           <div className="analytics-table">
             {(summary?.byErrorCategory || []).map((row) => (
               <div className="analytics-row" key={row.errorCategory}>
@@ -140,12 +155,11 @@ export default function Analytics() {
               </div>
             ))}
           </div>
-        </div>
+        </Panel>
       </div>
 
-      <div className="grid-2" style={{ alignItems: 'start', marginTop: 'var(--space-6)' }}>
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Level III Rubric Bands</h3>
+      <div className="grid-2 analytics-section-grid">
+        <Panel tone="analytics" title="Level III Rubric Bands">
           <div className="analytics-table">
             {(summary?.essayRubrics || []).map((row) => (
               <div className="analytics-row" key={row.criterion}>
@@ -155,24 +169,49 @@ export default function Analytics() {
               </div>
             ))}
           </div>
-        </div>
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Skill-Lab Feedback</h3>
+        </Panel>
+        <Panel tone="analytics" title="Skill-Lab Feedback">
           <div className="analytics-table">
             {(summary?.skillLabs || []).slice(0, 8).map((row) => (
               <div className="analytics-row" key={row.labId}>
                 <span>{row.labId}</span>
                 <strong>{row.attempts}</strong>
-                <span>{row.latestScore ?? '-'}</span>
+                <span>{row.latestScore ?? '-'} / {row.impact ?? 0}</span>
               </div>
             ))}
-            {!summary?.skillLabs?.length && <p style={{ color: 'var(--text-secondary)' }}>Calculator, Quant, and Excel drills will feed this panel.</p>}
+            {!summary?.skillLabs?.length && <p className="muted-copy">Calculator, Quant, and Excel drills will feed this panel.</p>}
           </div>
-        </div>
+        </Panel>
       </div>
 
-      <div className="glass-card no-hover" style={{ marginTop: 'var(--space-6)' }}>
-        <h3 style={{ marginTop: 0 }}><Activity size={18} /> Rolling Trend</h3>
+      <div className="grid-2 analytics-section-grid">
+        <Panel tone="analytics" title="Constructed-Response Weaknesses">
+          <div className="analytics-table">
+            {(summary?.constructedResponseWeaknesses || []).slice(0, 6).map((row) => (
+              <div className="analytics-row" key={row.criterion}>
+                <span>{row.criterion}</span>
+                <strong>{pct(row.averagePct)}</strong>
+                <span>{row.impact}</span>
+              </div>
+            ))}
+            {!summary?.constructedResponseWeaknesses?.length && <p className="muted-copy">Rubric weakness signals appear after Level III responses.</p>}
+          </div>
+        </Panel>
+        <Panel tone="analytics" title="Objective Impact">
+          <div className="analytics-table">
+            {(summary?.objectiveImpacts || []).slice(0, 8).map((row) => (
+              <div className="analytics-row" key={`${row.sourceType}:${row.objectiveId}`}>
+                <span>{row.objectiveId}</span>
+                <strong>{row.sourceType}</strong>
+                <span>{row.impact}</span>
+              </div>
+            ))}
+            {!summary?.objectiveImpacts?.length && <p className="muted-copy">Calculator and lab artifacts with objective metadata will appear here.</p>}
+          </div>
+        </Panel>
+      </div>
+
+      <Panel tone="analytics" title="Rolling Trend" icon={Activity} className="analytics-wide-panel">
         <div className="forecast-strip">
           {(summary?.rollingTrend || []).map((day) => (
             <div key={day.date}>
@@ -181,16 +220,15 @@ export default function Analytics() {
               <small>{day.attempts} attempts</small>
             </div>
           ))}
-          {!summary?.rollingTrend?.length && <p style={{ color: 'var(--text-secondary)' }}>No trend history yet.</p>}
+          {!summary?.rollingTrend?.length && <p className="muted-copy">No trend history yet.</p>}
         </div>
-      </div>
+      </Panel>
 
-      <div className="glass-card no-hover" style={{ marginTop: 'var(--space-6)' }}>
-        <h3 style={{ marginTop: 0 }}><Gauge size={18} /> Reading The Signals</h3>
-        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+      <Panel tone="analytics" title="Reading The Signals" icon={Gauge} className="analytics-wide-panel">
+        <p className="muted-copy">
           Positive calibration gaps mean confidence is running ahead of accuracy. Formula dependency and time-pressure errors help identify whether to drill calculations, reread concepts, or slow down on mock review.
         </p>
-      </div>
+      </Panel>
     </div>
   );
 }

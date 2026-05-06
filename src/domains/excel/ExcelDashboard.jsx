@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom';
 import { Table2, Sigma, DollarSign, TrendingUp, Code, ChevronRight } from 'lucide-react';
 import { excelModules } from '../../data/catalog';
 import { useProgressSummary } from '../../hooks/useProgress';
+import { IconFrame, PageHeader, Panel, StatusBadge } from '../../components/ui/Primitives';
+import { SourceRail } from '../../components/SourceContext';
 
 const iconMap = {
   fundamentals: Table2,
@@ -16,37 +18,54 @@ export default function ExcelDashboard() {
 
   return (
     <div className="page-container">
-      <div style={{ marginBottom: 'var(--space-8)' }}>
-        <div className="badge badge-green" style={{ marginBottom: 'var(--space-3)' }}>
-          <Table2 size={12} /> EXCEL TRAINING
-        </div>
-        <h1 className="section-title" style={{ fontSize: 'var(--fs-3xl)' }}>Financial Modeling & Automation</h1>
-        <p className="section-subtitle">From fundamentals to advanced VBA — master the spreadsheet</p>
-      </div>
+      <PageHeader
+        tone="excel"
+        badge="EXCEL TRAINING"
+        title="Financial Modeling & Automation"
+        subtitle="Practice spreadsheet workflows, formula design, finance functions, DCF modeling, audit controls, and automation safety."
+        meta={<StatusBadge tone="excel">{excelModules.length} drills</StatusBadge>}
+      />
+
+      <SourceRail
+        compact
+        limit={2}
+        title="Excel CFA Source Context"
+        target={{
+          kind: 'tool',
+          domain: 'excel',
+          level: 'level2',
+          topicId: 'equity',
+          title: 'Financial modeling Excel DCF valuation functions',
+          keywords: excelModules.map((mod) => `${mod.label} ${mod.desc}`),
+          route: '/excel',
+        }}
+      />
 
       <div className="grid-2">
         {excelModules.map((mod, i) => {
           const Icon = iconMap[mod.id] || Table2;
           const completed = summary.completedIds.has(`excel:${mod.id}`);
           return (
-          <Link
+          <Panel
+            as={Link}
             key={mod.id}
             to={mod.status === 'available' ? `/excel/${mod.id}` : '#'}
-            className="glass-card animate-fade"
-            style={{ animationDelay: `${i * 60}ms`, textDecoration: 'none', color: 'inherit', opacity: mod.status === 'coming' ? 0.5 : 1 }}
+            tone="excel"
+            status={completed ? 'success' : 'excel'}
+            interactive={mod.status === 'available'}
+            className="module-index-card animate-fade"
+            style={{ animationDelay: `${i * 60}ms`, opacity: mod.status === 'coming' ? 0.5 : 1 }}
             onClick={e => mod.status === 'coming' && e.preventDefault()}
           >
-            <div className="flex-between" style={{ marginBottom: 'var(--space-3)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                <div style={{ width: 40, height: 40, borderRadius: 'var(--radius-md)', background: `${mod.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon size={20} color={mod.color} />
-                </div>
-                <div style={{ fontWeight: 600 }}>{mod.label}</div>
+            <div className="module-index-head">
+              <IconFrame icon={Icon} tone="excel" />
+              <div>
+                <h3>{mod.label}</h3>
+                <p>{mod.desc}</p>
               </div>
-              {completed ? <span className="badge badge-green">COMPLETE</span> : <ChevronRight size={18} color="var(--text-muted)" />}
+              {completed ? <StatusBadge tone="success">Complete</StatusBadge> : <ChevronRight size={18} color="var(--text-muted)" />}
             </div>
-            <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', margin: 0 }}>{mod.desc}</p>
-          </Link>
+          </Panel>
           );
         })}
       </div>

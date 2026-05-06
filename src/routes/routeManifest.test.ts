@@ -28,6 +28,10 @@ describe('route visual metadata', () => {
     expect(visualPaths.has('/cfa')).toBe(true);
     expect(visualPaths.has('/cfa/level1/fixed-income')).toBe(true);
     expect(visualPaths.has('/cfa/level3/performance/constructed-response')).toBe(true);
+    expect(visualPaths.has('/calculators')).toBe(true);
+    expect(visualPaths.has('/formulas')).toBe(true);
+    expect(visualPaths.has('/quant/risk-management')).toBe(true);
+    expect(visualPaths.has('/excel/dcf-modeling')).toBe(true);
     expect(visualPaths.has('/system')).toBe(true);
   });
 

@@ -3,34 +3,17 @@ import { preview } from 'vite';
 import { chromium } from 'playwright-core';
 import AxeBuilder from '@axe-core/playwright';
 import { screenshotRoutes } from '../src/routes/routeManifest.ts';
+import {
+  applySourceState,
+  browserCandidates,
+  firstExistingPath,
+  routePathForSourceState,
+  routeSourceStates,
+  summarizeRouteFailures,
+  viewports,
+} from './qa-helpers.mjs';
 
 /* global document */
-
-const browserCandidates = [
-  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  `${process.env.LOCALAPPDATA || ''}/Google/Chrome/Application/chrome.exe`,
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/google-chrome-stable',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/opt/google/chrome/chrome',
-].filter(Boolean);
-
-async function firstExistingPath(paths) {
-  for (const candidate of paths) {
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {
-      // keep looking
-    }
-  }
-  return null;
-}
 
 async function waitForBodyText(page, text, label) {
   await page.waitForFunction(
@@ -63,56 +46,72 @@ if (!executablePath) {
 
 const address = server.resolvedUrls?.local?.[0] || 'http://127.0.0.1:4175/';
 const browser = await chromium.launch({ executablePath, headless: true });
-const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+const context = await browser.newContext({ viewport: viewports.desktop });
 const page = await context.newPage();
 const failures = [];
 const routeResults = [];
 
 try {
   for (const route of screenshotRoutes) {
-    const startedAt = Date.now();
-    const url = new URL(route.path, address).toString();
-    try {
-      await page.goto(url, { waitUntil: 'networkidle' });
-      await waitForBodyText(page, route.expectedText, route.id);
-      await page.waitForTimeout(1800);
-      const result = await new AxeBuilder({ page })
-        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-        .analyze();
-      const violations = result.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact || ''));
-      routeResults.push({
-        routeId: route.id,
-        path: route.path,
-        status: violations.length ? 'blocked' : 'ok',
-        durationMs: Date.now() - startedAt,
-        violations: violations.map((violation) => `${violation.id}: ${violation.help}`),
-      });
-      if (violations.length) {
-        failures.push({
-          route: route.id,
-          violations: violations.map((violation) => `${violation.id}: ${violation.help}`),
-        });
+    for (const sourceState of routeSourceStates(route)) {
+      for (const viewportName of route.viewports) {
+        const startedAt = Date.now();
+        const path = routePathForSourceState(route, sourceState);
+        const url = new URL(path, address).toString();
+        try {
+          await page.setViewportSize(viewports[viewportName]);
+          await applySourceState(page, address, sourceState);
+          await page.goto(url, { waitUntil: 'networkidle' });
+          await waitForBodyText(page, route.expectedText, `${route.id} ${viewportName} ${sourceState}`);
+          await page.waitForTimeout(1800);
+          const result = await new AxeBuilder({ page })
+            .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+            .analyze();
+          const violations = result.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact || ''));
+          routeResults.push({
+            routeId: route.id,
+            path,
+            expectedText: route.expectedText,
+            viewport: viewportName,
+            sourceState,
+            status: violations.length ? 'blocked' : 'ok',
+            durationMs: Date.now() - startedAt,
+            url,
+            violations: violations.map((violation) => `${violation.id}: ${violation.help}`),
+          });
+          if (violations.length) {
+            failures.push({
+              route: `${route.id} ${viewportName} ${sourceState}`,
+              violations: violations.map((violation) => `${violation.id}: ${violation.help}`),
+            });
+          }
+          console.log(`OK a11y scanned ${route.id} ${viewportName} ${sourceState}`);
+        } catch (error) {
+          failures.push({
+            route: `${route.id} ${viewportName} ${sourceState}`,
+            violations: [error instanceof Error ? error.message : String(error)],
+          });
+          routeResults.push({
+            routeId: route.id,
+            path,
+            expectedText: route.expectedText,
+            viewport: viewportName,
+            sourceState,
+            status: 'blocked',
+            durationMs: Date.now() - startedAt,
+            url,
+            violations: [error instanceof Error ? error.message : String(error)],
+          });
+        }
       }
-      console.log(`OK a11y scanned ${route.id}`);
-    } catch (error) {
-      failures.push({
-        route: route.id,
-        violations: [error instanceof Error ? error.message : String(error)],
-      });
-      routeResults.push({
-        routeId: route.id,
-        path: route.path,
-        status: 'blocked',
-        durationMs: Date.now() - startedAt,
-        violations: [error instanceof Error ? error.message : String(error)],
-      });
     }
   }
 } finally {
   await mkdir('dist/reports', { recursive: true });
+  const routeFailures = summarizeRouteFailures(routeResults);
   await writeFile(
     'dist/reports/a11y-check.json',
-    `${JSON.stringify({ generatedAt: new Date().toISOString(), routeResults }, null, 2)}\n`,
+    `${JSON.stringify({ generatedAt: new Date().toISOString(), routeResults, routeFailures }, null, 2)}\n`,
   );
   await context.close();
   await browser.close();

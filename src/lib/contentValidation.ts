@@ -368,14 +368,18 @@ export function validateMockExam(mockOrId: MockExam | string = buildLevel1MockEx
 
 function readinessCoverageScore(topic: CfaTopicContent) {
   const target = levelTargets[topic.level as keyof typeof levelTargets] || levelTargets.level1;
+  const vignetteQuestions = topic.vignettes.reduce((sum, vignette) => sum + vignette.questions.length, 0);
+  const questionItems = topic.level === 'level1' ? topic.questions.length : vignetteQuestions;
+  const hasConstructedResponseTarget = 'constructedResponses' in target;
+  const questionWeight = hasConstructedResponseTarget ? 20 : 30;
   const numerator =
-    Math.min(1, topic.questions.length / target.questions) * 30 +
+    Math.min(1, questionItems / target.questions) * questionWeight +
     Math.min(1, topic.learningObjectives.length / target.objectives) * 20 +
     Math.min(1, topic.formulas.length / target.formulas) * 15 +
     Math.min(1, topic.vignettes.length / target.vignettes) * 15 +
     Math.min(1, topic.flashcards.length / target.flashcards) * 10 +
     Math.min(1, topic.skillLabs.length / target.skillLabs) * 10 +
-    ('constructedResponses' in target ? Math.min(1, topic.constructedResponses.length / target.constructedResponses) * 10 : 0);
+    (hasConstructedResponseTarget ? Math.min(1, topic.constructedResponses.length / target.constructedResponses) * 10 : 0);
   return Math.min(100, Math.round(numerator));
 }
 

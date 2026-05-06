@@ -2,7 +2,19 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { MetricTile, PageHeader, SegmentedControl, StatusBadge, Surface } from './Primitives';
+import {
+  EmptyPanel,
+  IconFrame,
+  MetricTile,
+  PageHeader,
+  PageSection,
+  Panel,
+  SegmentedControl,
+  StatCell,
+  StatGrid,
+  StatusBadge,
+  Surface,
+} from './Primitives';
 
 describe('cockpit primitives', () => {
   it('renders page headers, status badges, and metric tiles with semantic cockpit classes', () => {
@@ -39,6 +51,25 @@ describe('cockpit primitives', () => {
     expect(screen.getByRole('link', { name: 'Review queue' })).toHaveClass('surface-interactive');
   });
 
+  it('renders shared cockpit layout primitives with stable semantic classes', () => {
+    render(
+      <PageSection title="Today" subtitle="Next action" actions={<button type="button">Export</button>}>
+        <Panel title="Readiness" eyebrow="local" icon={IconFrame} tone="vault" status="vault">
+          <StatGrid columns={2}>
+            <StatCell label="Queue" value="4" detail="due" tone="vault" />
+            <StatCell label="Mastery" value="82%" tone="success" />
+          </StatGrid>
+        </Panel>
+        <EmptyPanel title="No rows" description="Nothing to review." />
+      </PageSection>,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Today' })).toBeInTheDocument();
+    expect(screen.getByText('Readiness').closest('.panel')).toHaveClass('surface-status-vault');
+    expect(screen.getByText('Queue').closest('.stat-cell')).toHaveClass('stat-cell-vault');
+    expect(screen.getByText('No rows').closest('.empty-panel')).toBeInTheDocument();
+  });
+
   it('uses roving keyboard behavior for segmented controls', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -55,7 +86,7 @@ describe('cockpit primitives', () => {
       />,
     );
 
-    screen.getByRole('tab', { name: 'Topic' }).focus();
+    screen.getByRole('radio', { name: 'Topic' }).focus();
     await user.keyboard('{ArrowRight}');
 
     expect(onChange).toHaveBeenCalledWith('mock');

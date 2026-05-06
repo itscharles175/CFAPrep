@@ -1,4 +1,5 @@
 import { Component } from 'react';
+import { EmptyPanel } from './ui/Primitives';
 
 /**
  * A5: Granular error boundary that catches render errors and displays
@@ -32,24 +33,18 @@ export default class ErrorBoundary extends Component {
       const isPage = level === 'page';
 
       return (
-        <div
-          className={`glass-card no-hover ${isPage ? 'page-container' : ''}`}
-          role="alert"
-          style={{
-            textAlign: 'center',
-            padding: 'var(--space-8)',
-            borderColor: 'rgba(239,68,68,0.25)',
-          }}
-        >
-          <h2 style={{ marginBottom: 'var(--space-3)', color: 'var(--danger)' }}>
-            {isPage ? 'Something went wrong' : 'This section encountered an error'}
-          </h2>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-4)' }}>
-            {this.state.error?.message || 'An unexpected error occurred.'}
-          </p>
-          <button type="button" className="btn btn-primary" onClick={this.handleReset}>
-            Try Again
-          </button>
+        <div className={isPage ? 'page-container' : undefined} role="alert">
+          <EmptyPanel
+            tone="default"
+            className="surface-status-danger"
+            title={isPage ? 'Something went wrong' : 'This section encountered an error'}
+            description={this.state.error?.message || 'An unexpected error occurred.'}
+            action={
+              <button type="button" className="btn btn-primary" onClick={this.handleReset}>
+                Try Again
+              </button>
+            }
+          />
         </div>
       );
     }

@@ -126,7 +126,7 @@ export default function SystemHealth() {
         actions={<button className="btn btn-primary" onClick={handleBackup}><Download size={16} /> Export Backup</button>}
       />
 
-      <div className="grid-4" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="grid-4 page-metrics">
         <MetricCard label="IndexedDB Storage" value={`${usageMb} MB`} detail={`${usagePct}% of estimated quota`} icon={Database} />
         <MetricCard label="Quota" value={`${quotaMb || '-'} MB`} detail="Browser estimate" icon={HardDrive} tone="warning" />
         <MetricCard label="Service Worker" value={serviceWorkerReady ? 'Ready' : 'Unavailable'} detail="Offline shell support" icon={ShieldCheck} tone={serviceWorkerReady ? 'success' : 'danger'} />
@@ -134,7 +134,7 @@ export default function SystemHealth() {
         <MetricCard label="Vault Safety" value={vaultHealth?.status || 'Checking'} detail={`${vaultHealth?.totalRows ?? 0} local rows`} icon={Database} tone={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} />
       </div>
 
-      <Surface tone="ops" status={releaseReport.status === 'ok' ? 'success' : releaseReport.status} style={{ marginBottom: 'var(--space-6)' }}>
+      <Surface tone="ops" status={releaseReport.status === 'ok' ? 'success' : releaseReport.status === 'blocked' ? 'danger' : releaseReport.status} className="ops-report-panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)', flexWrap: 'wrap', marginBottom: 'var(--space-4)' }}>
           <div>
             <h3 style={{ margin: 0 }}>Release Health</h3>
@@ -181,7 +181,7 @@ export default function SystemHealth() {
         )}
       </Surface>
 
-      <Surface tone="vault" status={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} style={{ marginBottom: 'var(--space-6)' }}>
+      <Surface tone="vault" status={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} className="ops-report-panel">
         <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
           <div>
             <StatusBadge tone="vault">Vault Safety</StatusBadge>
@@ -208,7 +208,7 @@ export default function SystemHealth() {
         )}
       </Surface>
 
-      <Surface tone="ops" style={{ marginBottom: 'var(--space-6)' }}>
+      <Surface tone="ops" className="ops-report-panel">
         <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
           <div>
             <h3 style={{ marginTop: 0 }}>Offline Readiness</h3>

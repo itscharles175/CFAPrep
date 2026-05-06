@@ -1,4 +1,5 @@
 import { cfaTopics } from '../../data/catalog';
+import { enrichCfaFormula } from './formulaLexicon.js';
 import { getCurriculumTopic } from './curriculumMap';
 import {
   buildRuntimeLevelFromPacks,
@@ -139,11 +140,15 @@ function buildSections(level, topic, title, summary, objectives) {
 
 function buildFormulas(level, topic, title) {
   const base = level === 'level1' ? cfaContent[topic]?.formulas || [] : [];
-  const generated = Array.from({ length: 10 }, (_, index) => ({
-    name: `${title} Key Concept ${index + 1}`,
-    latex: `\\text{${titleToWords(title)}}_{${index + 1}} = \\text{Input} \\rightarrow \\text{Decision}`,
-    description: `Exam-ready ${title} concept linking a provided input to the correct interpretation or action.`,
-  }));
+  const generated = Array.from({ length: 10 }, (_, index) => {
+    const name = `${title} Key Concept ${index + 1}`;
+    const enrichment = enrichCfaFormula({ level, topicId: topic, name, index });
+    return {
+      name,
+      latex: enrichment.latex,
+      description: enrichment.description,
+    };
+  });
   const seen = new Set();
   return [...base, ...generated].filter((formula) => {
     if (seen.has(formula.name)) return false;

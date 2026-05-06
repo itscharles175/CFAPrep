@@ -208,29 +208,60 @@ export function irr(cashFlows = [], guess = 0.1) {
 
 export function xirr(cashFlows = [], dates = [], guess = 0.1) {
   if (cashFlows.length !== dates.length || cashFlows.length < 2) return NaN;
+  const flows = cashFlows.map((value) => toFiniteNumber(value, 0));
+  const hasPositive = flows.some((value) => value > 0);
+  const hasNegative = flows.some((value) => value < 0);
+  if (!hasPositive || !hasNegative) return NaN;
   const start = new Date(dates[0]).getTime();
   if (!Number.isFinite(start)) return NaN;
   const yearFractions = dates.map((date) => (new Date(date).getTime() - start) / (365 * 24 * 60 * 60 * 1000));
   if (yearFractions.some((value) => !Number.isFinite(value))) return NaN;
 
   function valueAt(rate) {
-    return cashFlows.reduce((sum, cashFlow, index) => sum + toFiniteNumber(cashFlow, 0) / Math.pow(1 + rate, yearFractions[index]), 0);
+    if (rate <= -0.999999) return NaN;
+    return flows.reduce((sum, cashFlow, index) => sum + cashFlow / Math.pow(1 + rate, yearFractions[index]), 0);
   }
 
   let rate = guess;
   for (let i = 0; i < 80; i += 1) {
     const value = valueAt(rate);
-    const derivative = cashFlows.reduce((sum, cashFlow, index) => {
+    if (!Number.isFinite(value)) break;
+    if (Math.abs(value) < 1e-7) return rate;
+    const derivative = flows.reduce((sum, cashFlow, index) => {
       const t = yearFractions[index];
-      return sum - (t * toFiniteNumber(cashFlow, 0)) / Math.pow(1 + rate, t + 1);
+      return sum - (t * cashFlow) / Math.pow(1 + rate, t + 1);
     }, 0);
     if (Math.abs(derivative) < 1e-10) break;
     const next = rate - value / derivative;
     if (!Number.isFinite(next) || next <= -0.9999) break;
-    if (Math.abs(next - rate) < 1e-8) return next;
+    if (Math.abs(next - rate) < 1e-8 && Math.abs(valueAt(next)) < 1e-6) return next;
     rate = next;
   }
-  return rate;
+
+  const candidates = [-0.9999, -0.95, -0.75, -0.5, -0.25, -0.1, 0, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10];
+  for (let index = 0; index < candidates.length - 1; index += 1) {
+    let low = candidates[index];
+    let high = candidates[index + 1];
+    let lowValue = valueAt(low);
+    let highValue = valueAt(high);
+    if (!Number.isFinite(lowValue) || !Number.isFinite(highValue) || lowValue * highValue > 0) continue;
+    for (let step = 0; step < 120; step += 1) {
+      const mid = (low + high) / 2;
+      const midValue = valueAt(mid);
+      if (!Number.isFinite(midValue)) break;
+      if (Math.abs(midValue) < 1e-7) return mid;
+      if (lowValue * midValue <= 0) {
+        high = mid;
+      } else {
+        low = mid;
+        lowValue = midValue;
+      }
+    }
+    const result = (low + high) / 2;
+    return Math.abs(valueAt(result)) < 1e-5 ? result : NaN;
+  }
+
+  return NaN;
 }
 
 export function capm({ riskFreeRate = 0.03, beta = 1, marketReturn = 0.08 }) {
@@ -247,6 +278,7 @@ export function gordonGrowth({ dividendNext = 1, requiredReturn = 0.1, growthRat
 export function portfolioStatistics({ weights = [], expectedReturns = [], volatilities = [], correlationMatrix = [], riskFreeRate = 0 }) {
   const n = Math.min(weights.length, expectedReturns.length, volatilities.length);
   if (n === 0) return null;
+  if (correlationMatrix.length !== n || correlationMatrix.some((row) => !Array.isArray(row) || row.length !== n)) return null;
   const rawWeights = weights.slice(0, n).map((value) => toFiniteNumber(value, 0));
   const totalWeight = rawWeights.reduce((sum, value) => sum + value, 0) || 1;
   const normalizedWeights = rawWeights.map((value) => value / totalWeight);
@@ -257,7 +289,8 @@ export function portfolioStatistics({ weights = [], expectedReturns = [], volati
   let variance = 0;
   for (let i = 0; i < n; i += 1) {
     for (let j = 0; j < n; j += 1) {
-      const corr = i === j ? 1 : toFiniteNumber(correlationMatrix[i]?.[j], 0);
+      const corr = i === j ? 1 : toFiniteNumber(correlationMatrix[i]?.[j], NaN);
+      if (!Number.isFinite(corr) || corr < -1 || corr > 1) return null;
       variance += normalizedWeights[i] * normalizedWeights[j] * vols[i] * vols[j] * corr;
     }
   }

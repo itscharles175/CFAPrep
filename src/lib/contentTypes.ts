@@ -11,7 +11,8 @@ export type ContentSourceKind =
   | 'editorial-authoring'
   | 'expert-review'
   | 'public-structure'
-  | 'local-dataset';
+  | 'local-dataset'
+  | 'local-source-digest';
 
 export interface ContentProvenance {
   author: string;
@@ -58,6 +59,7 @@ export interface CurriculumSourceMeta {
   notes: string;
   runtimeMode?: ContentRuntimeMode;
   runtimeLabel?: string;
+  sourceIds?: string[];
 }
 
 export interface ObjectiveBlueprint {

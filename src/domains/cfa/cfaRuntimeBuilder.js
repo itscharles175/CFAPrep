@@ -1,3 +1,10 @@
+import {
+  LEVEL3_CORE_TOPIC_IDS,
+  LEVEL3_LIBRARY_MODE,
+  LEVEL3_PATHWAY_TOPICS,
+  level3PathwayTopicId,
+} from './cfaLevel3Pathways';
+
 function topicKey(level, topicId) {
   return level === 'level1' ? topicId : `${level}:${topicId}`;
 }
@@ -134,8 +141,18 @@ function buildAuthoredMocks(level, topics) {
   }));
 }
 
-export function buildRuntimeLevelFromAuthoredPacks(level, packs, runtimeMode = 'exam-ready') {
-  const topics = packs.map((pack) => buildRuntimeTopicFromAuthoredPack(pack, runtimeMode));
+const LEVEL3_CORE_TOPICS = new Set(LEVEL3_CORE_TOPIC_IDS);
+export { LEVEL3_PATHWAY_TOPICS };
+
+function packsForRuntime(level, packs, options = {}) {
+  if (level !== 'level3' || !options.pathway) return packs;
+  const pathwayTopicId = level3PathwayTopicId(options.pathway);
+  return packs.filter((pack) => LEVEL3_CORE_TOPICS.has(pack.topicId) || pack.topicId === pathwayTopicId);
+}
+
+export function buildRuntimeLevelFromAuthoredPacks(level, packs, runtimeMode = 'exam-ready', options = {}) {
+  const runtimePacks = packsForRuntime(level, packs, options);
+  const topics = runtimePacks.map((pack) => buildRuntimeTopicFromAuthoredPack(pack, runtimeMode));
   return {
     id: level,
     title: level === 'level1' ? 'CFA Level I' : level === 'level2' ? 'CFA Level II' : 'CFA Level III',
@@ -156,6 +173,7 @@ export function buildRuntimeLevelFromAuthoredPacks(level, packs, runtimeMode = '
       original: true,
       curriculumMap: level,
       authoringStatus: packs.every((pack) => pack.maturity === 'exam-ready') ? 'exam-ready' : 'draft',
+      activePathway: level === 'level3' ? options.pathway || LEVEL3_LIBRARY_MODE : undefined,
       runtimeMode,
       runtimeLabel: runtimeLabel(runtimeMode),
     },

@@ -13,6 +13,7 @@ import type {
   TopicDataset,
 } from '../../../lib/contentTypes';
 import type { ErrorCategory, LessonSection } from '../../../lib/learningTypes';
+import { enrichCfaFormula } from '../formulaLexicon.js';
 
 export interface Level1EditorialConfig {
   topicId: string;
@@ -36,10 +37,6 @@ function topicKey(pack: AuthoredContentPack) {
 
 function compact(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function shortTitle(value: string) {
-  return value.replace(/&/g, 'and').replace(/[^a-zA-Z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean).slice(0, 5).join(' ');
 }
 
 function pick<T>(items: T[], index: number): T {
@@ -78,6 +75,7 @@ function editorialProvenance(
     qualityNotes,
     generatedFromTemplate: false,
     promotionEvidence: evidence(config, kind, id),
+    sourceIds: [`cfa-source-digest:level1:${config.topicId}:2026`],
   };
 }
 
@@ -102,11 +100,16 @@ function rewriteObjectives(pack: AuthoredContentPack, config: Level1EditorialCon
 function rewriteFormulas(pack: AuthoredContentPack, objectives: ObjectiveBlueprint[], config: Level1EditorialConfig): FormulaBlueprint[] {
   return pack.formulaBlueprints.map((formula, index) => {
     const objective = objectives[index % objectives.length];
-    const measure = shortTitle(formula.name || pack.title);
+    const enrichment = enrichCfaFormula({
+      level: pack.level,
+      topicId: pack.topicId,
+      name: formula.name,
+      index,
+    });
     return {
       ...formula,
-      latex: `\\text{${measure}} = \\frac{\\text{Relevant input ${index + 1}}}{\\text{Decision base ${index + 1}}}`,
-      description: `${formula.name} is reviewed as a Level I ${pack.title} decision tool when the stem gives the matching inputs and asks for ${pick(config.decisions, index).toLowerCase()}.`,
+      latex: enrichment.latex,
+      description: `${enrichment.description} In ${pack.title}, use it when the stem asks for ${pick(config.decisions, index).toLowerCase()}.`,
       objectiveIds: [...new Set([objective.id, ...formula.objectiveIds.filter((id) => objectives.some((item) => item.id === id)).slice(0, 1)])],
     };
   });

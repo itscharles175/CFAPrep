@@ -145,7 +145,12 @@ function commandGate(definition: ReleaseGateDefinition, gateResults?: Record<str
     return baseGate(definition, 'pending', definition.fallbackDetail);
   }
 
-  const routeFailureDetail = result.routeFailures?.length ? ` ${result.routeFailures.length} route-level failure${result.routeFailures.length === 1 ? '' : 's'} recorded.` : '';
+  const routeFailureDetail = result.routeFailures?.length
+    ? ` ${result.routeFailures.length} route-level failure${result.routeFailures.length === 1 ? '' : 's'} recorded: ${result.routeFailures
+        .slice(0, 3)
+        .map((failure) => `${failure.routeId} (${failure.path})`)
+        .join(', ')}${result.routeFailures.length > 3 ? ', ...' : ''}.`
+    : '';
   return baseGate(
     definition,
     result.status,
@@ -217,6 +222,8 @@ export function buildReleaseGateReport({
       `${level3Release.topics.filter((topic) => topic.status === 'exam-ready').length}/${level3Release.topicIds.length} topics exam-ready; ${level3Release.templateRowsRemaining} template rows remaining; ${level3Release.warnings} release warnings.`,
       contentValidationResult,
     ),
+    commandGate(definition('source-audit'), gateResults),
+    commandGate(definition('stack-audit'), gateResults),
     bundleGate(bundle, gateResults),
     commandGate(definition('smoke'), gateResults),
     commandGate(definition('browser-regression'), gateResults),

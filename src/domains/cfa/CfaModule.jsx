@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useParams, Link } from 'react-router-dom';
 import { loadCfaTopicContent } from './cfaLoaders';
+import { level3PathwayForTopic } from './cfaLevel3Pathways';
+import { useLevel3Pathway } from './useLevel3Pathway';
 import { ArrowLeft, Target, BookOpen, Lightbulb, ChevronRight, Bookmark, StickyNote, Layers, PenLine } from 'lucide-react';
 import FormulaBlock from '../../components/FormulaBlock';
 import { useModuleProgress } from '../../hooks/useProgress';
 import { getBookmark, getNote, saveNote, toggleBookmark } from '../../lib/learning';
-import { PageHeader, ProgressRail, StatusBadge, Surface } from '../../components/ui/Primitives';
+import { EmptyPanel, PageHeader, ProgressRail, StatusBadge, Surface } from '../../components/ui/Primitives';
+import { SourceRail } from '../../components/SourceContext';
 
 export default function CfaModule() {
   const { level, topic } = useParams();
   const location = useLocation();
-  const requestKey = `${level}:${topic}`;
+  const [activePathway] = useLevel3Pathway();
+  const pathwayScoped = level === 'level3' && level3PathwayForTopic(topic) !== null;
+  const requestKey = `${level}:${topic}:${level === 'level3' ? activePathway : 'all'}`;
   const [contentState, setContentState] = useState({ key: null, data: null });
   const data = contentState.key === requestKey ? contentState.data : null;
   const loading = contentState.key !== requestKey;
@@ -27,7 +32,7 @@ export default function CfaModule() {
 
   useEffect(() => {
     let cancelled = false;
-    loadCfaTopicContent(level, topic)
+    loadCfaTopicContent(level, topic, level === 'level3' ? { pathway: activePathway } : {})
       .then((topicContent) => {
         if (!cancelled) setContentState({ key: requestKey, data: topicContent });
       })
@@ -37,7 +42,7 @@ export default function CfaModule() {
     return () => {
       cancelled = true;
     };
-  }, [level, requestKey, topic]);
+  }, [activePathway, level, requestKey, topic]);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,13 +104,12 @@ export default function CfaModule() {
   if (!data) {
     return (
       <div className="page-container">
-        <div className="glass-card no-hover" style={{ textAlign: 'center', padding: 'var(--space-16)' }}>
-          <h2 style={{ marginBottom: 'var(--space-4)' }}>Module Coming Soon</h2>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-6)' }}>
-            This topic is currently being developed. Check back soon!
-          </p>
-          <Link to="/cfa" className="btn btn-primary">← Back to CFA Dashboard</Link>
-        </div>
+        <EmptyPanel
+          title="Module Coming Soon"
+          description="This topic is currently being developed. Check back soon!"
+          tone="exam"
+          action={<Link to="/cfa" className="btn btn-primary">Back to CFA Dashboard</Link>}
+        />
       </div>
     );
   }
@@ -227,6 +231,27 @@ export default function CfaModule() {
               <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>No formulas for this topic.</p>
             )}
           </Surface>
+
+          <SourceRail
+            compact
+            title="Source References"
+            subtitle="Official-first snippets mapped to this lesson."
+            target={{
+              kind: 'module',
+              domain: 'cfa',
+              level,
+              topicId: topic,
+              pathway: level === 'level3' && pathwayScoped ? activePathway : undefined,
+              title: data.title,
+              objectiveIds: data.learningObjectives.map((objective) => objective.id),
+              formulaNames: data.formulas?.map((formula) => formula.name) || [],
+              keywords: [
+                ...data.learningObjectives.map((objective) => objective.title),
+                ...data.sections.map((section) => section.title),
+              ],
+              route: `/cfa/${level}/${topic}`,
+            }}
+          />
 
           <Surface tone="vault" density="compact">
             <div className="flex-between" style={{ marginBottom: 'var(--space-3)' }}>

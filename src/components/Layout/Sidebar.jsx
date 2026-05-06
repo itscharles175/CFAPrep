@@ -114,9 +114,16 @@ function SidebarSection({ label, icon: Icon, basePath, items, collapsed, onNavig
   );
 }
 
-export default function Sidebar({ collapsed, open, onToggle, onNavigate }) {
+export default function Sidebar({ collapsed, open, mobileHidden = false, onToggle, onNavigate }) {
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${open ? 'open' : ''}`} role="complementary" aria-label="Main navigation sidebar">
+    <aside
+      id="main-sidebar"
+      className={`sidebar ${collapsed ? 'collapsed' : ''} ${open ? 'open' : ''}`}
+      role="complementary"
+      aria-label="Main navigation sidebar"
+      hidden={mobileHidden}
+      inert={mobileHidden ? '' : undefined}
+    >
       <div className="sidebar-header">
         <div className="sidebar-logo">Q</div>
         {!collapsed && <span className="sidebar-title">QuantVault</span>}

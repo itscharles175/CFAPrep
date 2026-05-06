@@ -1,4 +1,4 @@
-import { createElement, isValidElement } from 'react';
+import { createElement, isValidElement, useEffect, useId, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 
@@ -52,6 +52,18 @@ export function ActionBar({ children, align = 'end', className }) {
   return <div className={joinClasses('action-bar', `action-bar-${align}`, className)}>{children}</div>;
 }
 
+export function InlineCluster({ children, align = 'start', className }) {
+  return <div className={joinClasses('inline-cluster', `inline-cluster-${align}`, className)}>{children}</div>;
+}
+
+export function IconFrame({ icon, tone = 'accent', size = 18, className, children }) {
+  return (
+    <span className={joinClasses('icon-frame', `icon-frame-${tone}`, className)} aria-hidden={!children}>
+      {children || iconNode(icon, size)}
+    </span>
+  );
+}
+
 export function PageHeader({ badge, title, subtitle, actions, tone = 'study', eyebrow, meta }) {
   return (
     <header className={joinClasses('page-header', `page-header-${tone}`)}>
@@ -67,6 +79,93 @@ export function PageHeader({ badge, title, subtitle, actions, tone = 'study', ey
       </div>
       {actions && <ActionBar>{actions}</ActionBar>}
     </header>
+  );
+}
+
+export function PageSection({ eyebrow, title, subtitle, actions, children, tone = 'default', className }) {
+  return (
+    <section className={joinClasses('page-section', `page-section-${tone}`, className)}>
+      {(eyebrow || title || subtitle || actions) && (
+        <div className="page-section-head">
+          <div className="page-section-copy">
+            {eyebrow && <StatusBadge tone={tone === 'default' ? 'accent' : tone}>{eyebrow}</StatusBadge>}
+            {title && <h2>{title}</h2>}
+            {subtitle && <p>{subtitle}</p>}
+          </div>
+          {actions && <ActionBar>{actions}</ActionBar>}
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
+
+export function Panel({
+  as: Component = 'div',
+  title,
+  eyebrow,
+  subtitle,
+  icon,
+  actions,
+  footer,
+  children,
+  tone = 'default',
+  density = 'default',
+  status,
+  interactive = false,
+  className,
+  ...props
+}) {
+  return (
+    <Surface
+      as={Component}
+      tone={tone}
+      density={density}
+      status={status}
+      interactive={interactive}
+      className={joinClasses('panel', className)}
+      {...props}
+    >
+      {(title || eyebrow || subtitle || icon || actions) && (
+        <div className="panel-head">
+          <div className="panel-title-row">
+            {icon && <IconFrame icon={icon} tone={status || tone} size={18} />}
+            <div className="panel-title-copy">
+              {eyebrow && <StatusBadge tone={status || tone}>{eyebrow}</StatusBadge>}
+              {title && <h3>{title}</h3>}
+              {subtitle && <p>{subtitle}</p>}
+            </div>
+          </div>
+          {actions && <ActionBar>{actions}</ActionBar>}
+        </div>
+      )}
+      {children && <div className="panel-body">{children}</div>}
+      {footer && <div className="panel-footer">{footer}</div>}
+    </Surface>
+  );
+}
+
+export function StatGrid({ children, columns = 3, className }) {
+  return <div className={joinClasses('stat-grid', `stat-grid-${columns}`, className)}>{children}</div>;
+}
+
+export function StatCell({ label, value, tone = 'accent', detail, className }) {
+  return (
+    <div className={joinClasses('stat-cell', `stat-cell-${tone}`, className)}>
+      <small>{label}</small>
+      <strong>{value}</strong>
+      {detail && <span>{detail}</span>}
+    </div>
+  );
+}
+
+export function EmptyPanel({ title, description, action, tone = 'default', className }) {
+  return (
+    <Surface tone={tone} className={joinClasses('empty-panel', className)}>
+      <h2>{title}</h2>
+      {description && <p>{description}</p>}
+      {action && <div className="empty-panel-action">{action}</div>}
+    </Surface>
   );
 }
 
@@ -128,19 +227,19 @@ export function SegmentedControl({ label, options, value, onChange, density = 'd
     if (event.key === 'End') nextIndex = lastIndex;
     const next = options[nextIndex];
     onChange(next.value);
-    event.currentTarget.parentElement?.querySelectorAll('[role="tab"]')?.[nextIndex]?.focus();
+    event.currentTarget.parentElement?.querySelectorAll('[role="radio"]')?.[nextIndex]?.focus();
   }
 
   return (
-    <div className={joinClasses('segmented-row', `segmented-row-${density}`)} role="tablist" aria-label={label}>
+    <div className={joinClasses('segmented-row', `segmented-row-${density}`)} role="radiogroup" aria-label={label}>
       {options.map((option, index) => {
         const selected = value === option.value;
         return (
           <button
             key={option.value}
             type="button"
-            role="tab"
-            aria-selected={selected}
+            role="radio"
+            aria-checked={selected}
             tabIndex={selected ? 0 : -1}
             className={joinClasses('segmented-tab', selected && 'active')}
             onClick={() => onChange(option.value)}
@@ -151,6 +250,64 @@ export function SegmentedControl({ label, options, value, onChange, density = 'd
           </button>
         );
       })}
+    </div>
+  );
+}
+
+export function Dialog({ title, description, children, actions, onClose, labelledBy, className }) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    const previous = document.activeElement;
+    const firstFocusable = dialogRef.current?.querySelector(
+      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    (firstFocusable || dialogRef.current)?.focus?.();
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        onClose?.();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = dialogRef.current.querySelectorAll(
+        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previous?.focus?.();
+    };
+  }, [onClose]);
+
+  return (
+    <div className="confirm-dialog" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}>
+      <div
+        ref={dialogRef}
+        className={joinClasses('surface surface-default confirm-dialog-card', className)}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy || titleId}
+        aria-describedby={description ? descriptionId : undefined}
+        tabIndex={-1}
+      >
+        {title && <h2 id={titleId}>{title}</h2>}
+        {description && <p id={descriptionId}>{description}</p>}
+        {children}
+        {actions && <InlineCluster align="end">{actions}</InlineCluster>}
+      </div>
     </div>
   );
 }
@@ -255,6 +412,14 @@ export function ReviewItemCard({ item }) {
           <small className="command-hint">
             Reason: {item.reason.replace(/-/g, ' ')}
             {typeof item.retentionPct === 'number' ? ` · retention ${item.retentionPct}%` : ''}
+          </small>
+        )}
+        {item.reasonDetails?.length > 0 && (
+          <small className="muted-copy">{item.reasonDetails.slice(0, 2).join(' ')}</small>
+        )}
+        {item.weaknessSignals?.length > 0 && (
+          <small className="command-hint">
+            Signals: {item.weaknessSignals.slice(0, 2).map((signal) => `${signal.label} (${signal.impact})`).join(' · ')}
           </small>
         )}
       </div>

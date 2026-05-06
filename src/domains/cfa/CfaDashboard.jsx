@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Award,
@@ -18,9 +19,13 @@ import {
   Target,
   TrendingUp,
 } from 'lucide-react';
-import { cfaLevels, getCfaRuntimeReport } from './cfaSummary';
+import { getCfaLevelSummaries, getCfaRuntimeReport } from './cfaSummary';
+import { LEVEL3_PATHWAY_OPTIONS } from './cfaLevel3Pathways';
+import { useLevel3Pathway } from './useLevel3Pathway';
 import { useProgressSummary } from '../../hooks/useProgress';
-import { ActionBar, MetricTile, PageHeader, ProgressRail, StatusBadge, Surface } from '../../components/ui/Primitives';
+import { ActionBar, MetricTile, PageHeader, ProgressRail, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
+import { SourceCoverageMeter } from '../../components/SourceContext';
+import { getCfaSourceCoverageMap, getCfaSourceMapStatus } from '../../lib/cfaSourceVault';
 
 const iconMap = {
   ethics: Shield,
@@ -43,6 +48,8 @@ const iconMap = {
   'alternatives-pm': Gem,
   performance: Target,
   'pm-pathway': Layers,
+  'private-markets-pathway': Gem,
+  'private-wealth-pathway': Building2,
 };
 
 function levelStats(level) {
@@ -62,11 +69,27 @@ function completedFor(summary, levelId, topicId) {
 
 export default function CfaDashboard() {
   const summary = useProgressSummary();
+  const [activePathway, setActivePathway] = useLevel3Pathway();
+  const [sourceCoverage, setSourceCoverage] = useState(null);
+  const [sourceStatus, setSourceStatus] = useState(null);
+  const cfaLevels = useMemo(() => getCfaLevelSummaries({ level3Pathway: activePathway }), [activePathway]);
   const runtimeReport = getCfaRuntimeReport();
   const activeLevels = runtimeReport.levels.filter((item) => item.releaseEligible);
-  const totalReadyTopics = runtimeReport.levels.reduce((sum, level) => sum + level.examReadyTopics, 0);
-  const totalTopics = runtimeReport.levels.reduce((sum, level) => sum + level.topicCount, 0);
+  const totalReadyTopics = cfaLevels.reduce((sum, level) => sum + level.topics.filter((topic) => topic.runtimeMode === 'exam-ready').length, 0);
+  const totalTopics = cfaLevels.reduce((sum, level) => sum + level.topics.length, 0);
   const firstWeak = summary.weakObjectives[0];
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([getCfaSourceCoverageMap(), getCfaSourceMapStatus()]).then(([coverage, status]) => {
+      if (!active) return;
+      setSourceCoverage(coverage);
+      setSourceStatus(status);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <div className="page-container">
@@ -95,6 +118,24 @@ export default function CfaDashboard() {
         <MetricTile label="Questions" value={summary.questionsAnswered.toLocaleString()} detail="Recorded answer rows" icon={Target} tone="accent" />
         <MetricTile label="Weakest Signal" value={firstWeak ? `${firstWeak.score}%` : '-'} detail={firstWeak?.title || 'No weak objective yet'} icon={Inbox} tone="warning" />
       </div>
+
+      <SourceCoverageMeter coverage={sourceCoverage} status={sourceStatus} title="Native CFA Source Layer" />
+
+      <Surface tone="exam" density="compact" style={{ marginBottom: 'var(--space-6)' }}>
+        <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'center' }}>
+          <div>
+            <StatusBadge tone="exam">Level III exam pathway</StatusBadge>
+            <p className="muted-copy">Dashboard, modules, mocks, review, analytics, and source context use common core plus this selected pathway.</p>
+          </div>
+          <SegmentedControl
+            label="Active Level III pathway"
+            density="compact"
+            options={LEVEL3_PATHWAY_OPTIONS}
+            value={activePathway}
+            onChange={setActivePathway}
+          />
+        </div>
+      </Surface>
 
       <div className="cockpit-grid cockpit-grid-3" style={{ marginBottom: 'var(--space-8)' }}>
         {cfaLevels.map((level) => {
@@ -151,6 +192,7 @@ export default function CfaDashboard() {
                   </div>
                   <strong>{topic.label}</strong>
                   <small>{topic.weight} · {topic.questions} Q · {topic.vignettes} cases</small>
+                  <small>{sourceCoverage?.topicCounts?.[topic.id] || 0} private source document(s) mapped</small>
                   <StatusBadge tone={completed ? 'success' : ready ? 'exam' : 'warning'}>
                     {completed ? 'complete' : ready ? 'exam-ready' : topic.maturity}
                   </StatusBadge>

@@ -46,11 +46,21 @@ import type {
   VaultImportHistoryEntry,
   VaultNote,
 } from './learningTypes';
+import type {
+  CfaSourceChunk,
+  CfaSourceDocument,
+  CfaSourceIndex,
+  CfaSourceIngestionRun,
+  CfaSourceLink,
+  CfaSourceLinkOverride,
+  CfaSourceVaultStores,
+} from './cfaSourceTypes';
+import { level3PathwayForTopic, level3TopicBelongsToPathway } from '../domains/cfa/cfaLevel3Pathways';
 
 export const PROGRESS_EVENT = 'quantvault:progress';
 const PROGRESS_CHANNEL = 'quantvault:progress-channel';
-export const VAULT_SCHEMA_VERSION = 8;
-export const VAULT_SCHEMA_HASH = 'qv-v8-local-first-event-log-health';
+export const VAULT_SCHEMA_VERSION = 10;
+export const VAULT_SCHEMA_HASH = 'qv-v10-native-source-links';
 export const VAULT_CONTENT_VERSION = 'cfa-2026-local-pack-v1';
 
 type SettingRow = { key: string; value: unknown; updatedAt: string };
@@ -69,6 +79,10 @@ type QuestionResultRow = QuestionResult & {
 
 type QuizAttemptRow = Omit<QuizAttempt, 'answers'> & {
   answers: QuestionResultRow[];
+};
+
+type Level3PathwayQuery = {
+  level3Pathway?: string;
 };
 
 export type VaultDataStores = {
@@ -111,6 +125,7 @@ export type VaultExport = {
     keyDerivation?: 'PBKDF2';
   };
   stores: VaultDataStores;
+  sourceVault?: CfaSourceVaultStores;
 };
 
 export type EncryptedVaultExport = Omit<VaultExport, 'stores' | 'encryption'> & {
@@ -130,12 +145,14 @@ export type VaultExportOptions = {
   encryption?: {
     passphrase: string;
   };
+  includeSourceVault?: boolean;
 };
 
 export type VaultImportOptions = {
   mode?: 'merge' | 'replace';
   passphrase?: string;
   conflictPolicy?: 'keep-existing' | 'prefer-import' | 'replace';
+  includeSourceVault?: boolean;
 };
 
 type VaultDatabase = Dexie & {
@@ -162,6 +179,12 @@ type VaultDatabase = Dexie & {
   notes: Table<VaultNote, string>;
   bookmarks: Table<VaultBookmark, string>;
   settings: Table<SettingRow, string>;
+  sourceDocuments: Table<CfaSourceDocument, string>;
+  sourceChunks: Table<CfaSourceChunk, string>;
+  sourceIndexes: Table<CfaSourceIndex, string>;
+  sourceIngestionRuns: Table<CfaSourceIngestionRun, string>;
+  sourceLinks: Table<CfaSourceLink, string>;
+  sourceLinkOverrides: Table<CfaSourceLinkOverride, string>;
 };
 
 const STORE_NAMES = [
@@ -203,6 +226,33 @@ const AUTO_ID_STORES = new Set<(typeof STORE_NAMES)[number]>([
   'confidenceCalibration',
   'flashcardAttempts',
 ]);
+
+const SOURCE_STORE_NAMES = ['sourceDocuments', 'sourceChunks', 'sourceIndexes', 'sourceIngestionRuns', 'sourceLinks', 'sourceLinkOverrides'] as const;
+
+export type VaultImportPreviewBase = {
+  valid: boolean;
+  errors: string[];
+  schemaVersion: number | null;
+  schemaHash: string | null;
+  contentVersion: string | null;
+  exportId: string | null;
+  checksumValid: boolean;
+  counts: Record<(typeof STORE_NAMES)[number], number>;
+  sourceCounts: Record<(typeof SOURCE_STORE_NAMES)[number], number>;
+};
+
+export type VaultImportPreview = VaultImportPreviewBase & {
+  encrypted: boolean;
+  exportedAt: string | null;
+  totalRows: number;
+  sourceIncluded: boolean;
+  sourceAvailable: boolean;
+  conflictPolicy: 'keep-existing' | 'prefer-import' | 'replace';
+  conflicts: {
+    total: number;
+    byStore: Partial<Record<(typeof STORE_NAMES)[number], number>>;
+  };
+};
 
 const CONFIDENCE_SCORE: Record<Confidence, number> = {
   low: 34,
@@ -307,7 +357,7 @@ db.version(5).stores({
   settings: 'key',
 });
 
-/* D1: Current schema v8 — persisted event envelopes and vault health snapshots */
+/* D1: Current schema v10 — native CFA source links remain private and export-gated */
 db.version(VAULT_SCHEMA_VERSION).stores({
   lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
   quizAttempts: '++id, domain, topic, pct, createdAt, mode',
@@ -332,6 +382,12 @@ db.version(VAULT_SCHEMA_VERSION).stores({
   notes: 'id, type, domain, moduleId, questionId, formulaName, updatedAt',
   bookmarks: 'id, type, domain, moduleId, questionId, formulaName, createdAt',
   settings: 'key',
+  sourceDocuments: 'id, level, year, publisher, sourceKind, format, sha256, canonical, importedAt',
+  sourceChunks: 'id, documentId, chunkIndex, sourceHash, importedAt',
+  sourceIndexes: 'id, token, updatedAt',
+  sourceIngestionRuns: 'id, rootPath, startedAt, status',
+  sourceLinks: 'id, targetId, targetKind, documentId, chunkId, score, rank, sourcePriority, createdAt',
+  sourceLinkOverrides: 'id, targetId, chunkId, action, updatedAt',
 });
 
 function nowIso() {
@@ -392,6 +448,26 @@ function defaultPathFor(domain: DomainId, topic: string, mode = 'review-due') {
     return `/cfa/${level}/${topicId}/quiz?mode=${mode}`;
   }
   return `/${domain}/${topic}`;
+}
+
+function isPathwayScopedLevel3Topic(topic?: string | null) {
+  const pathway = level3PathwayForTopic(topic || '');
+  return pathway !== null && pathway !== 'core';
+}
+
+function isLevel3TopicRow(row: { level?: string; topic?: string }) {
+  return row.level === 'level3' || row.topic?.startsWith('level3:') || isPathwayScopedLevel3Topic(row.topic);
+}
+
+function level3TopicRowAllowed(row: { level?: string; topic?: string }, level3Pathway?: string) {
+  if (!level3Pathway || !isLevel3TopicRow(row)) return true;
+  return level3TopicBelongsToPathway(row.topic, level3Pathway);
+}
+
+function level3MockAttemptAllowed(attempt: MockAttempt, level3Pathway?: string) {
+  if (!level3Pathway || attempt.level !== 'level3') return true;
+  const pathwayTopics = attempt.topicBreakdown.map((row) => row.topic).filter(isPathwayScopedLevel3Topic);
+  return !pathwayTopics.length || pathwayTopics.some((topic) => level3TopicBelongsToPathway(topic, level3Pathway));
 }
 
 function normalizeDifficulty(value: unknown): Difficulty {
@@ -729,27 +805,28 @@ export async function recordQuizAttempt({
   emitProgressChange();
 }
 
-export async function getDueReviews(date = new Date()) {
+export async function getDueReviews(date = new Date(), options: Level3PathwayQuery = {}) {
   const reviewItems = await db.reviewItems.toArray();
-  return rankReviewItems(reviewItems, date).filter((item) => isDue(item, date));
+  return rankReviewItems(reviewItems.filter((item) => level3TopicRowAllowed(item, options.level3Pathway)), date).filter((item) => isDue(item, date));
 }
 
-export async function getMasterySummary() {
+export async function getMasterySummary(options: Level3PathwayQuery = {}) {
   const snapshots = await db.masterySnapshots.toArray();
-  const ranked = [...snapshots].sort((a, b) => a.score - b.score || b.lastAttemptAt.localeCompare(a.lastAttemptAt));
+  const visibleSnapshots = snapshots.filter((snapshot) => level3TopicRowAllowed(snapshot, options.level3Pathway));
+  const ranked = [...visibleSnapshots].sort((a, b) => a.score - b.score || b.lastAttemptAt.localeCompare(a.lastAttemptAt));
   return {
-    snapshots,
+    snapshots: visibleSnapshots,
     weakObjectives: ranked.filter((snapshot) => snapshot.score < 72).slice(0, 6),
-    averageScore: snapshots.length
-      ? Math.round(snapshots.reduce((sum, snapshot) => sum + snapshot.score, 0) / snapshots.length)
+    averageScore: visibleSnapshots.length
+      ? Math.round(visibleSnapshots.reduce((sum, snapshot) => sum + snapshot.score, 0) / visibleSnapshots.length)
       : null,
   };
 }
 
-export async function getNextRecommendation() {
+export async function getNextRecommendation(options: Level3PathwayQuery = {}) {
   const [dueReviews, mastery, lessonProgress] = await Promise.all([
-    getDueReviews(),
-    getMasterySummary(),
+    getDueReviews(new Date(), options),
+    getMasterySummary(options),
     db.lessonProgress.orderBy('lastVisitedAt').reverse().first(),
   ]);
 
@@ -760,7 +837,7 @@ export async function getNextRecommendation() {
       path: defaultPathFor(objective.domain, objective.topic, 'weak-areas'),
       score: objective.score,
     })),
-    continuePath: lessonProgress?.path || null,
+    continuePath: lessonProgress && level3TopicRowAllowed({ topic: lessonProgress.moduleId }, options.level3Pathway) ? lessonProgress.path : null,
   });
 }
 
@@ -939,11 +1016,12 @@ function noteIdFor({
   moduleId,
   questionId,
   formulaName,
-}: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName'>) {
-  return [type, domain || 'vault', moduleId || questionId || formulaName || 'general'].join(':');
+  artifactId,
+}: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName' | 'artifactId'>) {
+  return [type, domain || 'vault', artifactId || moduleId || questionId || formulaName || 'general'].join(':');
 }
 
-export async function getNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName'>) {
+export async function getNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName' | 'artifactId'>) {
   return db.notes.get(noteIdFor(target));
 }
 
@@ -953,11 +1031,12 @@ export async function saveNote({
   moduleId,
   questionId,
   formulaName,
+  artifactId,
   title,
   body,
   path,
 }: Omit<VaultNote, 'id' | 'createdAt' | 'updatedAt'>) {
-  const id = noteIdFor({ type, domain, moduleId, questionId, formulaName });
+  const id = noteIdFor({ type, domain, moduleId, questionId, formulaName, artifactId });
   const existing = await db.notes.get(id);
   const timestamp = nowIso();
   const note: VaultNote = {
@@ -967,6 +1046,7 @@ export async function saveNote({
     moduleId,
     questionId,
     formulaName,
+    artifactId,
     title,
     body,
     path,
@@ -975,11 +1055,12 @@ export async function saveNote({
   };
 
   await db.notes.put(note);
+  if (artifactId) await attachArtifactToNote(artifactId, id);
   emitProgressChange();
   return note;
 }
 
-export async function deleteNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName'>) {
+export async function deleteNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName' | 'artifactId'>) {
   await db.notes.delete(noteIdFor(target));
   emitProgressChange();
 }
@@ -1059,6 +1140,11 @@ function checksumForStablePayload(payload: unknown) {
 
 function checksumForExport(payload: Omit<VaultExport, 'checksum'>) {
   return checksumForStablePayload(payload);
+}
+
+function checksumMatchesPayload(payload: Record<string, unknown>, checksum: string) {
+  const { checksum: _checksum, ...payloadForChecksum } = payload;
+  return checksum === checksumForStablePayload(payloadForChecksum);
 }
 
 function exportIdFor(timestamp: string) {
@@ -1178,6 +1264,8 @@ function isEncryptedVaultExport(payload: unknown): payload is EncryptedVaultExpo
 
 export async function exportVaultData(): Promise<VaultExport>;
 export async function exportVaultData(options: { encryption: { passphrase: string } }): Promise<EncryptedVaultExport>;
+export async function exportVaultData(options: { includeSourceVault: true }): Promise<VaultExport>;
+export async function exportVaultData(options: VaultExportOptions): Promise<VaultExport | EncryptedVaultExport>;
 export async function exportVaultData(options: VaultExportOptions = {}): Promise<VaultExport | EncryptedVaultExport> {
   const [
     lessonProgress,
@@ -1229,6 +1317,17 @@ export async function exportVaultData(options: VaultExportOptions = {}): Promise
     db.settings.toArray(),
   ]);
 
+  const sourceVault: CfaSourceVaultStores | undefined = options.includeSourceVault
+    ? {
+        sourceDocuments: await db.sourceDocuments.toArray(),
+        sourceChunks: await db.sourceChunks.toArray(),
+        sourceIndexes: await db.sourceIndexes.toArray(),
+        sourceIngestionRuns: await db.sourceIngestionRuns.toArray(),
+        sourceLinks: await db.sourceLinks.toArray(),
+        sourceLinkOverrides: await db.sourceLinkOverrides.toArray(),
+      }
+    : undefined;
+
   const vaultExport = buildVaultExport({
     lessonProgress,
     quizAttempts,
@@ -1254,8 +1353,10 @@ export async function exportVaultData(options: VaultExportOptions = {}): Promise
     bookmarks,
     settings,
   });
-  if (options.encryption) return encryptVaultExport(vaultExport, options.encryption.passphrase);
-  return vaultExport;
+  const { checksum: _checksum, ...vaultExportPayload } = vaultExport;
+  const exportWithSource = sourceVault ? withChecksum({ ...vaultExportPayload, sourceVault }) : vaultExport;
+  if (options.encryption) return encryptVaultExport(exportWithSource, options.encryption.passphrase);
+  return exportWithSource;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -1290,6 +1391,37 @@ function emptyVaultStores(): VaultDataStores {
   };
 }
 
+function emptyVaultCounts(): Record<(typeof STORE_NAMES)[number], number> {
+  return STORE_NAMES.reduce(
+    (counts, storeName) => ({
+      ...counts,
+      [storeName]: 0,
+    }),
+    {} as Record<(typeof STORE_NAMES)[number], number>,
+  );
+}
+
+function emptySourceVaultStores(): CfaSourceVaultStores {
+  return {
+    sourceDocuments: [],
+    sourceChunks: [],
+    sourceIndexes: [],
+    sourceIngestionRuns: [],
+    sourceLinks: [],
+    sourceLinkOverrides: [],
+  };
+}
+
+function emptySourceVaultCounts(): Record<(typeof SOURCE_STORE_NAMES)[number], number> {
+  return SOURCE_STORE_NAMES.reduce(
+    (counts, storeName) => ({
+      ...counts,
+      [storeName]: 0,
+    }),
+    {} as Record<(typeof SOURCE_STORE_NAMES)[number], number>,
+  );
+}
+
 export function migrateVaultData(payload: unknown): VaultExport {
   if (!isObject(payload)) {
     throw new Error('Payload must be a JSON object.');
@@ -1311,6 +1443,21 @@ export function migrateVaultData(payload: unknown): VaultExport {
     })),
   };
   const exportedAt = typeof payload.exportedAt === 'string' ? payload.exportedAt : nowIso();
+  const sourceVaultPayload = isObject(payload.sourceVault) ? payload.sourceVault : undefined;
+  const sourceVault = sourceVaultPayload
+    ? {
+        sourceDocuments: Array.isArray(sourceVaultPayload.sourceDocuments) ? (sourceVaultPayload.sourceDocuments as CfaSourceVaultStores['sourceDocuments']) : [],
+        sourceChunks: Array.isArray(sourceVaultPayload.sourceChunks) ? (sourceVaultPayload.sourceChunks as CfaSourceVaultStores['sourceChunks']) : [],
+        sourceIndexes: Array.isArray(sourceVaultPayload.sourceIndexes) ? (sourceVaultPayload.sourceIndexes as CfaSourceVaultStores['sourceIndexes']) : [],
+        sourceIngestionRuns: Array.isArray(sourceVaultPayload.sourceIngestionRuns)
+          ? (sourceVaultPayload.sourceIngestionRuns as CfaSourceVaultStores['sourceIngestionRuns'])
+          : [],
+        sourceLinks: Array.isArray(sourceVaultPayload.sourceLinks) ? (sourceVaultPayload.sourceLinks as CfaSourceVaultStores['sourceLinks']) : [],
+        sourceLinkOverrides: Array.isArray(sourceVaultPayload.sourceLinkOverrides)
+          ? (sourceVaultPayload.sourceLinkOverrides as CfaSourceVaultStores['sourceLinkOverrides'])
+          : [],
+      }
+    : undefined;
   const baseExport: Omit<VaultExport, 'checksum'> = {
     app: payload.app === 'QuantVault' ? 'QuantVault' : 'QuantVault',
     exportId: typeof payload.exportId === 'string' ? payload.exportId : exportIdFor(exportedAt),
@@ -1327,8 +1474,9 @@ export function migrateVaultData(payload: unknown): VaultExport {
       : {
           encrypted: false,
           algorithm: 'none',
-        },
+    },
     stores: storesWithV6Defaults,
+    ...(sourceVault ? { sourceVault } : {}),
   };
 
   return {
@@ -1349,9 +1497,7 @@ export function validateVaultData(payload: unknown): { valid: boolean; errors: s
 
   if (isObject(payload) && payload.app !== 'QuantVault') errors.push('Payload is not a QuantVault export.');
   if (isObject(payload) && typeof payload.checksum === 'string') {
-    const { checksum: _checksum, ...payloadForChecksum } = migrated;
-    const expectedChecksum = checksumForExport(payloadForChecksum);
-    if (payload.checksum !== expectedChecksum) {
+    if (!checksumMatchesPayload(payload, payload.checksum)) {
       errors.push('Vault export checksum does not match its payload.');
     }
   }
@@ -1361,6 +1507,39 @@ export function validateVaultData(payload: unknown): { valid: boolean; errors: s
   STORE_NAMES.forEach((storeName) => {
     if (!Array.isArray(migrated.stores[storeName])) errors.push(`${storeName} must be an array.`);
   });
+  if (migrated.sourceVault) {
+    SOURCE_STORE_NAMES.forEach((storeName) => {
+      if (!Array.isArray(migrated.sourceVault?.[storeName])) errors.push(`${storeName} must be an array.`);
+    });
+    const publicSourceDocuments = migrated.sourceVault.sourceDocuments.filter((document) => document.privateUseOnly !== true);
+    if (publicSourceDocuments.length) {
+      errors.push(`${publicSourceDocuments.length} source document rows are not marked privateUseOnly.`);
+    }
+    const orphanedSourceChunks = migrated.sourceVault.sourceChunks.filter(
+      (chunk) => !migrated.sourceVault?.sourceDocuments.some((document) => document.id === chunk.documentId),
+    );
+    if (orphanedSourceChunks.length) {
+      errors.push(`${orphanedSourceChunks.length} source chunk rows reference unknown source documents.`);
+    }
+    const sourceChunkIds = new Set(migrated.sourceVault.sourceChunks.map((chunk) => chunk.id));
+    const sourceDocumentIds = new Set(migrated.sourceVault.sourceDocuments.map((document) => document.id));
+    const sourceChunkById = new Map(migrated.sourceVault.sourceChunks.map((chunk) => [chunk.id, chunk]));
+    const orphanedSourceLinks = (migrated.sourceVault.sourceLinks || []).filter((link) => !sourceChunkIds.has(link.chunkId));
+    if (orphanedSourceLinks.length) {
+      errors.push(`${orphanedSourceLinks.length} source link rows reference unknown source chunks.`);
+    }
+    const mismatchedSourceLinks = (migrated.sourceVault.sourceLinks || []).filter((link) => {
+      const chunk = sourceChunkById.get(link.chunkId);
+      return !sourceDocumentIds.has(link.documentId) || (chunk && chunk.documentId !== link.documentId);
+    });
+    if (mismatchedSourceLinks.length) {
+      errors.push(`${mismatchedSourceLinks.length} source link rows have mismatched source document citations.`);
+    }
+    const orphanedSourceOverrides = (migrated.sourceVault.sourceLinkOverrides || []).filter((override) => !sourceChunkIds.has(override.chunkId));
+    if (orphanedSourceOverrides.length) {
+      errors.push(`${orphanedSourceOverrides.length} source override rows reference unknown source chunks.`);
+    }
+  }
 
   const invalidQuestionResults = migrated.stores.questionResults.filter(
     (row) => !row.domain || !row.topic || !row.questionId || !row.learningObjective,
@@ -1398,7 +1577,7 @@ export function validateVaultData(payload: unknown): { valid: boolean; errors: s
   return { valid: errors.length === 0, errors };
 }
 
-export function previewVaultImport(payload: unknown) {
+export function previewVaultImport(payload: unknown): VaultImportPreviewBase {
   const validation = validateVaultData(payload);
   if (!validation.valid) {
     return {
@@ -1409,7 +1588,8 @@ export function previewVaultImport(payload: unknown) {
       contentVersion: null,
       exportId: null,
       checksumValid: false,
-      counts: emptyVaultStores(),
+      counts: emptyVaultCounts(),
+      sourceCounts: emptySourceVaultCounts(),
     };
   }
 
@@ -1430,6 +1610,13 @@ export function previewVaultImport(payload: unknown) {
       }),
       {} as Record<(typeof STORE_NAMES)[number], number>,
     ),
+    sourceCounts: SOURCE_STORE_NAMES.reduce(
+      (counts, storeName) => ({
+        ...counts,
+        [storeName]: migrated.sourceVault?.[storeName]?.length || 0,
+      }),
+      {} as Record<(typeof SOURCE_STORE_NAMES)[number], number>,
+    ),
   };
 }
 
@@ -1449,16 +1636,17 @@ function remapMergeIds(stores: VaultDataStores): VaultDataStores {
   );
 }
 
-function normalizeVaultImportOptions(options: 'merge' | 'replace' | VaultImportOptions = 'merge'): Required<Pick<VaultImportOptions, 'mode' | 'conflictPolicy'>> &
+function normalizeVaultImportOptions(options: 'merge' | 'replace' | VaultImportOptions = 'merge'): Required<Pick<VaultImportOptions, 'mode' | 'conflictPolicy' | 'includeSourceVault'>> &
   Pick<VaultImportOptions, 'passphrase'> {
   if (typeof options === 'string') {
-    return { mode: options, conflictPolicy: options === 'replace' ? 'replace' : 'prefer-import' };
+    return { mode: options, conflictPolicy: options === 'replace' ? 'replace' : 'prefer-import', includeSourceVault: false };
   }
   const conflictPolicy = options.conflictPolicy || (options.mode === 'replace' ? 'replace' : 'prefer-import');
   return {
     mode: conflictPolicy === 'replace' ? 'replace' : options.mode || 'merge',
     conflictPolicy,
     passphrase: options.passphrase,
+    includeSourceVault: options.includeSourceVault === true,
   };
 }
 
@@ -1497,9 +1685,66 @@ async function filterKeepExisting(stores: VaultDataStores): Promise<VaultDataSto
   );
 }
 
+async function detectImportConflicts(stores: VaultDataStores) {
+  const entries = await Promise.all(
+    STORE_NAMES.map(async (storeName) => {
+      if (AUTO_ID_STORES.has(storeName)) return [storeName, 0] as const;
+      const keyPath = primaryKeyPathForStore(storeName);
+      if (!keyPath) return [storeName, 0] as const;
+      const keys = stores[storeName].map((row) => rowKey(row, keyPath)).filter((key) => key !== undefined) as any[];
+      if (!keys.length) return [storeName, 0] as const;
+      const existing = await db[storeName].bulkGet(keys);
+      return [storeName, existing.filter(Boolean).length] as const;
+    }),
+  );
+  const byStore = entries.reduce<Partial<Record<(typeof STORE_NAMES)[number], number>>>((result, [storeName, count]) => {
+    if (count > 0) result[storeName] = count;
+    return result;
+  }, {});
+  return {
+    total: Object.values(byStore).reduce((sum, count) => sum + (count || 0), 0),
+    byStore,
+  };
+}
+
 async function resolveVaultImportPayload(payload: unknown, passphrase?: string): Promise<VaultExport> {
   if (isEncryptedVaultExport(payload)) return decryptVaultExport(payload, passphrase);
   return migrateVaultData(payload);
+}
+
+export async function previewVaultImportPayload(payload: unknown, options: VaultImportOptions = {}): Promise<VaultImportPreview> {
+  const importOptions = normalizeVaultImportOptions(options);
+  const encrypted = isEncryptedVaultExport(payload);
+
+  try {
+    const exportPayload = await resolveVaultImportPayload(payload, importOptions.passphrase);
+    const preview = previewVaultImport(exportPayload);
+    const totalRows = Object.values(preview.counts).reduce((sum, count) => sum + count, 0);
+    const sourceAvailable = Object.values(preview.sourceCounts).some((count) => count > 0);
+    return {
+      ...preview,
+      encrypted,
+      exportedAt: exportPayload.exportedAt,
+      totalRows,
+      sourceIncluded: importOptions.includeSourceVault && sourceAvailable,
+      sourceAvailable,
+      conflictPolicy: importOptions.conflictPolicy,
+      conflicts: importOptions.mode === 'merge' ? await detectImportConflicts(exportPayload.stores) : { total: 0, byStore: {} },
+    };
+  } catch (error) {
+    return {
+      ...previewVaultImport({}),
+      valid: false,
+      errors: [error instanceof Error ? error.message : 'Import preview failed.'],
+      encrypted,
+      exportedAt: null,
+      totalRows: 0,
+      sourceIncluded: false,
+      sourceAvailable: false,
+      conflictPolicy: importOptions.conflictPolicy,
+      conflicts: { total: 0, byStore: {} },
+    };
+  }
 }
 
 async function appendVaultImportHistory({
@@ -1580,10 +1825,16 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
       db.notes,
       db.bookmarks,
       db.settings,
+      ...(importOptions.includeSourceVault
+        ? [db.sourceDocuments, db.sourceChunks, db.sourceIndexes, db.sourceIngestionRuns, db.sourceLinks, db.sourceLinkOverrides]
+        : []),
     ],
     async () => {
       if (importOptions.mode === 'replace') {
         await Promise.all(STORE_NAMES.map((storeName) => db[storeName].clear()));
+        if (importOptions.includeSourceVault) {
+          await Promise.all(SOURCE_STORE_NAMES.map((storeName) => db[storeName].clear()));
+        }
       }
 
       await Promise.all([
@@ -1610,6 +1861,16 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
         db.notes.bulkPut(storesToWrite.notes),
         db.bookmarks.bulkPut(storesToWrite.bookmarks),
         db.settings.bulkPut(storesToWrite.settings),
+        ...(importOptions.includeSourceVault && exportPayload.sourceVault
+          ? [
+              db.sourceDocuments.bulkPut(exportPayload.sourceVault.sourceDocuments),
+              db.sourceChunks.bulkPut(exportPayload.sourceVault.sourceChunks),
+              db.sourceIndexes.bulkPut(exportPayload.sourceVault.sourceIndexes),
+              db.sourceIngestionRuns.bulkPut(exportPayload.sourceVault.sourceIngestionRuns),
+              db.sourceLinks.bulkPut(exportPayload.sourceVault.sourceLinks || []),
+              db.sourceLinkOverrides.bulkPut(exportPayload.sourceVault.sourceLinkOverrides || []),
+            ]
+          : []),
       ]);
     },
   );
@@ -1851,14 +2112,16 @@ function scoreVolatility(scores: number[]) {
   return Math.round(Math.sqrt(variance));
 }
 
-export async function getReadinessByTopic(date = new Date()): Promise<TopicReadiness[]> {
+export async function getReadinessByTopic(dateOrOptions: Date | Level3PathwayQuery = new Date(), maybeOptions: Level3PathwayQuery = {}): Promise<TopicReadiness[]> {
+  const date = dateOrOptions instanceof Date ? dateOrOptions : new Date();
+  const options = dateOrOptions instanceof Date ? maybeOptions : dateOrOptions;
   const [snapshots, reviewItems, results] = await Promise.all([
     db.masterySnapshots.toArray(),
     db.reviewItems.toArray(),
     db.questionResults.toArray(),
   ]);
   const grouped = new Map<string, MasterySnapshot[]>();
-  snapshots.forEach((snapshot) => {
+  snapshots.filter((snapshot) => level3TopicRowAllowed(snapshot, options.level3Pathway)).forEach((snapshot) => {
     const key = `${snapshot.domain}:${snapshot.topic}`;
     grouped.set(key, [...(grouped.get(key) || []), snapshot]);
   });
@@ -1868,8 +2131,8 @@ export async function getReadinessByTopic(date = new Date()): Promise<TopicReadi
       const [domainPart, ...topicParts] = key.split(':');
       const domain = domainPart as DomainId;
       const topic = topicParts.join(':');
-      const topicResults = results.filter((result) => result.domain === domain && result.topic === topic);
-      const topicReviews = reviewItems.filter((item) => item.domain === domain && item.topic === topic);
+      const topicResults = results.filter((result) => result.domain === domain && result.topic === topic && level3TopicRowAllowed(result, options.level3Pathway));
+      const topicReviews = reviewItems.filter((item) => item.domain === domain && item.topic === topic && level3TopicRowAllowed(item, options.level3Pathway));
       const dueCount = topicReviews.filter((item) => isDue(item, date)).length;
       const averageMastery = Math.round(
         topicSnapshots.reduce((sum, snapshot) => sum + snapshot.score, 0) / Math.max(1, topicSnapshots.length),
@@ -1918,13 +2181,14 @@ export async function getReadinessByTopic(date = new Date()): Promise<TopicReadi
     .sort((a, b) => a.readinessScore - b.readinessScore);
 }
 
-export async function forecastReviewLoad(days = 14, date = new Date()): Promise<RetentionForecast[]> {
+export async function forecastReviewLoad(days = 14, date = new Date(), options: Level3PathwayQuery = {}): Promise<RetentionForecast[]> {
   const reviewItems = await db.reviewItems.toArray();
+  const visibleItems = reviewItems.filter((item) => level3TopicRowAllowed(item, options.level3Pathway));
   return Array.from({ length: days }, (_, index) => {
     const day = new Date(date);
     day.setDate(date.getDate() + index);
     const key = day.toISOString().slice(0, 10);
-    const dueItems = reviewItems.filter((item) => item.dueAt.slice(0, 10) === key);
+    const dueItems = visibleItems.filter((item) => item.dueAt.slice(0, 10) === key);
     const retention = dueItems.length
       ? Math.round((dueItems.reduce((sum, item) => sum + predictRetention(item, day), 0) / dueItems.length) * 100)
       : null;
@@ -1940,6 +2204,106 @@ export async function forecastReviewLoad(days = 14, date = new Date()): Promise<
 function topicWeightFor(topicWeights: Record<string, number> | undefined, topic?: string) {
   if (!topic || !topicWeights) return 0;
   return Number(topicWeights[topic] ?? topicWeights[topic.split(':').at(-1) || topic] ?? 0) || 0;
+}
+
+const ITEM_TYPE_WEIGHTS: Record<string, number> = {
+  'constructed-response': 1.45,
+  mock: 1.3,
+  vignette: 1.2,
+  'quant-lab': 1.18,
+  'excel-drill': 1.14,
+  calculator: 1.12,
+  'formula-drill': 1.08,
+  flashcard: 1.04,
+  single: 1,
+};
+
+function itemTypeWeightFor(itemType?: string) {
+  return ITEM_TYPE_WEIGHTS[itemType || 'single'] ?? 1;
+}
+
+function itemTypeLabel(itemType?: string) {
+  return (itemType || 'single').replace(/-/g, ' ');
+}
+
+function weightedAccuracyFor(results: QuestionResultRow[]) {
+  if (!results.length) return 100;
+  const totalWeight = results.reduce((sum, result) => sum + itemTypeWeightFor(result.itemType), 0);
+  const earnedWeight = results.reduce((sum, result) => sum + (result.correct ? itemTypeWeightFor(result.itemType) : 0), 0);
+  return Math.round((earnedWeight / Math.max(1, totalWeight)) * 100);
+}
+
+function impactFromScore(score: number, weight = 1) {
+  return Math.max(0, Math.round((100 - score) * weight));
+}
+
+function lowestRubricSignals(attempts: ConstructedResponseAttempt[], topic?: string, limit = 3) {
+  const relevant = topic ? attempts.filter((attempt) => attempt.topic === topic) : attempts;
+  const rubricKeys = [...new Set(relevant.flatMap((attempt) => Object.keys(attempt.rubricScores || {})))].sort();
+  return rubricKeys
+    .map((criterion) => {
+      const scores = relevant.map((attempt) => Math.round(((attempt.rubricScores[criterion] ?? 0) / 2) * 100));
+      const averagePct = scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : 0;
+      return {
+        criterion,
+        attempts: scores.length,
+        averagePct,
+        impact: impactFromScore(averagePct, 0.35),
+      };
+    })
+    .filter((row) => row.attempts > 0 && row.averagePct < 75)
+    .sort((a, b) => b.impact - a.impact || a.averagePct - b.averagePct)
+    .slice(0, limit);
+}
+
+function artifactObjectiveImpacts(artifacts: ResultArtifact[], skillLabAttempts: SkillLabAttempt[]) {
+  const grouped = new Map<string, { objectiveId: string; topic?: string; sourceType: string; scores: number[] }>();
+  const add = (objectiveId: string, topic: string | undefined, sourceType: string, score: number) => {
+    const key = `${sourceType}:${topic || 'unmapped'}:${objectiveId}`;
+    const row = grouped.get(key) || { objectiveId, topic, sourceType, scores: [] };
+    row.scores.push(score);
+    grouped.set(key, row);
+  };
+
+  artifacts.forEach((artifact) => {
+    const metricScore = Number(artifact.metrics.score ?? artifact.metrics.accuracy ?? artifact.metrics.pct);
+    const score = Number.isFinite(metricScore) ? Math.max(0, Math.min(100, metricScore)) : 100;
+    artifact.objectiveIds?.forEach((objectiveId) => add(objectiveId, artifact.topic, artifact.type, score));
+  });
+  skillLabAttempts.forEach((attempt) => {
+    const score = Math.max(0, Math.min(100, Number(attempt.score ?? 100)));
+    attempt.objectiveIds.forEach((objectiveId) => add(objectiveId, attempt.topic, attempt.labType, score));
+  });
+
+  return [...grouped.values()]
+    .map((row) => {
+      const averageScore = Math.round(row.scores.reduce((sum, score) => sum + score, 0) / Math.max(1, row.scores.length));
+      return {
+        objectiveId: row.objectiveId,
+        topic: row.topic,
+        sourceType: row.sourceType,
+        attempts: row.scores.length,
+        averageScore,
+        impact: impactFromScore(averageScore, row.sourceType === 'calculator' ? 0.22 : 0.3),
+      };
+    })
+    .filter((row) => row.impact > 0)
+    .sort((a, b) => b.impact - a.impact || a.averageScore - b.averageScore);
+}
+
+function explainReviewReason(reason: ReviewReason, context: { score?: number; retentionPct?: number; topicWeight?: number; itemType?: string } = {}) {
+  const details: string[] = [];
+  if (reason === 'due-review') details.push(`Retention forecast is ${context.retentionPct ?? 'below target'}%.`);
+  if (reason === 'weak-objective') details.push(`Readiness is ${context.score ?? 'below target'}%.`);
+  if (reason === 'rubric-miss') details.push('Constructed-response rubric bands are below the command-word target.');
+  if (reason === 'skill-lab-gap') details.push(`${context.itemType ? itemTypeLabel(context.itemType) : 'Lab'} practice is below target.`);
+  if (reason === 'stale-topic') details.push('Prior evidence has decayed or accumulated review debt.');
+  if (reason === 'missed-question') details.push('The latest evidence includes an incorrect answer.');
+  if (reason === 'flashcard-decay') details.push('Recall evidence needs another retrieval rep.');
+  if (reason === 'unfinished-lesson') details.push('Started lesson progress has not been completed.');
+  if (reason === 'saved-artifact') details.push('Saved vault artifact is available for follow-up.');
+  if ((context.topicWeight ?? 0) >= 12) details.push(`Topic carries ${context.topicWeight}% planning weight.`);
+  return details;
 }
 
 const DEFAULT_CFA_TOPIC_WEIGHTS: Record<string, number> = {
@@ -2003,17 +2367,20 @@ export async function getStudyPlan({
   examDate,
   dailyTargetMinutes,
   targetLevel,
+  level3Pathway,
 }: {
   examDate?: string | null;
   dailyTargetMinutes?: number;
   targetLevel?: string;
+  level3Pathway?: string;
 } = {}): Promise<StudySessionPlan> {
-  const [settings, dueReviews, forecast, readiness, recommendation] = await Promise.all([
+  const [settings, dueReviews, forecast, readiness, objectiveReadiness, recommendation] = await Promise.all([
     getStudyPlanSettings(),
-    getDueReviews(),
-    forecastReviewLoad(14),
-    getReadinessByTopic(),
-    getNextRecommendation(),
+    getDueReviews(new Date(), { level3Pathway }),
+    forecastReviewLoad(14, new Date(), { level3Pathway }),
+    getReadinessByTopic({ level3Pathway }),
+    getReadinessByObjectiveV2({ level3Pathway }),
+    getNextRecommendation({ level3Pathway }),
   ]);
   const effectiveExamDate = examDate !== undefined ? examDate : settings.examDate;
   const effectiveDailyTarget = dailyTargetMinutes ?? settings.dailyTargetMinutes;
@@ -2026,6 +2393,9 @@ export async function getStudyPlan({
       (b.readinessScore - topicWeightFor(settings.topicWeights, b.topic) * 0.4),
   );
   const weakest = weightedReadiness[0];
+  const weakestObjective = objectiveReadiness[0];
+  const recommendationReason: ReviewReason =
+    recommendation.label === 'Review Due' ? 'due-review' : recommendation.label === 'Weak Area' ? 'weak-objective' : 'unfinished-lesson';
 
   return {
     id: 'local-study-plan',
@@ -2039,15 +2409,28 @@ export async function getStudyPlan({
     dueToday: dueReviews.length,
     forecastReviewCount: forecast.reduce((sum, item) => sum + item.count, 0),
     nextActions: [
-      recommendation,
+      {
+        ...recommendation,
+        reasonDetails: explainReviewReason(recommendationReason, {
+          score: weakestObjective?.readinessScore,
+          retentionPct: weakestObjective?.retentionForecastPct,
+          topicWeight: weakestObjective?.topicWeight,
+        }),
+      },
       ...(weakest
         ? [
             {
               label: 'Readiness',
-              title: weakest.title,
-              path: defaultPathFor(weakest.domain, weakest.topic, 'weak-areas'),
-              reason: `Topic readiness is ${weakest.readinessScore}%.`,
-              reviewReason: 'weak-objective' as ReviewReason,
+              title: weakestObjective?.title || weakest.title,
+              path: defaultPathFor(weakestObjective?.domain || weakest.domain, weakestObjective?.topic || weakest.topic, 'weak-areas'),
+              reason: weakestObjective
+                ? `Objective readiness is ${weakestObjective.readinessScore}% after item-type, retention, rubric, and lab evidence.`
+                : `Topic readiness is ${weakest.readinessScore}%.`,
+              reasonDetails: weakestObjective?.reasonDetails || [
+                `Topic readiness is ${weakest.readinessScore}%.`,
+                `Planning weight is ${topicWeightFor(settings.topicWeights, weakest.topic)}%.`,
+              ],
+              reviewReason: weakestObjective?.primaryReason || ('weak-objective' as ReviewReason),
               estimatedMinutes: Math.min(30, Math.max(12, Math.round(effectiveDailyTarget * 0.35))),
             },
           ]
@@ -2062,7 +2445,7 @@ export async function getStudyPlan({
   };
 }
 
-export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
+export async function getReviewInbox(options: Level3PathwayQuery = {}): Promise<ReviewQueueItem[]> {
   const [
     dueReviews,
     mastery,
@@ -2077,12 +2460,12 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
     skillLabAttempts,
     artifacts,
   ] = await Promise.all([
-    getDueReviews(),
-    getMasterySummary(),
+    getDueReviews(new Date(), options),
+    getMasterySummary(options),
     db.questionResults.orderBy('createdAt').reverse().toArray(),
     db.bookmarks.toArray(),
     db.lessonProgress.toArray(),
-    getReadinessByTopic(),
+    getReadinessByTopic(options),
     db.mockAttempts.orderBy('createdAt').reverse().toArray(),
     db.vignetteAttempts.orderBy('createdAt').reverse().toArray(),
     db.constructedResponseAttempts.orderBy('createdAt').reverse().toArray(),
@@ -2090,11 +2473,29 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
     db.skillLabAttempts.orderBy('createdAt').reverse().toArray(),
     db.resultArtifacts.orderBy('createdAt').reverse().toArray(),
   ]);
+  const visibleResults = results.filter((result) => level3TopicRowAllowed(result, options.level3Pathway));
+  const visibleBookmarks = bookmarks.filter((item) => level3TopicRowAllowed({ topic: item.moduleId }, options.level3Pathway));
+  const visibleLessonProgress = lessonProgress.filter((item) => level3TopicRowAllowed({ topic: item.moduleId }, options.level3Pathway));
+  const visibleMockAttempts = mockAttempts.filter((attempt) => level3MockAttemptAllowed(attempt, options.level3Pathway));
+  const visibleVignetteAttempts = vignetteAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleConstructedResponseAttempts = constructedResponseAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleFormulaDrillAttempts = formulaDrillAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleSkillLabAttempts = skillLabAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleArtifacts = artifacts.filter((artifact) => level3TopicRowAllowed(artifact, options.level3Pathway));
   const latestWrongByQuestion = new Map<string, QuestionResultRow>();
-  results.forEach((result) => {
+  visibleResults.forEach((result) => {
     const key = `${result.domain}:${result.topic}:${result.questionId}`;
     if (!result.correct && !latestWrongByQuestion.has(key)) latestWrongByQuestion.set(key, result);
   });
+  const objectiveReadiness = await getReadinessByObjectiveV2();
+  const readinessById = new Map(objectiveReadiness.map((item) => [item.id, item]));
+  const rubricSignalsByTopic = new Map<string, ReturnType<typeof lowestRubricSignals>>();
+  constructedResponseAttempts.forEach((attempt) => {
+    if (!rubricSignalsByTopic.has(attempt.topic)) {
+      rubricSignalsByTopic.set(attempt.topic, lowestRubricSignals(constructedResponseAttempts, attempt.topic));
+    }
+  });
+  const artifactImpacts = artifactObjectiveImpacts(artifacts, skillLabAttempts);
 
   const items: ReviewQueueItem[] = [
     ...dueReviews.map((item) => ({
@@ -2109,6 +2510,11 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       reason: 'due-review' as const,
       retentionPct: Math.round(predictRetention(item, new Date()) * 100),
       sourceIds: [item.id, item.learningObjective],
+      reasonDetails: explainReviewReason('due-review', {
+        retentionPct: Math.round(predictRetention(item, new Date()) * 100),
+        topicWeight: readinessById.get(item.id)?.topicWeight,
+      }),
+      weaknessSignals: readinessById.get(item.id)?.weaknessSignals.map((signal) => ({ label: signal.label, impact: signal.impact })),
     })),
     ...mastery.weakObjectives.map((item) => ({
       id: `weak:${item.id}`,
@@ -2120,6 +2526,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       topic: item.topic,
       reason: 'weak-objective' as const,
       sourceIds: [item.id],
+      reasonDetails: readinessById.get(item.id)?.reasonDetails || explainReviewReason('weak-objective', { score: item.score }),
+      weaknessSignals: readinessById.get(item.id)?.weaknessSignals.map((signal) => ({ label: signal.label, impact: signal.impact })),
     })),
     ...[...latestWrongByQuestion.values()].slice(0, 12).map((item) => ({
       id: `miss:${item.domain}:${item.topic}:${item.questionId}`,
@@ -2131,8 +2539,12 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       topic: item.topic,
       reason: 'missed-question' as const,
       sourceIds: [item.questionId, item.learningObjective],
+      reasonDetails: explainReviewReason('missed-question', {
+        itemType: item.itemType,
+        topicWeight: topicWeightFor(DEFAULT_STUDY_PLAN_SETTINGS.topicWeights, item.topic),
+      }),
     })),
-    ...bookmarks.map((item) => ({
+    ...visibleBookmarks.map((item) => ({
       id: `bookmark:${item.id}`,
       type: 'bookmark' as const,
       title: item.title,
@@ -2154,10 +2566,14 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: defaultPathFor(item.domain, item.topic, 'review-due'),
         priority: 60 - item.readinessScore,
         topic: item.topic,
-        reason: 'stale-topic' as const,
-        sourceIds: [item.id],
-      })),
-    ...mockAttempts
+      reason: 'stale-topic' as const,
+      sourceIds: [item.id],
+      reasonDetails: explainReviewReason('stale-topic', {
+        score: item.readinessScore,
+        topicWeight: topicWeightFor(DEFAULT_STUDY_PLAN_SETTINGS.topicWeights, item.topic),
+      }),
+    })),
+    ...visibleMockAttempts
       .filter((attempt) => attempt.pct < 70 || attempt.flaggedQuestionIds.length > 0)
       .slice(0, 6)
       .map((attempt) => ({
@@ -2170,8 +2586,14 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         topic: 'mock',
         reason: attempt.flaggedQuestionIds.length ? ('flagged-mock-item' as const) : ('missed-question' as const),
         sourceIds: attempt.flaggedQuestionIds,
+        reasonDetails: [
+          `${attempt.pct}% mock score.`,
+          attempt.flaggedQuestionIds.length
+            ? `${attempt.flaggedQuestionIds.length} flagged item${attempt.flaggedQuestionIds.length === 1 ? '' : 's'}.`
+            : 'Score is below the mock review threshold.',
+        ],
       })),
-    ...vignetteAttempts
+    ...visibleVignetteAttempts
       .filter((attempt) => attempt.pct < 72)
       .slice(0, 6)
       .map((attempt) => ({
@@ -2184,8 +2606,9 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         topic: attempt.topic,
         reason: 'missed-question' as const,
         sourceIds: [attempt.vignetteId],
+        reasonDetails: [`${attempt.pct}% item-set score.`, 'Vignette evidence has higher readiness weight than standalone quiz rows.'],
       })),
-    ...constructedResponseAttempts
+    ...visibleConstructedResponseAttempts
       .filter((attempt) => attempt.pct < 75)
       .slice(0, 6)
       .map((attempt) => ({
@@ -2198,8 +2621,16 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         topic: attempt.topic,
         reason: 'rubric-miss' as const,
         sourceIds: [attempt.itemId],
+        reasonDetails: [
+          `${attempt.pct}% constructed-response score.`,
+          ...(rubricSignalsByTopic.get(attempt.topic) || []).map((signal) => `${signal.criterion} rubric average is ${signal.averagePct}%.`),
+        ],
+        weaknessSignals: (rubricSignalsByTopic.get(attempt.topic) || []).map((signal) => ({
+          label: `${signal.criterion} rubric`,
+          impact: signal.impact,
+        })),
       })),
-    ...formulaDrillAttempts
+    ...visibleFormulaDrillAttempts
       .filter((attempt) => !attempt.correct)
       .slice(0, 8)
       .map((attempt) => ({
@@ -2212,8 +2643,9 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         topic: attempt.topic,
         reason: 'flashcard-decay' as const,
         sourceIds: [attempt.formulaName],
+        reasonDetails: explainReviewReason('flashcard-decay', { itemType: 'formula-drill' }),
       })),
-    ...skillLabAttempts
+    ...visibleSkillLabAttempts
       .filter((attempt) => (attempt.score ?? 100) < 75)
       .slice(0, 6)
       .map((attempt) => ({
@@ -2226,8 +2658,19 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         topic: attempt.topic,
         reason: 'skill-lab-gap' as const,
         sourceIds: [attempt.labId, attempt.artifactId].filter(Boolean) as string[],
+        reasonDetails: [
+          `${attempt.labType} score is ${attempt.score ?? 100}%.`,
+          ...artifactImpacts
+            .filter((impact) => attempt.objectiveIds.includes(impact.objectiveId))
+            .slice(0, 2)
+            .map((impact) => `${impact.sourceType} maps to ${impact.objectiveId} at ${impact.averageScore}%.`),
+        ],
+        weaknessSignals: artifactImpacts
+          .filter((impact) => attempt.objectiveIds.includes(impact.objectiveId))
+          .slice(0, 3)
+          .map((impact) => ({ label: `${impact.sourceType} objective impact`, impact: impact.impact })),
       })),
-    ...artifacts.slice(0, 6).map((artifact) => ({
+    ...visibleArtifacts.slice(0, 6).map((artifact) => ({
       id: `artifact:${artifact.id}`,
       type: 'bookmark' as const,
       title: artifact.title,
@@ -2237,8 +2680,11 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       topic: artifact.topic,
       reason: 'saved-artifact' as const,
       sourceIds: [artifact.id],
+      reasonDetails: artifact.objectiveIds?.length
+        ? [`Maps to ${artifact.objectiveIds.length} objective${artifact.objectiveIds.length === 1 ? '' : 's'}.`]
+        : explainReviewReason('saved-artifact'),
     })),
-    ...lessonProgress
+    ...visibleLessonProgress
       .filter((item) => !item.completed)
       .slice(0, 8)
       .map((item) => ({
@@ -2251,6 +2697,7 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         topic: item.moduleId,
         reason: 'unfinished-lesson' as const,
         sourceIds: [item.id],
+        reasonDetails: explainReviewReason('unfinished-lesson'),
       })),
   ];
 
@@ -2272,8 +2719,7 @@ function trendForResults(results: QuestionResultRow[]): 'new' | 'up' | 'flat' | 
   return 'flat';
 }
 
-export async function getConfidenceCalibration(): Promise<ConfidenceCalibrationSummary[]> {
-  const rows = await db.confidenceCalibration.toArray();
+function confidenceCalibrationSummary(rows: ConfidenceCalibration[]): ConfidenceCalibrationSummary[] {
   return CONFIDENCES.map((confidence) => {
     const bucket = rows.filter((row) => row.confidence === confidence);
     const accuracy = accuracyFor(bucket as QuestionResultRow[]);
@@ -2286,7 +2732,11 @@ export async function getConfidenceCalibration(): Promise<ConfidenceCalibrationS
   });
 }
 
-export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
+export async function getConfidenceCalibration(): Promise<ConfidenceCalibrationSummary[]> {
+  return confidenceCalibrationSummary(await db.confidenceCalibration.toArray());
+}
+
+export async function getAnalyticsSummary(options: Level3PathwayQuery = {}): Promise<AnalyticsSummary> {
   const [
     results,
     sessions,
@@ -2297,7 +2747,7 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
     skillLabAttempts,
     flashcardAttempts,
     artifacts,
-    confidenceCalibration,
+    confidenceCalibrationRows,
   ] = await Promise.all([
     db.questionResults.toArray(),
     db.studySessions.toArray(),
@@ -2308,12 +2758,22 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
     db.skillLabAttempts.toArray(),
     db.flashcardAttempts.toArray(),
     db.resultArtifacts.toArray(),
-    getConfidenceCalibration(),
+    db.confidenceCalibration.toArray(),
   ]);
+  const visibleResults = results.filter((result) => level3TopicRowAllowed(result, options.level3Pathway));
+  const visibleSessions = sessions.filter((session) => level3TopicRowAllowed(session, options.level3Pathway));
+  const visibleMockAttempts = mockAttempts.filter((attempt) => level3MockAttemptAllowed(attempt, options.level3Pathway));
+  const visibleVignetteAttempts = vignetteAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleConstructedResponseAttempts = constructedResponseAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleFormulaDrillAttempts = formulaDrillAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleSkillLabAttempts = skillLabAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleFlashcardAttempts = flashcardAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleArtifacts = artifacts.filter((artifact) => level3TopicRowAllowed(artifact, options.level3Pathway));
+  const confidenceCalibration = confidenceCalibrationSummary(confidenceCalibrationRows.filter((row) => level3TopicRowAllowed(row, options.level3Pathway)));
 
-  const topics = [...new Set(results.map((result) => result.topic))].sort();
+  const topics = [...new Set(visibleResults.map((result) => result.topic))].sort();
   const byTopic = topics.map((topic) => {
-    const topicResults = results.filter((result) => result.topic === topic);
+    const topicResults = visibleResults.filter((result) => result.topic === topic);
     const confidenceAverage = Math.round(
       topicResults.reduce((sum, result) => sum + CONFIDENCE_SCORE[result.confidence], 0) / Math.max(1, topicResults.length),
     );
@@ -2335,35 +2795,35 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   });
 
   const byDifficulty = DIFFICULTIES.map((difficulty) => {
-    const bucket = results.filter((result) => result.difficulty === difficulty);
+    const bucket = visibleResults.filter((result) => result.difficulty === difficulty);
     return { difficulty, attempts: bucket.length, accuracy: accuracyFor(bucket) };
   });
 
   const byErrorCategory = ERROR_CATEGORIES.map((errorCategory) => ({
     errorCategory,
-    attempts: results.filter((result) => result.errorCategory === errorCategory).length,
+    attempts: visibleResults.filter((result) => result.errorCategory === errorCategory).length,
   })).filter((row) => row.attempts > 0 || row.errorCategory === 'none');
 
-  const rollingTrend = [...new Set(results.map((result) => result.createdAt.slice(0, 10)))]
+  const rollingTrend = [...new Set(visibleResults.map((result) => result.createdAt.slice(0, 10)))]
     .sort()
     .slice(-14)
     .map((date) => {
-      const bucket = results.filter((result) => result.createdAt.slice(0, 10) === date);
+      const bucket = visibleResults.filter((result) => result.createdAt.slice(0, 10) === date);
       return { date, attempts: bucket.length, accuracy: accuracyFor(bucket) };
     });
 
-  const byLevel = [...new Set(results.map((result) => result.level || (result.topic.includes(':') ? result.topic.split(':')[0] : 'level1')))]
+  const byLevel = [...new Set(visibleResults.map((result) => result.level || (result.topic.includes(':') ? result.topic.split(':')[0] : 'level1')))]
     .sort()
     .map((level) => {
-      const bucket = results.filter((result) => (result.level || (result.topic.includes(':') ? result.topic.split(':')[0] : 'level1')) === level);
+      const bucket = visibleResults.filter((result) => (result.level || (result.topic.includes(':') ? result.topic.split(':')[0] : 'level1')) === level);
       return { level, attempts: bucket.length, accuracy: accuracyFor(bucket) };
     });
 
-  const byObjective = [...new Set(results.map((result) => result.learningObjective))]
+  const byObjective = [...new Set(visibleResults.map((result) => result.learningObjective))]
     .sort()
     .slice(0, 30)
     .map((objectiveId) => {
-      const bucket = results.filter((result) => result.learningObjective === objectiveId);
+      const bucket = visibleResults.filter((result) => result.learningObjective === objectiveId);
       return {
         objectiveId,
         topic: bucket[0]?.topic || 'objective',
@@ -2373,13 +2833,14 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
       };
     });
 
-  const byItemType = [...new Set(results.map((result) => result.itemType || 'single'))].sort().map((itemType) => {
-    const bucket = results.filter((result) => (result.itemType || 'single') === itemType);
+  const byItemType = [...new Set(visibleResults.map((result) => result.itemType || 'single'))].sort().map((itemType) => {
+    const bucket = visibleResults.filter((result) => (result.itemType || 'single') === itemType);
     return { itemType, attempts: bucket.length, accuracy: accuracyFor(bucket) };
   });
 
-  const essayRubrics = ['identify', 'apply', 'justify'].map((criterion) => {
-    const scores = constructedResponseAttempts
+  const rubricCriteria = [...new Set(constructedResponseAttempts.flatMap((attempt) => Object.keys(attempt.rubricScores || {})))].sort();
+  const essayRubrics = (rubricCriteria.length ? rubricCriteria : ['identify', 'apply', 'justify']).map((criterion) => {
+    const scores = visibleConstructedResponseAttempts
       .map((attempt) => {
         const possible = 2;
         const earned = attempt.rubricScores[criterion] ?? 0;
@@ -2392,29 +2853,46 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
     };
   });
 
-  const skillLabs = [...new Set(skillLabAttempts.map((attempt) => attempt.labId))].sort().map((labId) => {
-    const bucket = skillLabAttempts.filter((attempt) => attempt.labId === labId);
-    return { labId, attempts: bucket.length, latestScore: bucket.at(-1)?.score };
+  const constructedResponseWeaknesses = essayRubrics
+    .map((row) => ({ ...row, impact: impactFromScore(row.averagePct, 0.35) }))
+    .filter((row) => row.attempts > 0 && row.impact > 0)
+    .sort((a, b) => b.impact - a.impact || a.averagePct - b.averagePct);
+  const objectiveImpacts = artifactObjectiveImpacts(artifacts, skillLabAttempts).slice(0, 20);
+  const skillLabs = [...new Set(visibleSkillLabAttempts.map((attempt) => attempt.labId))].sort().map((labId) => {
+    const bucket = visibleSkillLabAttempts.filter((attempt) => attempt.labId === labId);
+    const latest = [...bucket].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).at(-1);
+    const impactedObjectives = new Set(bucket.flatMap((attempt) => attempt.objectiveIds)).size;
+    const latestScore = latest?.score;
+    return {
+      labId,
+      labType: latest?.labType,
+      attempts: bucket.length,
+      latestScore,
+      impactedObjectives,
+      impact: latestScore === undefined ? 0 : impactFromScore(latestScore, latest?.labType === 'calculator' ? 0.22 : 0.3),
+    };
   });
 
   return {
     generatedAt: nowIso(),
     totals: {
-      questionsAnswered: results.length,
-      sessions: sessions.length,
-      studyTimeSeconds: sessions.reduce((sum, session) => sum + (session.elapsedSeconds || 0), 0),
-      mockAttempts: mockAttempts.length,
-      vignetteAttempts: vignetteAttempts.length,
-      constructedResponseAttempts: constructedResponseAttempts.length,
-      skillLabAttempts: skillLabAttempts.length + formulaDrillAttempts.length,
-      flashcardAttempts: flashcardAttempts.length,
-      artifacts: artifacts.length,
+      questionsAnswered: visibleResults.length,
+      sessions: visibleSessions.length,
+      studyTimeSeconds: visibleSessions.reduce((sum, session) => sum + (session.elapsedSeconds || 0), 0),
+      mockAttempts: visibleMockAttempts.length,
+      vignetteAttempts: visibleVignetteAttempts.length,
+      constructedResponseAttempts: visibleConstructedResponseAttempts.length,
+      skillLabAttempts: visibleSkillLabAttempts.length + visibleFormulaDrillAttempts.length,
+      flashcardAttempts: visibleFlashcardAttempts.length,
+      artifacts: visibleArtifacts.length,
     },
     byLevel,
     byObjective,
     byItemType,
     essayRubrics,
+    constructedResponseWeaknesses,
     skillLabs,
+    objectiveImpacts,
     byTopic,
     byDifficulty,
     byErrorCategory,
@@ -2834,9 +3312,10 @@ export function exportMockSummary(attempt: MockAttempt | VignetteAttempt | Const
   return JSON.stringify(attempt, null, 2);
 }
 
-export async function getReadinessByObjective(): Promise<ObjectiveReadiness[]> {
+export async function getReadinessByObjective(options: Level3PathwayQuery = {}): Promise<ObjectiveReadiness[]> {
   const snapshots = await db.masterySnapshots.toArray();
   return snapshots
+    .filter((snapshot) => level3TopicRowAllowed(snapshot, options.level3Pathway))
     .map((snapshot) => ({
       id: snapshot.id,
       domain: snapshot.domain,
@@ -2860,52 +3339,119 @@ function reasonForObjective(readinessScore: number, retentionForecastPct?: numbe
   return 'unfinished-lesson';
 }
 
-export async function getReadinessByObjectiveV2(): Promise<ObjectiveReadinessV2[]> {
-  const [objectives, reviewItems, results, settings] = await Promise.all([
-    getReadinessByObjective(),
+function topWeaknessSignals(signals: ObjectiveReadinessV2['weaknessSignals'], limit = 5) {
+  const sorted = [...signals].sort((a, b) => b.impact - a.impact);
+  const top = sorted.slice(0, limit);
+  const artifactSignal = sorted.find((signal) => signal.type === 'artifact');
+  if (artifactSignal && !top.some((signal) => signal.type === 'artifact')) {
+    top[Math.max(0, top.length - 1)] = artifactSignal;
+  }
+  return top.sort((a, b) => b.impact - a.impact);
+}
+
+export async function getReadinessByObjectiveV2(options: Level3PathwayQuery = {}): Promise<ObjectiveReadinessV2[]> {
+  const [objectives, reviewItems, results, settings, constructedResponseAttempts, artifacts, skillLabAttempts] = await Promise.all([
+    getReadinessByObjective(options),
     db.reviewItems.toArray(),
     db.questionResults.toArray(),
     getStudyPlanSettings(),
+    db.constructedResponseAttempts.toArray(),
+    db.resultArtifacts.toArray(),
+    db.skillLabAttempts.toArray(),
   ]);
+  const visibleResults = results.filter((result) => level3TopicRowAllowed(result, options.level3Pathway));
+  const visibleReviews = reviewItems.filter((item) => level3TopicRowAllowed(item, options.level3Pathway));
+  const visibleConstructedResponseAttempts = constructedResponseAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleArtifacts = artifacts.filter((artifact) => level3TopicRowAllowed(artifact, options.level3Pathway));
+  const visibleSkillLabAttempts = skillLabAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const artifactImpacts = artifactObjectiveImpacts(visibleArtifacts, visibleSkillLabAttempts);
 
   return objectives
     .map((objective) => {
-      const review = reviewItems.find((item) => item.id === objective.id);
-      const objectiveResults = results.filter(
+      const review = visibleReviews.find((item) => item.id === objective.id);
+      const objectiveResults = visibleResults.filter(
         (result) =>
           result.domain === objective.domain &&
           result.topic === objective.topic &&
           result.learningObjective === objective.learningObjective,
       );
-      const itemTypeWeight = Math.max(
-        1,
-        ...objectiveResults.map((result) =>
-          result.itemType === 'constructed-response'
-            ? 1.35
-            : result.itemType === 'mock'
-              ? 1.25
-              : result.itemType === 'vignette'
-                ? 1.15
-                : result.itemType === 'skill-lab'
-                  ? 1.1
-                  : 1,
-        ),
-      );
+      const itemTypeWeight = Math.max(1, ...objectiveResults.map((result) => itemTypeWeightFor(result.itemType)));
+      const weightedAccuracy = weightedAccuracyFor(objectiveResults);
       const topicWeight = topicWeightFor(settings.topicWeights, objective.topic);
       const retentionForecastPct = review ? Math.round(predictRetention(review, new Date()) * 100) : undefined;
+      const rubricSignals = lowestRubricSignals(visibleConstructedResponseAttempts, objective.topic).map((signal) => ({
+        type: 'rubric' as const,
+        label: `${signal.criterion} rubric ${signal.averagePct}%`,
+        impact: signal.impact,
+      }));
+      const objectiveArtifactSignals = artifactImpacts
+        .filter((impact) => impact.objectiveId === objective.learningObjective || impact.objectiveId === objective.id)
+        .slice(0, 3)
+        .map((impact) => ({
+          type: 'artifact' as const,
+          label: `${itemTypeLabel(impact.sourceType)} impact ${impact.averageScore}%`,
+          impact: impact.impact,
+        }));
+      const retentionImpact = retentionForecastPct === undefined ? 0 : impactFromScore(retentionForecastPct, 0.35);
+      const itemTypeImpact = impactFromScore(weightedAccuracy, itemTypeWeight - 1);
+      const topicWeightImpact = Math.round(topicWeight * 0.35);
+      const signals = [
+        itemTypeImpact
+          ? {
+              type: 'item-type' as const,
+              label: `${itemTypeLabel(objectiveResults.find((result) => itemTypeWeightFor(result.itemType) === itemTypeWeight)?.itemType)} evidence ${weightedAccuracy}%`,
+              impact: itemTypeImpact,
+            }
+          : null,
+        retentionImpact
+          ? {
+              type: 'retention' as const,
+              label: `retention forecast ${retentionForecastPct}%`,
+              impact: retentionImpact,
+            }
+          : null,
+        topicWeightImpact
+          ? {
+              type: 'topic-weight' as const,
+              label: `topic weight ${topicWeight}%`,
+              impact: topicWeightImpact,
+            }
+          : null,
+        ...rubricSignals,
+        ...objectiveArtifactSignals,
+      ].filter(Boolean) as ObjectiveReadinessV2['weaknessSignals'];
+      const signalPenalty = Math.min(24, signals.reduce((sum, signal) => sum + signal.impact, 0) * 0.18);
       const weightedScore = Math.max(
         0,
-        Math.min(100, Math.round(objective.readinessScore - Math.max(0, 78 - (retentionForecastPct ?? 78)) * 0.25 - topicWeight * 0.05 + (itemTypeWeight - 1) * 6)),
+        Math.min(
+          100,
+          Math.round(
+            objective.readinessScore -
+              Math.max(0, 78 - (retentionForecastPct ?? 78)) * 0.25 -
+              topicWeight * 0.05 -
+              Math.max(0, objective.readinessScore - weightedAccuracy) * (itemTypeWeight - 1) * 0.45 -
+              signalPenalty,
+          ),
+        ),
       );
+      const primaryReason = reasonForObjective(weightedScore, retentionForecastPct);
       return {
         ...objective,
         readinessVersion: 2 as const,
         readinessScore: weightedScore,
+        itemTypeAdjustedScore: weightedAccuracy,
         itemTypeWeight,
         topicWeight,
         retentionForecastPct,
         evidenceCount: objectiveResults.length,
-        primaryReason: reasonForObjective(weightedScore, retentionForecastPct),
+        primaryReason,
+        reasonDetails: explainReviewReason(primaryReason, {
+          score: weightedScore,
+          retentionPct: retentionForecastPct,
+          topicWeight,
+          itemType: objectiveResults.find((result) => itemTypeWeightFor(result.itemType) === itemTypeWeight)?.itemType,
+        }),
+        weaknessSignals: topWeaknessSignals(signals),
       };
     })
     .sort((a, b) => a.readinessScore - b.readinessScore);
@@ -3135,9 +3681,27 @@ export async function resetVaultData(scope: 'attempts' | 'progress' | 'full' = '
       db.learningEvents.clear(),
     ]);
   } else if (scope === 'progress') {
-    await Promise.all([db.lessonProgress.clear(), db.quizAttempts.clear(), db.vignetteAttempts.clear(), db.studySessions.clear()]);
+    await Promise.all([
+      db.lessonProgress.clear(),
+      db.quizAttempts.clear(),
+      db.questionResults.clear(),
+      db.reviewItems.clear(),
+      db.masterySnapshots.clear(),
+      db.mockAttempts.clear(),
+      db.vignetteAttempts.clear(),
+      db.constructedResponseAttempts.clear(),
+      db.formulaDrillAttempts.clear(),
+      db.skillLabAttempts.clear(),
+      db.reviewEvents.clear(),
+      db.confidenceCalibration.clear(),
+      db.flashcardAttempts.clear(),
+      db.resultArtifacts.clear(),
+      db.mockSectionState.clear(),
+      db.studySessions.clear(),
+      db.learningEvents.clear(),
+    ]);
   } else {
-    await Promise.all(STORE_NAMES.map((storeName) => db[storeName].clear()));
+    await Promise.all([...STORE_NAMES, ...SOURCE_STORE_NAMES].map((storeName) => db[storeName].clear()));
   }
 
   emitProgressChange();

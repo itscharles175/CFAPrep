@@ -5,6 +5,8 @@ export type ReleaseGateId =
   | 'level1-editorial'
   | 'level2-editorial'
   | 'level3-editorial'
+  | 'source-audit'
+  | 'stack-audit'
   | 'bundle-report'
   | 'smoke'
   | 'browser-regression'
@@ -80,6 +82,24 @@ export const releaseGateDefinitions: ReleaseGateDefinition[] = [
     required: true,
     fallbackDetail: 'Every Level III topic must remain exam-ready with zero template rows.',
     artifactPaths: ['dist/reports/content-release-level3.json'],
+  },
+  {
+    id: 'source-audit',
+    label: 'CFA source audit',
+    command: 'npm run cfa:source:audit',
+    category: 'content',
+    required: true,
+    fallbackDetail: 'Private source text, .qvsource bundles, PDFs, and EPUBs must stay out of tracked files and release artifact roots.',
+    artifactPaths: ['dist/reports/cfa-source-policy.json'],
+  },
+  {
+    id: 'stack-audit',
+    label: 'Stack audit',
+    command: 'npm run stack:audit',
+    category: 'quality',
+    required: true,
+    fallbackDetail: 'Must pass route, PWA, artifact denylist, visual coverage, and release-manifest structural checks.',
+    artifactPaths: ['dist/reports/stack-audit.json'],
   },
   {
     id: 'bundle-report',

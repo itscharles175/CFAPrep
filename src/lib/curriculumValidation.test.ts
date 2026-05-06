@@ -193,7 +193,7 @@ describe('CFA curriculum mapping', () => {
     const ethics = level3AuthoredContentPacks.find((pack) => pack.topicId === 'ethics')!;
     const counts = getAuthoredContentPackCounts(ethics);
 
-    [1, 3, 5].forEach((readyCount) => {
+    [1, 4, 7].forEach((readyCount) => {
       const partialPacks = level3AuthoredContentPacks.map((pack, index) =>
         index < readyCount
           ? pack
@@ -210,9 +210,19 @@ describe('CFA curriculum mapping', () => {
       expect(partialRelease.topics.filter((topic) => topic.status === 'exam-ready')).toHaveLength(readyCount);
     });
 
-    expect(level3AuthoredContentPacks).toHaveLength(6);
+    expect(level3AuthoredContentPacks).toHaveLength(8);
     expect(counts.authoredConstructedResponses).toBe(3);
-    expect(ethics.authoredConstructedResponses?.every((item) => item.provenance.promotionEvidence?.length && item.commandWords.length && item.rubric.maxPoints > 0)).toBe(true);
+    expect(ethics.authoredConstructedResponses?.every((item) => item.provenance.promotionEvidence?.length && item.provenance.sourceIds?.length && item.commandWords.length && item.rubric.maxPoints > 0)).toBe(true);
+    expect(level3AuthoredContentPacks.map((pack) => pack.topicId)).toEqual([
+      'ethics',
+      'asset-allocation',
+      'portfolio-construction',
+      'performance',
+      'derivatives-risk',
+      'pm-pathway',
+      'private-markets-pathway',
+      'private-wealth-pathway',
+    ]);
     expect(validateLevel3SaturationBatch().filter((issue) => issue.severity === 'error')).toEqual([]);
     expect(validateAuthoredContentPack(ethics).filter((issue) => issue.severity === 'error')).toEqual([]);
     expect(release.status).toBe('exam-ready');
@@ -256,6 +266,11 @@ describe('CFA curriculum mapping', () => {
           .some((assessment) => assessment.itemType === 'constructed-response' && assessment.commandWords?.length && assessment.rubricBands?.length),
       ),
     ).toBe(true);
+    expect(
+      level3Topics.every((topic) =>
+        topic.studyUnits.flatMap((unit) => unit.assessmentBlueprints).some((assessment) => assessment.itemType === 'vignette' && assessment.scope === 'item-set'),
+      ),
+    ).toBe(true);
   });
 
   it('reports curriculum coverage and source metadata without official outcome wording', () => {
@@ -267,8 +282,8 @@ describe('CFA curriculum mapping', () => {
       .join(' ');
 
     expect(report.totals.levels).toBe(3);
-    expect(report.totals.topics).toBe(26);
-    expect(report.totals.examReadyTopics).toBe(26);
+    expect(report.totals.topics).toBe(28);
+    expect(report.totals.examReadyTopics).toBe(28);
     expect(report.totals.errors).toBe(0);
     expect(allObjectiveText.toLowerCase()).not.toContain('candidate should be able to');
     expect(cfaCurriculumMap.sourceMeta.publicReferences.every((reference) => reference.url.startsWith('https://www.cfainstitute.org/'))).toBe(true);

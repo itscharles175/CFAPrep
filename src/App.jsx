@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Sidebar from './components/Layout/Sidebar';
 import TopBar from './components/Layout/TopBar';
@@ -54,6 +54,9 @@ function routeElementFor(definition, element) {
 export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileViewport, setMobileViewport] = useState(false);
+  const mobileNavWasOpen = useRef(false);
+  const mobileNavHidden = mobileViewport && !mobileNavOpen;
   const routeElements = {
     dashboard: <Dashboard />,
     'cfa-dashboard': <CfaDashboard />,
@@ -77,6 +80,30 @@ export default function App() {
     system: <SystemHealth />,
   };
 
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia('(max-width: 900px)');
+    const update = () => setMobileViewport(query.matches);
+    update();
+    query.addEventListener?.('change', update);
+    return () => query.removeEventListener?.('change', update);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      if (mobileNavWasOpen.current) document.querySelector('.mobile-menu-button')?.focus?.();
+      mobileNavWasOpen.current = false;
+      return undefined;
+    }
+    mobileNavWasOpen.current = true;
+    document.querySelector('#main-sidebar a, #main-sidebar button')?.focus?.();
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mobileNavOpen]);
+
   return (
     <ThemeProvider>
       <ToastProvider>
@@ -89,6 +116,7 @@ export default function App() {
           <Sidebar
             collapsed={sidebarCollapsed}
             open={mobileNavOpen}
+            mobileHidden={mobileNavHidden}
             onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
             onNavigate={() => setMobileNavOpen(false)}
           />
@@ -98,7 +126,7 @@ export default function App() {
             aria-label="Close navigation"
             onClick={() => setMobileNavOpen(false)}
           />
-          <TopBar collapsed={sidebarCollapsed} onMenuToggle={() => setMobileNavOpen((open) => !open)} />
+          <TopBar collapsed={sidebarCollapsed} navOpen={mobileNavOpen} onMenuToggle={() => setMobileNavOpen((open) => !open)} />
           {/* G1: Proper <main> landmark with id for skip-link target */}
           <main
             id="main-content"

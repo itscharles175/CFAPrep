@@ -14,12 +14,13 @@ import type {
   TopicDataset,
 } from '../../../lib/contentTypes';
 import type { Difficulty, ErrorCategory, LessonSection } from '../../../lib/learningTypes';
+import { enrichCfaFormula } from '../formulaLexicon.js';
 
 export interface Level3TopicSpec {
   id: string;
   title: string;
   examWeight: string;
-  pathway: 'core' | 'portfolio-management';
+  pathway: 'core' | 'portfolio-management' | 'private-markets' | 'private-wealth';
   focus: string;
   caseFrames: string[];
   decisions: string[];
@@ -56,7 +57,7 @@ function provenance(spec: Level3TopicSpec, kind: string, id: string, qualityNote
     author: 'QuantVault Level III editorial desk',
     reviewer: `QuantVault ${spec.title} Level III reviewer`,
     reviewedAt: reviewerDate,
-    sourceKind: kind === 'dataset' ? 'local-dataset' : kind === 'pack' ? 'expert-review' : 'editorial-authoring',
+    sourceKind: kind === 'dataset' ? 'local-dataset' : kind === 'pack' ? 'expert-review' : 'local-source-digest',
     editorialStatus: 'exam-ready',
     qualityNotes,
     generatedFromTemplate: false,
@@ -65,6 +66,7 @@ function provenance(spec: Level3TopicSpec, kind: string, id: string, qualityNote
       `level3-${spec.id}-2026:constructed-response-review`,
       `level3-${spec.id}-2026:${kind}:${id}`,
     ],
+    sourceIds: [`cfa-source-digest:level3:${spec.id}:2026`, `cfa-source-pathway:${spec.pathway}`],
   };
 }
 
@@ -93,11 +95,17 @@ function objectives(spec: Level3TopicSpec): ObjectiveBlueprint[] {
 function formulas(spec: Level3TopicSpec, objectiveBlueprints: ObjectiveBlueprint[]): FormulaBlueprint[] {
   return Array.from({ length: 6 }, (_, index) => {
     const name = spec.formulas[index % spec.formulas.length];
+    const enrichment = enrichCfaFormula({
+      level: 'level3',
+      topicId: spec.id,
+      name,
+      index,
+    });
     return {
       id: `level3-${spec.id}-formula-${String(index + 1).padStart(2, '0')}`,
       name,
-      latex: `\\text{${name.replace(/[^a-zA-Z0-9 ]+/g, ' ')}} = \\text{Policy input ${index + 1}} \\rightarrow \\text{Portfolio decision ${index + 1}}`,
-      description: `${name} converts a Level III case input into a concise portfolio action, constraint, or risk-control interpretation.`,
+      latex: enrichment.latex,
+      description: `${enrichment.description} Use it to support a concise Level III portfolio action, constraint, or risk-control interpretation.`,
       objectiveIds: [objectiveBlueprints[index % objectiveBlueprints.length].id, objectiveBlueprints[(index + 2) % objectiveBlueprints.length].id],
     };
   });
@@ -460,6 +468,7 @@ export function buildLevel3Pack(spec: Level3TopicSpec): AuthoredContentPack {
       ],
       authoringStatus: 'exam-ready',
       notes: `${spec.title} Level III pack uses public pages only for exam structure and topic weight alignment; learner-facing wording is original QuantVault material.`,
+      sourceIds: [`cfa-source-digest:level3:${spec.id}:2026`],
     },
     objectiveBlueprints,
     lessonBlueprints,

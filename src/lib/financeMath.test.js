@@ -79,6 +79,23 @@ describe('finance math', () => {
     expect(ytm).toBeCloseTo(0.06, 4);
   });
 
+  it('rejects unreliable XIRR and incomplete portfolio covariance inputs', () => {
+    expect(Number.isNaN(xirr([1000, 1120], ['2026-01-01', '2027-01-01']))).toBe(true);
+    expect(Number.isNaN(xirr([-1000, -20], ['2026-01-01', '2027-01-01']))).toBe(true);
+    expect(Number.isNaN(xirr([-1000, 1120], ['bad-date', '2027-01-01']))).toBe(true);
+    expect(
+      portfolioStatistics({
+        weights: [0.4, 0.3, 0.3],
+        expectedReturns: [0.1, 0.08, 0.06],
+        volatilities: [0.2, 0.15, 0.1],
+        correlationMatrix: [
+          [1, 0.2],
+          [0.2, 1],
+        ],
+      }),
+    ).toBeNull();
+  });
+
   it('supports CFA skill-lab math for trees, tail risk, and duration shocks', () => {
     const tree = binomialOptionPrice({ spot: 100, strike: 100, years: 1, annualRate: 0.05, volatility: 0.2, steps: 3 });
     expect(tree.price).toBeCloseTo(11.04, 1);

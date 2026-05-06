@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Download, Flag, ListChecks, PenLine, Timer, Trophy } from 'lucide-react';
 import { loadCfaLevelContent, loadCfaMockExam } from '../domains/cfa/cfaLoaders';
-import { CaseViewer, MetricCard, PageHeader, ProgressRail, QuestionStage, RubricPanel, StatusBadge, Surface } from '../components/ui/Primitives';
+import { LEVEL3_PATHWAY_OPTIONS } from '../domains/cfa/cfaLevel3Pathways';
+import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
+import { CaseViewer, EmptyPanel, InlineCluster, MetricCard, PageHeader, Panel, ProgressRail, QuestionStage, RubricPanel, SegmentedControl, StatusBadge, Surface } from '../components/ui/Primitives';
 import {
   clearMockSectionState,
   getMockSectionState,
@@ -10,6 +12,7 @@ import {
   recordMockAttempt,
   saveMockSectionState,
 } from '../lib/learning';
+import { SourceRail } from '../components/SourceContext';
 
 function nowMs() {
   return Date.now();
@@ -136,10 +139,12 @@ function ConstructedItem({ item, response, scores, onResponse, onScore }) {
 export default function MockExam() {
   const params = useParams();
   const level = params.level || 'level1';
-  const [contentState, setContentState] = useState({ level: null, levelContent: null, mock: null });
-  const levelContent = contentState.level === level ? contentState.levelContent : null;
-  const mock = contentState.level === level ? contentState.mock : null;
-  const loading = contentState.level !== level;
+  const [activePathway, setActivePathway] = useLevel3Pathway();
+  const [contentState, setContentState] = useState({ level: null, pathway: null, levelContent: null, mock: null });
+  const contentMatches = contentState.level === level && (level !== 'level3' || contentState.pathway === activePathway);
+  const levelContent = contentMatches ? contentState.levelContent : null;
+  const mock = contentMatches ? contentState.mock : null;
+  const loading = !contentMatches;
   const items = useMemo(() => (levelContent && mock ? buildMockItems(level, levelContent, mock) : []), [level, levelContent, mock]);
   const objectiveMap = useMemo(
     () => new Map((levelContent?.topics || []).flatMap((topic) => topic.learningObjectives).map((objective) => [objective.id, objective])),
@@ -160,6 +165,7 @@ export default function MockExam() {
   const [hydrated, setHydrated] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
   const [report, setReport] = useState(null);
+  const mockStateId = level === 'level3' ? `cfa-${level}-${activePathway}-mixed-mock` : `cfa-${level}-mixed-mock`;
   const item = items[current];
   const questionRows = useMemo(() => items.flatMap(questionRowsFromItem), [items]);
   const constructedItems = useMemo(() => items.filter((mockItem) => mockItem.type === 'constructed-response').map((mockItem) => mockItem.constructed), [items]);
@@ -174,21 +180,22 @@ export default function MockExam() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([loadCfaLevelContent(level), loadCfaMockExam(level)])
+    const pathwayOptions = level === 'level3' ? { pathway: activePathway } : {};
+    Promise.all([loadCfaLevelContent(level, pathwayOptions), loadCfaMockExam(level, undefined, pathwayOptions)])
       .then(([content, loadedMock]) => {
-        if (!cancelled) setContentState({ level, levelContent: content, mock: loadedMock });
+        if (!cancelled) setContentState({ level, pathway: level === 'level3' ? activePathway : null, levelContent: content, mock: loadedMock });
       })
       .catch(() => {
-        if (!cancelled) setContentState({ level, levelContent: null, mock: null });
+        if (!cancelled) setContentState({ level, pathway: level === 'level3' ? activePathway : null, levelContent: null, mock: null });
       });
     return () => {
       cancelled = true;
     };
-  }, [level]);
+  }, [activePathway, level]);
 
   useEffect(() => {
     let active = true;
-    getMockSectionState(`cfa-${level}-mixed-mock`).then((state) => {
+    getMockSectionState(mockStateId).then((state) => {
       if (!active) return;
       if (state?.questionIds?.join('|') === items.map(itemId).join('|')) {
         setSelected(state.selected || {});
@@ -206,12 +213,12 @@ export default function MockExam() {
     return () => {
       active = false;
     };
-  }, [level, items]);
+  }, [items, mockStateId]);
 
   useEffect(() => {
     if (!hydrated || finished || !items.length || !mock) return;
     saveMockSectionState({
-      id: `cfa-${level}-mixed-mock`,
+      id: mockStateId,
       title: mock.title,
       questionIds: items.map(itemId),
       selected,
@@ -224,7 +231,7 @@ export default function MockExam() {
       pausedAt,
       status: paused ? 'paused' : 'in-progress',
     });
-  }, [constructedResponses, current, flags, finished, hydrated, items, level, mock, paused, pausedAt, pausedMs, rubricScores, selected, startTime]);
+  }, [constructedResponses, current, flags, finished, hydrated, items, level, mock, mockStateId, paused, pausedAt, pausedMs, rubricScores, selected, startTime]);
 
   useEffect(() => {
     function handleKeyboard(event) {
@@ -273,7 +280,7 @@ export default function MockExam() {
     setPausedMs(0);
     setReviewMode(false);
     setReport(null);
-    clearMockSectionState(`cfa-${level}-mixed-mock`);
+    clearMockSectionState(mockStateId);
   }
 
   function togglePause() {
@@ -343,7 +350,7 @@ export default function MockExam() {
         path: `/cfa/${level}/mock`,
       });
     }
-    await clearMockSectionState(`cfa-${level}-mixed-mock`);
+    await clearMockSectionState(mockStateId);
     const constructedPoints = constructedItems.reduce((sum, constructed) => {
       const scores = rubricScores[constructed.id] || {};
       return sum + constructed.rubric.criteria.reduce((scoreSum, criterion) => scoreSum + Number(scores[criterion.id] || 0), 0);
@@ -374,7 +381,7 @@ export default function MockExam() {
   if (!items.length || !levelContent || !mock) {
     return (
       <div className="page-container">
-        <div className="glass-card no-hover">This mock has no available items yet.</div>
+        <EmptyPanel title="This mock has no available items yet." tone="exam" />
       </div>
     );
   }
@@ -384,33 +391,55 @@ export default function MockExam() {
     return (
       <div className="page-container">
         <PageHeader badge="MOCK SECTION" title="Mock Section Report" subtitle="Your attempt has been recorded into readiness, review scheduling, and mastery snapshots." />
-        <div className="grid-4" style={{ marginBottom: 'var(--space-6)' }}>
+        <div className="grid-4 page-metrics">
           <MetricCard label="MCQ Score" value={`${pct}%`} detail={`${score}/${questionRows.length} correct`} icon={Trophy} />
           <MetricCard label="Constructed" value={report?.constructedMax ? `${report.constructedPoints}/${report.constructedMax}` : '-'} detail="Rubric points recorded" icon={PenLine} tone="warning" />
           <MetricCard label="Flagged" value={flags.size} detail="Items marked for review" icon={Flag} tone="warning" />
           <MetricCard label="Time" value={`${elapsedSeconds}s`} detail="Elapsed attempt time" icon={Timer} tone="success" />
         </div>
-        <div className="glass-card no-hover">
-          <div className="flex-between" style={{ marginBottom: 'var(--space-4)' }}>
-            <h3 style={{ marginTop: 0 }}>Topic Breakdown</h3>
+        <Panel
+          tone="exam"
+          title="Topic Breakdown"
+          actions={
             <button className="btn btn-secondary" onClick={() => downloadMockSummary(report || { score, total: questionRows.length })}>
               <Download size={16} /> Export Summary
             </button>
-          </div>
+          }
+        >
           <div className="grid-2">
             {(report?.topicBreakdown || []).map((row) => (
-              <Link key={row.topic} to={`/cfa/${level}/${row.topic.split(':').at(-1)}/quiz?mode=weak-areas`} className="glass-card" style={{ color: 'inherit', textDecoration: 'none' }}>
-                <span className="badge badge-blue">{topicTitleMap.get(row.topic) || row.topic}</span>
+              <Surface as={Link} key={row.topic} to={`/cfa/${level}/${row.topic.split(':').at(-1)}/quiz?mode=weak-areas`} tone="exam" interactive>
+                <StatusBadge tone="accent">{topicTitleMap.get(row.topic) || row.topic}</StatusBadge>
                 <h3>{row.pct}%</h3>
-                <p style={{ color: 'var(--text-secondary)' }}>{row.score}/{row.total} correct - open weak-area drill</p>
-              </Link>
+                <p className="muted-copy">{row.score}/{row.total} correct - open weak-area drill</p>
+              </Surface>
             ))}
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-6)' }}>
+        </Panel>
+        <SourceRail
+          title="Mock Source Context"
+          subtitle="Official-first snippets mapped after the section is submitted."
+          target={{
+            kind: 'mock',
+            domain: 'cfa',
+            level,
+            title: mock.title,
+            objectiveIds: questionRows.map((question) => question.learningObjective),
+            pathway: level === 'level3' ? activePathway : undefined,
+            formulaNames: questionRows.map((question) => question.formula).filter(Boolean),
+            keywords: [
+              mock.title,
+              ...(report?.topicBreakdown || []).map((row) => row.topic),
+              ...constructedItems.map((constructed) => `${constructed.title} ${constructed.prompt}`),
+            ],
+            route: `/cfa/${level}/mock`,
+          }}
+          compact
+        />
+        <InlineCluster className="mock-report-actions">
           <button className="btn btn-secondary" onClick={restart}>Restart</button>
           <Link to="/review" className="btn btn-primary">Open Review Inbox</Link>
-        </div>
+        </InlineCluster>
       </div>
     );
   }
@@ -433,7 +462,35 @@ export default function MockExam() {
         }
       />
 
-      <div className="grid-4" style={{ marginBottom: 'var(--space-6)' }}>
+      {level === 'level3' && (
+        <Surface density="compact" status="exam" style={{ marginBottom: 'var(--space-6)' }}>
+          <InlineCluster align="between">
+            <div>
+              <StatusBadge tone="exam">Level III pathway exam mode</StatusBadge>
+              <p className="muted-copy">Mocks include common core plus one selected pathway.</p>
+            </div>
+            <SegmentedControl
+              label="Level III pathway"
+              density="compact"
+              options={LEVEL3_PATHWAY_OPTIONS}
+              value={activePathway}
+              onChange={(nextPathway) => {
+                setActivePathway(nextPathway);
+                setCurrent(0);
+                setSelected({});
+                setConstructedResponses({});
+                setRubricScores({});
+                setFlags(new Set());
+                setFinished(false);
+                setReviewMode(false);
+                setReport(null);
+              }}
+            />
+          </InlineCluster>
+        </Surface>
+      )}
+
+      <div className="grid-4 page-metrics">
         <MetricCard label="Answered" value={`${answered}/${questionRows.length + constructedItems.length}`} detail="Question and response items" icon={ListChecks} />
         <MetricCard label="Flagged" value={flags.size} detail="Marked for review" icon={Flag} tone="warning" />
         <MetricCard label="Item" value={current + 1} detail={topicTitleMap.get(itemTopic(item)) || itemTopic(item)} icon={Timer} tone="success" />
@@ -444,20 +501,20 @@ export default function MockExam() {
       </div>
 
       {paused && (
-        <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)', textAlign: 'center' }}>
+        <Surface className="mock-state-panel">
           <h2>Section Paused</h2>
-          <p style={{ color: 'var(--text-secondary)' }}>Timer is paused. Resume when you are ready to continue.</p>
+          <p className="muted-copy">Timer is paused. Resume when you are ready to continue.</p>
           <button className="btn btn-primary" onClick={togglePause}>Resume Section</button>
-        </div>
+        </Surface>
       )}
 
       {reviewMode && (
-        <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)', borderColor: 'rgba(245,158,11,0.35)' }}>
+        <Surface status="warning" className="mock-state-panel">
           <h2 style={{ marginTop: 0 }}>Review Before Finish</h2>
-          <p style={{ color: 'var(--text-secondary)' }}>
+          <p className="muted-copy">
             {unansweredItems.length} incomplete item{unansweredItems.length === 1 ? '' : 's'} remain. Jump to them now or finish with unanswered multiple-choice items marked incorrect.
           </p>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+          <InlineCluster>
             {unansweredItems.slice(0, 10).map((mockItem) => (
               <button
                 key={itemId(mockItem)}
@@ -471,8 +528,8 @@ export default function MockExam() {
               </button>
             ))}
             <button className="btn btn-primary btn-sm" onClick={finish}>Finish Anyway</button>
-          </div>
-        </div>
+          </InlineCluster>
+        </Surface>
       )}
 
       <div className="quiz-container" style={{ opacity: paused ? 0.45 : 1, pointerEvents: paused ? 'none' : 'auto' }}>

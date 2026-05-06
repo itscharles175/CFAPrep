@@ -52,14 +52,26 @@ describe('CFA runtime content strategy', () => {
 
     expect(runtime?.mode).toBe('exam-ready');
     expect(runtime?.releaseEligible).toBe(true);
-    expect(runtime?.topicCount).toBe(6);
+    expect(runtime?.topicCount).toBe(8);
     expect(level3.runtimeMode).toBe('exam-ready');
-    expect(level3.topics).toHaveLength(6);
+    expect(level3.topics).toHaveLength(8);
     expect(level3.topics.every((topic) => topic.runtimeMode === 'exam-ready')).toBe(true);
-    expect(level3.topics.reduce((sum, topic) => sum + topic.constructedResponses.length, 0)).toBe(18);
-    expect(level3.topics.reduce((sum, topic) => sum + topic.vignettes.length, 0)).toBe(24);
-    expect(level3.topics.reduce((sum, topic) => sum + topic.vignettes.reduce((questionSum, vignette) => questionSum + vignette.questions.length, 0), 0)).toBe(72);
-    expect(level3.topics.reduce((sum, topic) => sum + topic.flashcards.length, 0)).toBe(192);
+    expect(level3.topics.reduce((sum, topic) => sum + topic.constructedResponses.length, 0)).toBe(24);
+    expect(level3.topics.reduce((sum, topic) => sum + topic.vignettes.length, 0)).toBe(32);
+    expect(level3.topics.reduce((sum, topic) => sum + topic.vignettes.reduce((questionSum, vignette) => questionSum + vignette.questions.length, 0), 0)).toBe(96);
+    expect(level3.topics.reduce((sum, topic) => sum + topic.flashcards.length, 0)).toBe(256);
+    expect(level3.topics.find((topic) => topic.id === 'private-markets-pathway')?.constructedResponses).toHaveLength(3);
+    expect(level3.topics.find((topic) => topic.id === 'private-wealth-pathway')?.vignettes).toHaveLength(4);
+  });
+
+  it('keeps Level III pathway packs source-digested without changing existing progress ids', () => {
+    const level3 = getCfaLevelContent('level3');
+    const pathwayIds = level3.topics.filter((topic) => topic.id.includes('pathway')).map((topic) => topic.id);
+    const performance = level3.topics.find((topic) => topic.id === 'performance');
+
+    expect(pathwayIds).toEqual(['pm-pathway', 'private-markets-pathway', 'private-wealth-pathway']);
+    expect(performance?.topic).toBe('level3:performance');
+    expect(level3.topics.find((topic) => topic.id === 'private-markets-pathway')?.topic).toBe('level3:private-markets-pathway');
   });
 
   it('loads Level III topics through async content APIs', async () => {
@@ -68,12 +80,34 @@ describe('CFA runtime content strategy', () => {
     const performance = await loadCfaTopicContent('level3', 'performance');
     const mock = await loadCfaMockExam('level3');
 
-    expect(level3Summary?.topics).toHaveLength(6);
+    expect(level3Summary?.topics).toHaveLength(8);
     expect(level3Summary?.topics.find((topic) => topic.id === 'performance')?.constructedResponses).toBe(3);
     expect(level3.topics.find((topic) => topic.id === 'performance')).toBe(performance);
     expect(performance?.runtimeMode).toBe('exam-ready');
     expect(performance?.constructedResponses).toHaveLength(3);
     expect(mock?.constructedResponseIds.length).toBeGreaterThan(0);
+  });
+
+  it('builds Level III exam-mode mocks from common core plus one selected pathway', async () => {
+    const privateMarkets = await loadCfaLevelContent('level3', { pathway: 'private-markets' });
+    const mock = await loadCfaMockExam('level3', undefined, { pathway: 'private-markets' });
+    const topicIds = privateMarkets.topics.map((topic) => topic.id);
+
+    expect(topicIds).toEqual(['ethics', 'asset-allocation', 'portfolio-construction', 'performance', 'derivatives-risk', 'private-markets-pathway']);
+    expect(topicIds).not.toContain('pm-pathway');
+    expect(topicIds).not.toContain('private-wealth-pathway');
+    expect(mock.topics).toEqual(topicIds);
+  });
+
+  it('keeps Level III all-pathways library content separate from selected-pathway exam content', async () => {
+    const library = await loadCfaLevelContent('level3');
+    const coreTopic = await loadCfaTopicContent('level3', 'performance', { pathway: 'private-wealth' });
+    const inactivePathwayTopic = await loadCfaTopicContent('level3', 'private-wealth-pathway', { pathway: 'private-markets' });
+
+    expect(library.sourceMeta.activePathway).toBe('all-pathways-library');
+    expect(library.topics.map((topic) => topic.id)).toContain('private-wealth-pathway');
+    expect(coreTopic?.id).toBe('performance');
+    expect(inactivePathwayTopic).toBeNull();
   });
 
   it('keeps route components off synchronous all-level CFA content imports', () => {

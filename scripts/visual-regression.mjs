@@ -4,39 +4,17 @@ import { chromium } from 'playwright-core';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 import { screenshotRoutes } from '../src/routes/routeManifest.ts';
+import {
+  applySourceState,
+  browserCandidates,
+  firstExistingPath,
+  routePathForSourceState,
+  routeSourceStates,
+  summarizeRouteFailures,
+  viewports,
+} from './qa-helpers.mjs';
 
 /* global document, window */
-
-const browserCandidates = [
-  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  `${process.env.LOCALAPPDATA || ''}/Google/Chrome/Application/chrome.exe`,
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/google-chrome-stable',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/opt/google/chrome/chrome',
-].filter(Boolean);
-
-const viewports = {
-  desktop: { width: 1440, height: 1000 },
-  mobile: { width: 390, height: 844 },
-};
-
-async function firstExistingPath(paths) {
-  for (const candidate of paths) {
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {
-      // keep looking
-    }
-  }
-  return null;
-}
 
 async function waitForBodyText(page, text, label) {
   await page.waitForFunction(
@@ -124,36 +102,44 @@ let firstFailure = null;
 
 try {
   for (const route of screenshotRoutes) {
-    for (const viewportName of route.viewports) {
-      const startedAt = Date.now();
-      try {
-        await page.setViewportSize(viewports[viewportName]);
-        const url = new URL(route.path, address).toString();
-        await page.goto(url, { waitUntil: 'networkidle' });
-        await waitForBodyText(page, route.expectedText, `${route.id} ${viewportName}`);
-        await assertNoObviousLayoutBreaks(page, `${route.id} ${viewportName}`);
-        const screenshot = await page.screenshot({ fullPage: false });
-        assertNonBlankScreenshot(screenshot, `${route.id} ${viewportName}`);
-        routeResults.push({ routeId: route.id, path: route.path, viewport: viewportName, status: 'ok', durationMs: Date.now() - startedAt });
-        console.log(`OK visual ${route.id} ${viewportName}`);
-      } catch (error) {
-        routeResults.push({
-          routeId: route.id,
-          path: route.path,
-          viewport: viewportName,
-          status: 'blocked',
-          durationMs: Date.now() - startedAt,
-          message: error instanceof Error ? error.message : String(error),
-        });
-        firstFailure ||= error;
+    for (const sourceState of routeSourceStates(route)) {
+      for (const viewportName of route.viewports) {
+        const startedAt = Date.now();
+        const path = routePathForSourceState(route, sourceState);
+        const url = new URL(path, address).toString();
+        try {
+          await page.setViewportSize(viewports[viewportName]);
+          await applySourceState(page, address, sourceState);
+          await page.goto(url, { waitUntil: 'networkidle' });
+          await waitForBodyText(page, route.expectedText, `${route.id} ${viewportName} ${sourceState}`);
+          await assertNoObviousLayoutBreaks(page, `${route.id} ${viewportName} ${sourceState}`);
+          const screenshot = await page.screenshot({ fullPage: false });
+          assertNonBlankScreenshot(screenshot, `${route.id} ${viewportName} ${sourceState}`);
+          routeResults.push({ routeId: route.id, path, expectedText: route.expectedText, viewport: viewportName, sourceState, status: 'ok', durationMs: Date.now() - startedAt, url });
+          console.log(`OK visual ${route.id} ${viewportName} ${sourceState}`);
+        } catch (error) {
+          routeResults.push({
+            routeId: route.id,
+            path,
+            expectedText: route.expectedText,
+            viewport: viewportName,
+            sourceState,
+            status: 'blocked',
+            durationMs: Date.now() - startedAt,
+            url,
+            message: error instanceof Error ? error.message : String(error),
+          });
+          firstFailure ||= error;
+        }
       }
     }
   }
 } finally {
   await mkdir('dist/reports', { recursive: true });
+  const routeFailures = summarizeRouteFailures(routeResults);
   await writeFile(
     'dist/reports/visual-regression.json',
-    `${JSON.stringify({ generatedAt: new Date().toISOString(), routeResults }, null, 2)}\n`,
+    `${JSON.stringify({ generatedAt: new Date().toISOString(), routeResults, routeFailures }, null, 2)}\n`,
   );
   await browser.close();
   await new Promise((resolve) => server.httpServer.close(resolve));

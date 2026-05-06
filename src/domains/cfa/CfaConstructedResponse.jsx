@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ClipboardCheck, PenLine, Trophy } from 'lucide-react';
 import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
-import { CommandHint, MetricCard, PageHeader, ProgressRail, RubricPanel, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
+import { useLevel3Pathway } from './useLevel3Pathway';
+import { CommandHint, EmptyPanel, MetricCard, PageHeader, ProgressRail, RubricPanel, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
 import { recordConstructedResponseAttempt } from '../../lib/learning';
+import { SourceRail } from '../../components/SourceContext';
 
 function nowMs() {
   return Date.now();
@@ -11,7 +13,8 @@ function nowMs() {
 
 export default function CfaConstructedResponse() {
   const { level, topic } = useParams();
-  const requestKey = `${level}:${topic}`;
+  const [activePathway] = useLevel3Pathway();
+  const requestKey = `${level}:${topic}:${level === 'level3' ? activePathway : 'all'}`;
   const [contentState, setContentState] = useState({ key: null, data: null });
   const data = contentState.key === requestKey ? contentState.data : null;
   const loading = contentState.key !== requestKey;
@@ -33,7 +36,7 @@ export default function CfaConstructedResponse() {
 
   useEffect(() => {
     let cancelled = false;
-    loadCfaTopicContent(level, topic)
+    loadCfaTopicContent(level, topic, level === 'level3' ? { pathway: activePathway } : {})
       .then((content) => {
         if (!cancelled) setContentState({ key: requestKey, data: content });
       })
@@ -43,7 +46,7 @@ export default function CfaConstructedResponse() {
     return () => {
       cancelled = true;
     };
-  }, [level, requestKey, topic]);
+  }, [activePathway, level, requestKey, topic]);
 
   useEffect(() => {
     function handleKeyboard(event) {
@@ -69,7 +72,7 @@ export default function CfaConstructedResponse() {
   if (!data || !item) {
     return (
       <div className="page-container">
-        <div className="glass-card no-hover">Constructed-response practice is available on Level III portfolio topics.</div>
+        <EmptyPanel title="Constructed-response practice is available on Level III portfolio topics." tone="exam" />
       </div>
     );
   }
@@ -170,11 +173,29 @@ export default function CfaConstructedResponse() {
       </div>
 
       {submitted && (
-        <Surface tone="study" status="success" style={{ marginBottom: 'var(--space-6)' }}>
-          <StatusBadge tone="success">Model answer revealed</StatusBadge>
-          <h2>Model Answer</h2>
-          <p style={{ color: 'var(--text-secondary)' }}>{item.modelAnswer}</p>
-        </Surface>
+        <>
+          <Surface tone="study" status="success" style={{ marginBottom: 'var(--space-6)' }}>
+            <StatusBadge tone="success">Model answer revealed</StatusBadge>
+            <h2>Model Answer</h2>
+            <p style={{ color: 'var(--text-secondary)' }}>{item.modelAnswer}</p>
+          </Surface>
+          <SourceRail
+            title="Constructed Response Source Context"
+            subtitle="Private snippets are shown only after submission and mapped to command words, rubric criteria, and objectives."
+            target={{
+              kind: 'constructed-response',
+              domain: 'cfa',
+              level,
+              topicId: topic,
+              pathway: level === 'level3' ? activePathway : undefined,
+              title: item.title,
+              objectiveIds: item.learningObjectives,
+              keywords: [item.prompt, item.modelAnswer, item.commandWords.join(' '), item.rubric.criteria.map((criterion) => criterion.label).join(' ')],
+              route: `/cfa/${level}/${topic}/constructed-response`,
+            }}
+            compact
+          />
+        </>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
