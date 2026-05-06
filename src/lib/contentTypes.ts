@@ -21,6 +21,8 @@ export interface ContentProvenance {
   editorialStatus: EditorialStatus;
   qualityNotes: string;
   generatedFromTemplate: boolean;
+  promotionEvidence?: string[];
+  sourceIds?: string[];
 }
 
 export type ItemType =
@@ -168,6 +170,7 @@ export interface AuthoringReview {
     | 'skill-lab-mapping'
     | 'accessibility'
   >;
+  promotionEvidence?: string[];
 }
 
 export interface ContentPack {
@@ -273,9 +276,26 @@ export interface ContentPackRelease {
   generatedAt: string;
   topicIds: string[];
   packIds: string[];
+  topics: ContentPackReleaseTopic[];
+  templateRowsRemaining: number;
   blockingIssues: number;
   warnings: number;
   notes: string[];
+}
+
+export interface ContentPackReleaseTopic {
+  topicId: string;
+  title: string;
+  status: ContentMaturity;
+  totalRows: number;
+  editorialRows: number;
+  templateRowsRemaining: number;
+  missingEvidence: number;
+  blockers: number;
+  warnings: number;
+  reviewer: string;
+  reviewedAt: string;
+  promotionEvidence: string[];
 }
 
 export interface ContentBatchProgress {

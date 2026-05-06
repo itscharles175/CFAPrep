@@ -3,8 +3,8 @@ import {
   emptyProgressSummary,
   getLessonProgress,
   progressSummaryQuery,
-  PROGRESS_EVENT,
   recordModuleVisit,
+  subscribeProgressChanges,
   toggleModuleCompleted,
 } from '../lib/learning';
 
@@ -42,10 +42,10 @@ export function useModuleProgress({ domain, moduleId, title, path }) {
       if (!cancelled) setProgress(row);
     };
 
-    window.addEventListener(PROGRESS_EVENT, handleProgressChange);
+    const unsubscribe = subscribeProgressChanges(handleProgressChange);
     return () => {
       cancelled = true;
-      window.removeEventListener(PROGRESS_EVENT, handleProgressChange);
+      unsubscribe();
     };
   }, [domain, moduleId, title, path]);
 

@@ -7,6 +7,7 @@ const gates = [
   { id: 'content-validation', command: 'npm run content:validate' },
   { id: 'bundle-report', command: 'npm run bundle:report' },
   { id: 'smoke', command: 'npm run smoke' },
+  { id: 'browser-regression', command: 'npm run browser:regression' },
   { id: 'fresh-import', command: 'npm run fresh-import:check' },
   { id: 'content-report', command: 'npm run content:report' },
 ];
@@ -30,6 +31,11 @@ function runCommand({ id, command }) {
         exitCode,
         durationMs,
         completedAt: new Date().toISOString(),
+        runtime: {
+          node: process.version,
+          platform: process.platform,
+          arch: process.arch,
+        },
       };
       console.log(`==> ${command} ${result.status} (${Math.round(durationMs / 1000)}s)`);
       resolve(result);
@@ -44,6 +50,11 @@ for (const gate of gates) {
 
 const report = {
   generatedAt: new Date().toISOString(),
+  runtime: {
+    node: process.version,
+    platform: process.platform,
+    arch: process.arch,
+  },
   results,
   resultsById: Object.fromEntries(results.map((result) => [result.id, result])),
 };
@@ -60,4 +71,3 @@ if (failures.length) {
 } else {
   console.log('All executable release gate commands passed.');
 }
-

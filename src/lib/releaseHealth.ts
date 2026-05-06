@@ -29,6 +29,11 @@ export interface ReleaseCommandResult {
   exitCode: number | null;
   durationMs: number;
   completedAt: string;
+  runtime?: {
+    node: string;
+    platform: string;
+    arch: string;
+  };
 }
 
 export interface ReleaseGate {
@@ -51,6 +56,10 @@ export interface ReleaseGateReport {
     level1ExamReadyTopics: number;
     level1ValidatedTopics: number;
     level1TopicCount: number;
+    level2ExamReadyTopics: number;
+    level2TopicCount: number;
+    activeCurriculumWarnings: number;
+    futureDiagnostics: number;
     releaseBlockers: number;
     releaseWarnings: number;
     bundleFailures: number | null;
@@ -58,6 +67,8 @@ export interface ReleaseGateReport {
   gates: ReleaseGate[];
   blockers: string[];
   warnings: string[];
+  activeLevels: string[];
+  futureDiagnostics: string[];
 }
 
 function worstStatus(statuses: ReleaseGateStatus[]): ReleaseGateStatus {
@@ -137,18 +148,22 @@ export function buildReleaseGateReport({
   generatedAt?: string;
 } = {}): ReleaseGateReport {
   const catalog = generateCoverageReport();
-  const curriculum = generateCurriculumCoverageReport();
+  const activeCurriculumReports = [generateCurriculumCoverageReport('level1'), generateCurriculumCoverageReport('level2')];
+  const futureCurriculumReports = [generateCurriculumCoverageReport('level3')];
   const progress = getLevel1BatchProgress();
   const release = generateContentReleaseReport('level1');
+  const level2Release = generateContentReleaseReport('level2');
   const bundleFailures = bundle?.checks
     ? bundle.checks.filter((check) => check.status === 'missing' || check.status === 'over-threshold').length
     : null;
 
   const catalogErrors = catalog.totals.errors;
   const catalogWarnings = catalog.totals.warnings;
-  const curriculumErrors = curriculum.totals.errors;
-  const curriculumWarnings = curriculum.totals.warnings;
+  const curriculumErrors = activeCurriculumReports.reduce((sum, report) => sum + report.totals.errors, 0);
+  const curriculumWarnings = activeCurriculumReports.reduce((sum, report) => sum + report.totals.warnings, 0);
+  const futureDiagnostics = futureCurriculumReports.reduce((sum, report) => sum + report.totals.warnings + report.totals.errors, 0);
   const level1PublicReady = progress.topicCount > 0 && progress.examReadyTopics === progress.topicCount && release.status === 'exam-ready';
+  const level2PublicReady = level2Release.topicIds.length > 0 && level2Release.topics.every((topic) => topic.status === 'exam-ready') && level2Release.status === 'exam-ready';
   const contentHasErrors = catalogErrors + curriculumErrors > 0;
 
   const gates: ReleaseGate[] = [
@@ -179,7 +194,15 @@ export function buildReleaseGateReport({
       label: 'Level I editorial gate',
       command: 'npm run content:validate',
       status: level1PublicReady ? 'ok' : 'blocked',
-      detail: `${progress.examReadyTopics}/${progress.topicCount} topics exam-ready; ${progress.validatedTopics} structurally validated; ${release.warnings} release warnings.`,
+      detail: `${progress.examReadyTopics}/${progress.topicCount} topics exam-ready; ${release.templateRowsRemaining} template rows remaining; ${release.warnings} release warnings.`,
+      required: true,
+    },
+    {
+      id: 'level2-editorial',
+      label: 'Level II editorial gate',
+      command: 'npm run content:validate',
+      status: level2PublicReady ? 'ok' : 'blocked',
+      detail: `${level2Release.topics.filter((topic) => topic.status === 'exam-ready').length}/${level2Release.topicIds.length} topics exam-ready; ${level2Release.templateRowsRemaining} template rows remaining; ${level2Release.warnings} release warnings.`,
       required: true,
     },
     bundleGate(bundle),
@@ -188,6 +211,13 @@ export function buildReleaseGateReport({
       label: 'Route smoke',
       command: 'npm run smoke',
       fallbackDetail: 'Must pass dashboard, CFA, quiz, mock, flashcards, vault, analytics, tools, and system routes.',
+      gateResults,
+    }),
+    commandGate({
+      id: 'browser-regression',
+      label: 'Browser regression',
+      command: 'npm run browser:regression',
+      fallbackDetail: 'Must pass async CFA loading, Level II item-set, mock resume, offline badge, and update-prompt browser checks.',
       gateResults,
     }),
     commandGate({
@@ -201,12 +231,14 @@ export function buildReleaseGateReport({
 
   const blockers = [
     ...(contentHasErrors ? ['Content or curriculum validators have blocking errors.'] : []),
-    ...(!level1PublicReady ? ['Level I remains blocked from public exam-ready release until all template-derived rows are editorially replaced.'] : []),
+    ...(!level1PublicReady ? [`Level I remains blocked from public exam-ready release until all template-derived rows are editorially replaced (${release.templateRowsRemaining} remaining).`] : []),
+    ...(!level2PublicReady ? [`Level II remains blocked from public exam-ready release until all item-set packs are editorially replaced (${level2Release.templateRowsRemaining} template rows remaining).`] : []),
     ...(bundleFailures ? [`${bundleFailures} tracked route bundle thresholds failed.`] : []),
   ];
   const warnings = [
     ...(catalogWarnings + curriculumWarnings ? [`${catalogWarnings + curriculumWarnings} content/curriculum warnings need triage.`] : []),
     ...(release.warnings ? [`Level I release report has ${release.warnings} warnings.`] : []),
+    ...(level2Release.warnings ? [`Level II release report has ${level2Release.warnings} warnings.`] : []),
   ];
 
   return {
@@ -220,12 +252,18 @@ export function buildReleaseGateReport({
       level1ExamReadyTopics: progress.examReadyTopics,
       level1ValidatedTopics: progress.validatedTopics,
       level1TopicCount: progress.topicCount,
-      releaseBlockers: release.blockingIssues + blockers.length,
-      releaseWarnings: release.warnings,
+      level2ExamReadyTopics: level2Release.topics.filter((topic) => topic.status === 'exam-ready').length,
+      level2TopicCount: level2Release.topicIds.length,
+      activeCurriculumWarnings: curriculumWarnings,
+      futureDiagnostics,
+      releaseBlockers: release.blockingIssues + level2Release.blockingIssues + blockers.length,
+      releaseWarnings: release.warnings + level2Release.warnings,
       bundleFailures,
     },
     gates,
     blockers,
     warnings,
+    activeLevels: ['level1', 'level2'],
+    futureDiagnostics: futureCurriculumReports.flatMap((report) => report.issues.map((issue) => `${issue.area}:${issue.id} - ${issue.message}`)),
   };
 }

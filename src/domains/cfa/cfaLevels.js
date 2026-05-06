@@ -4,6 +4,7 @@ import {
   buildRuntimeLevelFromPacks,
   getLevel1AuthoredRuntimeMode,
   getLevel1RuntimeStatus,
+  getLevel2RuntimeStatus,
 } from './contentPacks';
 import { cfaContent, cfaLearningObjectives, cfaQuizzes } from './cfaData';
 
@@ -23,19 +24,6 @@ const level1Topics = cfaTopics.map((topic) => ({
   weight: topic.weight,
   summary: `Level I foundation coverage for ${topic.label}, focused on recognition, calculation, and exam-day traps.`,
 }));
-
-const level2Topics = [
-  ['ethics', 'Ethics & Professional Standards', '10-15%', 'case-based application of duties, conflicts, and professional judgment'],
-  ['quant-methods', 'Quantitative Methods', '5-10%', 'regression, time series, machine learning intuition, and model diagnostics'],
-  ['economics', 'Economics', '5-10%', 'currency, growth, regulation, and macro scenario interpretation'],
-  ['fsa', 'Financial Statement Analysis', '10-15%', 'intercorporate investments, pensions, multinationals, quality, and adjustments'],
-  ['corporate', 'Corporate Issuers', '5-10%', 'capital structure, governance, payout, and project analysis'],
-  ['equity', 'Equity Valuation', '10-15%', 'DCF, residual income, private company valuation, and multiples'],
-  ['fixed-income', 'Fixed Income', '10-15%', 'term structure, credit, embedded options, and structured products'],
-  ['derivatives', 'Derivatives', '5-10%', 'option pricing, swaps, forwards, and risk-neutral valuation'],
-  ['alternatives', 'Alternative Investments', '5-10%', 'private equity, real estate, commodities, and hedge fund valuation'],
-  ['portfolio', 'Portfolio Management', '10-15%', 'active management, factor models, allocation, and risk budgeting'],
-].map(([id, title, weight, summary]) => ({ id, title, weight, summary }));
 
 const level3Topics = [
   ['ethics', 'Ethics & Professional Standards', '10-15%', 'portfolio-manager judgment, conflicts, suitability, and professional conduct cases'],
@@ -509,13 +497,7 @@ const generatedLevel1 = buildLevel(
 
 export const cfaLevelContent = [
   getLevel1AuthoredRuntimeMode() === 'generated' ? generatedLevel1 : buildRuntimeLevelFromPacks('level1'),
-  buildLevel(
-    'level2',
-    'CFA Level II',
-    'Item-set vignettes focused on application, analysis, valuation, and interpretation.',
-    'The Level II bundle introduces deeper valuation and case-analysis practice while staying local and original.',
-    level2Topics,
-  ),
+  buildRuntimeLevelFromPacks('level2'),
   buildLevel(
     'level3',
     'CFA Level III',
@@ -550,18 +532,7 @@ export const cfaRuntimeReport = {
   generatedAt: new Date().toISOString(),
   levels: [
     getLevel1RuntimeStatus(),
-    {
-      level: 'level2',
-      mode: 'generated',
-      label: 'Generated scaffold',
-      releaseEligible: false,
-      topicCount: cfaLevelContent.find((level) => level.id === 'level2')?.topics.length || 0,
-      authoredPackCount: 0,
-      validatedTopics: 0,
-      examReadyTopics: 0,
-      blockers: ['Level II remains draft scaffold content until Level I editorial quality is proven.'],
-      warnings: ['Level II runtime is generated draft content.'],
-    },
+    getLevel2RuntimeStatus(),
     {
       level: 'level3',
       mode: 'generated',

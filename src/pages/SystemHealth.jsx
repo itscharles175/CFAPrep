@@ -96,7 +96,7 @@ export default function SystemHealth() {
           <div>
             <h3 style={{ margin: 0 }}>Release Health</h3>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
-              Generated {new Date(releaseReport.generatedAt).toLocaleString()} · {releaseReport.summary.level1ExamReadyTopics}/{releaseReport.summary.level1TopicCount} Level I topics exam-ready
+              Generated {new Date(releaseReport.generatedAt).toLocaleString()} · {releaseReport.summary.level1ExamReadyTopics}/{releaseReport.summary.level1TopicCount} Level I and {releaseReport.summary.level2ExamReadyTopics}/{releaseReport.summary.level2TopicCount} Level II topics exam-ready
             </p>
           </div>
           <div className={`badge ${releaseReport.status === 'ok' ? 'badge-green' : releaseReport.status === 'blocked' ? 'badge-red' : 'badge-amber'}`}>

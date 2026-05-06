@@ -5,6 +5,7 @@ import { buildSearchItems } from '../../data/catalog';
 import { useTheme } from '../../context/ThemeContext';
 import { useProgressSummary } from '../../hooks/useProgress';
 import { exportVaultData, repairVaultData } from '../../lib/learning';
+import { commandRoutes } from '../../routes/routeManifest';
 
 function normalizeSearch(value) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -50,14 +51,10 @@ export default function TopBar({ collapsed, onMenuToggle }) {
   const commandItems = useMemo(
     () => [
       ...searchItems,
-      { id: 'command:review', type: 'command', title: 'Open Review Inbox', subtitle: 'Due work, weak objectives, and flags', path: '/review', keywords: ['review inbox due weak stale flags'] },
-      { id: 'command:mock-level1', type: 'command', title: 'Start Level I Mock', subtitle: 'Timed standalone and vignette section', path: '/cfa/level1/mock', keywords: ['start level i mock exam timed'] },
-      { id: 'command:mock-level2', type: 'command', title: 'Start Level II Mock', subtitle: 'Timed item-set section', path: '/cfa/level2/mock', keywords: ['start level ii mock item set vignette'] },
-      { id: 'command:mock-level3', type: 'command', title: 'Start Level III Mock', subtitle: 'Constructed response and item-set section', path: '/cfa/level3/mock', keywords: ['start level iii mock constructed response essay'] },
-      { id: 'command:system', type: 'command', title: 'Open System Health', subtitle: 'Offline cache, storage, and backup status', path: '/system', keywords: ['system health pwa offline storage backup'] },
-      { id: 'action:backup', type: 'action', title: 'Export Vault Backup', subtitle: 'Download all local data as JSON', keywords: ['export backup vault json local data'], action: 'backup' },
-      { id: 'action:repair', type: 'action', title: 'Repair Local Vault', subtitle: 'Rebuild review indexes and clean corrupted rows', keywords: ['repair vault rebuild indexes corrupted rows'], action: 'repair' },
-      { id: 'action:theme', type: 'action', title: 'Toggle Theme', subtitle: 'Switch light or dark mode', keywords: ['toggle theme light dark'], action: 'theme' },
+      ...commandRoutes.map((item) => ({
+        ...item,
+        type: item.action ? 'action' : 'command',
+      })),
     ],
     [searchItems],
   );

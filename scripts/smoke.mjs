@@ -1,26 +1,9 @@
 import { access } from 'node:fs/promises';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { smokeRoutes as routes } from '../src/routes/routeManifest.js';
 
-const routes = [
-  ['/', 'QuantVault'],
-  ['/cfa', 'CFA'],
-  ['/cfa/level1/fixed-income', 'Fixed Income'],
-  ['/cfa/level1/fixed-income/quiz', 'Fixed Income'],
-  ['/cfa/level1/fixed-income/vignette', 'Fixed Income'],
-  ['/cfa/mock', 'Mock'],
-  ['/flashcards', 'Flashcards'],
-  ['/review', 'Review'],
-  ['/vault', 'Vault'],
-  ['/analytics', 'Analytics'],
-  ['/content-ops', 'Content Operations'],
-  ['/calculators', 'Calculators'],
-  ['/quant', 'Quant'],
-  ['/quant/risk-management', 'Risk'],
-  ['/excel', 'Excel'],
-  ['/excel/fundamentals', 'Excel'],
-  ['/system', 'System'],
-];
+/* global document */
 
 const browserCandidates = [
   process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
@@ -71,6 +54,11 @@ try {
   for (const [route, expectedText] of routes) {
     const url = new URL(route, address).toString();
     await page.goto(url, { waitUntil: 'networkidle' });
+    await page.waitForFunction(
+      (text) => document.body.innerText.includes(text),
+      expectedText,
+      { timeout: 15_000 },
+    );
     const body = await page.locator('body').innerText({ timeout: 10_000 });
     if (!body.includes(expectedText)) {
       throw new Error(`Missing expected text "${expectedText}" at ${url}`);

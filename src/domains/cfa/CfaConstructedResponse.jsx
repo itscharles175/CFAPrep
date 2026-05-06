@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ClipboardCheck, PenLine, Trophy } from 'lucide-react';
-import { getCfaTopicContent, getCfaTopicKey } from './cfaLevels';
+import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
 import { PageHeader, MetricCard } from '../../components/ui/Primitives';
 import { recordConstructedResponseAttempt } from '../../lib/learning';
 
@@ -11,7 +11,10 @@ function nowMs() {
 
 export default function CfaConstructedResponse() {
   const { level, topic } = useParams();
-  const data = useMemo(() => getCfaTopicContent(level, topic), [level, topic]);
+  const requestKey = `${level}:${topic}`;
+  const [contentState, setContentState] = useState({ key: null, data: null });
+  const data = contentState.key === requestKey ? contentState.data : null;
+  const loading = contentState.key !== requestKey;
   const topicKey = useMemo(() => getCfaTopicKey(level, topic), [level, topic]);
   const [itemIndex, setItemIndex] = useState(0);
   const [commandFilter, setCommandFilter] = useState('all');
@@ -27,6 +30,29 @@ export default function CfaConstructedResponse() {
   const [scores, setScores] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [startTime] = useState(nowMs);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCfaTopicContent(level, topic)
+      .then((content) => {
+        if (!cancelled) setContentState({ key: requestKey, data: content });
+      })
+      .catch(() => {
+        if (!cancelled) setContentState({ key: requestKey, data: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [level, requestKey, topic]);
+
+  if (loading) {
+    return (
+      <div className="page-container" aria-busy="true">
+        <div className="skeleton skeleton-heading" />
+        <div className="skeleton skeleton-card" />
+      </div>
+    );
+  }
 
   if (!data || !item) {
     return (

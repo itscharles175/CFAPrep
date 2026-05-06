@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -10,15 +14,17 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile=dist/reports/junit.xml",
     "verify": "npm run lint && npm run test && npm run build",
     "audit": "npm audit --omit=dev",
-    "content:validate": "node --loader ./scripts/ts-loader.mjs scripts/content-validate.mjs",
-    "content:report": "node --loader ./scripts/ts-loader.mjs scripts/content-report.mjs",
+    "content:validate": "node --import ./scripts/register-ts-loader.mjs scripts/content-validate.mjs",
+    "content:report": "node --import ./scripts/register-ts-loader.mjs scripts/content-report.mjs",
     "bundle:report": "node scripts/bundle-report.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "fresh-import:check": "node --loader ./scripts/ts-loader.mjs scripts/fresh-import-check.mjs",
+    "browser:regression": "node scripts/browser-regression.mjs",
+    "fresh-import:check": "node --import ./scripts/register-ts-loader.mjs scripts/fresh-import-check.mjs",
     "release:gates": "node scripts/release-gates.mjs",
-    "release:checklist": "node --loader ./scripts/ts-loader.mjs scripts/release-checklist.mjs"
+    "release:checklist": "node --import ./scripts/register-ts-loader.mjs scripts/release-checklist.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -38,6 +44,7 @@
     "prettier": "^3.8.3",
     "typescript": "~6.0.2",
     "vite": "^8.0.10",
+    "vite-plugin-pwa": "^1.3.0",
     "vitest": "^4.1.5"
   },
   "dependencies": {
@@ -46,7 +53,7 @@
     "lucide-react": "^1.14.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "react-router-dom": "^7.14.2",
+    "react-router-dom": "^7.15.0",
     "recharts": "^3.8.1"
   }
 }

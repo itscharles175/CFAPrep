@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { getCfaTopicContent, getCfaTopicKey } from './cfaLevels';
+import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -97,7 +97,10 @@ export default function CfaQuiz() {
   const summary = useProgressSummary();
   const mode = searchParams.get('mode') || 'topic-drill';
   const objectiveParam = searchParams.get('objective');
-  const topicData = useMemo(() => getCfaTopicContent(level, topic), [level, topic]);
+  const requestKey = `${level}:${topic}`;
+  const [contentState, setContentState] = useState({ key: null, data: null });
+  const topicData = contentState.key === requestKey ? contentState.data : null;
+  const loading = contentState.key !== requestKey;
   const topicKey = useMemo(() => getCfaTopicKey(level, topic), [level, topic]);
   const baseQuestions = useMemo(() => topicData?.questions || [], [topicData]);
   const objectives = useMemo(() => topicData?.learningObjectives || [], [topicData]);
@@ -123,6 +126,20 @@ export default function CfaQuiz() {
   const modeLabel = quizModes.find((item) => item.id === mode)?.label || 'Topic Drill';
 
   const score = useMemo(() => answers.filter((answer) => answer.correct).length, [answers]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCfaTopicContent(level, topic)
+      .then((content) => {
+        if (!cancelled) setContentState({ key: requestKey, data: content });
+      })
+      .catch(() => {
+        if (!cancelled) setContentState({ key: requestKey, data: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [level, requestKey, topic]);
 
   function resetQuiz() {
     setCurrent(0);
@@ -213,6 +230,15 @@ export default function CfaQuiz() {
     });
   }
 
+  if (loading) {
+    return (
+      <div className="page-container" aria-busy="true">
+        <div className="skeleton skeleton-heading" />
+        <div className="skeleton skeleton-card" />
+      </div>
+    );
+  }
+
   if (!questions.length) {
     return (
       <div className="page-container">
@@ -251,9 +277,9 @@ export default function CfaQuiz() {
             <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-8)' }}>
               {topicData?.title || topic} - {modeLabel}
             </p>
-            {topicData?.runtimeMode === 'validated-beta' && (
-              <div className="badge badge-amber" style={{ marginBottom: 'var(--space-6)' }}>
-                Authored beta content · release gate remains editorial
+            {topicData?.runtimeMode === 'exam-ready' && (
+              <div className="badge badge-green" style={{ marginBottom: 'var(--space-6)' }}>
+                Editorial exam-ready content
               </div>
             )}
 
@@ -344,9 +370,9 @@ export default function CfaQuiz() {
       <Link to={`/cfa/${level}/${topic}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-6)' }}>
         <ArrowLeft size={16} /> Back to {topicData?.title || topic}
       </Link>
-      {topicData?.runtimeMode === 'validated-beta' && (
-        <div className="badge badge-amber" style={{ marginBottom: 'var(--space-4)' }}>
-          Validated authored beta · not public exam-ready
+      {topicData?.runtimeMode === 'exam-ready' && (
+        <div className="badge badge-green" style={{ marginBottom: 'var(--space-4)' }}>
+          Editorial exam-ready
         </div>
       )}
 

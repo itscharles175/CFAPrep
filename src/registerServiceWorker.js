@@ -3,7 +3,7 @@ export function registerServiceWorker() {
 
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register('/service-worker.js')
+      .register('/sw.js')
       .then((registration) => {
         function notifyUpdateAvailable(worker) {
           window.dispatchEvent(

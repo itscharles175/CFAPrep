@@ -34,6 +34,9 @@ import {
   exportArtifactCsv,
   exportMockSummary,
   getExamPlan,
+  VAULT_CONTENT_VERSION,
+  VAULT_SCHEMA_HASH,
+  VAULT_SCHEMA_VERSION,
   validateVaultData,
 } from './progressStore';
 
@@ -98,6 +101,16 @@ describe('local vault progress store', () => {
     });
 
     const exported = await exportVaultData();
+    expect(exported).toMatchObject({
+      app: 'QuantVault',
+      schemaVersion: VAULT_SCHEMA_VERSION,
+      schemaHash: VAULT_SCHEMA_HASH,
+      contentVersion: VAULT_CONTENT_VERSION,
+      encryption: { encrypted: false, algorithm: 'none' },
+    });
+    expect(exported.exportId).toMatch(/^qv-/);
+    expect(exported.checksum).toMatch(/^fnv1a32:/);
+    expect(exported.stores.reviewItems[0].fsrsDifficulty).toBeTypeOf('number');
     expect(validateVaultData(exported)).toEqual({ valid: true, errors: [] });
 
     await resetVaultData('full');
@@ -138,6 +151,7 @@ describe('local vault progress store', () => {
     exported.stores.masterySnapshots = [];
     exported.stores.reviewEvents = [];
     exported.stores.confidenceCalibration = [];
+    delete (exported as Partial<typeof exported>).checksum;
 
     await resetVaultData('full');
     await importVaultData(exported, 'replace');
@@ -217,6 +231,7 @@ describe('local vault progress store', () => {
     expect(plan.dailyTargetMinutes).toBe(60);
     expect(plan.nextActions.length).toBeGreaterThan(0);
     expect(forecast).toHaveLength(7);
+    expect(forecast.some((day) => day.count > 0 && typeof day.averageRetention === 'number')).toBe(true);
   });
 
   it('records mock attempts into local readiness state', async () => {
@@ -282,6 +297,10 @@ describe('local vault progress store', () => {
     };
 
     const migrated = migrateVaultData(oldExport);
+    expect(migrated.schemaVersion).toBe(VAULT_SCHEMA_VERSION);
+    expect(migrated.schemaHash).toBe(VAULT_SCHEMA_HASH);
+    expect(migrated.contentVersion).toBe(VAULT_CONTENT_VERSION);
+    expect(migrated.checksum).toMatch(/^fnv1a32:/);
     expect(migrated.stores.mockAttempts).toEqual([]);
     expect(migrated.stores.vignetteAttempts).toEqual([]);
     expect(migrated.stores.constructedResponseAttempts).toEqual([]);
@@ -300,6 +319,35 @@ describe('local vault progress store', () => {
     const validation = validateVaultData({ app: 'Other', stores: {} });
     expect(validation.valid).toBe(false);
     expect(validation.errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects tampered v6 vault checksums', async () => {
+    await recordQuizAttempt({
+      domain: 'cfa',
+      topic: 'ethics',
+      title: 'Ethics',
+      score: 1,
+      total: 1,
+      elapsedSeconds: 10,
+      answers: [
+        {
+          questionId: 'ethics-checksum',
+          learningObjective: 'ethics-checksum-lo',
+          objectiveTitle: 'Protect vault export integrity',
+          correct: true,
+          confidence: 'high',
+          errorCategory: 'none',
+          difficulty: 'foundation',
+        },
+      ],
+    });
+
+    const exported = await exportVaultData();
+    exported.stores.questionResults[0].correct = false;
+    const validation = validateVaultData(exported);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.errors).toContain('Vault export checksum does not match its payload.');
   });
 
   it('persists study planner settings and records non-quiz study events', async () => {

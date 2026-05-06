@@ -97,7 +97,7 @@ export function validateLevelContent(level?: string): ContentValidationIssue[] {
         topicIssue(topic, 'objectives', topic.learningObjectives.length, target.objectives),
         topicIssue(topic, 'sections', topic.readings.reduce((sum, reading) => sum + reading.sections.length, 0), target.sections),
         topicIssue(topic, 'formulas', topic.formulas.length, target.formulas),
-        topicIssue(topic, 'questions', topic.questions.length, target.questions),
+        topicIssue(topic, 'questions', topic.questions.length + topic.vignettes.reduce((sum, vignette) => sum + vignette.questions.length, 0), target.questions),
         topicIssue(topic, 'vignettes', topic.vignettes.length, target.vignettes),
         topicIssue(topic, 'flashcards', topic.flashcards.length, target.flashcards),
         topicIssue(topic, 'skillLabs', topic.skillLabs.length, target.skillLabs),

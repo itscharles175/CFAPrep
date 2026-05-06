@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildReleaseGateReport } from './releaseHealth';
 
 describe('release health report', () => {
-  it('blocks public release while Level I packs are validated but not editorial exam-ready', () => {
+  it('opens active Level I and Level II editorial gates once every pack is exam-ready', () => {
     const report = buildReleaseGateReport({
       generatedAt: '2026-05-04T00:00:00.000Z',
       bundle: {
@@ -17,12 +17,17 @@ describe('release health report', () => {
     });
 
     expect(report.generatedAt).toBe('2026-05-04T00:00:00.000Z');
-    expect(report.status).toBe('blocked');
-    expect(report.summary.level1ValidatedTopics).toBe(10);
-    expect(report.summary.level1ExamReadyTopics).toBe(0);
-    expect(report.gates.find((gate) => gate.id === 'level1-editorial')?.status).toBe('blocked');
+    expect(report.status).toBe('pending');
+    expect(report.summary.level1ValidatedTopics).toBe(0);
+    expect(report.summary.level1ExamReadyTopics).toBe(10);
+    expect(report.summary.level2ExamReadyTopics).toBe(10);
+    expect(report.summary.level2TopicCount).toBe(10);
+    expect(report.summary.activeCurriculumWarnings).toBe(0);
+    expect(report.summary.futureDiagnostics).toBeGreaterThan(0);
+    expect(report.gates.find((gate) => gate.id === 'level1-editorial')?.status).toBe('ok');
+    expect(report.gates.find((gate) => gate.id === 'level2-editorial')?.status).toBe('ok');
     expect(report.gates.find((gate) => gate.id === 'bundle-report')?.status).toBe('ok');
-    expect(report.blockers.some((blocker) => blocker.includes('template-derived rows'))).toBe(true);
+    expect(report.blockers.some((blocker) => blocker.includes('template-derived rows'))).toBe(false);
   });
 
   it('marks bundle reports as blocked when a tracked threshold fails', () => {

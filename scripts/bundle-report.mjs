@@ -4,11 +4,17 @@ import path from 'node:path';
 
 const ASSET_DIR = 'dist/assets';
 const thresholds = [
-  { label: 'index', pattern: /^index-.*\.js$/, maxBytes: 450_000, maxGzipBytes: 150_000, required: true },
-  { label: 'cfaLevels', pattern: /^cfaLevels-.*\.js$/, maxBytes: 180_000, maxGzipBytes: 60_000, required: true },
-  { label: 'QuantModule', pattern: /^QuantModule-.*\.js$/, maxBytes: 430_000, maxGzipBytes: 130_000, required: true },
+  { label: 'main app', pattern: /^index-.*\.js$/, maxBytes: 350_000, maxGzipBytes: 110_000, required: true },
+  { label: 'CFA summary chunk', pattern: /^cfaSummary-.*\.js$/, maxBytes: 30_000, maxGzipBytes: 10_000, required: false },
+  { label: 'Level I async loader', pattern: /^cfaLevel1Runtime-.*\.js$/, maxBytes: 20_000, maxGzipBytes: 8_000, required: true },
+  { label: 'Level II async loader', pattern: /^cfaLevel2Runtime-.*\.js$/, maxBytes: 20_000, maxGzipBytes: 8_000, required: true },
+  { label: 'CFA content core', pattern: /^cfa-content-core-.*\.js$/, maxBytes: 180_000, maxGzipBytes: 60_000, required: true },
+  { label: 'Level I dedicated content chunk', pattern: /^cfa-level1-content-.*\.js$/, maxBytes: 400_000, maxGzipBytes: 120_000, required: false },
+  { label: 'Level II dedicated content chunk', pattern: /^cfa-level2-content-.*\.js$/, maxBytes: 400_000, maxGzipBytes: 120_000, required: false },
+  { label: 'Level III scaffold chunk', pattern: /^cfa-level3-scaffold-.*\.js$/, maxBytes: 300_000, maxGzipBytes: 120_000, required: true },
+  { label: 'Quant route chunk', pattern: /^QuantModule-.*\.js$/, maxBytes: 250_000, maxGzipBytes: 80_000, required: true },
   { label: 'KaTeX', pattern: /^katex-.*\.js$/, maxBytes: 300_000, maxGzipBytes: 95_000, required: true },
-  { label: 'Recharts route payload', pattern: /^(QuantModule|Analytics)-.*\.js$/, maxBytes: 430_000, maxGzipBytes: 130_000, required: false },
+  { label: 'Quant/Recharts payload', pattern: /^(recharts-vendor|Analytics)-.*\.js$/, maxBytes: 430_000, maxGzipBytes: 130_000, required: false },
 ];
 
 async function getAssets() {

@@ -3,6 +3,7 @@ import {
   isDue,
   masteryScoreForResults,
   nextRecommendation,
+  predictRetention,
   rankReviewItems,
   scheduleReview,
 } from './scheduler';
@@ -40,7 +41,10 @@ import type {
 } from './learningTypes';
 
 export const PROGRESS_EVENT = 'quantvault:progress';
-export const VAULT_SCHEMA_VERSION = 5;
+const PROGRESS_CHANNEL = 'quantvault:progress-channel';
+export const VAULT_SCHEMA_VERSION = 6;
+export const VAULT_SCHEMA_HASH = 'qv-v6-local-first-fsrs-export-meta';
+export const VAULT_CONTENT_VERSION = 'cfa-2026-local-pack-v1';
 
 type SettingRow = { key: string; value: unknown; updatedAt: string };
 type QuestionResultRow = QuestionResult & {
@@ -86,8 +90,17 @@ export type VaultDataStores = {
 
 export type VaultExport = {
   app: 'QuantVault';
+  exportId: string;
   schemaVersion: number;
+  schemaHash: string;
+  contentVersion: string;
   exportedAt: string;
+  checksum: string;
+  encryption?: {
+    encrypted: boolean;
+    algorithm: 'none' | 'AES-GCM';
+    keyDerivation?: 'PBKDF2';
+  };
   stores: VaultDataStores;
 };
 
@@ -180,7 +193,34 @@ db.version(1).stores({
   settings: 'key',
 });
 
-db.version(VAULT_SCHEMA_VERSION).stores({
+/* D1: Intermediate migration v2 — adds question results and review system */
+db.version(2).stores({
+  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
+  quizAttempts: '++id, domain, topic, pct, createdAt',
+  questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
+  reviewItems: 'id, domain, topic, learningObjective, dueAt, ease, attempts',
+  masterySnapshots: 'id, domain, topic, learningObjective, score, lastAttemptAt, nextReviewAt',
+  bookmarks: 'id, type, domain, moduleId, createdAt',
+  settings: 'key',
+});
+
+/* D1: Intermediate migration v3 — adds mock exams and assessment types */
+db.version(3).stores({
+  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
+  quizAttempts: '++id, domain, topic, pct, createdAt, mode',
+  questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
+  reviewItems: 'id, domain, topic, learningObjective, dueAt, ease, attempts',
+  masterySnapshots: 'id, domain, topic, learningObjective, score, lastAttemptAt, nextReviewAt',
+  mockAttempts: '++id, domain, level, pct, createdAt, mode',
+  vignetteAttempts: '++id, domain, level, topic, vignetteId, pct, createdAt',
+  constructedResponseAttempts: '++id, domain, level, topic, itemId, pct, createdAt',
+  formulaDrillAttempts: '++id, domain, level, topic, formulaName, correct, createdAt',
+  bookmarks: 'id, type, domain, moduleId, createdAt',
+  settings: 'key',
+});
+
+/* D1: Intermediate migration v4 — adds study sessions, drills, and notes */
+db.version(4).stores({
   lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
   quizAttempts: '++id, domain, topic, pct, createdAt, mode',
   questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
@@ -204,14 +244,100 @@ db.version(VAULT_SCHEMA_VERSION).stores({
   settings: 'key',
 });
 
+/* D1: Schema v5 — full 21-store architecture */
+db.version(5).stores({
+  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
+  quizAttempts: '++id, domain, topic, pct, createdAt, mode',
+  questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
+  reviewItems: 'id, domain, topic, learningObjective, dueAt, ease, attempts',
+  masterySnapshots: 'id, domain, topic, learningObjective, score, lastAttemptAt, nextReviewAt',
+  mockAttempts: '++id, domain, level, pct, createdAt, mode',
+  vignetteAttempts: '++id, domain, level, topic, vignetteId, pct, createdAt',
+  constructedResponseAttempts: '++id, domain, level, topic, itemId, pct, createdAt',
+  formulaDrillAttempts: '++id, domain, level, topic, formulaName, correct, createdAt',
+  skillLabAttempts: '++id, domain, level, topic, labId, labType, createdAt',
+  studySessions: '++id, domain, topic, mode, startedAt',
+  studyPlanSettings: 'id, updatedAt, examDate',
+  contentVersions: 'id, version, updatedAt',
+  reviewEvents: '++id, domain, topic, learningObjective, eventType, createdAt',
+  confidenceCalibration: '++id, domain, topic, learningObjective, confidence, correct, createdAt',
+  flashcardAttempts: '++id, domain, topic, cardId, outcome, createdAt',
+  resultArtifacts: 'id, type, domain, topic, createdAt',
+  mockSectionState: 'id, status, updatedAt, expiresAt',
+  notes: 'id, type, domain, moduleId, questionId, formulaName, updatedAt',
+  bookmarks: 'id, type, domain, moduleId, questionId, formulaName, createdAt',
+  settings: 'key',
+});
+
+/* D1: Current schema v6 — explicit FSRS difficulty and export metadata */
+db.version(VAULT_SCHEMA_VERSION).stores({
+  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
+  quizAttempts: '++id, domain, topic, pct, createdAt, mode',
+  questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
+  reviewItems: 'id, domain, topic, learningObjective, dueAt, ease, fsrsDifficulty, attempts',
+  masterySnapshots: 'id, domain, topic, learningObjective, score, lastAttemptAt, nextReviewAt',
+  mockAttempts: '++id, domain, level, pct, createdAt, mode',
+  vignetteAttempts: '++id, domain, level, topic, vignetteId, pct, createdAt',
+  constructedResponseAttempts: '++id, domain, level, topic, itemId, pct, createdAt',
+  formulaDrillAttempts: '++id, domain, level, topic, formulaName, correct, createdAt',
+  skillLabAttempts: '++id, domain, level, topic, labId, labType, createdAt',
+  studySessions: '++id, domain, topic, mode, startedAt',
+  studyPlanSettings: 'id, updatedAt, examDate',
+  contentVersions: 'id, version, updatedAt',
+  reviewEvents: '++id, domain, topic, learningObjective, eventType, createdAt',
+  confidenceCalibration: '++id, domain, topic, learningObjective, confidence, correct, createdAt',
+  flashcardAttempts: '++id, domain, topic, cardId, outcome, createdAt',
+  resultArtifacts: 'id, type, domain, topic, createdAt',
+  mockSectionState: 'id, status, updatedAt, expiresAt',
+  notes: 'id, type, domain, moduleId, questionId, formulaName, updatedAt',
+  bookmarks: 'id, type, domain, moduleId, questionId, formulaName, createdAt',
+  settings: 'key',
+});
+
 function nowIso() {
   return new Date().toISOString();
+}
+
+let sharedProgressChannel: BroadcastChannel | null | undefined;
+
+function getSharedProgressChannel() {
+  if (sharedProgressChannel !== undefined) return sharedProgressChannel;
+  if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return null;
+  sharedProgressChannel = new BroadcastChannel(PROGRESS_CHANNEL);
+  return sharedProgressChannel;
+}
+
+function createProgressChannel() {
+  if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return null;
+  return new BroadcastChannel(PROGRESS_CHANNEL);
 }
 
 function emitProgressChange() {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(PROGRESS_EVENT));
   }
+  getSharedProgressChannel()?.postMessage({ type: PROGRESS_EVENT, emittedAt: nowIso() });
+}
+
+export function subscribeProgressChanges(handler: () => void) {
+  const channel = createProgressChannel();
+  const handleWindowEvent = () => handler();
+  const handleChannelMessage = (event: MessageEvent) => {
+    if (event.data?.type === PROGRESS_EVENT) handler();
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener(PROGRESS_EVENT, handleWindowEvent);
+  }
+  channel?.addEventListener('message', handleChannelMessage);
+
+  return () => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener(PROGRESS_EVENT, handleWindowEvent);
+    }
+    channel?.removeEventListener('message', handleChannelMessage);
+    channel?.close();
+  };
 }
 
 function objectiveId(domain: DomainId, topic: string, learningObjective: string) {
@@ -361,6 +487,7 @@ function buildReviewItem(result: QuestionResultRow, previous?: ReviewItem): Revi
     path: result.path || defaultPathFor(result.domain, result.topic),
     intervalDays: scheduled.intervalDays,
     ease: scheduled.ease,
+    fsrsDifficulty: scheduled.fsrsDifficulty,
     dueAt: scheduled.dueAt,
     lastResultAt: result.createdAt,
     attempts: scheduled.attempts,
@@ -868,6 +995,56 @@ export async function toggleBookmark({
   return bookmark;
 }
 
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (isObject(value)) {
+    return `{${Object.keys(value)
+      .filter((key) => value[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function checksumForExport(payload: Omit<VaultExport, 'checksum'>) {
+  const source = stableStringify(payload);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function exportIdFor(timestamp: string) {
+  const random = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `qv-${timestamp.replace(/[^0-9]/g, '').slice(0, 14)}-${random}`;
+}
+
+function withChecksum(payload: Omit<VaultExport, 'checksum'>): VaultExport {
+  return {
+    ...payload,
+    checksum: checksumForExport(payload),
+  };
+}
+
+function buildVaultExport(stores: VaultDataStores, exportedAt = nowIso()): VaultExport {
+  return withChecksum({
+    app: 'QuantVault',
+    exportId: exportIdFor(exportedAt),
+    schemaVersion: VAULT_SCHEMA_VERSION,
+    schemaHash: VAULT_SCHEMA_HASH,
+    contentVersion: VAULT_CONTENT_VERSION,
+    exportedAt,
+    encryption: {
+      encrypted: false,
+      algorithm: 'none',
+    },
+    stores,
+  });
+}
+
 export async function exportVaultData(): Promise<VaultExport> {
   const [
     lessonProgress,
@@ -915,34 +1092,29 @@ export async function exportVaultData(): Promise<VaultExport> {
     db.settings.toArray(),
   ]);
 
-  return {
-    app: 'QuantVault',
-    schemaVersion: VAULT_SCHEMA_VERSION,
-    exportedAt: nowIso(),
-    stores: {
-      lessonProgress,
-      quizAttempts,
-      questionResults,
-      reviewItems,
-      masterySnapshots,
-      mockAttempts,
-      vignetteAttempts,
-      constructedResponseAttempts,
-      formulaDrillAttempts,
-      skillLabAttempts,
-      studySessions,
-      studyPlanSettings,
-      contentVersions,
-      reviewEvents,
-      confidenceCalibration,
-      flashcardAttempts,
-      resultArtifacts,
-      mockSectionState,
-      notes,
-      bookmarks,
-      settings,
-    },
-  };
+  return buildVaultExport({
+    lessonProgress,
+    quizAttempts,
+    questionResults,
+    reviewItems,
+    masterySnapshots,
+    mockAttempts,
+    vignetteAttempts,
+    constructedResponseAttempts,
+    formulaDrillAttempts,
+    skillLabAttempts,
+    studySessions,
+    studyPlanSettings,
+    contentVersions,
+    reviewEvents,
+    confidenceCalibration,
+    flashcardAttempts,
+    resultArtifacts,
+    mockSectionState,
+    notes,
+    bookmarks,
+    settings,
+  });
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -988,12 +1160,37 @@ export function migrateVaultData(payload: unknown): VaultExport {
       [storeName]: Array.isArray(stores[storeName]) ? stores[storeName] : emptyStores[storeName],
     };
   }, emptyStores);
+  const storesWithV6Defaults: VaultDataStores = {
+    ...migratedStores,
+    reviewItems: migratedStores.reviewItems.map((row) => ({
+      ...row,
+      fsrsDifficulty: Number.isFinite(row.fsrsDifficulty) ? row.fsrsDifficulty : 5,
+    })),
+  };
+  const exportedAt = typeof payload.exportedAt === 'string' ? payload.exportedAt : nowIso();
+  const baseExport: Omit<VaultExport, 'checksum'> = {
+    app: payload.app === 'QuantVault' ? 'QuantVault' : 'QuantVault',
+    exportId: typeof payload.exportId === 'string' ? payload.exportId : exportIdFor(exportedAt),
+    schemaVersion: VAULT_SCHEMA_VERSION,
+    schemaHash: typeof payload.schemaHash === 'string' ? payload.schemaHash : VAULT_SCHEMA_HASH,
+    contentVersion: typeof payload.contentVersion === 'string' ? payload.contentVersion : VAULT_CONTENT_VERSION,
+    exportedAt,
+    encryption: isObject(payload.encryption)
+      ? {
+          encrypted: Boolean(payload.encryption.encrypted),
+          algorithm: payload.encryption.algorithm === 'AES-GCM' ? 'AES-GCM' : 'none',
+          keyDerivation: payload.encryption.keyDerivation === 'PBKDF2' ? 'PBKDF2' : undefined,
+        }
+      : {
+          encrypted: false,
+          algorithm: 'none',
+        },
+    stores: storesWithV6Defaults,
+  };
 
   return {
-    app: payload.app === 'QuantVault' ? 'QuantVault' : 'QuantVault',
-    schemaVersion: VAULT_SCHEMA_VERSION,
-    exportedAt: typeof payload.exportedAt === 'string' ? payload.exportedAt : nowIso(),
-    stores: migratedStores,
+    ...baseExport,
+    checksum: typeof payload.checksum === 'string' ? payload.checksum : checksumForExport(baseExport),
   };
 }
 
@@ -1008,6 +1205,16 @@ export function validateVaultData(payload: unknown): { valid: boolean; errors: s
   }
 
   if (isObject(payload) && payload.app !== 'QuantVault') errors.push('Payload is not a QuantVault export.');
+  if (isObject(payload) && typeof payload.checksum === 'string') {
+    const { checksum: _checksum, ...payloadForChecksum } = migrated;
+    const expectedChecksum = checksumForExport(payloadForChecksum);
+    if (payload.checksum !== expectedChecksum) {
+      errors.push('Vault export checksum does not match its payload.');
+    }
+  }
+  if (migrated.encryption?.encrypted) {
+    errors.push('Encrypted QuantVault exports require decryption before import.');
+  }
   STORE_NAMES.forEach((storeName) => {
     if (!Array.isArray(migrated.stores[storeName])) errors.push(`${storeName} must be an array.`);
   });
@@ -1428,12 +1635,35 @@ export async function forecastReviewLoad(days = 14, date = new Date()) {
     const day = new Date(date);
     day.setDate(date.getDate() + index);
     const key = day.toISOString().slice(0, 10);
+    const dueItems = reviewItems.filter((item) => item.dueAt.slice(0, 10) === key);
+    const retention = dueItems.length
+      ? Math.round((dueItems.reduce((sum, item) => sum + predictRetention(item, day), 0) / dueItems.length) * 100)
+      : null;
     return {
       date: key,
-      count: reviewItems.filter((item) => item.dueAt.slice(0, 10) === key).length,
+      count: dueItems.length,
+      averageRetention: retention,
     };
   });
 }
+
+function topicWeightFor(topicWeights: Record<string, number> | undefined, topic?: string) {
+  if (!topic || !topicWeights) return 0;
+  return Number(topicWeights[topic] ?? topicWeights[topic.split(':').at(-1) || topic] ?? 0) || 0;
+}
+
+const DEFAULT_CFA_TOPIC_WEIGHTS: Record<string, number> = {
+  ethics: 20,
+  'quant-methods': 9,
+  economics: 9,
+  fsa: 14,
+  corporate: 9,
+  equity: 14,
+  'fixed-income': 14,
+  derivatives: 8,
+  alternatives: 10,
+  portfolio: 12,
+};
 
 const DEFAULT_STUDY_PLAN_SETTINGS: StudyPlanSettings = {
   id: 'local-study-plan',
@@ -1442,7 +1672,7 @@ const DEFAULT_STUDY_PLAN_SETTINGS: StudyPlanSettings = {
   examDate: null,
   restDays: [],
   mockCadenceDays: 14,
-  topicWeights: {},
+  topicWeights: DEFAULT_CFA_TOPIC_WEIGHTS,
   updatedAt: '',
 };
 
@@ -1499,7 +1729,13 @@ export async function getStudyPlan({
   const effectiveDailyTarget = dailyTargetMinutes ?? settings.dailyTargetMinutes;
   const effectiveTargetLevel = targetLevel || settings.targetLevel || 'level1';
   const daysToExam = effectiveExamDate ? Math.max(0, Math.ceil(daysBetween(new Date(), new Date(effectiveExamDate)))) : null;
-  const weakest = readiness[0];
+  const weightedReadiness = [...readiness].sort(
+    (a, b) =>
+      a.readinessScore -
+      topicWeightFor(settings.topicWeights, a.topic) * 0.4 -
+      (b.readinessScore - topicWeightFor(settings.topicWeights, b.topic) * 0.4),
+  );
+  const weakest = weightedReadiness[0];
 
   return {
     id: 'local-study-plan',

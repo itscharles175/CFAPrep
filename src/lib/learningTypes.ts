@@ -141,6 +141,7 @@ export interface ReviewItem {
   path: string;
   intervalDays: number;
   ease: number;
+  fsrsDifficulty?: number;
   dueAt: string;
   lastResultAt: string;
   attempts: number;

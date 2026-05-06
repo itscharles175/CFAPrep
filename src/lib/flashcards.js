@@ -1,7 +1,8 @@
-import { cfaAllFlashcards } from '../domains/cfa/cfaLevels';
+import { loadCfaLevelContent } from '../domains/cfa/cfaLoaders';
+import { cfaLevels } from '../domains/cfa/cfaSummary';
 
-export function buildFlashcards(bookmarks = []) {
-  const bookmarkCards = bookmarks.map((bookmark) => ({
+export function buildBookmarkFlashcards(bookmarks = []) {
+  return bookmarks.map((bookmark) => ({
     id: `bookmark:${bookmark.id}`,
     domain: bookmark.domain || 'cfa',
     topic: bookmark.moduleId || 'bookmarks',
@@ -11,6 +12,11 @@ export function buildFlashcards(bookmarks = []) {
     sourcePath: bookmark.path,
     tags: ['bookmark', bookmark.type],
   }));
+}
 
-  return [...bookmarkCards, ...cfaAllFlashcards];
+export async function buildFlashcards(bookmarks = []) {
+  const levels = await Promise.all(cfaLevels.map((level) => loadCfaLevelContent(level.id)));
+  const cfaFlashcards = levels.flatMap((level) => level.topics.flatMap((topic) => topic.flashcards));
+
+  return [...buildBookmarkFlashcards(bookmarks), ...cfaFlashcards];
 }

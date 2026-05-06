@@ -2,26 +2,50 @@ import { useMemo } from 'react';
 import { CheckCircle2, FileSearch, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { PageHeader, MetricCard } from '../components/ui/Primitives';
 import { cfaContentBatches } from '../domains/cfa/contentPacks';
-import { getCfaRuntimeReport } from '../domains/cfa/cfaLevels';
+import { getCfaRuntimeReport } from '../domains/cfa/cfaSummary';
+import { level1EditorialSprintOrder } from '../domains/cfa/level1Packs';
 import { generateCoverageReport } from '../lib/contentValidation';
-import { generateContentReleaseReport, generateCurriculumCoverageReport, getLevel1BatchProgress } from '../lib/curriculumValidation';
+import { generateContentReleaseReport, generateCurriculumCoverageReport, getContentBatchProgress, getLevel1BatchProgress } from '../lib/curriculumValidation';
 
 export default function ContentOps() {
   const report = useMemo(() => generateCoverageReport(), []);
   const curriculumReport = useMemo(() => generateCurriculumCoverageReport(), []);
+  const activeCurriculumWarnings = useMemo(
+    () => generateCurriculumCoverageReport('level1').totals.warnings + generateCurriculumCoverageReport('level2').totals.warnings,
+    [],
+  );
+  const futureDiagnostics = useMemo(() => generateCurriculumCoverageReport('level3').totals.warnings, []);
   const level1Progress = useMemo(() => getLevel1BatchProgress(), []);
-  const releaseReport = useMemo(() => generateContentReleaseReport('level1'), []);
+  const level2Progress = useMemo(() => getContentBatchProgress('level2'), []);
+  const level1Release = useMemo(() => generateContentReleaseReport('level1'), []);
+  const level2Release = useMemo(() => generateContentReleaseReport('level2'), []);
   const runtimeReport = useMemo(() => getCfaRuntimeReport(), []);
   const level1Runtime = runtimeReport.levels.find((item) => item.level === 'level1');
+  const level2Runtime = runtimeReport.levels.find((item) => item.level === 'level2');
+  const releaseSections = [
+    {
+      title: 'Level I Saturation Release',
+      release: level1Release,
+      progress: level1Progress,
+      runtime: level1Runtime,
+      vignetteLabel: 'mini-vignettes',
+      sprint: `Sprint order: ${level1EditorialSprintOrder.join(' -> ')}`,
+    },
+    {
+      title: 'Level II Item-Set Release',
+      release: level2Release,
+      progress: level2Progress,
+      runtime: level2Runtime,
+      vignetteLabel: 'item-set vignettes',
+      sprint: 'Strict active gate: no partial public Level II exam-ready claim ships.',
+    },
+  ];
   const hasErrors = report.totals.errors > 0;
   const curriculumHasErrors = curriculumReport.totals.errors > 0;
-  const allIssues = useMemo(
-    () => [
-      ...curriculumReport.issues.map((issue) => ({ ...issue, area: `curriculum:${issue.area}` })),
-      ...report.issues.map((issue) => ({ ...issue, area: `catalog:${issue.area}` })),
-    ],
-    [curriculumReport.issues, report.issues],
-  );
+  const allIssues = [
+    ...curriculumReport.issues.map((issue) => ({ ...issue, area: `curriculum:${issue.area}` })),
+    ...report.issues.map((issue) => ({ ...issue, area: `catalog:${issue.area}` })),
+  ];
 
   return (
     <div className="page-container">
@@ -35,28 +59,30 @@ export default function ContentOps() {
         <MetricCard label="Levels" value={report.totals.levels ?? 1} detail={`${report.totals.topics} topics`} icon={FileSearch} />
         <MetricCard label="Questions" value={report.totals.questions} detail="Question bank rows" icon={ShieldCheck} tone="success" />
         <MetricCard label="Errors" value={report.totals.errors} detail="Must fix before release" icon={TriangleAlert} tone={hasErrors ? 'danger' : 'success'} />
-        <MetricCard label="Exam-ready maps" value={curriculumReport.totals.examReadyTopics} detail={`${curriculumReport.totals.warnings} editorial warnings`} icon={CheckCircle2} tone={curriculumHasErrors ? 'danger' : 'warning'} />
+        <MetricCard label="Exam-ready maps" value={curriculumReport.totals.examReadyTopics} detail={`${activeCurriculumWarnings} active warnings · ${futureDiagnostics} future diagnostics`} icon={CheckCircle2} tone={curriculumHasErrors ? 'danger' : activeCurriculumWarnings ? 'warning' : 'success'} />
       </div>
 
-      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
-        <h3 style={{ marginTop: 0 }}>Level I Saturation Release</h3>
-        <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>
-          {releaseReport.status} · {level1Progress.examReadyTopics}/{level1Progress.topicCount} topics exam-ready · {level1Progress.validatedTopics} validated · {releaseReport.blockingIssues} blockers · {releaseReport.warnings} warnings · {level1Progress.totalLessons} authored lessons · {level1Progress.totalExamples} examples · {level1Progress.totalQuestions} standalone questions · {level1Progress.totalVignettes} mini-vignettes · {level1Progress.totalFlashcards} flashcards · {level1Progress.totalSkillLabs} mapped labs
-        </p>
-        <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>
-          Runtime mode: <strong>{level1Runtime?.label || 'Generated scaffold'}</strong> · release eligible: {level1Runtime?.releaseEligible ? 'yes' : 'no'} · {level1Runtime?.warnings?.[0] || 'No runtime warnings'}
-        </p>
-        <div className="coverage-grid">
-          {cfaContentBatches[0].packs.map((pack) => (
-            <div key={pack.id}>
-              <strong>{pack.title}</strong>
-              <small>
-                {pack.maturity} · {pack.provenance?.editorialStatus || 'unreviewed'} · {pack.provenance?.generatedFromTemplate ? 'template rows' : 'editorial rows'} · {pack.objectiveBlueprints.length} objectives · {pack.lessonBlueprints.reduce((sum, lesson) => sum + lesson.sectionTitles.length, 0)} sections · {pack.questionPacks.reduce((sum, questionPack) => sum + questionPack.count, 0)} standalone items · {pack.vignettePacks.reduce((sum, vignettePack) => sum + vignettePack.count, 0)} mini-vignettes · {pack.flashcardPacks.reduce((sum, flashcardPack) => sum + flashcardPack.count, 0)} flashcards
-              </small>
-            </div>
-          ))}
+      {releaseSections.map(({ title, release, progress, runtime, vignetteLabel, sprint }) => (
+        <div key={release.id} className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
+          <h3 style={{ marginTop: 0 }}>{title}</h3>
+          <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>
+            {release.status} · {progress.examReadyTopics}/{progress.topicCount} topics exam-ready · {release.templateRowsRemaining} template rows remaining · {release.blockingIssues} blockers · {release.warnings} warnings · {progress.totalLessons} authored lessons · {progress.totalExamples} examples · {progress.totalQuestions} standalone questions · {progress.totalVignettes} {vignetteLabel} · {progress.totalFlashcards} flashcards · {progress.totalSkillLabs} mapped labs
+          </p>
+          <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>
+            Runtime mode: <strong>{runtime?.label || 'Generated scaffold'}</strong> · release eligible: {runtime?.releaseEligible ? 'yes' : 'no'} · {sprint}
+          </p>
+          <div className="coverage-grid">
+            {release.topics.map((topic) => (
+              <div key={`${release.level}:${topic.topicId}`}>
+                <strong>{topic.title}</strong>
+                <small>
+                  {topic.status} · {topic.editorialRows}/{topic.totalRows} editorial rows · {topic.templateRowsRemaining} template rows · {topic.missingEvidence} missing evidence · {topic.blockers} blockers · {topic.warnings} warnings · reviewed by {topic.reviewer} on {topic.reviewedAt}
+                </small>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      ))}
 
       <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
         <h3 style={{ marginTop: 0 }}>Curriculum Authoring Map</h3>

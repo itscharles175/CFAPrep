@@ -21,8 +21,10 @@ Generated: ${report.generatedAt}
 
 - Overall: ${report.status}
 - Catalog: ${report.summary.catalogErrors} errors, ${report.summary.catalogWarnings} warnings.
-- Curriculum: ${report.summary.curriculumErrors} errors, ${report.summary.curriculumWarnings} warnings.
+- Active curriculum: ${report.summary.curriculumErrors} errors, ${report.summary.activeCurriculumWarnings} warnings.
+- Future diagnostics: ${report.summary.futureDiagnostics} Level III diagnostic notices.
 - Level I release: ${report.summary.level1ExamReadyTopics}/${report.summary.level1TopicCount} exam-ready, ${report.summary.level1ValidatedTopics} validated, ${report.summary.releaseWarnings} warnings.
+- Level II release: ${report.summary.level2ExamReadyTopics}/${report.summary.level2TopicCount} exam-ready.
 - Bundle report: ${report.summary.bundleFailures === null ? 'not generated' : `${report.summary.bundleFailures} failures`}.
 
 ## Required Gates
@@ -37,9 +39,13 @@ ${report.blockers.length ? report.blockers.map((blocker) => `- ${blocker}`).join
 
 ${report.warnings.length ? report.warnings.map((warning) => `- ${warning}`).join('\n') : '- None'}
 
+## Future Diagnostics
+
+${report.futureDiagnostics.length ? report.futureDiagnostics.slice(0, 20).map((diagnostic) => `- ${diagnostic}`).join('\n') : '- None'}
+
 ## Notes
 
-- Level I saturation packs are currently structurally validated. Packs with template-generated provenance must be editorially replaced before public exam-ready release.
+- Level I and Level II public release gates are all-or-nothing: every active-level pack must remain exam-ready with zero template rows before the editorial gates can stay open.
 - Core behavior remains local-first: no backend, account, cloud sync, payment, or required AI.
 `;
 

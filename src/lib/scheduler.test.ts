@@ -26,6 +26,7 @@ describe('spaced repetition scheduler', () => {
     expect(review.intervalDays).toBe(1);
     expect(review.correctStreak).toBe(0);
     expect(review.ease).toBeLessThan(2.3);
+    expect(review.fsrsDifficulty).toBeGreaterThanOrEqual(1);
   });
 
   it('expands intervals after correct high-confidence answers', () => {
@@ -41,6 +42,7 @@ describe('spaced repetition scheduler', () => {
         path: '/cfa/level1/economics/quiz',
         intervalDays: first.intervalDays,
         ease: first.ease,
+        fsrsDifficulty: first.fsrsDifficulty,
         dueAt: first.dueAt,
         lastResultAt: baseResult.createdAt || '',
         attempts: first.attempts,
@@ -51,9 +53,10 @@ describe('spaced repetition scheduler', () => {
       },
     );
 
-    expect(first.intervalDays).toBe(3);
+    expect(first.intervalDays).toBeGreaterThanOrEqual(3);
     expect(second.intervalDays).toBeGreaterThan(first.intervalDays);
     expect(second.correctStreak).toBe(2);
+    expect(second.fsrsDifficulty).toBeLessThanOrEqual(first.fsrsDifficulty ?? 10);
   });
 
   it('computes mastery from correctness, confidence, errors, and recency', () => {

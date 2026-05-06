@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useParams, Link } from 'react-router-dom';
-import { getCfaTopicContent } from './cfaLevels';
+import { loadCfaTopicContent } from './cfaLoaders';
 import { ArrowLeft, Target, BookOpen, Lightbulb, ChevronRight, Bookmark, StickyNote, Layers, PenLine } from 'lucide-react';
 import FormulaBlock from '../../components/FormulaBlock';
 import { useModuleProgress } from '../../hooks/useProgress';
@@ -9,7 +9,10 @@ import { getBookmark, getNote, saveNote, toggleBookmark } from '../../lib/learni
 export default function CfaModule() {
   const { level, topic } = useParams();
   const location = useLocation();
-  const data = getCfaTopicContent(level, topic);
+  const requestKey = `${level}:${topic}`;
+  const [contentState, setContentState] = useState({ key: null, data: null });
+  const data = contentState.key === requestKey ? contentState.data : null;
+  const loading = contentState.key !== requestKey;
   const moduleId = data ? `${level}:${topic}` : null;
   const { completed, toggleComplete } = useModuleProgress({
     domain: 'cfa',
@@ -20,6 +23,20 @@ export default function CfaModule() {
   const [noteBody, setNoteBody] = useState('');
   const [noteSavedAt, setNoteSavedAt] = useState(null);
   const [bookmarked, setBookmarked] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCfaTopicContent(level, topic)
+      .then((topicContent) => {
+        if (!cancelled) setContentState({ key: requestKey, data: topicContent });
+      })
+      .catch(() => {
+        if (!cancelled) setContentState({ key: requestKey, data: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [level, requestKey, topic]);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,6 +86,15 @@ export default function CfaModule() {
     setBookmarked(Boolean(bookmark));
   }
 
+  if (loading) {
+    return (
+      <div className="page-container" aria-busy="true">
+        <div className="skeleton skeleton-heading" />
+        <div className="skeleton skeleton-card" />
+      </div>
+    );
+  }
+
   if (!data) {
     return (
       <div className="page-container">
@@ -94,9 +120,9 @@ export default function CfaModule() {
             <div className="badge badge-gold" style={{ marginBottom: 'var(--space-2)' }}>
               {level?.replace('level', 'Level ')} · Weight: {data.weight}
             </div>
-            {data.runtimeMode === 'validated-beta' && (
-              <div className="badge badge-amber" style={{ marginBottom: 'var(--space-2)' }}>
-                Validated authored beta · not public exam-ready
+            {data.runtimeMode === 'exam-ready' && (
+              <div className="badge badge-green" style={{ marginBottom: 'var(--space-2)' }}>
+                Editorial exam-ready
               </div>
             )}
             <h1 className="section-title" style={{ fontSize: 'var(--fs-3xl)' }}>{data.title}</h1>

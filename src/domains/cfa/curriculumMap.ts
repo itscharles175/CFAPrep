@@ -622,7 +622,11 @@ function buildLevel1Topics(): CurriculumTopic[] {
 }
 
 function buildLevel2Topics(): CurriculumTopic[] {
-  return level2TopicSeeds.map((seed) => draftTopic('level2', seed, 'analyze-evaluate', 'vignette', 'item-set'));
+  return level2TopicSeeds.map((seed) => {
+    const authoredPack = getAuthoredContentPack('level2', seed.id);
+    if (authoredPack) return contentPackToCurriculumTopic(authoredPack);
+    return draftTopic('level2', seed, 'analyze-evaluate', 'vignette', 'item-set');
+  });
 }
 
 function buildLevel3Topics(): CurriculumTopic[] {

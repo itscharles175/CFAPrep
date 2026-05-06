@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Layers, Trophy } from 'lucide-react';
-import { getCfaTopicContent, getCfaTopicKey } from './cfaLevels';
+import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
 import { PageHeader, MetricCard } from '../../components/ui/Primitives';
 import { recordVignetteAttempt } from '../../lib/learning';
 
@@ -11,7 +11,10 @@ function nowMs() {
 
 export default function CfaVignette() {
   const { level, topic } = useParams();
-  const data = useMemo(() => getCfaTopicContent(level, topic), [level, topic]);
+  const requestKey = `${level}:${topic}`;
+  const [contentState, setContentState] = useState({ key: null, data: null });
+  const data = contentState.key === requestKey ? contentState.data : null;
+  const loading = contentState.key !== requestKey;
   const topicKey = useMemo(() => getCfaTopicKey(level, topic), [level, topic]);
   const [vignetteIndex, setVignetteIndex] = useState(0);
   const [selected, setSelected] = useState({});
@@ -19,6 +22,29 @@ export default function CfaVignette() {
   const [startTime, setStartTime] = useState(nowMs);
   const vignette = data?.vignettes?.[vignetteIndex];
   const letters = ['A', 'B', 'C', 'D'];
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCfaTopicContent(level, topic)
+      .then((content) => {
+        if (!cancelled) setContentState({ key: requestKey, data: content });
+      })
+      .catch(() => {
+        if (!cancelled) setContentState({ key: requestKey, data: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [level, requestKey, topic]);
+
+  if (loading) {
+    return (
+      <div className="page-container" aria-busy="true">
+        <div className="skeleton skeleton-heading" />
+        <div className="skeleton skeleton-card" />
+      </div>
+    );
+  }
 
   if (!data || !vignette) {
     return (
@@ -76,11 +102,11 @@ export default function CfaVignette() {
         <ArrowLeft size={16} /> Back to {data.title}
       </Link>
       <PageHeader
-        badge={data.runtimeMode === 'validated-beta' ? 'VALIDATED BETA' : level?.replace('level', 'LEVEL ')}
+        badge={data.runtimeMode === 'exam-ready' ? 'EXAM-READY' : level?.replace('level', 'LEVEL ')}
         title={vignette.title}
         subtitle={
-          data.runtimeMode === 'validated-beta'
-            ? 'Authored beta vignette content is available locally; public release still waits for editorial exam-ready provenance.'
+          data.runtimeMode === 'exam-ready'
+            ? 'Editorial item-set content is available locally with reviewed exhibits, rationales, and provenance.'
             : 'A local item-set vignette. Read the case once, answer all questions, then review the explanation trail.'
         }
       />

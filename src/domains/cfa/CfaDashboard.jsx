@@ -15,7 +15,7 @@ import {
   Target,
   TrendingUp,
 } from 'lucide-react';
-import { cfaLevels, getCfaRuntimeReport } from './cfaLevels';
+import { cfaLevels, getCfaRuntimeReport } from './cfaSummary';
 import { useProgressSummary } from '../../hooks/useProgress';
 
 const iconMap = {
@@ -66,9 +66,9 @@ export default function CfaDashboard() {
         <p className="section-subtitle" style={{ marginBottom: 0 }}>
           Level I, II, and III local-first material bundles with lessons, item sets, mocks, flashcards, and mapped skill labs.
         </p>
-        {level1Runtime?.mode === 'validated-beta' && (
-          <div className="badge badge-amber" style={{ marginTop: 'var(--space-4)' }}>
-            Level I authored beta · public release still blocked until editorial exam-ready
+        {level1Runtime?.mode === 'exam-ready' && (
+          <div className="badge badge-green" style={{ marginTop: 'var(--space-4)' }}>
+            Level I editorial exam-ready · local public gate open
           </div>
         )}
       </div>
@@ -79,7 +79,7 @@ export default function CfaDashboard() {
           return (
             <div key={level.id} className="glass-card no-hover">
               <div className="badge badge-blue">{level.title}</div>
-              {level.runtimeMode === 'validated-beta' && <div className="badge badge-amber" style={{ marginTop: 'var(--space-2)' }}>{level.runtimeLabel}</div>}
+              {level.runtimeMode === 'exam-ready' && <div className="badge badge-green" style={{ marginTop: 'var(--space-2)' }}>{level.runtimeLabel}</div>}
               <h3>{stats.topics} topics</h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)' }}>{level.examFormat}</p>
               <div className="metric-row">
@@ -102,7 +102,7 @@ export default function CfaDashboard() {
               <h2 style={{ margin: 0 }}>{level.title}</h2>
               <p style={{ color: 'var(--text-secondary)', margin: 'var(--space-2) 0 0' }}>{level.summary}</p>
             </div>
-            <span className={`badge ${level.runtimeMode === 'validated-beta' ? 'badge-amber' : 'badge-purple'}`}>
+            <span className={`badge ${level.runtimeMode === 'exam-ready' ? 'badge-green' : level.runtimeMode === 'validated-beta' ? 'badge-amber' : 'badge-purple'}`}>
               {level.runtimeLabel || level.topics[0]?.maturity || 'draft'}
             </span>
           </div>
@@ -146,7 +146,7 @@ export default function CfaDashboard() {
                     <span>{topic.vignettes} vignettes</span>
                     <span>{topic.skillLabs} labs</span>
                     <span style={{ color: completed ? 'var(--success)' : 'var(--text-muted)' }}>
-                      {completed ? 'Complete' : topic.runtimeMode === 'validated-beta' ? 'Authored beta' : topic.maturity}
+                      {completed ? 'Complete' : topic.runtimeMode === 'exam-ready' ? 'Exam-ready' : topic.maturity}
                     </span>
                   </div>
                 </Link>

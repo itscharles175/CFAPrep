@@ -1,3 +1,5 @@
+import { searchToolRoutes } from '../routes/routeManifest';
+
 export const domains = [
   {
     id: 'cfa',
@@ -95,105 +97,6 @@ export const formulaLibrary = [
 ];
 
 export function buildSearchItems() {
-  const toolItems = [
-    {
-      id: 'tool:review',
-      title: 'Review Inbox',
-      subtitle: 'Due reviews, weak objectives, missed questions, and unfinished lessons',
-      type: 'Tool',
-      path: '/review',
-      keywords: ['review inbox due weak objectives missed questions bookmarks stale unfinished lessons'],
-    },
-    {
-      id: 'tool:flashcards',
-      title: 'Flashcards',
-      subtitle: 'Formula, objective, and bookmark drills',
-      type: 'Tool',
-      path: '/flashcards',
-      keywords: ['flashcards formulas definitions objectives bookmarks drill'],
-    },
-    {
-      id: 'tool:vault',
-      title: 'Notes & Bookmarks',
-      subtitle: 'Local notes and saved items',
-      type: 'Tool',
-      path: '/vault',
-      keywords: ['notes bookmarks local vault saved'],
-    },
-    {
-      id: 'tool:mock',
-      title: 'CFA Level I Mock Exam',
-      subtitle: 'Timed mixed-topic Level I section',
-      type: 'Tool',
-      path: '/cfa/mock',
-      keywords: ['mock exam section cfa timed mixed practice'],
-    },
-    {
-      id: 'tool:mock-level2',
-      title: 'CFA Level II Mock Exam',
-      subtitle: 'Timed item-set mixed section',
-      type: 'Tool',
-      path: '/cfa/level2/mock',
-      keywords: ['level ii level 2 mock exam vignette item set timed cfa'],
-    },
-    {
-      id: 'tool:mock-level3',
-      title: 'CFA Level III Mock Exam',
-      subtitle: 'Timed constructed-response and item-set section',
-      type: 'Tool',
-      path: '/cfa/level3/mock',
-      keywords: ['level iii level 3 mock exam constructed response essay item set cfa'],
-    },
-    {
-      id: 'tool:vignette',
-      title: 'Start CFA Vignette',
-      subtitle: 'Open a Level II equity item set',
-      type: 'Command',
-      path: '/cfa/level2/equity/vignette',
-      keywords: ['start vignette item set case level 2 equity'],
-    },
-    {
-      id: 'tool:constructed-response',
-      title: 'Start Constructed Response',
-      subtitle: 'Open a Level III portfolio response drill',
-      type: 'Command',
-      path: '/cfa/level3/portfolio-construction/constructed-response',
-      keywords: ['constructed response essay level 3 command word rubric'],
-    },
-    {
-      id: 'tool:formula-drill',
-      title: 'Start Formula Drill',
-      subtitle: 'Open local flashcards generated from all CFA levels',
-      type: 'Command',
-      path: '/flashcards',
-      keywords: ['formula drill flashcard start formulas objectives'],
-    },
-    {
-      id: 'tool:analytics',
-      title: 'Learning Analytics',
-      subtitle: 'Accuracy, confidence, error type, and trend signals',
-      type: 'Tool',
-      path: '/analytics',
-      keywords: ['analytics readiness accuracy confidence calibration errors trend topic difficulty'],
-    },
-    {
-      id: 'tool:content-ops',
-      title: 'Content QA',
-      subtitle: 'Catalog coverage and validation',
-      type: 'Tool',
-      path: '/content-ops',
-      keywords: ['content qa validation coverage duplicate answer key formula'],
-    },
-    {
-      id: 'tool:system',
-      title: 'System Health',
-      subtitle: 'Offline cache, storage quota, and backup status',
-      type: 'Tool',
-      path: '/system',
-      keywords: ['system health pwa offline cache storage quota backup service worker'],
-    },
-  ];
-
   const domainItems = domains.map((domain) => ({
     id: `domain:${domain.id}`,
     title: domain.title,
@@ -240,5 +143,5 @@ export function buildSearchItems() {
     keywords: [formula.name, formula.category, formula.desc, formula.latex],
   }));
 
-  return [...toolItems, ...domainItems, ...cfaItems, ...quantItems, ...excelItems, ...formulaItems];
+  return [...searchToolRoutes, ...domainItems, ...cfaItems, ...quantItems, ...excelItems, ...formulaItems];
 }

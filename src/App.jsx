@@ -2,9 +2,11 @@ import { Suspense, lazy, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Sidebar from './components/Layout/Sidebar';
 import TopBar from './components/Layout/TopBar';
-import ErrorBoundary from './components/ErrorBoundary';
+import ErrorBoundary, { DomainErrorBoundary } from './components/ErrorBoundary';
 import EmptyState from './components/EmptyState';
 import { ThemeProvider } from './context/ThemeContext';
+import { ToastProvider } from './context/ToastContext';
+import { appRoutes } from './routes/routeManifest';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const CfaDashboard = lazy(() => import('./domains/cfa/CfaDashboard'));
@@ -26,74 +28,110 @@ const Analytics = lazy(() => import('./pages/Analytics'));
 const ContentOps = lazy(() => import('./pages/ContentOps'));
 const SystemHealth = lazy(() => import('./pages/SystemHealth'));
 
+/* C5: Skeleton loading state instead of text-only fallback */
 function RouteFallback() {
   return (
-    <div className="page-container">
-      <div className="glass-card no-hover route-fallback">Loading QuantVault...</div>
+    <div className="page-container" aria-busy="true" aria-label="Loading page">
+      <div className="skeleton skeleton-heading" />
+      <div className="skeleton skeleton-text" />
+      <div className="skeleton skeleton-text medium" />
+      <div className="grid-3" style={{ marginTop: 'var(--space-6)' }}>
+        <div className="skeleton skeleton-card" />
+        <div className="skeleton skeleton-card" />
+        <div className="skeleton skeleton-card" />
+      </div>
     </div>
   );
+}
+
+function routeElementFor(definition, element) {
+  if (definition.boundary === 'domain') {
+    return <DomainErrorBoundary name={definition.boundaryName}>{element}</DomainErrorBoundary>;
+  }
+  return element;
 }
 
 export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const routeElements = {
+    dashboard: <Dashboard />,
+    'cfa-dashboard': <CfaDashboard />,
+    'cfa-module': <CfaModule />,
+    'cfa-quiz': <CfaQuiz />,
+    'cfa-vignette': <CfaVignette />,
+    'cfa-constructed-response': <CfaConstructedResponse />,
+    'quant-dashboard': <QuantDashboard />,
+    'quant-module': <QuantModule />,
+    'excel-dashboard': <ExcelDashboard />,
+    'excel-module': <ExcelModule />,
+    calculators: <Calculators />,
+    formulas: <FormulaLibrary />,
+    review: <ReviewInbox />,
+    vault: <VaultCenter />,
+    flashcards: <Flashcards />,
+    mock: <MockExam />,
+    'level-mock': <MockExam />,
+    analytics: <Analytics />,
+    'content-ops': <ContentOps />,
+    system: <SystemHealth />,
+  };
 
   return (
     <ThemeProvider>
-      <div className="app-layout">
-        <Sidebar
-          collapsed={sidebarCollapsed}
-          open={mobileNavOpen}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-          onNavigate={() => setMobileNavOpen(false)}
-        />
-        <button
-          type="button"
-          className={`mobile-scrim ${mobileNavOpen ? 'open' : ''}`}
-          aria-label="Close navigation"
-          onClick={() => setMobileNavOpen(false)}
-        />
-        <TopBar collapsed={sidebarCollapsed} onMenuToggle={() => setMobileNavOpen((open) => !open)} />
-        <main className={`main-content ${sidebarCollapsed ? 'collapsed' : ''}`}>
-          <ErrorBoundary>
-            <Suspense fallback={<RouteFallback />}>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/cfa" element={<CfaDashboard />} />
-                <Route path="/cfa/:level/:topic" element={<CfaModule />} />
-                <Route path="/cfa/:level/:topic/quiz" element={<CfaQuiz />} />
-                <Route path="/cfa/:level/:topic/vignette" element={<CfaVignette />} />
-                <Route path="/cfa/:level/:topic/constructed-response" element={<CfaConstructedResponse />} />
-                <Route path="/quant" element={<QuantDashboard />} />
-                <Route path="/quant/:module" element={<QuantModule />} />
-                <Route path="/excel" element={<ExcelDashboard />} />
-                <Route path="/excel/:module" element={<ExcelModule />} />
-                <Route path="/calculators" element={<Calculators />} />
-                <Route path="/formulas" element={<FormulaLibrary />} />
-                <Route path="/review" element={<ReviewInbox />} />
-                <Route path="/vault" element={<VaultCenter />} />
-                <Route path="/flashcards" element={<Flashcards />} />
-                <Route path="/cfa/mock" element={<MockExam />} />
-                <Route path="/cfa/:level/mock" element={<MockExam />} />
-                <Route path="/analytics" element={<Analytics />} />
-                <Route path="/content-ops" element={<ContentOps />} />
-                <Route path="/system" element={<SystemHealth />} />
-                <Route
-                  path="*"
-                  element={
-                    <EmptyState
-                      title="Page not found"
-                      description="That route is not in the vault yet."
-                      actionLabel="Back to Dashboard"
-                      actionTo="/"
+      <ToastProvider>
+        <div className="app-layout">
+          {/* G1: Skip to main content link for keyboard/screen reader users */}
+          <a href="#main-content" className="skip-link">
+            Skip to main content
+          </a>
+
+          <Sidebar
+            collapsed={sidebarCollapsed}
+            open={mobileNavOpen}
+            onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+            onNavigate={() => setMobileNavOpen(false)}
+          />
+          <button
+            type="button"
+            className={`mobile-scrim ${mobileNavOpen ? 'open' : ''}`}
+            aria-label="Close navigation"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <TopBar collapsed={sidebarCollapsed} onMenuToggle={() => setMobileNavOpen((open) => !open)} />
+          {/* G1: Proper <main> landmark with id for skip-link target */}
+          <main
+            id="main-content"
+            className={`main-content ${sidebarCollapsed ? 'collapsed' : ''}`}
+            role="main"
+          >
+            <ErrorBoundary name="app-root" level="page">
+              <Suspense fallback={<RouteFallback />}>
+                <Routes>
+                  {appRoutes.map((definition) => (
+                    <Route
+                      key={definition.id}
+                      path={definition.path}
+                      element={routeElementFor(definition, routeElements[definition.id])}
                     />
-                  }
-                />
-              </Routes>
-            </Suspense>
-          </ErrorBoundary>
-        </main>
-      </div>
+                  ))}
+                  <Route
+                    path="*"
+                    element={
+                      <EmptyState
+                        title="Page not found"
+                        description="That route is not in the vault yet."
+                        actionLabel="Back to Dashboard"
+                        actionTo="/"
+                      />
+                    }
+                  />
+                </Routes>
+              </Suspense>
+            </ErrorBoundary>
+          </main>
+        </div>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

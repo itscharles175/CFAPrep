@@ -3,6 +3,7 @@ import { buildSearchItems, cfaTopics, excelModules, quantModules } from './catal
 import { cfaContent, cfaLearningObjectives, cfaQuestionBank, cfaQuizzes } from '../domains/cfa/cfaData';
 import { excelContent } from './excelContent';
 import { quantContent } from './quantContent';
+import { appRoutes, searchToolRoutes, smokeRoutes } from '../routes/routeManifest';
 
 describe('learning catalog integrity', () => {
   it('has content for every available quant and excel module', () => {
@@ -55,5 +56,16 @@ describe('learning catalog integrity', () => {
     expect(ids.size).toBe(items.length);
     expect(items.length).toBeGreaterThan(30);
     expect(items.some((item) => item.path === '/calculators')).toBe(true);
+  });
+
+  it('keeps route, search, and smoke metadata centralized', () => {
+    const routeMatches = (routePath, actualPath) => {
+      const pattern = new RegExp(`^${routePath.replace(/:[^/]+/g, '[^/]+')}$`);
+      return pattern.test(actualPath);
+    };
+    expect(searchToolRoutes.every((route) => route.id.startsWith('tool:'))).toBe(true);
+    smokeRoutes.forEach(([path]) => {
+      expect(appRoutes.some((route) => routeMatches(route.path, path))).toBe(true);
+    });
   });
 });

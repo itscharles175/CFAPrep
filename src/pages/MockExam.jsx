@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Download, Flag, ListChecks, PenLine, Timer, Trophy } from 'lucide-react';
-import { getCfaLevelContent, getCfaMockExam } from '../domains/cfa/cfaLevels';
+import { loadCfaLevelContent, loadCfaMockExam } from '../domains/cfa/cfaLoaders';
 import { PageHeader, MetricCard } from '../components/ui/Primitives';
 import {
   clearMockSectionState,
@@ -33,9 +33,7 @@ function itemId(item) {
   return item.constructed.id;
 }
 
-function buildMockItems(level) {
-  const levelContent = getCfaLevelContent(level);
-  const mock = getCfaMockExam(level);
+function buildMockItems(level, levelContent, mock) {
   const questionsById = new Map(
     levelContent.topics
       .flatMap((topic) => topic.questions)
@@ -145,14 +143,16 @@ function ConstructedItem({ item, response, scores, onResponse, onScore }) {
 export default function MockExam() {
   const params = useParams();
   const level = params.level || 'level1';
-  const levelContent = useMemo(() => getCfaLevelContent(level), [level]);
-  const mock = useMemo(() => getCfaMockExam(level), [level]);
-  const items = useMemo(() => buildMockItems(level), [level]);
+  const [contentState, setContentState] = useState({ level: null, levelContent: null, mock: null });
+  const levelContent = contentState.level === level ? contentState.levelContent : null;
+  const mock = contentState.level === level ? contentState.mock : null;
+  const loading = contentState.level !== level;
+  const items = useMemo(() => (levelContent && mock ? buildMockItems(level, levelContent, mock) : []), [level, levelContent, mock]);
   const objectiveMap = useMemo(
-    () => new Map(levelContent.topics.flatMap((topic) => topic.learningObjectives).map((objective) => [objective.id, objective])),
+    () => new Map((levelContent?.topics || []).flatMap((topic) => topic.learningObjectives).map((objective) => [objective.id, objective])),
     [levelContent],
   );
-  const topicTitleMap = useMemo(() => new Map(levelContent.topics.map((topic) => [topic.topic, topic.title])), [levelContent]);
+  const topicTitleMap = useMemo(() => new Map((levelContent?.topics || []).map((topic) => [topic.topic, topic.title])), [levelContent]);
   const [current, setCurrent] = useState(0);
   const [selected, setSelected] = useState({});
   const [constructedResponses, setConstructedResponses] = useState({});
@@ -180,6 +180,20 @@ export default function MockExam() {
   });
 
   useEffect(() => {
+    let cancelled = false;
+    Promise.all([loadCfaLevelContent(level), loadCfaMockExam(level)])
+      .then(([content, loadedMock]) => {
+        if (!cancelled) setContentState({ level, levelContent: content, mock: loadedMock });
+      })
+      .catch(() => {
+        if (!cancelled) setContentState({ level, levelContent: null, mock: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [level]);
+
+  useEffect(() => {
     let active = true;
     getMockSectionState(`cfa-${level}-mixed-mock`).then((state) => {
       if (!active) return;
@@ -202,7 +216,7 @@ export default function MockExam() {
   }, [level, items]);
 
   useEffect(() => {
-    if (!hydrated || finished || !items.length) return;
+    if (!hydrated || finished || !items.length || !mock) return;
     saveMockSectionState({
       id: `cfa-${level}-mixed-mock`,
       title: mock.title,
@@ -217,7 +231,7 @@ export default function MockExam() {
       pausedAt,
       status: paused ? 'paused' : 'in-progress',
     });
-  }, [constructedResponses, current, flags, finished, hydrated, items, level, mock.title, paused, pausedAt, pausedMs, rubricScores, selected, startTime]);
+  }, [constructedResponses, current, flags, finished, hydrated, items, level, mock, paused, pausedAt, pausedMs, rubricScores, selected, startTime]);
 
   function toggleFlag() {
     const id = itemId(item);
@@ -332,7 +346,16 @@ export default function MockExam() {
     finish();
   }
 
-  if (!items.length) {
+  if (loading) {
+    return (
+      <div className="page-container" aria-busy="true">
+        <div className="skeleton skeleton-heading" />
+        <div className="skeleton skeleton-card" />
+      </div>
+    );
+  }
+
+  if (!items.length || !levelContent || !mock) {
     return (
       <div className="page-container">
         <div className="glass-card no-hover">This mock has no available items yet.</div>
@@ -379,11 +402,11 @@ export default function MockExam() {
   return (
     <div className="page-container">
       <PageHeader
-        badge={levelContent.runtimeMode === 'validated-beta' ? 'MOCK SECTION · AUTHORED BETA' : 'MOCK SECTION'}
+        badge={levelContent.runtimeMode === 'exam-ready' ? 'MOCK SECTION · EXAM-READY' : 'MOCK SECTION'}
         title={mock.title}
         subtitle={
-          levelContent.runtimeMode === 'validated-beta'
-            ? 'Validated beta authored Level I items are used locally; public release still waits for editorial exam-ready provenance.'
+          levelContent.runtimeMode === 'exam-ready'
+            ? 'Editorial exam-ready items are loaded locally with resume, flags, review state, and no network dependency.'
             : 'A level-aware mixed section with standalone items, vignettes, constructed responses, flags, review state, and local persistence.'
         }
         actions={
