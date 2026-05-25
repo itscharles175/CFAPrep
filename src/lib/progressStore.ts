@@ -17,6 +17,7 @@ import type {
   DomainId,
   ErrorCategory,
   FlashcardAttempt,
+  ImportJob,
   FormulaDrillAttempt,
   LessonProgress,
   LearningEventEnvelope,
@@ -34,12 +35,19 @@ import type {
   ReviewQueueItem,
   ReviewItem,
   ReviewReason,
+  CalculatorScenario,
   SkillLabAttempt,
+  SourceBundleManifest,
   StudySessionPlan,
   StudyPlanSettings,
   StudySession,
+  ReleaseRunHistory,
+  RollbackSnapshot,
+  PsychometricStats,
   TopicReadiness,
   VignetteAttempt,
+  MockBlueprint,
+  VaultRollbackReason,
   VaultBookmark,
   VaultHealthReport,
   VaultHealthSnapshot,
@@ -59,8 +67,8 @@ import { level3PathwayForTopic, level3TopicBelongsToPathway } from '../domains/c
 
 export const PROGRESS_EVENT = 'quantvault:progress';
 const PROGRESS_CHANNEL = 'quantvault:progress-channel';
-export const VAULT_SCHEMA_VERSION = 10;
-export const VAULT_SCHEMA_HASH = 'qv-v10-native-source-links';
+export const VAULT_SCHEMA_VERSION = 11;
+export const VAULT_SCHEMA_HASH = 'qv-v11-resilience-control-plane';
 export const VAULT_CONTENT_VERSION = 'cfa-2026-local-pack-v1';
 
 type SettingRow = { key: string; value: unknown; updatedAt: string };
@@ -106,6 +114,13 @@ export type VaultDataStores = {
   mockSectionState: MockSectionState[];
   learningEvents: LearningEventEnvelope[];
   vaultHealthSnapshots: VaultHealthSnapshot[];
+  rollbackSnapshots: RollbackSnapshot[];
+  calculatorScenarios: CalculatorScenario[];
+  releaseRunHistory: ReleaseRunHistory[];
+  importJobs: ImportJob[];
+  sourceBundleManifests: SourceBundleManifest[];
+  psychometricStats: PsychometricStats[];
+  mockBlueprints: MockBlueprint[];
   notes: VaultNote[];
   bookmarks: VaultBookmark[];
   settings: SettingRow[];
@@ -176,6 +191,13 @@ type VaultDatabase = Dexie & {
   mockSectionState: Table<MockSectionState, string>;
   learningEvents: Table<LearningEventEnvelope, string>;
   vaultHealthSnapshots: Table<VaultHealthSnapshot, string>;
+  rollbackSnapshots: Table<RollbackSnapshot, string>;
+  calculatorScenarios: Table<CalculatorScenario, string>;
+  releaseRunHistory: Table<ReleaseRunHistory, string>;
+  importJobs: Table<ImportJob, string>;
+  sourceBundleManifests: Table<SourceBundleManifest, string>;
+  psychometricStats: Table<PsychometricStats, string>;
+  mockBlueprints: Table<MockBlueprint, string>;
   notes: Table<VaultNote, string>;
   bookmarks: Table<VaultBookmark, string>;
   settings: Table<SettingRow, string>;
@@ -208,6 +230,13 @@ const STORE_NAMES = [
   'mockSectionState',
   'learningEvents',
   'vaultHealthSnapshots',
+  'rollbackSnapshots',
+  'calculatorScenarios',
+  'releaseRunHistory',
+  'importJobs',
+  'sourceBundleManifests',
+  'psychometricStats',
+  'mockBlueprints',
   'notes',
   'bookmarks',
   'settings',
@@ -357,7 +386,7 @@ db.version(5).stores({
   settings: 'key',
 });
 
-/* D1: Current schema v10 — native CFA source links remain private and export-gated */
+/* D1: Current schema v11 — resilience control plane, rollback snapshots, and private source bundles */
 db.version(VAULT_SCHEMA_VERSION).stores({
   lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
   quizAttempts: '++id, domain, topic, pct, createdAt, mode',
@@ -379,6 +408,13 @@ db.version(VAULT_SCHEMA_VERSION).stores({
   mockSectionState: 'id, status, updatedAt, expiresAt',
   learningEvents: 'id, recordedAt',
   vaultHealthSnapshots: 'id, generatedAt, status',
+  rollbackSnapshots: 'id, createdAt, reason',
+  calculatorScenarios: 'id, calculatorId, updatedAt',
+  releaseRunHistory: 'id, runId, generatedAt, status',
+  importJobs: 'id, startedAt, status',
+  sourceBundleManifests: 'id, bundleId, createdAt, encrypted',
+  psychometricStats: 'id, level, topic, itemId',
+  mockBlueprints: 'id, level, updatedAt',
   notes: 'id, type, domain, moduleId, questionId, formulaName, updatedAt',
   bookmarks: 'id, type, domain, moduleId, questionId, formulaName, createdAt',
   settings: 'key',
@@ -1128,7 +1164,78 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function checksumForStablePayload(payload: unknown) {
+const SHA256_INITIAL_HASH = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+const SHA256_ROUND_CONSTANTS = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+function rotateRight(value: number, bits: number) {
+  return (value >>> bits) | (value << (32 - bits));
+}
+
+function sha256Hex(source: string) {
+  const bytes = Array.from(new TextEncoder().encode(source));
+  const bitLength = bytes.length * 8;
+  bytes.push(0x80);
+  while (bytes.length % 64 !== 56) bytes.push(0);
+  const highBits = Math.floor(bitLength / 0x100000000);
+  const lowBits = bitLength >>> 0;
+  for (let shift = 24; shift >= 0; shift -= 8) bytes.push((highBits >>> shift) & 0xff);
+  for (let shift = 24; shift >= 0; shift -= 8) bytes.push((lowBits >>> shift) & 0xff);
+
+  const hash = [...SHA256_INITIAL_HASH];
+  const words = new Array<number>(64);
+  for (let offset = 0; offset < bytes.length; offset += 64) {
+    for (let index = 0; index < 16; index += 1) {
+      const position = offset + index * 4;
+      words[index] =
+        ((bytes[position] << 24) | (bytes[position + 1] << 16) | (bytes[position + 2] << 8) | bytes[position + 3]) >>> 0;
+    }
+    for (let index = 16; index < 64; index += 1) {
+      const sigma0 = rotateRight(words[index - 15], 7) ^ rotateRight(words[index - 15], 18) ^ (words[index - 15] >>> 3);
+      const sigma1 = rotateRight(words[index - 2], 17) ^ rotateRight(words[index - 2], 19) ^ (words[index - 2] >>> 10);
+      words[index] = (words[index - 16] + sigma0 + words[index - 7] + sigma1) >>> 0;
+    }
+
+    let [a, b, c, d, e, f, g, h] = hash;
+    for (let index = 0; index < 64; index += 1) {
+      const sum1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + sum1 + ch + SHA256_ROUND_CONSTANTS[index] + words[index]) >>> 0;
+      const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (sum0 + maj) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+
+    hash[0] = (hash[0] + a) >>> 0;
+    hash[1] = (hash[1] + b) >>> 0;
+    hash[2] = (hash[2] + c) >>> 0;
+    hash[3] = (hash[3] + d) >>> 0;
+    hash[4] = (hash[4] + e) >>> 0;
+    hash[5] = (hash[5] + f) >>> 0;
+    hash[6] = (hash[6] + g) >>> 0;
+    hash[7] = (hash[7] + h) >>> 0;
+  }
+
+  return hash.map((value) => value.toString(16).padStart(8, '0')).join('');
+}
+
+function fnv1a32ForStablePayload(payload: unknown) {
   const source = stableStringify(payload);
   let hash = 0x811c9dc5;
   for (let index = 0; index < source.length; index += 1) {
@@ -1138,12 +1245,17 @@ function checksumForStablePayload(payload: unknown) {
   return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+function checksumForStablePayload(payload: unknown) {
+  return `sha256:${sha256Hex(stableStringify(payload))}`;
+}
+
 function checksumForExport(payload: Omit<VaultExport, 'checksum'>) {
   return checksumForStablePayload(payload);
 }
 
 function checksumMatchesPayload(payload: Record<string, unknown>, checksum: string) {
   const { checksum: _checksum, ...payloadForChecksum } = payload;
+  if (checksum.startsWith('fnv1a32:')) return checksum === fnv1a32ForStablePayload(payloadForChecksum);
   return checksum === checksumForStablePayload(payloadForChecksum);
 }
 
@@ -1241,8 +1353,7 @@ async function encryptVaultExport(payload: VaultExport, passphrase: string): Pro
 
 async function decryptVaultExport(payload: EncryptedVaultExport, passphrase?: string): Promise<VaultExport> {
   if (!passphrase) throw new Error('Encrypted QuantVault exports require a passphrase.');
-  const { checksum, ...payloadForChecksum } = payload;
-  if (checksum !== checksumForStablePayload(payloadForChecksum)) {
+  if (!checksumMatchesPayload(payload, payload.checksum)) {
     throw new Error('Encrypted vault export checksum does not match its payload.');
   }
   const key = await deriveVaultKey(passphrase, base64ToBytes(payload.encryption.salt), payload.encryption.iterations);
@@ -1288,6 +1399,13 @@ export async function exportVaultData(options: VaultExportOptions = {}): Promise
     mockSectionState,
     learningEvents,
     vaultHealthSnapshots,
+    rollbackSnapshots,
+    calculatorScenarios,
+    releaseRunHistory,
+    importJobs,
+    sourceBundleManifests,
+    psychometricStats,
+    mockBlueprints,
     notes,
     bookmarks,
     settings,
@@ -1312,6 +1430,13 @@ export async function exportVaultData(options: VaultExportOptions = {}): Promise
     db.mockSectionState.toArray(),
     db.learningEvents.toArray(),
     db.vaultHealthSnapshots.toArray(),
+    db.rollbackSnapshots.toArray(),
+    db.calculatorScenarios.toArray(),
+    db.releaseRunHistory.toArray(),
+    db.importJobs.toArray(),
+    db.sourceBundleManifests.toArray(),
+    db.psychometricStats.toArray(),
+    db.mockBlueprints.toArray(),
     db.notes.toArray(),
     db.bookmarks.toArray(),
     db.settings.toArray(),
@@ -1349,6 +1474,13 @@ export async function exportVaultData(options: VaultExportOptions = {}): Promise
     mockSectionState,
     learningEvents,
     vaultHealthSnapshots,
+    rollbackSnapshots,
+    calculatorScenarios,
+    releaseRunHistory,
+    importJobs,
+    sourceBundleManifests,
+    psychometricStats,
+    mockBlueprints,
     notes,
     bookmarks,
     settings,
@@ -1385,6 +1517,13 @@ function emptyVaultStores(): VaultDataStores {
     mockSectionState: [],
     learningEvents: [],
     vaultHealthSnapshots: [],
+    rollbackSnapshots: [],
+    calculatorScenarios: [],
+    releaseRunHistory: [],
+    importJobs: [],
+    sourceBundleManifests: [],
+    psychometricStats: [],
+    mockBlueprints: [],
     notes: [],
     bookmarks: [],
     settings: [],
@@ -1479,9 +1618,15 @@ export function migrateVaultData(payload: unknown): VaultExport {
     ...(sourceVault ? { sourceVault } : {}),
   };
 
+  const hasCurrentShaChecksum =
+    payload.schemaVersion === VAULT_SCHEMA_VERSION &&
+    payload.schemaHash === VAULT_SCHEMA_HASH &&
+    typeof payload.checksum === 'string' &&
+    payload.checksum.startsWith('sha256:');
+
   return {
     ...baseExport,
-    checksum: typeof payload.checksum === 'string' ? payload.checksum : checksumForExport(baseExport),
+    checksum: hasCurrentShaChecksum ? (payload.checksum as string) : checksumForExport(baseExport),
   };
 }
 
@@ -1594,7 +1739,6 @@ export function previewVaultImport(payload: unknown): VaultImportPreviewBase {
   }
 
   const migrated = migrateVaultData(payload);
-  const { checksum: _checksum, ...checksumPayload } = migrated;
   return {
     valid: true,
     errors: [],
@@ -1602,7 +1746,7 @@ export function previewVaultImport(payload: unknown): VaultImportPreviewBase {
     schemaHash: migrated.schemaHash,
     contentVersion: migrated.contentVersion,
     exportId: migrated.exportId,
-    checksumValid: migrated.checksum === checksumForExport(checksumPayload),
+    checksumValid: checksumMatchesPayload(migrated, migrated.checksum),
     counts: STORE_NAMES.reduce(
       (counts, storeName) => ({
         ...counts,
@@ -1784,15 +1928,87 @@ export async function getVaultImportHistory(): Promise<VaultImportHistoryEntry[]
   return Array.isArray(existing?.value) ? (existing.value as VaultImportHistoryEntry[]) : [];
 }
 
+function vaultRowCounts(stores: VaultDataStores): Record<string, number> {
+  return STORE_NAMES.reduce(
+    (counts, storeName) => ({
+      ...counts,
+      [storeName]: stores[storeName].length,
+    }),
+    {} as Record<string, number>,
+  );
+}
+
+function sourceVaultRowCounts(sourceVault?: CfaSourceVaultStores): Record<string, number> | undefined {
+  if (!sourceVault) return undefined;
+  return SOURCE_STORE_NAMES.reduce(
+    (counts, storeName) => ({
+      ...counts,
+      [storeName]: sourceVault[storeName]?.length || 0,
+    }),
+    {} as Record<string, number>,
+  );
+}
+
+export async function getRollbackSnapshots(limit = 10): Promise<RollbackSnapshot[]> {
+  return db.rollbackSnapshots.orderBy('createdAt').reverse().limit(limit).toArray();
+}
+
+export async function createRollbackSnapshot(reason: VaultRollbackReason = 'manual'): Promise<RollbackSnapshot> {
+  const exported = await exportVaultData();
+  const { checksum: _checksum, ...rollbackPayloadWithoutChecksum } = {
+    ...exported,
+    stores: {
+      ...exported.stores,
+      rollbackSnapshots: [],
+    },
+  };
+  const rollbackPayload = withChecksum(rollbackPayloadWithoutChecksum);
+  const snapshot: RollbackSnapshot = {
+    id: `rollback:${reason}:${exported.exportId}`,
+    reason,
+    createdAt: nowIso(),
+    schemaVersion: exported.schemaVersion,
+    schemaHash: exported.schemaHash,
+    contentVersion: exported.contentVersion,
+    checksum: rollbackPayload.checksum,
+    encrypted: false,
+    rowCounts: vaultRowCounts(exported.stores),
+    sourceRowCounts: sourceVaultRowCounts(exported.sourceVault),
+    payload: rollbackPayload,
+  };
+  await db.rollbackSnapshots.put(snapshot);
+  const staleSnapshots = await db.rollbackSnapshots.orderBy('createdAt').reverse().offset(10).toArray();
+  await Promise.all(staleSnapshots.map((stale) => db.rollbackSnapshots.delete(stale.id)));
+  return snapshot;
+}
+
 export async function importVaultData(payload: unknown, mode?: 'merge' | 'replace'): Promise<void>;
 export async function importVaultData(payload: unknown, options?: VaultImportOptions): Promise<void>;
 export async function importVaultData(payload: unknown, options: 'merge' | 'replace' | VaultImportOptions = 'merge') {
   const importOptions = normalizeVaultImportOptions(options);
   const exportPayload = await resolveVaultImportPayload(payload, importOptions.passphrase);
+  const importStartedAt = nowIso();
+  const importJobId = `import-job:${exportPayload.exportId}:${importStartedAt.replace(/[^0-9]/g, '')}`;
+  const encrypted = isEncryptedVaultExport(payload);
   const validation = validateVaultData(exportPayload);
   if (!validation.valid) {
+    await db.importJobs.put({
+      id: importJobId,
+      startedAt: importStartedAt,
+      completedAt: nowIso(),
+      status: 'blocked',
+      mode: importOptions.mode,
+      conflictPolicy: importOptions.conflictPolicy,
+      encrypted,
+      includeSourceVault: importOptions.includeSourceVault,
+      exportId: exportPayload.exportId,
+      rowCounts: vaultRowCounts(exportPayload.stores),
+      sourceRowCounts: sourceVaultRowCounts(exportPayload.sourceVault),
+      errors: validation.errors,
+    });
     throw new Error(validation.errors.join(' '));
   }
+  const rollbackSnapshot = importOptions.mode === 'replace' ? await createRollbackSnapshot('import-replace') : undefined;
   const mergeStores = importOptions.mode === 'merge' ? remapMergeIds(exportPayload.stores) : exportPayload.stores;
   const storesToWrite =
     importOptions.mode === 'merge' && importOptions.conflictPolicy === 'keep-existing'
@@ -1822,6 +2038,13 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
       db.mockSectionState,
       db.learningEvents,
       db.vaultHealthSnapshots,
+      db.rollbackSnapshots,
+      db.calculatorScenarios,
+      db.releaseRunHistory,
+      db.importJobs,
+      db.sourceBundleManifests,
+      db.psychometricStats,
+      db.mockBlueprints,
       db.notes,
       db.bookmarks,
       db.settings,
@@ -1858,6 +2081,13 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
         db.mockSectionState.bulkPut(storesToWrite.mockSectionState),
         db.learningEvents.bulkPut(storesToWrite.learningEvents),
         db.vaultHealthSnapshots.bulkPut(storesToWrite.vaultHealthSnapshots),
+        db.rollbackSnapshots.bulkPut(storesToWrite.rollbackSnapshots),
+        db.calculatorScenarios.bulkPut(storesToWrite.calculatorScenarios),
+        db.releaseRunHistory.bulkPut(storesToWrite.releaseRunHistory),
+        db.importJobs.bulkPut(storesToWrite.importJobs),
+        db.sourceBundleManifests.bulkPut(storesToWrite.sourceBundleManifests),
+        db.psychometricStats.bulkPut(storesToWrite.psychometricStats),
+        db.mockBlueprints.bulkPut(storesToWrite.mockBlueprints),
         db.notes.bulkPut(storesToWrite.notes),
         db.bookmarks.bulkPut(storesToWrite.bookmarks),
         db.settings.bulkPut(storesToWrite.settings),
@@ -1872,6 +2102,7 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
             ]
           : []),
       ]);
+      if (rollbackSnapshot) await db.rollbackSnapshots.put(rollbackSnapshot);
     },
   );
 
@@ -1879,7 +2110,22 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
     exportPayload,
     mode: importOptions.mode,
     conflictPolicy: importOptions.conflictPolicy,
-    encrypted: isEncryptedVaultExport(payload),
+    encrypted,
+  });
+  await db.importJobs.put({
+    id: importJobId,
+    startedAt: importStartedAt,
+    completedAt: nowIso(),
+    status: 'ok',
+    mode: importOptions.mode,
+    conflictPolicy: importOptions.conflictPolicy,
+    encrypted,
+    includeSourceVault: importOptions.includeSourceVault,
+    exportId: exportPayload.exportId,
+    rowCounts: vaultRowCounts(exportPayload.stores),
+    sourceRowCounts: sourceVaultRowCounts(exportPayload.sourceVault),
+    errors: [],
+    rollbackSnapshotId: rollbackSnapshot?.id,
   });
   await rebuildLearningIndexes({ emit: false });
   emitProgressChange();
@@ -3614,12 +3860,24 @@ export async function getVaultHealthReport(): Promise<VaultHealthReport> {
   const exported = await exportVaultData();
   const validation = validateVaultData(exported);
   const snapshot = buildVaultHealthSnapshot(exported, validation.errors);
+  const [rollbackSnapshots, importJobs, sourceBundleManifests, calculatorScenarios, releaseRunHistory] = await Promise.all([
+    db.rollbackSnapshots.orderBy('createdAt').reverse().limit(10).toArray(),
+    db.importJobs.orderBy('startedAt').reverse().limit(10).toArray(),
+    db.sourceBundleManifests.orderBy('createdAt').reverse().limit(10).toArray(),
+    db.calculatorScenarios.orderBy('updatedAt').reverse().limit(10).toArray(),
+    db.releaseRunHistory.orderBy('generatedAt').reverse().limit(10).toArray(),
+  ]);
   const report: VaultHealthReport = {
     ...snapshot,
     schemaVersion: VAULT_SCHEMA_VERSION,
     schemaHash: VAULT_SCHEMA_HASH,
     contentVersion: VAULT_CONTENT_VERSION,
     importHistory: await getVaultImportHistory(),
+    rollbackSnapshots,
+    importJobs,
+    sourceBundleManifests,
+    calculatorScenarios,
+    releaseRunHistory,
     storageEstimate: await storageEstimate(),
   };
   await db.vaultHealthSnapshots.put(snapshot);
@@ -3631,6 +3889,7 @@ export async function previewVaultRepair(): Promise<VaultHealthReport> {
 }
 
 export async function repairVaultData() {
+  await createRollbackSnapshot('repair');
   const exported = await exportVaultData();
   const seenNotes = new Set<string>();
   const seenBookmarks = new Set<string>();
@@ -3661,6 +3920,7 @@ export async function repairVaultData() {
 }
 
 export async function resetVaultData(scope: 'attempts' | 'progress' | 'full' = 'full') {
+  const rollbackSnapshot = await createRollbackSnapshot('reset');
   if (scope === 'attempts') {
     await Promise.all([
       db.quizAttempts.clear(),
@@ -3702,6 +3962,7 @@ export async function resetVaultData(scope: 'attempts' | 'progress' | 'full' = '
     ]);
   } else {
     await Promise.all([...STORE_NAMES, ...SOURCE_STORE_NAMES].map((storeName) => db[storeName].clear()));
+    await db.rollbackSnapshots.put(rollbackSnapshot);
   }
 
   emitProgressChange();

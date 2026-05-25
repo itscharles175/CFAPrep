@@ -15,10 +15,47 @@ export interface TutorProviderMetadata {
   enabled: boolean;
   localOnly: boolean;
   capabilities: TutorCapability[];
+  policy: TutorProviderPolicy;
 }
 
 export interface TutorResponse {
   text: string;
+  sourceIds: string[];
+  safetyFlags: string[];
+  blockedReason?: string;
+  citations?: GroundingCitation[];
+  groundingRequired?: boolean;
+  groundingStatus?: 'grounded' | 'refused' | 'not-required';
+  auditLog?: TutorAuditLog;
+}
+
+export interface GroundingCitation {
+  sourceId: string;
+  label: string;
+  locator?: string;
+  excerptHash?: string;
+}
+
+export interface GroundedTutorResponse extends TutorResponse {
+  citations: GroundingCitation[];
+  groundingRequired: boolean;
+  groundingStatus: 'grounded' | 'refused' | 'not-required';
+  auditLog?: TutorAuditLog;
+}
+
+export interface TutorProviderPolicy {
+  optInRequired: boolean;
+  sourceGroundingRequired: boolean;
+  allowNetwork: boolean;
+  logResponses: boolean;
+  defaultEnabled: boolean;
+}
+
+export interface TutorAuditLog {
+  id: string;
+  providerId: string;
+  capability: TutorCapability;
+  createdAt: string;
   sourceIds: string[];
   safetyFlags: string[];
   blockedReason?: string;
@@ -57,6 +94,8 @@ export interface TutorEvalCase {
   capability: TutorCapability;
   requiredSourceIds: string[];
   allowBlocked?: boolean;
+  requireGrounding?: boolean;
+  sourceRequired?: boolean;
 }
 
 export interface TutorEvalResult {
@@ -93,6 +132,13 @@ export function createUnavailableTutorProvider(): TutorProvider {
       enabled: false,
       localOnly: true,
       capabilities: [],
+      policy: {
+        optInRequired: true,
+        sourceGroundingRequired: true,
+        allowNetwork: false,
+        logResponses: false,
+        defaultEnabled: false,
+      },
     },
     explainMissedAnswer: unavailable,
     provideGroundedHint: unavailable,
@@ -105,11 +151,47 @@ export function createUnavailableTutorProvider(): TutorProvider {
 }
 
 export function createMockTutorProvider(): TutorProvider {
-  function groundedResponse(text: string, sourceIds: string[] = []): TutorResponse {
+  function groundedResponse(text: string, sourceIds: string[] = [], capability: TutorCapability = 'grounded-hint'): GroundedTutorResponse {
+    if (!sourceIds.length) {
+      return {
+        text: '',
+        sourceIds: [],
+        safetyFlags: ['missing-grounding'],
+        blockedReason: 'Grounding citations are required before tutor output can be shown.',
+        citations: [],
+        groundingRequired: true,
+        groundingStatus: 'refused',
+        auditLog: {
+          id: `tutor-audit:${Date.now()}`,
+          providerId: 'mock-local',
+          capability,
+          createdAt: new Date().toISOString(),
+          sourceIds: [],
+          safetyFlags: ['missing-grounding'],
+          blockedReason: 'Grounding citations are required before tutor output can be shown.',
+        },
+      };
+    }
     return {
       text,
       sourceIds,
       safetyFlags: [],
+      citations: sourceIds.map((sourceId) => ({
+        sourceId,
+        label: sourceId,
+        locator: 'local-authoring-pack',
+        excerptHash: `local:${sourceId}`,
+      })),
+      groundingRequired: true,
+      groundingStatus: 'grounded',
+      auditLog: {
+        id: `tutor-audit:${Date.now()}`,
+        providerId: 'mock-local',
+        capability,
+        createdAt: new Date().toISOString(),
+        sourceIds,
+        safetyFlags: [],
+      },
     };
   }
 
@@ -127,37 +209,50 @@ export function createMockTutorProvider(): TutorProvider {
         'lesson-question',
         'constructed-response-critique',
       ],
+      policy: {
+        optInRequired: true,
+        sourceGroundingRequired: true,
+        allowNetwork: false,
+        logResponses: true,
+        defaultEnabled: false,
+      },
     },
     explainMissedAnswer: async ({ context }) =>
       groundedResponse(
         `Review ${context.objective?.title || context.lessonTitle || context.topic}. Start from the authored explanation, identify the missed concept, then redo one adjacent local question before advancing.`,
         context.sourceIds || ([context.question?.id, context.objective?.id].filter(Boolean) as string[]),
+        'missed-answer-explanation',
       ),
     provideGroundedHint: async ({ context }) =>
       groundedResponse(
         `Hint: read the command word, name the controlling local fact, and connect it to ${context.objective?.title || context.topic} before looking at choices.`,
         context.sourceIds || ([context.question?.id, context.objective?.id].filter(Boolean) as string[]),
+        'grounded-hint',
       ),
     generateExtraPractice: async () => [],
     suggestNextPractice: async ({ context, count, difficulty }) =>
       groundedResponse(
         `Next practice: complete ${count} ${difficulty || 'mixed'} local item${count === 1 ? '' : 's'} for ${context.objective?.title || context.topic}, then add any miss to the review inbox.`,
         context.sourceIds || ([context.objective?.id, context.question?.id].filter(Boolean) as string[]),
+        'next-practice-suggestion',
       ),
     summarizeWeakTopic: async (context) =>
       groundedResponse(
         `Your local mastery signal points to ${context.objective?.title || context.topic}. Prioritize due reviews, then run a short topic drill and tag the error category after each miss.`,
         context.sourceIds || ([context.objective?.id].filter(Boolean) as string[]),
+        'weak-topic-summary',
       ),
     answerLessonQuestion: async ({ context }) =>
       groundedResponse(
         `Use the local lesson and formulas for ${context.lessonTitle || context.topic}. I can summarize grounded hints here once an AI provider is enabled.`,
         context.sourceIds || ([context.objective?.id].filter(Boolean) as string[]),
+        'lesson-question',
       ),
     critiqueConstructedResponse: async ({ context, rubricCriteria }) =>
       groundedResponse(
         `Self-score against ${rubricCriteria.length} rubric criteria. Check command words first, then confirm every claimed point is tied to the prompt facts.`,
         context.sourceIds || ([context.objective?.id].filter(Boolean) as string[]),
+        'constructed-response-critique',
       ),
   };
 }
@@ -171,9 +266,17 @@ export function getTutorProvider() {
 }
 
 export function evaluateTutorResponse(evalCase: TutorEvalCase, response: TutorResponse): TutorEvalResult {
+  const groundedResponse = response as Partial<GroundedTutorResponse>;
   const issues = [
     !evalCase.allowBlocked && response.blockedReason ? `Response is blocked: ${response.blockedReason}` : '',
     !response.blockedReason && !response.text.trim() ? 'Response text is empty.' : '',
+    evalCase.sourceRequired && !response.blockedReason && response.sourceIds.length === 0 ? 'Grounded tutor output requires at least one sourceId.' : '',
+    evalCase.requireGrounding && !response.blockedReason && groundedResponse.groundingStatus !== 'grounded'
+      ? 'Grounded tutor output must report groundingStatus=grounded.'
+      : '',
+    evalCase.requireGrounding && !response.blockedReason && !groundedResponse.citations?.length
+      ? 'Grounded tutor output requires citations.'
+      : '',
     ...evalCase.requiredSourceIds
       .filter((sourceId) => !response.sourceIds.includes(sourceId))
       .map((sourceId) => `Missing required sourceId: ${sourceId}`),

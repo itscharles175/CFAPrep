@@ -13,6 +13,10 @@ describe('route visual metadata', () => {
       expect(route.navLabel, route.id).toBeTruthy();
       expect(route.searchGroup, route.id).toBeTruthy();
       expect(route.keyboardScopes.length, route.id).toBeGreaterThan(0);
+      expect(route.breadcrumbs.length, route.id).toBeGreaterThan(0);
+      expect(route.keyboardHelp.length, route.id).toBeGreaterThan(0);
+      expect(route.preloadStrategy, route.id).toBeTruthy();
+      expect(route.qaStates[0].viewports, route.id).toEqual([320, 375, 414, 768, 1024, 1440]);
     });
   });
 
@@ -41,5 +45,7 @@ describe('route visual metadata', () => {
     expect(criticalIds.has('cfa-quiz')).toBe(true);
     expect(criticalIds.has('vault')).toBe(true);
     expect(criticalIds.has('system')).toBe(true);
+    expect(appRoutes.find((route) => route.id === 'cfa-module')?.offlineWarmup?.priority).toBe('critical');
+    expect(appRoutes.find((route) => route.id === 'system')?.routeActions.map((action) => action.id)).toContain('encrypted-backup');
   });
 });

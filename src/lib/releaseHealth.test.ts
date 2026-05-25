@@ -66,6 +66,9 @@ describe('release health report', () => {
           exitCode: 0,
           durationMs: 12_000,
           completedAt: '2026-05-04T00:00:00.000Z',
+          freshnessHours: 100_000,
+          runId: 'qv-release-test',
+          git: { shortSha: 'abc123', branch: 'test', dirty: false },
         },
         smoke: {
           id: 'smoke',
@@ -74,6 +77,7 @@ describe('release health report', () => {
           exitCode: 1,
           durationMs: 900,
           completedAt: '2026-05-04T00:00:01.000Z',
+          freshnessHours: 100_000,
         },
         'visual-regression': {
           id: 'visual-regression',
@@ -83,6 +87,7 @@ describe('release health report', () => {
           durationMs: 1_900,
           completedAt: '2026-05-04T00:00:02.000Z',
           artifactPaths: [],
+          freshnessHours: 100_000,
         },
         accessibility: {
           id: 'accessibility',
@@ -92,6 +97,7 @@ describe('release health report', () => {
           durationMs: 2_900,
           completedAt: '2026-05-04T00:00:03.000Z',
           artifactPaths: [],
+          freshnessHours: 100_000,
         },
         'release-checklist': {
           id: 'release-checklist',
@@ -101,14 +107,38 @@ describe('release health report', () => {
           durationMs: 300,
           completedAt: '2026-05-04T00:00:04.000Z',
           artifactPaths: ['dist/reports/release-manifest.json'],
+          freshnessHours: 100_000,
         },
       },
     });
 
+    expect(report.runId).toBe('qv-release-test');
+    expect(report.git?.shortSha).toBe('abc123');
     expect(report.gates.find((gate) => gate.id === 'verify')?.status).toBe('ok');
+    expect(report.gates.find((gate) => gate.id === 'verify')?.parallelGroup).toBe('bootstrap');
     expect(report.gates.find((gate) => gate.id === 'smoke')?.status).toBe('blocked');
     expect(report.gates.find((gate) => gate.id === 'visual-regression')?.status).toBe('ok');
     expect(report.gates.find((gate) => gate.id === 'accessibility')?.status).toBe('ok');
     expect(report.gates.find((gate) => gate.id === 'release-checklist')?.completedAt).toBe('2026-05-04T00:00:04.000Z');
+  });
+
+  it('warns when release gate artifacts exceed their freshness policy', () => {
+    const report = buildReleaseGateReport({
+      gateResults: {
+        verify: {
+          id: 'verify',
+          command: 'npm run verify',
+          status: 'ok',
+          exitCode: 0,
+          durationMs: 12_000,
+          completedAt: '2026-05-04T00:00:00.000Z',
+          freshnessHours: 1,
+        },
+      },
+    });
+
+    expect(report.staleGateCount).toBe(1);
+    expect(report.gates.find((gate) => gate.id === 'verify')?.status).toBe('warning');
+    expect(report.warnings.some((warning) => warning.includes('stale'))).toBe(true);
   });
 });

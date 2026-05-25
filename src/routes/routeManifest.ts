@@ -2,6 +2,9 @@ export type RouteBoundary = 'page' | 'domain';
 export type RouteDomain = 'home' | 'cfa' | 'quant' | 'excel' | 'vault' | 'analytics' | 'ops' | 'tool';
 export type RouteAccentRole = 'study' | 'exam' | 'quant' | 'excel' | 'vault' | 'analytics' | 'ops' | 'danger';
 export type PreferredLayout = 'dashboard' | 'learning' | 'assessment' | 'tool' | 'ops';
+export type RouteActionKind = 'navigate' | 'backup' | 'repair' | 'cache' | 'start-assessment' | 'open-drawer' | 'export';
+export type PreloadStrategy = 'eager' | 'idle' | 'interaction' | 'manual';
+export type QaViewport = 320 | 375 | 414 | 768 | 1024 | 1440;
 
 export type AppRouteId =
   | 'dashboard'
@@ -41,6 +44,12 @@ export interface AppRoute {
   searchGroup: string;
   offlineCritical: boolean;
   keyboardScopes: string[];
+  breadcrumbs: Array<{ label: string; path: string }>;
+  routeActions: Array<{ id: string; label: string; kind: RouteActionKind; path?: string; commandId?: string }>;
+  keyboardHelp: Array<{ scope: string; keys: string[]; label: string }>;
+  offlineWarmup?: { path: string; priority: 'critical' | 'standard' };
+  preloadStrategy: PreloadStrategy;
+  qaStates: Array<{ id: string; label: string; viewports: QaViewport[] }>;
   smokeRoute?: string;
   screenshotRoute?: string;
 }
@@ -64,7 +73,22 @@ export interface CommandRoute {
   action?: 'backup' | 'repair' | 'theme';
 }
 
-const baseAppRoutes: Array<Omit<AppRoute, 'navOrder' | 'navLabel' | 'searchGroup' | 'offlineCritical' | 'keyboardScopes'>> = [
+type BaseAppRoute = Omit<
+  AppRoute,
+  | 'navOrder'
+  | 'navLabel'
+  | 'searchGroup'
+  | 'offlineCritical'
+  | 'keyboardScopes'
+  | 'breadcrumbs'
+  | 'routeActions'
+  | 'keyboardHelp'
+  | 'offlineWarmup'
+  | 'preloadStrategy'
+  | 'qaStates'
+>;
+
+const baseAppRoutes: BaseAppRoute[] = [
   { id: 'dashboard', path: '/', expectedText: 'QuantVault', domain: 'home', navGroup: 'home', iconKey: 'home', accentRole: 'study', preferredLayout: 'dashboard', smokeRoute: '/', screenshotRoute: '/' },
   { id: 'cfa-dashboard', path: '/cfa', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa', domain: 'cfa', navGroup: 'domains', iconKey: 'graduation-cap', accentRole: 'exam', preferredLayout: 'dashboard', smokeRoute: '/cfa', screenshotRoute: '/cfa' },
   { id: 'cfa-module', path: '/cfa/:level/:topic', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa-module', domain: 'cfa', navGroup: 'domains', iconKey: 'book-open', accentRole: 'exam', preferredLayout: 'learning', smokeRoute: '/cfa/level1/fixed-income', screenshotRoute: '/cfa/level1/fixed-income' },
@@ -139,6 +163,68 @@ const keyboardScopesByRoute: Partial<Record<AppRouteId, string[]>> = {
   system: ['backup-actions', 'release-matrix'],
 };
 
+const routeActionsByRoute: Partial<Record<AppRouteId, AppRoute['routeActions']>> = {
+  dashboard: [{ id: 'open-review', label: 'Open review', kind: 'navigate', path: '/review', commandId: 'command:review' }],
+  'cfa-dashboard': [{ id: 'start-level1-mock', label: 'Start Level I mock', kind: 'start-assessment', path: '/cfa/level1/mock' }],
+  'cfa-module': [
+    { id: 'start-topic-quiz', label: 'Start quiz', kind: 'start-assessment', path: '/cfa/level1/fixed-income/quiz' },
+    { id: 'open-formulas', label: 'Open formulas', kind: 'open-drawer', path: '/formulas' },
+  ],
+  'cfa-quiz': [{ id: 'flag-question', label: 'Flag question', kind: 'start-assessment' }],
+  'cfa-vignette': [{ id: 'review-case', label: 'Review case', kind: 'start-assessment' }],
+  'cfa-constructed-response': [{ id: 'score-rubric', label: 'Score rubric', kind: 'start-assessment' }],
+  mock: [{ id: 'start-level1-mock', label: 'Start mock', kind: 'start-assessment', path: '/cfa/level1/mock' }],
+  'level-mock': [{ id: 'resume-level-mock', label: 'Resume mock', kind: 'start-assessment' }],
+  review: [{ id: 'open-review', label: 'Open review', kind: 'navigate', path: '/review', commandId: 'command:review' }],
+  vault: [{ id: 'export-vault', label: 'Export backup', kind: 'backup', commandId: 'action:backup' }],
+  analytics: [{ id: 'export-analytics', label: 'Export analytics', kind: 'export' }],
+  system: [
+    { id: 'encrypted-backup', label: 'Encrypted backup', kind: 'backup', commandId: 'action:backup' },
+    { id: 'cache-critical-routes', label: 'Cache critical routes', kind: 'cache' },
+    { id: 'repair-preview', label: 'Repair preview', kind: 'repair', commandId: 'action:repair' },
+  ],
+};
+
+function breadcrumbsFor(route: BaseAppRoute) {
+  const root = [{ label: 'Dashboard', path: '/' }];
+  if (route.id === 'dashboard') return root;
+  const domainCrumb =
+    route.domain === 'cfa'
+      ? { label: 'CFA', path: '/cfa' }
+      : route.domain === 'quant'
+        ? { label: 'Quant', path: '/quant' }
+        : route.domain === 'excel'
+          ? { label: 'Excel', path: '/excel' }
+          : route.domain === 'ops'
+            ? { label: 'Operations', path: '/system' }
+            : route.domain === 'vault'
+              ? { label: 'Vault', path: '/vault' }
+              : null;
+  return [...root, ...(domainCrumb && domainCrumb.path !== route.path ? [domainCrumb] : []), { label: routeLabels[route.id] || route.expectedText, path: route.smokeRoute || route.screenshotRoute || route.path }];
+}
+
+function keyboardHelpFor(route: { id: AppRouteId }, scopes: string[]): AppRoute['keyboardHelp'] {
+  return scopes.map((scope) => ({
+    scope,
+    keys:
+      route.id === 'cfa-quiz' || route.id === 'mock' || route.id === 'level-mock'
+        ? ['1-4', 'f', 'enter']
+        : route.id === 'system' || route.id === 'vault'
+          ? ['tab', 'enter', 'esc']
+          : ['/', 'k', 'tab'],
+    label: scope.replace(/-/g, ' '),
+  }));
+}
+
+function qaStatesFor(route: { id: AppRouteId; preferredLayout: PreferredLayout }): AppRoute['qaStates'] {
+  const viewports: QaViewport[] = [320, 375, 414, 768, 1024, 1440];
+  const states = [{ id: 'default', label: 'Default route state', viewports }];
+  if (route.preferredLayout === 'assessment') states.push({ id: 'active-assessment', label: 'Active assessment state', viewports });
+  if (route.id === 'system' || route.id === 'vault') states.push({ id: 'dialog-open', label: 'Dialog or action state', viewports });
+  if (route.id === 'dashboard' || route.id === 'review') states.push({ id: 'empty-loading-error', label: 'Loading, empty, and error states', viewports });
+  return states;
+}
+
 export const appRoutes: AppRoute[] = baseAppRoutes.map((route, index) => ({
   ...route,
   navOrder: index + 1,
@@ -146,6 +232,14 @@ export const appRoutes: AppRoute[] = baseAppRoutes.map((route, index) => ({
   searchGroup: route.navGroup,
   offlineCritical: offlineCriticalRouteIds.has(route.id),
   keyboardScopes: keyboardScopesByRoute[route.id] || ['route'],
+  breadcrumbs: breadcrumbsFor(route),
+  routeActions: routeActionsByRoute[route.id] || [],
+  keyboardHelp: keyboardHelpFor(route, keyboardScopesByRoute[route.id] || ['route']),
+  offlineWarmup: offlineCriticalRouteIds.has(route.id)
+    ? { path: route.smokeRoute || route.screenshotRoute || route.path, priority: route.id === 'dashboard' || route.domain === 'cfa' ? 'critical' : 'standard' }
+    : undefined,
+  preloadStrategy: offlineCriticalRouteIds.has(route.id) ? 'eager' : route.preferredLayout === 'tool' ? 'interaction' : 'idle',
+  qaStates: qaStatesFor(route),
 }));
 
 export const searchToolRoutes: SearchRoute[] = [

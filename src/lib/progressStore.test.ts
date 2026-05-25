@@ -17,6 +17,7 @@ import {
   getStudyPlanSettings,
   getVaultHealthReport,
   getVaultImportHistory,
+  getRollbackSnapshots,
   importVaultData,
   migrateVaultData,
   previewVaultImportPayload,
@@ -157,10 +158,14 @@ describe('local vault progress store', () => {
       encryption: { encrypted: false, algorithm: 'none' },
     });
     expect(exported.exportId).toMatch(/^qv-/);
-    expect(exported.checksum).toMatch(/^fnv1a32:/);
+    expect(exported.checksum).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(exported.stores.reviewItems[0].fsrsDifficulty).toBeTypeOf('number');
     expect(exported.stores.learningEvents).toEqual([]);
     expect(exported.stores.vaultHealthSnapshots).toEqual([]);
+    expect(exported.stores.rollbackSnapshots.length).toBeGreaterThanOrEqual(1);
+    expect(exported.stores.calculatorScenarios).toEqual([]);
+    expect(exported.stores.importJobs).toEqual([]);
+    expect(exported.stores.mockBlueprints).toEqual([]);
     expect(validateVaultData(exported)).toEqual({ valid: true, errors: [] });
 
     await resetVaultData('full');
@@ -190,9 +195,13 @@ describe('local vault progress store', () => {
 
     const restored = await getStudyPlanSettings();
     const history = await getVaultImportHistory();
+    const snapshots = await getRollbackSnapshots();
+    const restoredExport = await exportVaultData();
     expect(restored.dailyTargetMinutes).toBe(75);
     expect(restored.targetLevel).toBe('level3');
     expect(history[0]).toMatchObject({ schemaVersion: VAULT_SCHEMA_VERSION, encrypted: true, mode: 'replace' });
+    expect(snapshots.some((snapshot) => snapshot.reason === 'import-replace')).toBe(true);
+    expect(restoredExport.stores.importJobs[0]).toMatchObject({ status: 'ok', encrypted: true, mode: 'replace' });
   });
 
   it('keeps source vault text out of exports unless explicitly included', async () => {
@@ -445,7 +454,7 @@ describe('local vault progress store', () => {
     expect(migrated.schemaVersion).toBe(VAULT_SCHEMA_VERSION);
     expect(migrated.schemaHash).toBe(VAULT_SCHEMA_HASH);
     expect(migrated.contentVersion).toBe(VAULT_CONTENT_VERSION);
-    expect(migrated.checksum).toMatch(/^fnv1a32:/);
+    expect(migrated.checksum).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(migrated.stores.mockAttempts).toEqual([]);
     expect(migrated.stores.vignetteAttempts).toEqual([]);
     expect(migrated.stores.constructedResponseAttempts).toEqual([]);
@@ -459,6 +468,13 @@ describe('local vault progress store', () => {
     expect(migrated.stores.mockSectionState).toEqual([]);
     expect(migrated.stores.learningEvents).toEqual([]);
     expect(migrated.stores.vaultHealthSnapshots).toEqual([]);
+    expect(migrated.stores.rollbackSnapshots).toEqual([]);
+    expect(migrated.stores.calculatorScenarios).toEqual([]);
+    expect(migrated.stores.releaseRunHistory).toEqual([]);
+    expect(migrated.stores.importJobs).toEqual([]);
+    expect(migrated.stores.sourceBundleManifests).toEqual([]);
+    expect(migrated.stores.psychometricStats).toEqual([]);
+    expect(migrated.stores.mockBlueprints).toEqual([]);
     expect(previewVaultImport(oldExport)).toMatchObject({
       valid: true,
       schemaVersion: VAULT_SCHEMA_VERSION,

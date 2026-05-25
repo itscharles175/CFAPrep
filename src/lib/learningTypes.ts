@@ -510,11 +510,162 @@ export interface VaultHealthReport extends VaultHealthSnapshot {
   schemaHash: string;
   contentVersion: string;
   importHistory: VaultImportHistoryEntry[];
+  rollbackSnapshots?: RollbackSnapshot[];
+  importJobs?: ImportJob[];
+  sourceBundleManifests?: SourceBundleManifest[];
+  calculatorScenarios?: CalculatorScenario[];
+  releaseRunHistory?: ReleaseRunHistory[];
   storageEstimate?: {
     usage?: number;
     quota?: number;
     persisted?: boolean;
   };
+}
+
+export type VaultRollbackReason = 'import-replace' | 'repair' | 'reset' | 'source-clear' | 'manual';
+
+export interface RollbackSnapshot {
+  id: string;
+  reason: VaultRollbackReason;
+  createdAt: string;
+  schemaVersion: number;
+  schemaHash: string;
+  contentVersion: string;
+  checksum: string;
+  encrypted: boolean;
+  rowCounts: Record<string, number>;
+  sourceRowCounts?: Record<string, number>;
+  payload?: unknown;
+}
+
+export interface CalculatorScenario {
+  id: string;
+  calculatorId: string;
+  title: string;
+  level?: string;
+  topic?: string;
+  objectiveIds: string[];
+  assumptions: Record<string, string | number | boolean | null>;
+  metrics: Record<string, string | number | boolean | null>;
+  seed?: string;
+  sourceIds?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReleaseRunHistory {
+  id: string;
+  runId: string;
+  generatedAt: string;
+  status: 'ok' | 'warning' | 'blocked' | 'pending';
+  gitSha?: string;
+  branch?: string;
+  dirty?: boolean;
+  gateCount: number;
+  failedGateIds: string[];
+  staleGateIds: string[];
+  reportPath?: string;
+}
+
+export interface ImportJob {
+  id: string;
+  startedAt: string;
+  completedAt?: string;
+  status: 'pending' | 'ok' | 'blocked';
+  mode: 'merge' | 'replace';
+  conflictPolicy: 'keep-existing' | 'prefer-import' | 'replace';
+  encrypted: boolean;
+  includeSourceVault: boolean;
+  exportId?: string;
+  rowCounts: Record<string, number>;
+  sourceRowCounts?: Record<string, number>;
+  errors: string[];
+  rollbackSnapshotId?: string;
+}
+
+export interface SourceBundleManifest {
+  id: string;
+  bundleId: string;
+  createdAt: string;
+  encrypted: boolean;
+  algorithm?: 'AES-GCM';
+  sha256: string;
+  byteLength: number;
+  documentCount: number;
+  chunkCount: number;
+  sourceIds: string[];
+  staleAt?: string;
+  privateUseOnly: boolean;
+}
+
+export interface PsychometricStats {
+  id: string;
+  itemId: string;
+  level: string;
+  topic: string;
+  attempts: number;
+  difficulty: number;
+  discrimination: number;
+  distractorQuality: Record<string, number>;
+  reliability?: number;
+  retakeDrift?: number;
+  updatedAt: string;
+}
+
+export interface FormulaDependency {
+  id: string;
+  formulaName: string;
+  level?: string;
+  topic: string;
+  dependsOn: string[];
+  usedBy: string[];
+  sourceIds?: string[];
+  updatedAt: string;
+}
+
+export interface SourceCoverageStatus {
+  targetId: string;
+  targetKind: 'lesson' | 'question' | 'formula' | 'mock' | 'rubric';
+  status: 'covered' | 'partial' | 'missing' | 'stale';
+  sourceIds: string[];
+  staleAt?: string;
+  updatedAt: string;
+}
+
+export interface ConstructedResponseRubricHistory {
+  id: string;
+  attemptId?: number;
+  itemId: string;
+  criterion: string;
+  earnedPoints: number;
+  maxPoints: number;
+  scorer: 'local-rubric' | 'self' | 'grounded-tutor';
+  sourceIds: string[];
+  createdAt: string;
+}
+
+export interface MockBlueprint {
+  id: string;
+  level: 'level1' | 'level2' | 'level3';
+  title: string;
+  pathway?: string;
+  officialLength: boolean;
+  totalMinutes: number;
+  breakMinutes: number;
+  sessions: Array<{
+    id: string;
+    label: string;
+    minutes: number;
+    itemTypes: Array<'single' | 'vignette' | 'constructed-response' | 'trial'>;
+    scoredItemCount: number;
+    trialItemCount: number;
+  }>;
+  scoringBands: Array<{ label: string; minPct: number; maxPct: number }>;
+  topicWeights: Record<string, number>;
+  reviewPacketTemplate: string[];
+  variantSeed?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ConfidenceCalibrationSummary {

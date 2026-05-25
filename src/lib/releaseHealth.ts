@@ -34,9 +34,23 @@ export interface ReleaseCommandResult {
   status: 'ok' | 'blocked';
   exitCode: number | null;
   durationMs: number;
+  startedAt?: string;
   completedAt: string;
   artifactPaths?: string[];
+  dependencies?: ReleaseGateId[];
+  parallelGroup?: string;
+  freshnessHours?: number;
+  artifactSchema?: ReleaseGateDefinition['artifactSchema'];
+  runId?: string;
+  failureTriage?: string[];
+  message?: string;
   routeFailures?: Array<{ routeId: string; path: string; message: string }>;
+  git?: {
+    sha?: string;
+    shortSha?: string;
+    branch?: string;
+    dirty?: boolean;
+  };
   runtime?: {
     node: string;
     platform: string;
@@ -57,10 +71,21 @@ export interface ReleaseGate {
   durationMs?: number;
   exitCode?: number | null;
   ageHours?: number;
+  stale?: boolean;
+  freshnessHours?: number;
+  dependencies: ReleaseGateId[];
+  parallelGroup?: string;
+  artifactSchema?: ReleaseGateDefinition['artifactSchema'];
+  runId?: string;
+  git?: ReleaseCommandResult['git'];
+  failureTriage?: string[];
 }
 
 export interface ReleaseGateReport {
   generatedAt: string;
+  runId?: string;
+  git?: ReleaseCommandResult['git'];
+  staleGateCount: number;
   status: ReleaseGateStatus;
   summary: {
     catalogErrors: number;
@@ -102,19 +127,31 @@ function gateAgeHours(completedAt?: string) {
 }
 
 function baseGate(definition: ReleaseGateDefinition, status: ReleaseGateStatus, detail: string, result?: ReleaseCommandResult): ReleaseGate {
+  const freshnessHours = result?.freshnessHours ?? definition.freshnessHours;
+  const ageHours = gateAgeHours(result?.completedAt);
+  const stale = typeof ageHours === 'number' && typeof freshnessHours === 'number' && ageHours > freshnessHours;
+  const nextStatus = stale && status === 'ok' ? 'warning' : status;
   return {
     id: definition.id,
     label: definition.label,
     command: definition.command,
     category: definition.category,
-    status,
-    detail,
+    status: nextStatus,
+    detail: stale ? `${detail} Gate artifact is stale; rerun within ${freshnessHours}h freshness policy.` : detail,
     required: definition.required,
     artifactPaths: result?.artifactPaths || definition.artifactPaths,
     completedAt: result?.completedAt,
     durationMs: result?.durationMs,
     exitCode: result?.exitCode,
-    ageHours: gateAgeHours(result?.completedAt),
+    ageHours,
+    stale,
+    freshnessHours,
+    dependencies: result?.dependencies || definition.dependsOn || [],
+    parallelGroup: result?.parallelGroup || definition.parallelGroup,
+    artifactSchema: result?.artifactSchema || definition.artifactSchema,
+    runId: result?.runId,
+    git: result?.git,
+    failureTriage: result?.failureTriage || definition.failureTriage,
   };
 }
 
@@ -233,6 +270,10 @@ export function buildReleaseGateReport({
     commandGate(definition('content-report'), gateResults),
     commandGate(definition('release-checklist'), gateResults),
   ];
+  const gateResultValues = Object.values(gateResults || {});
+  const runId = gateResultValues.find((result) => result.runId)?.runId;
+  const git = gateResultValues.find((result) => result.git)?.git;
+  const staleGates = gates.filter((gate) => gate.stale);
 
   const blockers = [
     ...(contentHasErrors ? ['Content or curriculum validators have blocking errors.'] : []),
@@ -245,6 +286,7 @@ export function buildReleaseGateReport({
       .map((gate) => `${gate.label} failed: ${gate.detail}`),
   ];
   const warnings = [
+    ...(staleGates.length ? [`${staleGates.length} release gate artifact${staleGates.length === 1 ? ' is' : 's are'} stale and should be rerun.`] : []),
     ...(catalogWarnings + curriculumWarnings ? [`${catalogWarnings + curriculumWarnings} content/curriculum warnings need triage.`] : []),
     ...(release.warnings ? [`Level I release report has ${release.warnings} warnings.`] : []),
     ...(level2Release.warnings ? [`Level II release report has ${level2Release.warnings} warnings.`] : []),
@@ -253,6 +295,9 @@ export function buildReleaseGateReport({
 
   return {
     generatedAt,
+    runId,
+    git,
+    staleGateCount: staleGates.length,
     status: worstStatus(gates.map((gate) => gate.status)),
     summary: {
       catalogErrors,

@@ -7,6 +7,8 @@ describe('AI tutor provider contracts', () => {
     const response = await provider.explainMissedAnswer({ context: { domain: 'cfa', topic: 'ethics' } });
 
     expect(provider.metadata.enabled).toBe(false);
+    expect(provider.metadata.policy.defaultEnabled).toBe(false);
+    expect(provider.metadata.policy.sourceGroundingRequired).toBe(true);
     expect(provider.metadata.capabilities).toEqual([]);
     expect(response.blockedReason).toContain('AI tutoring is not enabled');
     expect((await provider.provideGroundedHint({ context: { domain: 'cfa', topic: 'ethics' } })).blockedReason).toContain('AI tutoring is not enabled');
@@ -26,6 +28,8 @@ describe('AI tutor provider contracts', () => {
     expect(provider.metadata.capabilities).toContain('grounded-hint');
     expect(provider.metadata.capabilities).toContain('next-practice-suggestion');
     expect(response.sourceIds).toEqual(['fi-lo1']);
+    expect(response.citations?.[0]).toMatchObject({ sourceId: 'fi-lo1', locator: 'local-authoring-pack' });
+    expect(response.groundingStatus).toBe('grounded');
     expect(response.safetyFlags).toEqual([]);
 
     const hint = await provider.provideGroundedHint({
@@ -42,7 +46,7 @@ describe('AI tutor provider contracts', () => {
     expect(nextPractice.sourceIds).toEqual(['fi-lo1']);
     expect(
       evaluateTutorResponse(
-        { id: 'weak-topic-summary-fi', capability: 'weak-topic-summary', requiredSourceIds: ['fi-lo1'] },
+        { id: 'weak-topic-summary-fi', capability: 'weak-topic-summary', requiredSourceIds: ['fi-lo1'], requireGrounding: true },
         response,
       ),
     ).toMatchObject({ passed: true, issues: [] });
@@ -52,5 +56,14 @@ describe('AI tutor provider contracts', () => {
         hint,
       ).issues[0],
     ).toContain('Missing required sourceId');
+
+    const refused = await provider.provideGroundedHint({ context: { domain: 'cfa', topic: 'fixed-income' } });
+    expect(refused.blockedReason).toContain('Grounding citations are required');
+    expect(
+      evaluateTutorResponse(
+        { id: 'refused-without-source', capability: 'grounded-hint', requiredSourceIds: [], allowBlocked: true, requireGrounding: true },
+        refused,
+      ),
+    ).toMatchObject({ passed: true, issues: [] });
   });
 });

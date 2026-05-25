@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Database, Download, HardDrive, ShieldCheck, WifiOff, Wrench, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Database, Download, HardDrive, KeyRound, ShieldCheck, WifiOff, Wrench, XCircle } from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
 import { exportVaultData, getVaultHealthReport, previewVaultRepair } from '../lib/learning';
 import { cacheCriticalOfflineRoutes, getOfflineReadinessReport } from '../lib/offlineContentCache';
@@ -33,6 +33,7 @@ export default function SystemHealth() {
   const [storage, setStorage] = useState(null);
   const [cacheNames, setCacheNames] = useState([]);
   const [message, setMessage] = useState('');
+  const [backupPassphrase, setBackupPassphrase] = useState('');
   const [releaseReport, setReleaseReport] = useState(() => buildReleaseGateReport());
   const [vaultHealth, setVaultHealth] = useState(null);
   const [offlineReadiness, setOfflineReadiness] = useState(null);
@@ -89,9 +90,19 @@ export default function SystemHealth() {
     };
   }, []);
 
-  async function handleBackup() {
+  async function handleEncryptedBackup() {
+    if (!backupPassphrase.trim()) {
+      setMessage('Enter a backup passphrase before exporting the encrypted vault.');
+      return;
+    }
+    downloadJson(await exportVaultData({ encryption: { passphrase: backupPassphrase } }));
+    setBackupPassphrase('');
+    setMessage('Encrypted backup exported. Keep the passphrase separate from the backup file.');
+  }
+
+  async function handlePlaintextBackup() {
     downloadJson(await exportVaultData());
-    setMessage('Backup exported. Keep it somewhere safe before long study blocks or browser cleanup.');
+    setMessage('Plaintext backup exported from the advanced path. Prefer encrypted backups for normal vault moves.');
   }
 
   async function handleRepairPreview() {
@@ -123,7 +134,20 @@ export default function SystemHealth() {
         badge="SYSTEM HEALTH"
         title="Offline & Data Safety"
         subtitle="Inspect local storage, cache state, service-worker availability, and backup readiness."
-        actions={<button className="btn btn-primary" onClick={handleBackup}><Download size={16} /> Export Backup</button>}
+        actions={
+          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              className="input"
+              type="password"
+              value={backupPassphrase}
+              onChange={(event) => setBackupPassphrase(event.target.value)}
+              placeholder="Backup passphrase"
+              aria-label="Encrypted backup passphrase"
+              style={{ minWidth: 190 }}
+            />
+            <button className="btn btn-primary" onClick={handleEncryptedBackup}><KeyRound size={16} /> Encrypted Backup</button>
+          </div>
+        }
       />
 
       <div className="grid-4 page-metrics">
@@ -141,6 +165,9 @@ export default function SystemHealth() {
             <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
               Generated {new Date(releaseReport.generatedAt).toLocaleString()} · {releaseReport.summary.level1ExamReadyTopics}/{releaseReport.summary.level1TopicCount} Level I, {releaseReport.summary.level2ExamReadyTopics}/{releaseReport.summary.level2TopicCount} Level II, and {releaseReport.summary.level3ExamReadyTopics}/{releaseReport.summary.level3TopicCount} Level III topics exam-ready
             </p>
+            <p style={{ color: 'var(--text-muted)', margin: 'var(--space-1) 0 0', fontSize: 'var(--fs-sm)' }}>
+              Run {releaseReport.runId || 'runtime-preview'} · Git {releaseReport.git?.shortSha || 'unknown'}{releaseReport.git?.branch ? ` on ${releaseReport.git.branch}` : ''} · {releaseReport.staleGateCount || 0} stale gate(s)
+            </p>
           </div>
           <StatusBadge tone={releaseReport.status === 'ok' ? 'success' : releaseReport.status === 'blocked' ? 'danger' : 'warning'}>
             {releaseReport.status}
@@ -157,9 +184,17 @@ export default function SystemHealth() {
               <small style={{ color: `var(--${gateTone(gate.status)})`, textTransform: 'uppercase', fontWeight: 800 }}>
                 {gate.status} · {gate.category}
                 {typeof gate.ageHours === 'number' ? ` · ${gate.ageHours}h old` : ''}
+                {gate.stale ? ' · stale' : ''}
               </small>
               <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', margin: 'var(--space-2) 0 0' }}>{gate.detail}</p>
               {gate.command && <code style={{ display: 'inline-block', marginTop: 'var(--space-2)' }}>{gate.command}</code>}
+              {(gate.parallelGroup || gate.dependencies?.length || gate.artifactSchema?.id) && (
+                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: 'var(--space-2)' }}>
+                  {gate.parallelGroup ? `Group: ${gate.parallelGroup}` : ''}
+                  {gate.dependencies?.length ? `${gate.parallelGroup ? ' · ' : ''}Depends: ${gate.dependencies.join(', ')}` : ''}
+                  {gate.artifactSchema?.id ? `${gate.parallelGroup || gate.dependencies?.length ? ' · ' : ''}Schema: ${gate.artifactSchema.id}` : ''}
+                </small>
+              )}
               {gate.artifactPaths?.length > 0 && (
                 <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: 'var(--space-2)' }}>
                   Artifacts: {gate.artifactPaths.join(', ')}
@@ -193,6 +228,7 @@ export default function SystemHealth() {
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={handleRepairPreview}><Wrench size={16} /> Repair Preview</button>
             <button className="btn btn-secondary" onClick={handlePersistStorage}>Persist Storage</button>
+            <button className="btn btn-secondary" onClick={handlePlaintextBackup}><Download size={16} /> Plaintext Export</button>
           </div>
         </div>
         <div className="coverage-grid" style={{ marginTop: 'var(--space-4)' }}>
@@ -200,6 +236,10 @@ export default function SystemHealth() {
           <div><strong>{vaultHealth?.orphanedReviews ?? 0}</strong><small>Orphaned reviews</small></div>
           <div><strong>{vaultHealth?.staleIndexes ?? 0}</strong><small>Stale indexes</small></div>
           <div><strong>{vaultHealth?.checksumIssues ?? 0}</strong><small>Checksum issues</small></div>
+          <div><strong>{vaultHealth?.rollbackSnapshots?.length ?? 0}</strong><small>Rollback snapshots</small></div>
+          <div><strong>{vaultHealth?.importJobs?.length ?? 0}</strong><small>Recent import jobs</small></div>
+          <div><strong>{vaultHealth?.sourceBundleManifests?.length ?? 0}</strong><small>Source bundle manifests</small></div>
+          <div><strong>{vaultHealth?.calculatorScenarios?.length ?? 0}</strong><small>Calculator scenarios</small></div>
         </div>
         {vaultHealth?.repairActions?.length > 0 && (
           <ul style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-4)' }}>
