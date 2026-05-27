@@ -7,6 +7,7 @@ import { basename, extname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync, inflateSync } from 'node:zlib';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const DEFAULT_ROOT = 'C:\\Users\\charl\\Downloads\\Compressed';
 const REPORT_DIR = resolve('dist/reports');
@@ -98,18 +99,21 @@ function classifyPath(filePath) {
   const lower = normalized.toLowerCase();
   const ext = extname(filePath).toLowerCase();
   const title = basename(filePath, ext).replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const level = lower.includes('/level 1/')
+  // Match level from the full path AND the title, tolerant of "Level 1", "Level I",
+  // and folder names like "CFA Level 1/" (no leading slash before "level").
+  const levelHint = `${lower} ${title.toLowerCase()}`;
+  const level = /\blevel\s*(?:1|i)\b(?!i)/.test(levelHint)
     ? 'level1'
-    : lower.includes('/level 2/')
+    : /\blevel\s*(?:2|ii)\b(?!i)/.test(levelHint)
       ? 'level2'
-      : lower.includes('/level 3/')
+      : /\blevel\s*(?:3|iii)\b/.test(levelHint)
         ? 'level3'
         : lower.includes('/prerequisites/')
           ? 'prerequisite'
           : lower.includes('/reference books/')
             ? 'reference'
             : 'unknown';
-  const sourceKind = lower.includes('official curriculum')
+  const sourceKind = /official curriculum|program curriculum/.test(levelHint)
     ? 'official-curriculum'
     : lower.includes('schweser') || lower.includes('wiley')
       ? 'prep-provider'
@@ -122,7 +126,7 @@ function classifyPath(filePath) {
     ? 'Schweser'
     : lower.includes('wiley')
       ? 'Wiley'
-      : lower.includes('official curriculum')
+      : /official curriculum|program curriculum|cfa institute/.test(levelHint)
         ? 'CFA Institute'
         : lower.includes('reference books')
           ? 'Reference Books'
@@ -322,6 +326,76 @@ function extractPlainText(format, buffer) {
   return '';
 }
 
+// Real PDF text extraction via pdfjs-dist (the legacy regex extractPdfText above is kept
+// only as a fallback and for the synthetic unit tests). Returns per-page text so chunks
+// can carry a meaningful page locator.
+async function extractPdfPagesWithPdfjs(buffer) {
+  const data = new Uint8Array(buffer);
+  const doc = await getDocument({ data, useSystemFonts: true, isEvalSupported: false, verbosity: 0 }).promise;
+  const pages = [];
+  try {
+    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+      const page = await doc.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const text = content.items
+        .map((item) => (typeof item.str === 'string' ? item.str : ''))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      pages.push({ pageNumber, text });
+      page.cleanup?.();
+    }
+  } finally {
+    await doc.destroy?.();
+  }
+  return { pages, numPages: doc.numPages, charCount: pages.reduce((sum, page) => sum + page.text.length, 0) };
+}
+
+const HEADING_PATTERN = /\b(?:LEARNING MODULE|READING|LEARNING OUTCOMES)\b[^.]{0,90}/i;
+
+function headingForSlice(text) {
+  const match = text.match(HEADING_PATTERN);
+  return match ? match[0].replace(/\s+/g, ' ').trim().slice(0, 90) : undefined;
+}
+
+// Page-aware chunker for the pdfjs path. Keeps the same chunk id/index shape as
+// textChunksFromText but adds a page-range locator and a best-effort heading.
+function pageChunksFromPages(pages, documentId, hash, topicIds, importedAt, { wordsPerChunk = 480, overlap = 60 } = {}) {
+  const words = [];
+  for (const page of pages) {
+    if (!page.text) continue;
+    for (const word of page.text.split(/\s+/)) {
+      if (word) words.push({ word, page: page.pageNumber });
+    }
+  }
+  const chunks = [];
+  const step = Math.max(1, wordsPerChunk - overlap);
+  for (let index = 0; index < words.length; index += step) {
+    const slice = words.slice(index, index + wordsPerChunk);
+    if (!slice.length) break;
+    const chunkText = slice.map((entry) => entry.word).join(' ');
+    const normalizedChunk = normalizeText(chunkText);
+    if (normalizedChunk.length >= 80) {
+      const startPage = slice[0].page;
+      const endPage = slice[slice.length - 1].page;
+      chunks.push({
+        id: `${documentId}:chunk:${String(chunks.length + 1).padStart(4, '0')}`,
+        documentId,
+        chunkIndex: chunks.length,
+        locator: startPage === endPage ? `p. ${startPage}` : `p. ${startPage}-${endPage}`,
+        heading: headingForSlice(chunkText),
+        text: chunkText,
+        normalizedText: normalizedChunk,
+        topicIds,
+        sourceHash: hash,
+        importedAt,
+      });
+    }
+    if (index + wordsPerChunk >= words.length) break;
+  }
+  return chunks;
+}
+
 function probePdfQuality(buffer, canonical = false) {
   const latin = buffer.toString('latin1');
   const pageCount = (latin.match(/\/Type\s*\/Page\b/g) || []).length;
@@ -414,10 +488,34 @@ async function commandIngest(root, options) {
     const hash = sha256(buffer);
     const id = `source:${hash.slice(0, 16)}`;
     const canonical = canonicalFiles.has(file);
-    const text = canonical ? extractPlainText(parsed.format, buffer) : '';
-    const docChunks = canonical ? textChunksFromText(text, id, hash, parsed.topicIds, startedAt) : [];
-    const pdfQuality = parsed.format === 'pdf' ? probePdfQuality(buffer, canonical) : undefined;
-    const needsOcr = Boolean(pdfQuality?.needsOcr || (canonical && parsed.format === 'pdf' && docChunks.length === 0));
+    let text = '';
+    let docChunks = [];
+    let pageCount;
+    let extractableTextChars;
+    if (canonical) {
+      if (parsed.format === 'pdf') {
+        try {
+          const extracted = await extractPdfPagesWithPdfjs(buffer);
+          pageCount = extracted.numPages;
+          extractableTextChars = extracted.charCount;
+          text = extracted.pages.map((page) => page.text).join('\n\n');
+          docChunks = pageChunksFromPages(extracted.pages, id, hash, parsed.topicIds, startedAt);
+        } catch (error) {
+          console.warn(`pdfjs extraction failed for "${parsed.title}": ${error instanceof Error ? error.message : String(error)}; using fallback parser.`);
+        }
+        if (!docChunks.length) {
+          const fallback = probePdfQuality(buffer, canonical);
+          text = text || extractPdfText(buffer);
+          docChunks = textChunksFromText(text, id, hash, parsed.topicIds, startedAt);
+          pageCount = pageCount ?? fallback.pageCount;
+          extractableTextChars = extractableTextChars ?? fallback.extractableTextChars;
+        }
+      } else {
+        text = extractPlainText(parsed.format, buffer);
+        docChunks = textChunksFromText(text, id, hash, parsed.topicIds, startedAt);
+      }
+    }
+    const needsOcr = Boolean(canonical && parsed.format === 'pdf' && docChunks.length === 0);
     chunks.push(...docChunks);
     documents.push({
       id,
@@ -431,9 +529,8 @@ async function commandIngest(root, options) {
       sha256: hash,
       logicalHash: text ? sha256(Buffer.from(normalizeText(text))) : undefined,
       sizeBytes: buffer.length,
-      pageCount: pdfQuality?.pageCount,
-      textOperatorCount: pdfQuality?.textOperatorCount,
-      extractableTextChars: pdfQuality?.extractableTextChars,
+      pageCount,
+      extractableTextChars,
       spineCount:
         parsed.format === 'epub'
           ? readZipEntries(buffer).filter((entry) => /\.(xhtml|html|htm)$/i.test(entry.name)).length
