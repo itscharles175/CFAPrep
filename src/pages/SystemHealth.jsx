@@ -12,7 +12,7 @@ import {
   saveOpenNotebookSettings,
 } from '../lib/openNotebook';
 import { ingestFolder, ingestTextSource, isTauri, pickCfaFolder } from '../lib/desktopIngestion';
-import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments } from '../lib/cfaSourceVault';
+import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 
 function downloadJson(payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -114,6 +114,22 @@ export default function SystemHealth() {
     try {
       const docs = await getCfaSourceDocuments();
       setSourceDocs(docs);
+    } finally {
+      setSourceDocsBusy(false);
+    }
+  }
+
+  async function handleImportSourceBundle(file) {
+    if (!file) return;
+    setSourceDocsBusy(true);
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const result = await importCfaSourceBundle(payload, { mode: 'merge' });
+      await refreshSourceDocs();
+      setMessage(`Imported ${result.documents ?? 0} document(s) and ${result.chunks ?? 0} chunk(s) from ${file.name}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? `Bundle import failed: ${error.message}` : 'Bundle import failed.');
     } finally {
       setSourceDocsBusy(false);
     }
@@ -553,6 +569,20 @@ export default function SystemHealth() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+            <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }} aria-disabled={sourceDocsBusy}>
+              Import .qvsource
+              <input
+                type="file"
+                accept=".qvsource,.json,application/json"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) handleImportSourceBundle(file);
+                  event.target.value = '';
+                }}
+                disabled={sourceDocsBusy}
+              />
+            </label>
             <button className="btn btn-secondary btn-sm" onClick={handleExportSourceBundle} disabled={sourceDocsBusy || sourceDocs.length === 0}>
               Export .qvsource
             </button>
