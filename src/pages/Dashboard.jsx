@@ -33,6 +33,7 @@ const domainIcons = {
 };
 
 const quickTools = [
+  { title: 'Today', icon: CalendarClock, path: '/today', desc: 'One screen, one decision — what to study now' },
   { title: 'Review Inbox', icon: Inbox, path: '/review', desc: 'Due work and weak areas' },
   { title: 'Analytics', icon: BarChart3, path: '/analytics', desc: 'Readiness and trends' },
   { title: 'Flashcards', icon: BadgeCheck, path: '/flashcards', desc: 'Formula and objective drills' },
