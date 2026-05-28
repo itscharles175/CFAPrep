@@ -26,6 +26,7 @@ import {
 } from '../../lib/openNotebook';
 import { parseCitations } from '../../lib/citations';
 import { hasSpeechRecognition, hasSpeechSynthesis, recognizeOnce, recognizeOnceOffline, recordAudioForOfflineStt, sanitizeForSpeech, speak, stopSpeaking } from '../../lib/voice';
+import PodcastPanel from '../../components/PodcastPanel/PodcastPanel';
 
 // Interactive deck for AI-generated flashcards: front visible by default,
 // click reveals the back; small Show all / Hide all controls.
@@ -712,6 +713,15 @@ export default function CfaModule() {
                   </p>
                 )}
               </Surface>
+
+              <div style={{ marginBottom: 'var(--space-6)' }}>
+                <PodcastPanel
+                  level={level}
+                  topic={topic}
+                  title={data.title || 'Topic'}
+                  sourceExcerpts={(reading?.chunks || []).slice(0, 6).map((c) => c.text).filter(Boolean)}
+                />
+              </div>
 
               <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
                 <div className="flex-between qv-mb-2" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>

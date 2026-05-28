@@ -431,3 +431,63 @@ export async function generateFlashcardsFromCurriculum({ settings, topicTitle, c
       ...(typeof item.locator === 'string' && item.locator.trim() ? { locator: item.locator.trim() } : {}),
     }));
 }
+
+/**
+ * Low-level OpenAI-style chat-completion call against the configured local
+ * LLM. Used by callers that need raw text (podcast script generation,
+ * future generic-prompt features). Returns `{ text }`.
+ *
+ * @param {Object} params
+ * @param {string} params.prompt           - User-facing prompt
+ * @param {string} [params.system]         - Optional system prompt
+ * @param {number} [params.temperature=0.4]
+ * @param {number} [params.maxTokens]      - Optional max_tokens hint to the model
+ * @param {Object} [params.settings]       - Override settings; default = saved settings
+ * @param {AbortSignal} [params.signal]
+ * @returns {Promise<{ text: string }>}
+ */
+export async function generateText({
+  prompt,
+  system,
+  temperature = 0.4,
+  maxTokens,
+  settings: overrideSettings,
+  signal,
+}) {
+  const settings = overrideSettings ?? (await getLlmSettings());
+  const base = normalizeBaseUrl(settings?.baseUrl);
+  const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
+
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: String(prompt ?? '') });
+
+  const body = {
+    model,
+    temperature,
+    messages,
+  };
+  if (typeof maxTokens === 'number' && Number.isFinite(maxTokens)) {
+    body.max_tokens = maxTokens;
+  }
+
+  let response;
+  try {
+    response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new Error(
+      `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set.`,
+      { cause: error },
+    );
+  }
+  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content || '';
+  return { text: String(content) };
+}
