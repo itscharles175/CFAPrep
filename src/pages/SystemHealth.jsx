@@ -574,6 +574,38 @@ export default function SystemHealth() {
       <Surface tone="ops" className="ops-report-panel">
         <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
           <div>
+            <StatusBadge tone="exam">Browser Reminders</StatusBadge>
+            <h3 style={{ margin: 'var(--space-2) 0 0' }}>Native review reminders</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+              Grant permission once and QuantVault will surface a desktop notification when you have reviews due. No network — fires from the local service worker.
+            </p>
+          </div>
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={typeof Notification === 'undefined' || Notification.permission === 'granted'}
+            onClick={async () => {
+              if (typeof Notification === 'undefined') {
+                toast.warning('Not supported', 'This browser does not expose the Notification API.');
+                return;
+              }
+              if (Notification.permission === 'granted') return;
+              const perm = await Notification.requestPermission();
+              if (perm === 'granted') {
+                new Notification('QuantVault', { body: 'Reminders enabled — you will be pinged when reviews are due.' });
+                toast.success('Reminders enabled', 'You will be notified when reviews are due.');
+              } else {
+                toast.warning('Reminder declined', 'You can grant permission later from this same button.');
+              }
+            }}
+          >
+            {typeof Notification !== 'undefined' && Notification.permission === 'granted' ? 'Enabled' : 'Enable reminders'}
+          </button>
+        </div>
+      </Surface>
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
+          <div>
             <StatusBadge tone="exam">Exam Date</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>Target exam date (pacing)</h3>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>

@@ -164,7 +164,30 @@ export default function Today() {
     let active = true;
     buildStudyPlan({ pathway: activePathway })
       .then((next) => {
-        if (active) setPlan(next);
+        if (!active) return;
+        setPlan(next);
+        // Best-effort browser reminder: if the user granted permission and has
+        // due reviews today, ping them once per day. Idempotent via a
+        // localStorage marker so reloading /today doesn't re-fire it.
+        try {
+          if (
+            typeof Notification !== 'undefined' &&
+            Notification.permission === 'granted' &&
+            next?.dueCount > 0
+          ) {
+            const today = new Date().toISOString().slice(0, 10);
+            const marker = `qv-reminder-${today}`;
+            if (typeof localStorage !== 'undefined' && localStorage.getItem(marker) !== '1') {
+              localStorage.setItem(marker, '1');
+              new Notification('QuantVault — reviews due', {
+                body: `${next.dueCount} review${next.dueCount === 1 ? '' : 's'} ready in your inbox.`,
+                tag: marker,
+              });
+            }
+          }
+        } catch {
+          // notifications are best-effort
+        }
       })
       .catch(() => undefined);
     return () => {
