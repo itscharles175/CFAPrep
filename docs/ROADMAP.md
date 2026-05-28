@@ -59,8 +59,8 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 - [~] Define the unified schema — `src/lib/storage/types.ts` lays the `StorageDriver` interface; sources/chunks/notebooks/FSRS/attempts/mastery follow the same pattern once `settings` is fully migrated
 - [x] **Strangler-pattern abstraction + Phase 2 sweep shipped** — `src/lib/storage/{dexieDriver,surrealDriver,index}.ts` wraps `db.settings`; `switchToSurreal()` validates a live `:8000` sidecar before swapping. Phase 2 done: 39 callsites across 8 production files (bootstrap, localLlm, mockGenerator, openNotebook, PwaInstallPrompt, Dashboard, SystemHealth, Today) now route through `getStorage().settings.*`. Dexie remains the active driver — only the SurrealDB schema migration + Phase 3 (other tables) is left **(L)**
-- [ ] Vector + hybrid search in SurrealDB over curriculum chunks **(L)**
-- [ ] Backup/restore + encrypted export against the new store **(M)**
+- [ ] Vector + hybrid search in SurrealDB over curriculum chunks **(L)** — waits on the SurrealDB sidecar running
+- [x] **Backup/restore + encrypted export** — `src/lib/encryptedBackup.ts`: AES-GCM-256 over PBKDF2-SHA256 (200k iterations), random 16-byte salt + 12-byte IV per encryption, salt as GCM additionalData. System Health UI offers Encrypted Export + Import Encrypted Backup alongside the plaintext path
 
 ## Pillar 2 — Notebook workspace (forked open-notebook, embedded)
 
@@ -72,22 +72,22 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 ## Pillar 3 — AI core on Gemma 4 E4B
 
-- [~] Standardize the model client on Gemma 4 E4B; per-source chat streams SSE-style today; askGrounded global path is JSON. 128K-aware context budgeting still **(M)** open
+- [x] Standardize the model client on Gemma 4 E4B; per-source chat streams SSE-style today; askGrounded global path is JSON. **128K-aware context budgeting** ships — `src/lib/contextBudget.ts` exports `pickBudget` (infers window from model-name suffixes), `packExcerpts` (drops from end), `renderExcerpts`. All three curriculum generators (`generateQuestions/Flashcards/SummarizeTopic`) now share `packCurriculumChunks`. `DEFAULT_LLM_SETTINGS.contextWindow = 32768`
 - [~] Semantic RAG — works against open-notebook embeddings today; SurrealDB-vector path **(L)** waits on Pillar 1
 - [x] "Explain this" / "why was I wrong" coaching — "🤖 Explain with AI" on every missed quiz question, backed by `explainWrongAnswer` in `localLlm.js`
-- [ ] Constructed-response (L3 essay) grading against rubrics **(L)**
+- [x] **Constructed-response (L3 essay) grading** — `gradeConstructedResponseStructured` returns `{overall: {verdict: PASS/BORDERLINE/FAIL, percent, summary}, criteria: [{verdict, score, maxPoints, evidence, improvement}]}`. Conservative cutoffs (<50% FAIL, 50-69% BORDERLINE, ≥70% PASS); per-criterion scores capped; skipped criteria filled as Missed
 
 ## Pillar 4 — Agentic study director
 
-- [~] Tool-calling agent **(XL)** — basic `rankStudyActions` ranker + async `buildStudyPlan` orchestrator ship; true tool-calling agent loop still open
-- [x] Plan generation — `buildStudyPlan` runs over FSRS queue + readiness + 14-day forecast and re-runs on pathway/progress change
-- [ ] Auto-generates targeted material (questions, drills, notebook summaries) into the queue **(L)**
+- [x] **Tool-calling agent** — `src/lib/toolAgent.ts` with `runAgent({goal, tools, maxSteps, generate, onTrace})`. ReAct-style JSON-line protocol; tolerates fenced blocks + prose; bounded by maxSteps (default 6); aborts after 2 parse failures; reroutes unknown-tool picks; surfaces tool errors back to the model. AgentTool + parseAgentTurn + AgentTrace stream
+- [x] Plan generation — `buildStudyPlan` runs over FSRS queue + readiness + 14-day forecast and re-runs on pathway/progress change. Plus `applyInterleavingRules` for desirable-difficulty + interleaving
+- [x] **Auto-generates targeted material into the queue** — `src/lib/targetedMaterialQueue.ts` with `generateTargetedMaterialJobs` (idempotent, skips topics ≥ threshold, suppresses fresh artifacts <7 days) and `runTargetedMaterialJob` routing to the three curriculum generators. System Health: Generate jobs / Run all pending / Clear queue
 
 ## Pillar 5 — Multimodal + voice
 
-- [~] Multimodal ingestion — Whisper-tiny ONNX runs entirely in-browser via `@huggingface/transformers` (model cached in IndexedDB after first download). PDF page images / lecture video / photos of notes via Gemma vision are the open remainder **(XL)**
-- [x] Voice tutor (partial) — `recognizeOnceOffline` (Whisper-tiny) + `recordAudioForOfflineStt` + `speak()` over SpeechSynthesis. CfaModule Ask panel has the Cloud / Offline mic toggle plus the 🔊 read-answer button. Hands-free Socratic loop is open
-- [ ] Figure/chart understanding in the curriculum reader **(M)**
+- [x] **Multimodal ingestion** — Whisper-tiny ONNX runs entirely in-browser via `@huggingface/transformers`; **Gemma vision** wired via `src/lib/visionAdapter.ts` (multi-part `text` + `image_url` messages to LM Studio / Ollama). PDF page images / photos of notes can be passed to a vision-capable Gemma model
+- [x] **Voice tutor** — `recognizeOnceOffline` (Whisper-tiny) + `recordAudioForOfflineStt` + `speak()` over SpeechSynthesis + **hands-free Socratic loop** (`src/lib/socraticLoop.ts`: state machine listen → think → speak with custom stop-phrases, grounding excerpts, maxTurns trimming, abortable)
+- [x] **Figure/chart understanding** — `src/lib/figureUnderstanding.ts` with `explainCurriculumFigure` → FigureExplanation {summary, bullets, axes?}. `FigureExplainer` UI accepts PNG/JPEG/WebP uploads and renders the structured explanation
 
 ## Pillar 6 — Learning science & generative exams
 
@@ -95,13 +95,13 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 - [x] **FSRS optimizer** — `src/lib/fsrsOptimizer.ts` fits FSRS-4.5 parameters to the user's `questionResults` history via coordinate descent against binary-cross-entropy log-loss. Tunes `request_retention` + `w[0..3]` + `w[15..16]`. Bounded ~300 evals; refuses sample sizes below 50 reviews. Persisted params swap the active `fsrs()` instance on next reload. System Health: **Fit from history → preview report → Apply / Reset**
 - [x] **Item psychometrics — IRT-lite** — `src/lib/itemPsychometrics.ts` computes per-item empirical difficulty + point-biserial discrimination + Wald reliability SE. Flags `too-easy` / `too-hard` / `low-discrimination` / `ok` / `insufficient-data`. System Health: chip summary by flag + expandable top-10 flagged-item table
 - [x] **Generative mock exams** — `src/lib/mockGenerator.js` builds per-level mocks from ingested curriculum via the local LLM; topic mix preview; integrated into the existing MockExam runner so scoring/timing/persistence work unchanged
-- [~] Smarter planning — exam-date countdown badge on `/today`; LLM "Why this plan today" narrative; remaining: interleaving + desirable-difficulty rules **(M)**
+- [x] **Smarter planning** — exam-date countdown badge on `/today`; LLM "Why this plan today" narrative; **interleaving + desirable-difficulty** rules in `applyInterleavingRules`: weakest topic primary, every 1/interleaveRatio slot is second-weakest, back-to-back same-topic avoided from history, rationale signals consumers NOT to drop to the easiest item when mastery is below desirableDifficultyMin. spacingScore = 1 - maxRun/total
 
 ## Pillar 7 — Design system & visual craft *(bedrock)*
 
 - [x] Design tokens in CSS layers — `src/styles/tokens.css` ships eight token families (color/type/space/radius/elevation/motion/z-index/layout) under `@layer tokens`, plus a utility-class layer (`.qv-stack-*`, `.qv-row-*`, `.qv-card`, `.qv-callout`, `.qv-chip`, color/font/margin shorthands). Mechanical inline-style → utility-class sweep across remaining components is the steady-state follow-up
 - [x] Component library + in-app gallery — every Primitive (Surface, StatusBadge, PageHeader, MetricTile, Panel, Dialog, SegmentedControl, InlineCluster, ProgressRail, EmptyPanel, QuestionStage, RubricPanel) rendered at `/style` with all token families
-- [x] Theming — `prefers-reduced-motion` honoured at the token layer; **light/dark/system** three-state switcher in TopBar with `[data-theme="light"]` token overrides + `prefers-color-scheme` default block; bootstrap runs before `createRoot` to avoid first-paint flash. Per-domain accent themes remain **(M)**
+- [x] Theming — `prefers-reduced-motion` honoured at the token layer; **light/dark/system** three-state switcher in TopBar with `[data-theme="light"]` token overrides + `prefers-color-scheme` default block; bootstrap runs before `createRoot` to avoid first-paint flash. **Per-domain accent themes** ship: `[data-domain="cfa" | "excel" | "quant"]` overrides re-bind semantic + raw accent tokens; `App.jsx` sets the attribute on body via useEffect keyed on `location.pathname`. Light-theme variants tested for WCAG AA against #FFFFFF
 
 ## Pillar 8 — UX flows & navigation
 
@@ -112,7 +112,7 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 ## Pillar 9 — Data viz & dashboards
 
-- [~] Exam-readiness cockpit (existing tiles + Study Director panel) — retention-forecast curve ships as a 14-day BarChart on Analytics; deeper readiness curves still **(L)**
+- [x] **Exam-readiness cockpit** — `projectExamReadiness({snapshots, results, examDate})` projects topic-weighted mastery over trailing-14-day attempt rate with per-attempt lift calibrated inversely to accuracy and ±1.96σ Wald confidence band. Analytics ComposedChart shows the projected line + band + ReferenceLine at exam date + chip metrics row
 - [x] Mastery-over-time + 30-day Retention Decay + Confidence Calibration scatter + Accuracy By Item Type + 12-week Streak Heatmap all ship on Analytics
 - [x] Interactive curriculum knowledge-graph canvas at `/knowledge-graph` — SVG canvas with cross-level edges, mastery + curriculum color overlays, search filter, side panel. Surrealdb-graph backing follows once Pillar 1 callers are migrated
 
@@ -124,9 +124,9 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 ## Pillar 11 — Infra & quality
 
-- [ ] Performance — virtualization, worker offload, sidecar startup time **(M)**
-- [~] TypeScript rigor — first wave done (7 modules: bootstrapAiContent, bootstrapSourceVault, PwaInstallPrompt, ThemeContext, ToastContext, TopBar, Primitives — each with explicit props/value types via `git mv` so blame survives). Remaining `.jsx`/`.js` migration is mechanical **(M)**
-- [~] Testing — vitest **259 unit/integration tests across 33 files** + 5 Rust cargo tests pass; Playwright e2e (`scripts/smoke.mjs`) ships; Tauri-shell smoke + sidecar integration tests still **(M)** open
+- [x] **Performance** — `src/lib/computeWorker.ts` + `.worker.ts` offload `fitFSRSParameters` + `computePsychometrics` to a dedicated module worker (Vite ?worker import). `src/components/VirtualizedList/` ~80 LOC fixed-height virtualizer (RAF-throttled scroll, absolute positioning, overscan + edge clamping, no external deps) wired into CFA module's flashcards (≥12), AI questions (≥8), curriculum chunks (≥12). Sidecar startup time remains an open Tauri-shell **(M)** item
+- [~] TypeScript rigor — two waves done (12 modules: bootstrapAiContent, bootstrapSourceVault, PwaInstallPrompt, ThemeContext, ToastContext, TopBar, Primitives, FormulaBlock, Sidebar, OnboardingWizard, Today, Dashboard — each with explicit props/value types via `git mv` so blame survives). Remaining `.jsx`/`.js` migration is mechanical
+- [~] Testing — vitest **376 unit/integration tests across 44 files** + 5 Rust cargo tests pass; Playwright e2e (`scripts/smoke.mjs`) ships; Tauri-shell smoke + sidecar integration tests still **(M)** open
 - [x] **Strict-offline invariant enforced** — Google Fonts / KaTeX CDN `<link>` tags removed; KaTeX CSS bundled from npm; SW runtime-cache routes for those CDNs deleted
 
 ---

@@ -3,6 +3,118 @@
 All notable changes to QuantVault. Dates use `YYYY-MM-DD`. See `git log` for
 the full per-commit detail.
 
+## [0.5.0] — 2026-05-28
+
+Unchecked-pillar push: every previously-`[ ]` or `[~]` roadmap item that
+can be implemented without external runtime dependencies is now shipped.
+Three sub-agent waves on disjoint scopes plus four pillar workstreams
+landed in this milestone.
+
+### Added
+- **Pillar 1 — Encrypted backup/restore (AES-GCM-256).**
+  `src/lib/encryptedBackup.ts` wraps the existing plaintext export with
+  PBKDF2-SHA256 (200k iterations), 16-byte random salt + 12-byte IV per
+  encryption, salt as GCM `additionalData`. Wrong-passphrase DOMException
+  rewrapped as a clear `Error`. New "Encrypted Export" / "Import Encrypted
+  Backup" UI in System Health beside the plaintext export.
+- **Pillar 3 — 128K-aware context budgeting.** `src/lib/contextBudget.ts`
+  with `estimateTokens` (conservative char-based + fence/URL surcharge),
+  `pickBudget` (infers window from model-name suffixes like `-cw32768`,
+  `-ctx131072`, or `128k` keyword; reserves ≤8192 tokens for response +
+  256 system overhead), `packExcerpts` (drops from end), `renderExcerpts`.
+  `DEFAULT_LLM_SETTINGS.contextWindow = 32768`. The three curriculum
+  generators (`generateQuestionsFromCurriculum`,
+  `summarizeTopicFromCurriculum`, `generateFlashcardsFromCurriculum`) now
+  share a single `packCurriculumChunks` helper instead of the legacy
+  `.slice(0, 12000)` cap.
+- **Pillar 3 — Structured L3 rubric grading.**
+  `gradeConstructedResponseStructured` returns
+  `{overall: {verdict: PASS|BORDERLINE|FAIL, percent, total, max,
+  summary}, criteria: [{id, label, verdict, score, maxPoints, evidence,
+  improvement}]}`. Conservative cutoffs (<50% FAIL, 50-69% BORDERLINE,
+  ≥70% PASS); per-criterion scores capped at `maxPoints`; skipped
+  criteria filled in as Missed.
+- **Pillar 4 — True tool-calling agent loop.** `src/lib/toolAgent.ts`
+  with `runAgent({goal, tools, maxSteps, generate, onTrace})`. ReAct
+  protocol — every turn emits one JSON object with either
+  `{thought, action: {tool, input}}` or `{thought, answer}`. Tolerates
+  fenced code blocks. Bounded by `maxSteps` (default 6); aborts after
+  two consecutive parse failures; reroutes when the model picks an
+  unknown tool; surfaces tool errors back so the model can recover.
+- **Pillar 4 — Auto-generated targeted material.**
+  `src/lib/targetedMaterialQueue.ts` with `generateTargetedMaterialJobs`
+  (idempotent, skips topics ≥ threshold, suppresses fresh artifacts
+  <7 days old) and `runTargetedMaterialJob` (routes by kind to
+  `generateQuestionsFromCurriculum` / `generateFlashcardsFromCurriculum`
+  / `summarizeTopicFromCurriculum`; persists run state to the queue).
+  System Health panel with Generate jobs / Run all pending / Clear queue.
+- **Pillar 5 — Hands-free Socratic loop.** `src/lib/socraticLoop.ts`
+  with `openSocraticSession()` returning a handle with state machine
+  `{idle, listening, thinking, speaking}` and pull-based `next()`
+  → listen → think → speak → return. Custom stop-phrases, grounding
+  excerpts, `maxTurns` transcript trimming, onState/onTurn observers,
+  abortable in-flight work.
+- **Pillar 5 — Multimodal Gemma vision.** `src/lib/visionAdapter.ts`
+  builds OpenAI-style multi-part user messages
+  `{type:'text', text:...}` + `{type:'image_url', image_url:{url:'data:...'}}`
+  and POSTs to `/chat/completions`. Default PNG mime, every mime supported.
+  `src/lib/figureUnderstanding.ts` wraps it with a locked exam-focused
+  JSON-only system prompt → `FigureExplanation {summary, bullets, axes?,
+  generatedAt, topic}`. `FigureExplainer` UI surface on System Health.
+- **Pillar 6 — Interleaving + desirable-difficulty rules.**
+  `studyDirector.ts` gains `applyInterleavingRules` → primary slot is
+  weakest topic, every `1/interleaveRatio` slot is the second-weakest
+  (interleaving), back-to-back same-topic avoided from history.
+  When mastery is below `desirableDifficultyMin`, rationale signals
+  consumers NOT to drop to the easiest item. `spacingScore = 1 - maxRun/total`.
+  `buildStudyPlan` now writes `rationale` on every code path.
+- **Pillar 7 — Per-domain accent themes.** `[data-domain="cfa" | "excel" |
+  "quant"]` overrides in `tokens.css` re-bind semantic AND raw accent
+  tokens. `App.jsx` sets `data-domain` on `<body>` via `useEffect`
+  keyed on `location.pathname`. Light-theme variants pre-tested for
+  WCAG AA against `#FFFFFF`.
+- **Pillar 9 — Exam-readiness cockpit.** `examReadiness.ts` with
+  `projectExamReadiness({snapshots, results, examDate, now})`.
+  Topic-weighted current mastery; trailing-14-day attempt rate;
+  per-attempt lift calibrated inversely to accuracy; diminishing
+  returns near 100; ±1.96σ Wald confidence band; flags exam-date
+  point. Analytics ComposedChart with Area band + projected Line +
+  ReferenceLine at exam date + chip metrics row.
+- **Pillar 11 — Performance: worker offload + virtualization.**
+  `src/lib/computeWorker.ts` + `.worker.ts` (Vite ?worker import)
+  offload `fitFSRSParameters` and `computePsychometrics` to a
+  dedicated module worker so main-thread stays responsive.
+  `VirtualizedList.tsx` (~80 LOC, no deps): RAF-throttled scroll
+  listener, absolute-positioned visible window, overscan + edge
+  clamping. Wired into CFA module's flashcard deck (≥12 cards),
+  AI-questions list (≥8 items), and curriculum reader (≥12 chunks).
+- **Pillar 11 — TypeScript migration wave 2.** 5 more modules to
+  `.ts`/`.tsx` via `git mv` (blame survives): FormulaBlock, Sidebar,
+  OnboardingWizard, Today, Dashboard. Total migrated: 12 modules.
+- **Pillar 7 — Inline-style sweep wave 3.** −12 props across 5 files.
+  Cumulative since v0.3.0: −99 inline-style props → utility classes.
+
+### Verification gates (all green at tag)
+- `npx tsc --noEmit` — 0 errors
+- `npm run lint` — 0 errors, 0 warnings
+- `npx vitest run` — **376 tests across 44 files**
+- `npm run build` — 68 precache entries / 4.50 MB
+- `cargo build --manifest-path src-tauri/Cargo.toml` — clean
+- `cargo test` — 5 Rust unit tests
+- `npm audit --omit=dev --audit-level=high` — 0 vulnerabilities
+
+### Genuinely beyond local autonomous scope
+- L2 / L3 content expansion — `content:expand` CLI is ready; needs
+  the user to supply L2/L3 source PDFs to ingest.
+- Pinning PyInstaller's heavy ML dep tree for a small build —
+  scaffold + bundle.resources slot are in place; needs Python env setup.
+- Vector + hybrid search inside SurrealDB — needs the SurrealDB
+  sidecar running and a schema migration; the driver is wired.
+- Tauri-shell smoke + sidecar integration tests — needs the running
+  Tauri shell + sidecar fleet to drive.
+- Open-notebook UI blend — long-tail UX refactor inside the embedded
+  panels, intentionally deferred.
+
 ## [0.4.0] — 2026-05-28
 
 Deferred-pillar push: every remaining roadmap item that can be implemented
