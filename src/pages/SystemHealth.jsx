@@ -3,6 +3,7 @@ import { Database, Download, HardDrive, KeyRound, ShieldCheck, WifiOff, Wrench }
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
 import { exportVaultData, getVaultHealthReport, previewVaultRepair } from '../lib/learning';
 import { cacheCriticalOfflineRoutes, getOfflineReadinessReport } from '../lib/offlineContentCache';
+import { checkLlmConnection, getLlmSettings, LLM_PRESETS, saveLlmSettings } from '../lib/localLlm';
 
 function downloadJson(payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -22,6 +23,9 @@ export default function SystemHealth() {
   const [vaultHealth, setVaultHealth] = useState(null);
   const [offlineReadiness, setOfflineReadiness] = useState(null);
   const [persisted, setPersisted] = useState(null);
+  const [llm, setLlm] = useState(null);
+  const [llmStatus, setLlmStatus] = useState(null);
+  const [llmTesting, setLlmTesting] = useState(false);
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -58,6 +62,29 @@ export default function SystemHealth() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    getLlmSettings().then((settings) => {
+      if (active) setLlm(settings);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleSaveLlm() {
+    const saved = await saveLlmSettings(llm);
+    setLlm(saved);
+    setMessage('Local AI settings saved.');
+  }
+
+  async function handleTestLlm() {
+    setLlmTesting(true);
+    const result = await checkLlmConnection(llm);
+    setLlmStatus(result);
+    setLlmTesting(false);
+  }
 
   async function handleEncryptedBackup() {
     if (!backupPassphrase.trim()) {
@@ -156,6 +183,53 @@ export default function SystemHealth() {
           <ul style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-4)' }}>
             {vaultHealth.repairActions.map((action) => <li key={action}>{action}</li>)}
           </ul>
+        )}
+      </Surface>
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+          <div>
+            <StatusBadge tone="accent">Local AI</StatusBadge>
+            <h3 style={{ margin: 'var(--space-2) 0 0' }}>On-device generation (Ollama / LM Studio)</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+              Point QuantVault at a local OpenAI-compatible model server. Fully offline — no cloud, no API key. Powers practice generated from your ingested curriculum.
+            </p>
+          </div>
+        </div>
+        {llm && (
+          <>
+            <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Base URL</span>
+                <input className="input" value={llm.baseUrl} onChange={(event) => setLlm({ ...llm, baseUrl: event.target.value })} placeholder="http://localhost:11434/v1" aria-label="Local model base URL" />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Model</span>
+                <input className="input" value={llm.model} onChange={(event) => setLlm({ ...llm, model: event.target.value })} placeholder="llama3.1" aria-label="Local model name" />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
+                <input type="checkbox" checked={llm.enabled} onChange={(event) => setLlm({ ...llm, enabled: event.target.checked })} />
+                <span>Enable AI generation</span>
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+              {LLM_PRESETS.map((preset) => (
+                <button key={preset.label} className="btn btn-secondary btn-sm" onClick={() => setLlm({ ...llm, baseUrl: preset.baseUrl })}>{preset.label}</button>
+              ))}
+              <button className="btn btn-primary" onClick={handleSaveLlm}>Save</button>
+              <button className="btn btn-secondary" onClick={handleTestLlm} disabled={llmTesting}>{llmTesting ? 'Testing…' : 'Test Connection'}</button>
+              {llmStatus && (
+                <StatusBadge tone={llmStatus.ok ? 'success' : 'danger'}>
+                  {llmStatus.ok ? `Connected · ${llmStatus.models.length} model(s)` : `Offline · ${llmStatus.error}`}
+                </StatusBadge>
+              )}
+            </div>
+            {llmStatus?.ok && llmStatus.models.length > 0 && (
+              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', marginTop: 'var(--space-2)' }}>
+                Available models: {llmStatus.models.slice(0, 8).join(', ')}
+              </p>
+            )}
+          </>
         )}
       </Surface>
 

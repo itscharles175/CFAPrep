@@ -11,6 +11,7 @@ import { EmptyPanel, PageHeader, ProgressRail, SegmentedControl, StatusBadge, Su
 import { SourceRail } from '../../components/SourceContext';
 import { getCfaSourceReadingForTopic } from '../../lib/cfaSourceVault';
 import { bootstrapSourceVault } from '../../lib/bootstrapSourceVault';
+import { generateQuestionsFromCurriculum, getCachedGeneratedQuestions, getLlmSettings, saveCachedGeneratedQuestions } from '../../lib/localLlm';
 
 export default function CfaModule() {
   const { level, topic } = useParams();
@@ -34,6 +35,9 @@ export default function CfaModule() {
   const [reading, setReading] = useState({ document: null, chunks: [] });
   const [readingView, setReadingView] = useState('lessons');
   const [chunkLimit, setChunkLimit] = useState(6);
+  const [aiQuestions, setAiQuestions] = useState([]);
+  const [aiState, setAiState] = useState('idle');
+  const [aiError, setAiError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +98,46 @@ export default function CfaModule() {
       cancelled = true;
     };
   }, [data, level, topic]);
+
+  // Phase 4: load any previously cached AI-generated practice for this topic.
+  useEffect(() => {
+    let cancelled = false;
+    if (!topic) return undefined;
+    getCachedGeneratedQuestions(level, topic).then((cached) => {
+      if (cancelled) return;
+      setAiQuestions(cached?.questions || []);
+      setAiState(cached?.questions?.length ? 'done' : 'idle');
+      setAiError('');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [level, topic]);
+
+  async function handleGenerate() {
+    setAiState('loading');
+    setAiError('');
+    try {
+      const settings = await getLlmSettings();
+      if (!settings.enabled) {
+        setAiState('error');
+        setAiError('Enable a local model in System Health → Local AI first.');
+        return;
+      }
+      const questions = await generateQuestionsFromCurriculum({
+        settings,
+        topicTitle: data.title,
+        chunks: reading.chunks.slice(0, 14),
+        count: 4,
+      });
+      setAiQuestions(questions);
+      setAiState('done');
+      await saveCachedGeneratedQuestions(level, topic, questions);
+    } catch (error) {
+      setAiState('error');
+      setAiError(error instanceof Error ? error.message : 'Generation failed.');
+    }
+  }
 
   async function handleSaveNote() {
     if (!data || !topic) return;
@@ -236,6 +280,32 @@ export default function CfaModule() {
                   Show more curriculum ({reading.chunks.length - chunkLimit} sections left)
                 </button>
               )}
+
+              <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+                <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                  <div>
+                    <StatusBadge tone="accent">AI practice</StatusBadge>
+                    <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>Generate questions from this curriculum with your local model.</p>
+                  </div>
+                  <button className="btn btn-primary" onClick={handleGenerate} disabled={aiState === 'loading'}>
+                    {aiState === 'loading' ? 'Generating…' : aiQuestions.length ? 'Regenerate' : 'Generate'}
+                  </button>
+                </div>
+                {aiState === 'error' && <p style={{ color: 'var(--danger)', margin: 0 }}>{aiError}</p>}
+                {aiQuestions.map((question, qi) => (
+                  <div key={question.id} style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
+                    <strong>{qi + 1}. {question.question}</strong>
+                    <ul style={{ margin: 'var(--space-2) 0', paddingLeft: 'var(--space-5)' }}>
+                      {question.options.map((option, oi) => (
+                        <li key={oi} style={{ color: oi === question.correct ? 'var(--success)' : 'var(--text-secondary)', fontWeight: oi === question.correct ? 700 : 400 }}>
+                          {option}{oi === question.correct ? ' ✓' : ''}
+                        </li>
+                      ))}
+                    </ul>
+                    {question.explanation && <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>{question.explanation}</p>}
+                  </div>
+                ))}
+              </Surface>
             </>
           ) : (
             <>
