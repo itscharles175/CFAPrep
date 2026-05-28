@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Activity, BarChart3, Clock, Gauge, Layers, Target } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader, MetricCard, Panel } from '../components/ui/Primitives';
 import { getAnalyticsSummary } from '../lib/learning';
-import { forecastReviewLoad } from '../lib/progressStore';
+import { db, forecastReviewLoad } from '../lib/progressStore';
 import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 
@@ -21,6 +21,7 @@ export default function Analytics() {
   const [activePathway] = useLevel3Pathway();
   const [summary, setSummary] = useState(null);
   const [forecast, setForecast] = useState([]);
+  const [masteryTrend, setMasteryTrend] = useState([]);
 
   useEffect(() => {
     let active = true;
@@ -30,6 +31,30 @@ export default function Analytics() {
     forecastReviewLoad(14, new Date(), { level3Pathway: activePathway })
       .then((rows) => {
         if (active) setForecast(rows || []);
+      })
+      .catch(() => undefined);
+
+    // Mastery-over-time: aggregate masterySnapshots by lastAttemptAt date
+    // (last 30 days), report daily mean score across topics touched that day.
+    db.masterySnapshots
+      .toArray()
+      .then((snapshots) => {
+        if (!active) return;
+        const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        const byDay = new Map();
+        for (const snap of snapshots) {
+          const at = Date.parse(snap.lastAttemptAt);
+          if (!Number.isFinite(at) || at < cutoff) continue;
+          const day = snap.lastAttemptAt.slice(0, 10);
+          const bucket = byDay.get(day) || { sum: 0, count: 0 };
+          bucket.sum += snap.score;
+          bucket.count += 1;
+          byDay.set(day, bucket);
+        }
+        const trend = [...byDay.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([day, { sum, count }]) => ({ day: day.slice(5), score: Math.round(sum / count) }));
+        setMasteryTrend(trend);
       })
       .catch(() => undefined);
     return () => {
@@ -86,6 +111,31 @@ export default function Analytics() {
           </div>
         </Panel>
       </div>
+
+      <Panel
+        tone="analytics"
+        title="Mastery Over Time"
+        subtitle="Average mastery score across topics touched on each day (last 30 days)."
+      >
+        {masteryTrend.length === 0 ? (
+          <p className="muted-copy">No mastery snapshots yet — answer a few quiz questions to populate the trend.</p>
+        ) : (
+          <div style={{ width: '100%', height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={masteryTrend} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="day" stroke="var(--text-muted)" fontSize={12} />
+                <YAxis stroke="var(--text-muted)" domain={[0, 100]} fontSize={12} />
+                <Tooltip
+                  contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
+                  labelStyle={{ color: 'var(--text-secondary)' }}
+                />
+                <Line type="monotone" dataKey="score" name="Mastery %" stroke="var(--success, #34d399)" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </Panel>
 
       <Panel
         tone="analytics"
