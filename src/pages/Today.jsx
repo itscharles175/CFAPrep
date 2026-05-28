@@ -281,7 +281,7 @@ export default function Today() {
           ) : null
         }
         actions={
-          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+          <div className="qv-row-2">
             <div
               style={{
                 display: 'flex',
@@ -296,7 +296,7 @@ export default function Today() {
               }}
               title="Study session timer — counts elapsed focus time; persists to studySessions on Stop"
             >
-              <span style={{ fontWeight: 600 }}>{formatTimer(displaySeconds)}</span>
+              <span className="qv-fw-semibold">{formatTimer(displaySeconds)}</span>
               {timer.state === 'idle' && (
                 <button className="btn-icon btn-ghost" onClick={startTimer} aria-label="Start study timer">▶</button>
               )}
@@ -322,13 +322,13 @@ export default function Today() {
 
       {!plan ? (
         <Surface tone="study" density="compact">
-          <p className="muted-copy" style={{ margin: 0 }}>Loading your plan…</p>
+          <p className="muted-copy qv-m-0">Loading your plan…</p>
         </Surface>
       ) : (
         <>
           <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
             <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
-              <p className="muted-copy" style={{ margin: 0 }}>{plan.headline}</p>
+              <p className="muted-copy qv-m-0">{plan.headline}</p>
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={generateNarrative}
@@ -341,21 +341,14 @@ export default function Today() {
 
             {narrative.state === 'done' && narrative.text && (
               <p
-                style={{
-                  marginTop: 'var(--space-3)',
-                  padding: 'var(--space-3)',
-                  borderLeft: '3px solid var(--accent)',
-                  background: 'var(--surface-2, rgba(120,180,255,0.06))',
-                  borderRadius: 'var(--radius-md, 8px)',
-                  whiteSpace: 'pre-line',
-                  lineHeight: 1.55,
-                }}
+                className="qv-callout qv-mt-3"
+                style={{ whiteSpace: 'pre-line' }}
               >
                 {narrative.text}
               </p>
             )}
             {narrative.state === 'error' && (
-              <p style={{ color: 'var(--danger)', marginTop: 'var(--space-2)', fontSize: 'var(--fs-sm)' }}>
+              <p className="qv-text-danger qv-fs-sm qv-mt-2">
                 {narrative.error}
               </p>
             )}
@@ -381,7 +374,7 @@ export default function Today() {
                 <div style={{ flex: 1 }}>
                   <StatusBadge tone={toneForKind(top.kind)}>{top.kind.replace('-', ' ')}</StatusBadge>
                   <h2 style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>{top.title}</h2>
-                  <p className="muted-copy" style={{ margin: 0 }}>{top.reason}</p>
+                  <p className="muted-copy qv-m-0">{top.reason}</p>
                 </div>
                 <ChevronRight size={28} style={{ flexShrink: 0 }} />
               </Link>
@@ -391,7 +384,7 @@ export default function Today() {
           {rest.length > 0 && (
             <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-6)' }}>
               <StatusBadge tone="accent">Then</StatusBadge>
-              <ul style={{ listStyle: 'none', margin: 'var(--space-3) 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              <ul className="qv-stack-2 qv-mt-3" style={{ listStyle: 'none', padding: 0, marginBottom: 0 }}>
                 {rest.map((action, index) => (
                   <li key={`${action.kind}-${index}`}>
                     <Link
@@ -407,7 +400,7 @@ export default function Today() {
                         color: 'inherit',
                       }}
                     >
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                      <span className="qv-row-3">
                         <ActionIconRender kind={action.kind} size={18} />
                         <span>
                           <strong style={{ display: 'block' }}>{action.title}</strong>
@@ -427,8 +420,8 @@ export default function Today() {
               <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
                 <div>
                   <StatusBadge tone="warning"><Sparkles size={14} /> Drill your weakest topic</StatusBadge>
-                  <h3 style={{ margin: 'var(--space-2) 0 0' }}>{weakAction.title}</h3>
-                  <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>{weakAction.reason}</p>
+                  <h3 className="qv-mt-2" style={{ marginBottom: 0 }}>{weakAction.title}</h3>
+                  <p className="muted-copy qv-mt-1" style={{ marginBottom: 0 }}>{weakAction.reason}</p>
                 </div>
                 <button
                   className="btn btn-primary"
@@ -441,7 +434,7 @@ export default function Today() {
               </div>
 
               {drill.state === 'error' && (
-                <p style={{ color: 'var(--danger)', margin: 'var(--space-2) 0 0' }}>{drill.error}</p>
+                <p className="qv-text-danger qv-mt-2" style={{ marginBottom: 0 }}>{drill.error}</p>
               )}
 
               {drill.questions.length > 0 && (() => {
@@ -451,10 +444,10 @@ export default function Today() {
                   (q) => drillAnswers[q.id] === q.correct,
                 ).length;
                 return (
-                  <div style={{ marginTop: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                  <div className="qv-stack-3 qv-mt-3">
                     {answered === total && (
-                      <p className="muted-copy" style={{ margin: 0 }}>
-                        Score: <strong style={{ color: 'var(--success)' }}>{correct}</strong>
+                      <p className="muted-copy qv-m-0">
+                        Score: <strong className="qv-text-success">{correct}</strong>
                         {' / '}
                         {total}
                       </p>
@@ -465,16 +458,12 @@ export default function Today() {
                       return (
                         <div
                           key={question.id}
-                          style={{
-                            padding: 'var(--space-3)',
-                            borderRadius: 'var(--radius-md, 8px)',
-                            border: '1px solid var(--border)',
-                          }}
+                          className="qv-card"
                         >
                           <strong>
                             {qi + 1}. {question.question}
                           </strong>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', margin: 'var(--space-2) 0' }}>
+                          <div className="qv-stack-1" style={{ margin: 'var(--space-2) 0' }}>
                             {question.options.map((option, oi) => {
                               let bg = 'transparent';
                               let color = 'inherit';
@@ -520,7 +509,7 @@ export default function Today() {
                             })}
                           </div>
                           {answered && question.explanation && (
-                            <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>
+                            <p className="qv-text-muted qv-fs-sm qv-m-0">
                               {question.explanation}
                             </p>
                           )}

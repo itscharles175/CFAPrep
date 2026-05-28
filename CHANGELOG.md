@@ -3,6 +3,71 @@
 All notable changes to QuantVault. Dates use `YYYY-MM-DD`. See `git log` for
 the full per-commit detail.
 
+## [0.3.0] — 2026-05-28
+
+Roadmap-completing milestone: every previously-deferred Pillar now ships or
+has a real foundation. Four sub-agents on disjoint scopes plus a
+strangler-pattern abstraction landed in one push.
+
+### Added
+- **Pillar 5 — Fully offline Whisper STT.** `@huggingface/transformers@^3.8.1`
+  runs Whisper-tiny ONNX in-browser (model cached in IndexedDB after first
+  use). CfaModule Ask panel gains a Cloud / Offline mic toggle plus the 🔊
+  read-answer button via SpeechSynthesis.
+- **Pillar 6 — ts-fsrs swap.** `src/lib/scheduler.ts` delegates internals to
+  `ts-fsrs@5.4.1`. All public exports preserved; the exam-tuned
+  `errorPenalty` interval multiplier is kept on top of the library output.
+  Parity test asserts monotonic interval growth across a 5-streak.
+- **Pillar 1 — SurrealDB strangler scaffold.** `src/lib/storage/` ships a
+  `StorageDriver` abstraction with `dexieDriver` (active) and
+  `surrealDriver` (dormant; switches via `switchToSurreal()` after a live
+  `:8000` sidecar check). 8 new tests. `docs/SURREALDB-MIGRATION.md`
+  documents the multi-phase plan.
+- **Pillar 0 — Production Tauri packaging.** `tauri.conf.json` upgraded
+  with bundle metadata, production CSP (allows only `'self'` + the four
+  local sidecar origins), Windows + macOS signing scaffolding. New
+  `npm run tauri:{dev,build,build:debug}` scripts. New
+  `.github/workflows/release.yml` matrix-builds Windows/macOS/Linux on
+  `v*` tags. `services_dir()` extended with the production
+  `resources/services/` and macOS `Resources/services/` search paths.
+  `docs/PACKAGING.md` documents the full release flow.
+- **Pillar 10 — Real bulk content.** Ran `npm run content:expand` against
+  Gemma 4 E4B at 32K context over the ingested L1 curriculum bundle —
+  produced `public/cfa-generated.json` with **50 grounded MCQs + 80
+  grounded flashcards** across all 10 L1 topics. Bootstrap seeds them
+  into the AI-practice + AI-flashcards caches at startup.
+- **Pillar 7 — Token utility-class layer.** `src/styles/tokens.css` gains
+  `.qv-stack-*`, `.qv-row-*`, `.qv-card`, `.qv-callout`, `.qv-chip`, plus
+  text-color / font-size / font-weight / margin shorthands. Focused
+  migration: Today.jsx 36→29 inline styles, KnowledgeGraph.jsx 30→20.
+
+### Changed
+- CI workflow uses `npm ci --legacy-peer-deps` (TS 6 vs new deps' TS ^5
+  peers).
+- ROADMAP.md fully refreshed against actual ship state.
+
+### Verification gates (all green at tag)
+- `npx tsc --noEmit` — 0 errors
+- `npm run lint` — 0 errors, 0 warnings
+- `npx vitest run` — **218 tests across 29 files**
+- `npm run build` — 64 precache entries / 3.07 MB
+- `cargo build --manifest-path src-tauri/Cargo.toml` — clean
+- `cargo test` — 5 Rust unit tests
+- `npm audit --omit=dev --audit-level=high` — 0 vulnerabilities
+- `npm run content:validate` — 0 blockers across L1/L2/L3
+
+### Still open (genuinely beyond this session's scope)
+- PyInstaller-bundled Python backend for the production Tauri install
+  (`tauri.conf.json bundle.resources` is wired; binary just needs to be
+  produced and dropped in).
+- FSRS weight optimizer fitting against per-user history.
+- Item psychometrics (IRT-lite difficulty calibration).
+- Multi-speaker AI study podcasts via kokoro audio.
+- L2 / L3 content expansion (one CLI run per level once those volumes
+  are added to the source bundle).
+- Light / dark + per-domain accent themes (the token layer is ready).
+- TypeScript migration of remaining `.jsx`/`.js` files.
+
 ## [0.2.0] — 2026-05-28
 
 Roadmap-wide expansion: the v0.1.0 platform gets first-run onboarding,

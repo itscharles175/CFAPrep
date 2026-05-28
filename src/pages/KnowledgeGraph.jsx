@@ -194,7 +194,7 @@ export default function KnowledgeGraph() {
           </>
         }
         actions={
-          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
             <input
               className="input"
               type="search"
@@ -317,42 +317,42 @@ export default function KnowledgeGraph() {
         <Surface tone="analytics" density="compact">
           <StatusBadge tone="accent">Legend</StatusBadge>
           {colorMode === 'coverage' ? (
-            <ul style={{ listStyle: 'none', padding: 0, marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <ul className="qv-stack-2 qv-mt-2" style={{ listStyle: 'none', padding: 0 }}>
+              <li className="qv-row-2">
                 <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--accent)' }} />
                 <span>Topic has ingested curriculum (Ask the curriculum will return grounded answers)</span>
               </li>
-              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <li className="qv-row-2">
                 <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--text-muted)', opacity: 0.65 }} />
                 <span>No curriculum yet — only authored questions available; ingest from System Health</span>
               </li>
             </ul>
           ) : (
-            <ul style={{ listStyle: 'none', padding: 0, marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <ul className="qv-stack-2 qv-mt-2" style={{ listStyle: 'none', padding: 0 }}>
+              <li className="qv-row-2">
                 <span style={{ width: 14, height: 14, borderRadius: '50%', background: masteryColor(0) }} />
                 <span>0–25% mastery — schedule focused review</span>
               </li>
-              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <li className="qv-row-2">
                 <span style={{ width: 14, height: 14, borderRadius: '50%', background: masteryColor(50) }} />
                 <span>~50% — exam-edge; keep drilling</span>
               </li>
-              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <li className="qv-row-2">
                 <span style={{ width: 14, height: 14, borderRadius: '50%', background: masteryColor(85) }} />
                 <span>85%+ — exam-ready; maintain with spaced reviews</span>
               </li>
-              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <li className="qv-row-2">
                 <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--text-muted)', opacity: 0.65 }} />
                 <span>No mastery snapshots yet — answer a few quiz questions</span>
               </li>
             </ul>
           )}
           <ul style={{ listStyle: 'none', padding: 0, marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-            <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <li className="qv-row-2">
               <svg width="40" height="14" viewBox="0 0 40 14"><line x1="0" y1="7" x2="40" y2="7" stroke="var(--border)" strokeDasharray="4 4" /></svg>
               <span>Dashed edge: same topic across consecutive levels (the curriculum spiral)</span>
             </li>
-            <li style={{ color: 'var(--text-muted)' }}>
+            <li className="qv-text-muted">
               Node radius scales with authored question count. Click any node to open the topic; hover/focus to highlight its cross-level chain.
             </li>
           </ul>
@@ -360,27 +360,26 @@ export default function KnowledgeGraph() {
         <Surface tone="analytics" density="compact">
           <StatusBadge tone="accent">Selected topic</StatusBadge>
           {selected ? (
-            <div style={{ marginTop: 'var(--space-2)' }}>
-              <h3 style={{ margin: 0 }}>{selected.title}</h3>
-              <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+            <div className="qv-mt-2">
+              <h3 className="qv-m-0">{selected.title}</h3>
+              <p className="muted-copy qv-mt-1" style={{ marginBottom: 0 }}>
                 {LEVEL_LABELS[selected.levelId]} · weight {selected.weight} · {selected.questions} questions ·{' '}
                 {selected.vignettes} vignettes · {selected.flashcards} flashcards
               </p>
-              <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+              <p className="muted-copy qv-mt-1" style={{ marginBottom: 0 }}>
                 Curriculum: {selected.hasCurriculum ? 'ingested' : 'not yet ingested'}
                 {' · Mastery: '}
                 {selected.mastery == null ? 'no snapshots' : `${selected.mastery}%`}
               </p>
               <Link
                 to={`/cfa/${selected.levelId}/${selected.topicId}`}
-                className="btn btn-secondary btn-sm"
-                style={{ marginTop: 'var(--space-2)' }}
+                className="btn btn-secondary btn-sm qv-mt-2"
               >
                 Open {selected.title}
               </Link>
             </div>
           ) : (
-            <p className="muted-copy" style={{ margin: 'var(--space-2) 0 0' }}>
+            <p className="muted-copy qv-mt-2" style={{ marginBottom: 0 }}>
               Hover or focus a node to see its details.
             </p>
           )}

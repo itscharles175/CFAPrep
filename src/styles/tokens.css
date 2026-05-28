@@ -182,3 +182,100 @@
     }
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * UTILITY CLASSES — token-aware shorthand for the most common
+ * inline-style patterns. Lives outside @layer tokens so callers
+ * win against the base layer without ! .
+ * ───────────────────────────────────────────────────────────── */
+
+/* Flex stacks */
+.qv-stack-1 { display: flex; flex-direction: column; gap: var(--space-1); }
+.qv-stack-2 { display: flex; flex-direction: column; gap: var(--space-2); }
+.qv-stack-3 { display: flex; flex-direction: column; gap: var(--space-3); }
+.qv-stack-4 { display: flex; flex-direction: column; gap: var(--space-4); }
+.qv-stack-6 { display: flex; flex-direction: column; gap: var(--space-6); }
+
+/* Flex rows */
+.qv-row-1 { display: flex; gap: var(--space-1); align-items: center; }
+.qv-row-2 { display: flex; gap: var(--space-2); align-items: center; }
+.qv-row-3 { display: flex; gap: var(--space-3); align-items: center; }
+.qv-row-4 { display: flex; gap: var(--space-4); align-items: center; }
+.qv-row-3-start { display: flex; gap: var(--space-3); align-items: flex-start; }
+.qv-row-between { display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; }
+
+/* Card surfaces — bordered + padded + rounded patterns scattered across pages */
+.qv-card {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+.qv-card-lg {
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+}
+
+/* The accent-bordered callout pattern used on every grounded-answer + AI panel */
+.qv-callout {
+  padding: var(--space-3);
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-bg-surface-2);
+  border-radius: var(--radius-md);
+  line-height: var(--lh-normal);
+}
+.qv-callout-warning {
+  padding: var(--space-3);
+  border-left: 3px solid var(--color-warning);
+  background: rgba(245, 158, 11, 0.06);
+  border-radius: var(--radius-md);
+}
+.qv-callout-danger {
+  padding: var(--space-3);
+  border-left: 3px solid var(--color-danger);
+  background: rgba(239, 68, 68, 0.06);
+  border-radius: var(--radius-md);
+}
+
+/* Text-color shorthands */
+.qv-text-muted     { color: var(--color-text-muted); }
+.qv-text-secondary { color: var(--color-text-secondary); }
+.qv-text-primary   { color: var(--color-text-primary); }
+.qv-text-success   { color: var(--color-success); }
+.qv-text-danger    { color: var(--color-danger); }
+.qv-text-warning   { color: var(--color-warning); }
+
+/* Font-size shorthands */
+.qv-fs-xs   { font-size: var(--fs-xs); }
+.qv-fs-sm   { font-size: var(--fs-sm); }
+.qv-fs-md   { font-size: var(--fs-md); }
+.qv-fs-lg   { font-size: var(--fs-lg); }
+
+/* Font-weight shorthands */
+.qv-fw-semibold { font-weight: var(--fw-semibold); }
+.qv-fw-bold     { font-weight: var(--fw-bold); }
+
+/* Mono font */
+.qv-mono { font-family: var(--font-mono); }
+
+/* Compact citation chip — used wherever locators show up */
+.qv-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--space-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  font-family: var(--font-mono);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+/* Tight margin resets used inside Surface panels */
+.qv-m-0  { margin: 0; }
+.qv-mt-1 { margin-top: var(--space-1); }
+.qv-mt-2 { margin-top: var(--space-2); }
+.qv-mt-3 { margin-top: var(--space-3); }
+.qv-mb-2 { margin-bottom: var(--space-2); }
+.qv-mb-3 { margin-bottom: var(--space-3); }

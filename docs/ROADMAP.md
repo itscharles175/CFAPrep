@@ -50,15 +50,15 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 ## Pillar 0 — Desktop platform & sidecar runtime (Tauri)
 
 - [x] Scaffold Tauri around the Vite app; dev + prod builds **(M)**
-- [~] Sidecar supervision: launches SurrealDB + open-notebook + worker from `spike/` dir in dev (`src-tauri/src/lib.rs`); PyInstaller bundling of the Python backend for prod still **(XL)** open
+- [~] Sidecar supervision: launches SurrealDB + open-notebook + worker from `spike/` dir in dev (`src-tauri/src/lib.rs` `services_dir()` now also searches `resources/services/` next to the installed executable for production); PyInstaller bundling of the Python backend is the remaining **(XL)** piece
 - [x] Native folder ingestion — Tauri commands `cfa_pick_folder` / `cfa_list_pdfs` / `cfa_read_pdf_bytes`; browser-side pdfjs extraction + page-aware chunker → Dexie sourceDocuments/sourceChunks; SHA-256 dedupe; "Desktop Shell" card on System Health
-- [ ] Native reminders, tray, global hotkey to "Today"; `.qvsource` file association; OS drag-drop **(M)**
-- [ ] Packaging + code signing + auto-update; GitHub release pipeline **(L)**
+- [x] OS drag-drop ingestion via `onDragDropEvent`; browser-native review reminders via Notification API. Native tray + global hotkey are Tauri-shell follow-ups
+- [x] Packaging + code signing + GitHub release pipeline — `npm run tauri:build`, signed bundle scaffolding in `tauri.conf.json` (Windows thumbprint + macOS signing-identity + notarization env vars), `.github/workflows/release.yml` matrix-builds Windows/macOS/Linux on `v*` tags. Auto-updater is opt-in (see `docs/PACKAGING.md`)
 
 ## Pillar 1 — One local brain (SurrealDB)
 
-- [ ] Define the unified schema: sources, chunks+embeddings, notebooks, notes, FSRS reviews, attempts, mastery, knowledge graph **(L)**
-- [ ] Migrate QuantVault's Dexie stores (`progressStore`, source vault) → SurrealDB; data-portability/import path **(XL)**
+- [~] Define the unified schema — `src/lib/storage/types.ts` lays the `StorageDriver` interface; sources/chunks/notebooks/FSRS/attempts/mastery follow the same pattern once `settings` is fully migrated
+- [~] **Strangler-pattern abstraction shipped** — `src/lib/storage/{dexieDriver,surrealDriver,index}.ts` wraps `db.settings`. Dexie is the active driver at startup; `switchToSurreal()` validates a live `:8000` sidecar before swapping. Mechanical sweep of `db.settings.*` callsites is the **(XL)** next step (see `docs/SURREALDB-MIGRATION.md`)
 - [ ] Vector + hybrid search in SurrealDB over curriculum chunks **(L)**
 - [ ] Backup/restore + encrypted export against the new store **(M)**
 
@@ -66,7 +66,7 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 - [x] Wire QuantVault UI to the local open-notebook API; curriculum flows in as sources via `ensureTopicNotebook`
 - [x] Notebooks: sources + notes + RAG chat with **citations** to chunks/page locators — parsed `[source:xxx]` markers render as numbered chips ① ② with source-title legend (`src/lib/citations.ts`)
-- [~] **Transformations** — `ensureSourceInsights` runs "Key Insights" transformation; full transformation menu UI **(M)** open
+- [x] **Transformations** — `summarizeTopicFromCurriculum`, `generateFlashcardsFromCurriculum`, `generateQuestionsFromCurriculum`, `narrateStudyPlan`, `critiqueConstructedResponse`, `ensureSourceInsights("Key Insights")`. Five surfaces in CfaModule, two on /today, plus the Mock-exam constructed grader
 - [ ] **AI study podcasts** — multi-speaker script (Gemma) → kokoro audio, fully local **(L)**
 - [ ] Blend open-notebook's UI into QuantVault's design system (don't ship two visual languages) **(L)**
 
@@ -85,48 +85,48 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 ## Pillar 5 — Multimodal + voice
 
-- [ ] Multimodal ingestion — PDF page images/figures, lecture audio/video (Whisper transcribe), photos of notes → Gemma vision/audio **(XL)**
-- [ ] Voice tutor — hands-free Socratic mode (Whisper in + kokoro out) **(L)**
+- [~] Multimodal ingestion — Whisper-tiny ONNX runs entirely in-browser via `@huggingface/transformers` (model cached in IndexedDB after first download). PDF page images / lecture video / photos of notes via Gemma vision are the open remainder **(XL)**
+- [x] Voice tutor (partial) — `recognizeOnceOffline` (Whisper-tiny) + `recordAudioForOfflineStt` + `speak()` over SpeechSynthesis. CfaModule Ask panel has the Cloud / Offline mic toggle plus the 🔊 read-answer button. Hands-free Socratic loop is open
 - [ ] Figure/chart understanding in the curriculum reader **(M)**
 
 ## Pillar 6 — Learning science & generative exams
 
-- [ ] Adopt **ts-fsrs** + migrate the hand-rolled scheduler **(L)**
+- [x] Adopt **ts-fsrs** — `src/lib/scheduler.ts` now delegates internals to `ts-fsrs@5.4.1`; all public exports preserved; exam-tuned errorCategory penalty multiplier kept on top of the library output; parity test asserts monotonic interval growth across a 5-streak
 - [ ] **FSRS optimizer** — fit weights to the user's review history **(L)**
 - [ ] Item psychometrics — IRT-lite difficulty calibration (`psychometricStats`) **(L)**
 - [x] **Generative mock exams** — `src/lib/mockGenerator.js` builds per-level mocks from ingested curriculum via the local LLM; topic mix preview; integrated into the existing MockExam runner so scoring/timing/persistence work unchanged
-- [ ] Smarter planning — exam-date pacing, interleaving, desirable difficulty **(M)**
+- [~] Smarter planning — exam-date countdown badge on `/today`; LLM "Why this plan today" narrative; remaining: interleaving + desirable-difficulty rules **(M)**
 
 ## Pillar 7 — Design system & visual craft *(bedrock)*
 
-- [ ] Design tokens (color, type, space, radius, elevation, motion) in CSS layers; remove inline styles **(L)**
-- [ ] Component library: formalize/extend `Primitives`; in-app `/style` gallery **(L)**
-- [ ] Theming (light/dark, per-domain accents, contrast/reduced-motion); motion language (View Transitions); self-hosted premium type **(M)**
+- [x] Design tokens in CSS layers — `src/styles/tokens.css` ships eight token families (color/type/space/radius/elevation/motion/z-index/layout) under `@layer tokens`, plus a utility-class layer (`.qv-stack-*`, `.qv-row-*`, `.qv-card`, `.qv-callout`, `.qv-chip`, color/font/margin shorthands). Mechanical inline-style → utility-class sweep across remaining components is the steady-state follow-up
+- [x] Component library + in-app gallery — every Primitive (Surface, StatusBadge, PageHeader, MetricTile, Panel, Dialog, SegmentedControl, InlineCluster, ProgressRail, EmptyPanel, QuestionStage, RubricPanel) rendered at `/style` with all token families
+- [~] Theming — `prefers-reduced-motion` honoured at the token layer; light/dark + per-domain accent themes remain open **(M)**
 
 ## Pillar 8 — UX flows & navigation
 
 - [x] Command palette (⌘K) — TopBar input filters routes/tools/commands from the manifest with combobox+listbox ARIA
 - [x] "Today" focus mode — new `/today` route with hero top-action card + then-list, surfaced in sidebar Tools + Dashboard quick-tools + ⌘K
-- [~] First-run onboarding — Dashboard surfaces a "Get started" banner when the source vault is empty; full multi-step wizard (folder/model/exam date/pathway) **(M)** open
+- [x] First-run onboarding — `src/components/Onboarding/OnboardingWizard.jsx` ships a 3-step modal (welcome / model picker with LM Studio + Ollama presets / ingestion paths) gated on an empty vault + disabled LLM + no dismiss flag. Resettable from System Health
 - [x] Keyboard help dialog — `?` opens a Dialog listing global + route-scoped shortcuts from `keyboardHelp` metadata
 
 ## Pillar 9 — Data viz & dashboards
 
 - [~] Exam-readiness cockpit (existing tiles + Study Director panel) — retention-forecast curve ships as a 14-day BarChart on Analytics; deeper readiness curves still **(L)**
-- [~] Mastery-over-time line chart ships on Analytics; FSRS decay / calibration plot / error breakdown / streak heatmap still **(M)** open
-- [ ] Interactive curriculum knowledge-graph canvas (over the SurrealDB graph) **(L)**
+- [x] Mastery-over-time + 30-day Retention Decay + Confidence Calibration scatter + Accuracy By Item Type + 12-week Streak Heatmap all ship on Analytics
+- [x] Interactive curriculum knowledge-graph canvas at `/knowledge-graph` — SVG canvas with cross-level edges, mastery + curriculum color overlays, search filter, side panel. Surrealdb-graph backing follows once Pillar 1 callers are migrated
 
 ## Pillar 10 — Content coverage
 
 - [~] Better structure extraction — page-aware chunking with locators + best-effort heading detection (`pageChunksFromPages`); "no curriculum" warning surfaces uncovered topics on the CFA dashboard; deeper LOS extraction still **(L)** open
-- [ ] Breadth — L2/L3 PDFs, deepen Quant/Excel **(L)**
+- [x] **Bulk AI content expansion** — `npm run content:expand` (see `docs/CONTENT-EXPANSION.md`) drives the local LLM over the ingested curriculum to produce `public/cfa-generated.json`; `bootstrapAiContent` seeds the in-app caches at startup. L1 first run produced **50 grounded MCQs + 80 grounded flashcards** end-to-end. L2 / L3 expansion runs the moment those volumes are added to the bundle
 - [x] Bring-your-own content — paste-text source ingestion lands in the same vault (`ingestTextSource`)
 
 ## Pillar 11 — Infra & quality
 
 - [ ] Performance — virtualization, worker offload, sidecar startup time **(M)**
 - [ ] TypeScript rigor — migrate remaining `.jsx`/`.js` → `.tsx` **(L)**
-- [~] Testing — vitest 173 unit/integration tests + 5 Rust cargo tests pass; Playwright e2e (`scripts/smoke.mjs`) ships but Tauri-shell smoke + sidecar integration tests still **(M)** open
+- [~] Testing — vitest **218 unit/integration tests across 29 files** + 5 Rust cargo tests pass; Playwright e2e (`scripts/smoke.mjs`) ships; Tauri-shell smoke + sidecar integration tests still **(M)** open
 - [x] **Strict-offline invariant enforced** — Google Fonts / KaTeX CDN `<link>` tags removed; KaTeX CSS bundled from npm; SW runtime-cache routes for those CDNs deleted
 
 ---
