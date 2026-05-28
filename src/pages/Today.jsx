@@ -42,6 +42,8 @@ export default function Today() {
   const [refreshing, setRefreshing] = useState(false);
   // Targeted drill state — generates AI MCQs for the weakest topic on demand.
   const [drill, setDrill] = useState({ state: 'idle', questions: [], error: '' });
+  // Map of question.id -> selected option index. Empty until the user picks.
+  const [drillAnswers, setDrillAnswers] = useState({});
 
   async function refresh() {
     setRefreshing(true);
@@ -94,6 +96,7 @@ export default function Today() {
         count: 3,
       });
       setDrill({ state: 'done', questions, error: '' });
+      setDrillAnswers({});
     } catch (error) {
       setDrill({
         state: 'error',
@@ -222,43 +225,92 @@ export default function Today() {
                 <p style={{ color: 'var(--danger)', margin: 'var(--space-2) 0 0' }}>{drill.error}</p>
               )}
 
-              {drill.questions.length > 0 && (
-                <div style={{ marginTop: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                  {drill.questions.map((question, qi) => (
-                    <div
-                      key={question.id}
-                      style={{
-                        padding: 'var(--space-3)',
-                        borderRadius: 'var(--radius-md, 8px)',
-                        border: '1px solid var(--border)',
-                      }}
-                    >
-                      <strong>
-                        {qi + 1}. {question.question}
-                      </strong>
-                      <ul style={{ margin: 'var(--space-2) 0', paddingLeft: 'var(--space-5)' }}>
-                        {question.options.map((option, oi) => (
-                          <li
-                            key={oi}
-                            style={{
-                              color: oi === question.correct ? 'var(--success)' : 'var(--text-secondary)',
-                              fontWeight: oi === question.correct ? 700 : 400,
-                            }}
-                          >
-                            {option}
-                            {oi === question.correct ? ' ✓' : ''}
-                          </li>
-                        ))}
-                      </ul>
-                      {question.explanation && (
-                        <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>
-                          {question.explanation}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+              {drill.questions.length > 0 && (() => {
+                const total = drill.questions.length;
+                const answered = drill.questions.filter((q) => drillAnswers[q.id] != null).length;
+                const correct = drill.questions.filter(
+                  (q) => drillAnswers[q.id] === q.correct,
+                ).length;
+                return (
+                  <div style={{ marginTop: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                    {answered === total && (
+                      <p className="muted-copy" style={{ margin: 0 }}>
+                        Score: <strong style={{ color: 'var(--success)' }}>{correct}</strong>
+                        {' / '}
+                        {total}
+                      </p>
+                    )}
+                    {drill.questions.map((question, qi) => {
+                      const picked = drillAnswers[question.id];
+                      const answered = picked != null;
+                      return (
+                        <div
+                          key={question.id}
+                          style={{
+                            padding: 'var(--space-3)',
+                            borderRadius: 'var(--radius-md, 8px)',
+                            border: '1px solid var(--border)',
+                          }}
+                        >
+                          <strong>
+                            {qi + 1}. {question.question}
+                          </strong>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', margin: 'var(--space-2) 0' }}>
+                            {question.options.map((option, oi) => {
+                              let bg = 'transparent';
+                              let color = 'inherit';
+                              let weight = 400;
+                              if (answered) {
+                                if (oi === question.correct) {
+                                  bg = 'rgba(52, 211, 153, 0.12)';
+                                  color = 'var(--success)';
+                                  weight = 700;
+                                } else if (oi === picked) {
+                                  bg = 'rgba(239, 68, 68, 0.12)';
+                                  color = 'var(--danger)';
+                                }
+                              } else if (oi === picked) {
+                                bg = 'var(--accent-soft, rgba(96,165,250,0.18))';
+                              }
+                              return (
+                                <button
+                                  key={oi}
+                                  type="button"
+                                  onClick={() =>
+                                    setDrillAnswers((prev) =>
+                                      prev[question.id] != null ? prev : { ...prev, [question.id]: oi },
+                                    )
+                                  }
+                                  disabled={answered}
+                                  style={{
+                                    textAlign: 'left',
+                                    padding: 'var(--space-2) var(--space-3)',
+                                    borderRadius: 'var(--radius-sm, 6px)',
+                                    border: '1px solid var(--border)',
+                                    background: bg,
+                                    color,
+                                    fontWeight: weight,
+                                    cursor: answered ? 'default' : 'pointer',
+                                  }}
+                                >
+                                  {String.fromCharCode(65 + oi)}. {option}
+                                  {answered && oi === question.correct ? ' ✓' : ''}
+                                  {answered && oi === picked && oi !== question.correct ? ' ✗' : ''}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {answered && question.explanation && (
+                            <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>
+                              {question.explanation}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </Surface>
           )}
         </>

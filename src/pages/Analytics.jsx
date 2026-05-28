@@ -17,6 +17,157 @@ function seconds(value) {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+// ---------------------------------------------------------------------------
+// StudyStreakHeatmap – Pillar 9
+// ---------------------------------------------------------------------------
+const CELL = 12; // px
+const GAP = 2; // px
+const COLS = 12; // weeks
+const ROWS = 7; // Mon=0 … Sun=6
+
+function cellColor(count) {
+  if (count === 0) return 'var(--border)';
+  if (count <= 2) return 'var(--accent-soft, rgba(96,165,250,0.25))';
+  if (count <= 5) return 'rgba(96,165,250,0.50)';
+  if (count <= 10) return 'rgba(96,165,250,0.75)';
+  return 'var(--accent, #60a5fa)';
+}
+
+const LEGEND_BUCKETS = [
+  { label: 'None', color: cellColor(0) },
+  { label: '1–2', color: cellColor(1) },
+  { label: '3–5', color: cellColor(3) },
+  { label: '6–10', color: cellColor(6) },
+  { label: '11+', color: cellColor(11) },
+];
+
+function StudyStreakHeatmap() {
+  const [heatData, setHeatData] = useState(null); // null = loading
+
+  useEffect(() => {
+    let active = true;
+    db.questionResults
+      .toArray()
+      .then((rows) => {
+        if (!active) return;
+        // Build a map: YYYY-MM-DD → count
+        const counts = new Map();
+        for (const row of rows) {
+          if (!row.createdAt) continue;
+          const day = row.createdAt.slice(0, 10);
+          counts.set(day, (counts.get(day) || 0) + 1);
+        }
+        setHeatData(counts);
+      })
+      .catch(() => {
+        if (active) setHeatData(new Map());
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Compute "end of current week" so today lands in the last column, last applicable row.
+  // We define week as Mon–Sun. "End of this week" = the coming Sunday (or today if Sunday).
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayDow = today.getDay(); // 0=Sun … 6=Sat
+  // Days until Sunday from today
+  const daysUntilSunday = todayDow === 0 ? 0 : 7 - todayDow;
+  const sunday = new Date(today);
+  sunday.setDate(sunday.getDate() + daysUntilSunday);
+
+  // Grid: col 0 = oldest (leftmost), col COLS-1 = this week (rightmost)
+  // row 0 = Mon, row 6 = Sun
+  // Date for cell (col, row):
+  //   sunday - (COLS-1-col)*7 - (6-row) days
+  const cells = [];
+
+  for (let col = 0; col < COLS; col++) {
+    for (let row = 0; row < ROWS; row++) {
+      const daysBack = (COLS - 1 - col) * 7 + (6 - row);
+      const d = new Date(sunday);
+      d.setDate(sunday.getDate() - daysBack);
+      const dateStr = d.toISOString().slice(0, 10);
+      const isFuture = d.getTime() > today.getTime();
+      const count = (!isFuture && heatData) ? (heatData.get(dateStr) || 0) : 0;
+      cells.push({ col, row, dateStr, count, isFuture });
+    }
+  }
+
+  // Total questions in the 12-week window
+  let total12w = 0;
+  if (heatData) {
+    for (const { count, isFuture } of cells) {
+      if (!isFuture) total12w += count;
+    }
+  }
+
+  const svgWidth = COLS * (CELL + GAP) - GAP;
+  const svgHeight = ROWS * (CELL + GAP) - GAP;
+
+  return (
+    <Panel tone="analytics" title="Study Streak Heatmap">
+      {heatData === null ? (
+        <p className="muted-copy">Loading heatmap…</p>
+      ) : total12w === 0 ? (
+        <p className="muted-copy">No question attempts in the last 12 weeks — answer some questions to see your streak.</p>
+      ) : (
+        <>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+            <strong>{total12w}</strong> question{total12w !== 1 ? 's' : ''} answered in the last 12 weeks
+          </p>
+          <svg
+            width={svgWidth}
+            height={svgHeight}
+            style={{ display: 'block', overflow: 'visible' }}
+            aria-label="Study streak heatmap"
+          >
+            {cells.map(({ col, row, dateStr, count, isFuture }) => (
+              <rect
+                key={`${col}-${row}`}
+                x={col * (CELL + GAP)}
+                y={row * (CELL + GAP)}
+                width={CELL}
+                height={CELL}
+                rx={2}
+                ry={2}
+                fill={isFuture ? 'transparent' : cellColor(count)}
+                opacity={isFuture ? 0 : 1}
+              >
+                {!isFuture && (
+                  <title>{dateStr} · {count} attempt{count !== 1 ? 's' : ''}</title>
+                )}
+              </rect>
+            ))}
+          </svg>
+          {/* Legend */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Less</span>
+            {LEGEND_BUCKETS.map(({ label, color }) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div
+                  style={{
+                    width: CELL,
+                    height: CELL,
+                    borderRadius: 2,
+                    background: color,
+                    border: '1px solid var(--border)',
+                    flexShrink: 0,
+                  }}
+                  title={label}
+                />
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
+              </div>
+            ))}
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>More</span>
+          </div>
+        </>
+      )}
+    </Panel>
+  );
+}
+
 export default function Analytics() {
   const [activePathway] = useLevel3Pathway();
   const [summary, setSummary] = useState(null);
@@ -290,6 +441,8 @@ export default function Analytics() {
           </Panel>
         );
       })()}
+
+      <StudyStreakHeatmap />
 
       {topWeakTopics[0] && (
         <SourceRail
