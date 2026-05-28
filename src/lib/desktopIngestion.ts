@@ -44,6 +44,108 @@ export async function readPdfBytes(path: string): Promise<Uint8Array> {
   return new Uint8Array(raw);
 }
 
+/**
+ * Subscribe to the Tauri window's drag-drop event for PDF files. The handler
+ * is called once per drop with the absolute paths the user dropped, filtered
+ * to .pdf files. Returns an unlisten function (call it on unmount).
+ *
+ * No-op in plain web dev (Tauri APIs unavailable); returns a noop unlisten.
+ */
+export async function onTauriPdfDrop(
+  handler: (paths: string[]) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => undefined;
+  const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+  const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+    if (event.payload.type !== 'drop') return;
+    const paths = (event.payload.paths || []).filter((p) => /\.pdf$/i.test(p));
+    if (paths.length === 0) return;
+    handler(paths);
+  });
+  return unlisten;
+}
+
+/**
+ * Ingest an explicit list of PDF file paths (skips the folder-listing step
+ * that `ingestFolder` would do). Used by the drag-drop path.
+ */
+export async function ingestPdfPaths(params: {
+  paths: string[];
+  onProgress?: (event: IngestionProgress) => void;
+  signal?: AbortSignal;
+}): Promise<IngestionResult> {
+  const { paths, onProgress, signal } = params;
+  const result: IngestionResult = {
+    folder: '',
+    scanned: paths.length,
+    ingested: 0,
+    skipped: 0,
+    chunkCount: 0,
+    warnings: [],
+  };
+
+  const existingHashes = new Set<string>();
+  const existingDocs = await db.sourceDocuments.toArray();
+  for (const doc of existingDocs) existingHashes.add(doc.sha256);
+
+  for (let index = 0; index < paths.length; index += 1) {
+    if (signal?.aborted) break;
+    const path = paths[index];
+    const name = path.split(/[\\/]/).pop() || path;
+    onProgress?.({ index, total: paths.length, fileName: name, status: 'reading' });
+    try {
+      const bytes = await readPdfBytes(path);
+      const hash = await sha256Hex(bytes);
+      if (existingHashes.has(hash)) {
+        result.skipped += 1;
+        onProgress?.({ index, total: paths.length, fileName: name, status: 'skipped', message: 'already ingested' });
+        continue;
+      }
+      onProgress?.({ index, total: paths.length, fileName: name, status: 'extracting' });
+      const extracted = await extractPdfPages(bytes);
+      const importedAt = new Date().toISOString();
+      const classification = classifyPath(name);
+      const documentId = `desktop:${hash.slice(0, 16)}`;
+      const chunks = pageChunksFromPages(extracted.pages, documentId, hash, classification.topicIds, importedAt);
+
+      const document: CfaSourceDocument = {
+        id: documentId,
+        title: classification.title,
+        level: classification.level,
+        year: classification.year,
+        publisher: classification.publisher,
+        sourceKind: classification.sourceKind,
+        format: 'pdf',
+        path,
+        sha256: hash,
+        sizeBytes: bytes.byteLength,
+        pageCount: extracted.numPages,
+        extractableTextChars: extracted.charCount,
+        canonical: classification.sourceKind === 'official-curriculum',
+        coverageTags: classification.coverageTags,
+        topicIds: classification.topicIds,
+        chunkCount: chunks.length,
+        importedAt,
+        privateUseOnly: true,
+      };
+
+      onProgress?.({ index, total: paths.length, fileName: name, status: 'storing' });
+      await db.transaction('rw', db.sourceDocuments, db.sourceChunks, async () => {
+        await db.sourceDocuments.put(document);
+        await db.sourceChunks.bulkPut(chunks);
+      });
+      existingHashes.add(hash);
+      result.ingested += 1;
+      result.chunkCount += chunks.length;
+      onProgress?.({ index, total: paths.length, fileName: name, status: 'done' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      result.warnings.push(`${name}: ${message}`);
+    }
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Classification — mirrors classifyPath() in scripts/cfa-source-vault.mjs so
 // desktop-ingested documents land with the same level/topicIds the bundled

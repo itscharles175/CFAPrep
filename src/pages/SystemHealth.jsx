@@ -11,7 +11,7 @@ import {
   listNotebooks as listOnbNotebooks,
   saveOpenNotebookSettings,
 } from '../lib/openNotebook';
-import { ingestFolder, ingestTextSource, isTauri, pickCfaFolder } from '../lib/desktopIngestion';
+import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop, pickCfaFolder } from '../lib/desktopIngestion';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 
 function downloadJson(payload) {
@@ -271,6 +271,55 @@ export default function SystemHealth() {
   function handleCancelIngest() {
     ingestAbortRef.current?.abort();
   }
+
+  // Tauri OS drag-drop: PDFs dropped on the window auto-ingest via the same
+  // pipeline as the folder picker, with the same progress UX.
+  useEffect(() => {
+    if (!desktopAvailable) return undefined;
+    let active = true;
+    let unlistenFn = () => undefined;
+    onTauriPdfDrop(async (paths) => {
+      if (!active) return;
+      const controller = new AbortController();
+      ingestAbortRef.current = controller;
+      setIngestError('');
+      setIngestResult(null);
+      setIngestProgress(null);
+      setIngestState('running');
+      try {
+        const result = await ingestPdfPaths({
+          paths,
+          signal: controller.signal,
+          onProgress: (event) => setIngestProgress(event),
+        });
+        if (!active) return;
+        setIngestResult(result);
+        setIngestState(controller.signal.aborted ? 'cancelled' : 'done');
+        setMessage(`Drag-dropped: ingested ${result.ingested}, skipped ${result.skipped}, ${result.chunkCount} chunks.`);
+        await refreshSourceDocs();
+      } catch (error) {
+        if (!active) return;
+        if (controller.signal.aborted) {
+          setIngestState('cancelled');
+        } else {
+          setIngestState('error');
+          setIngestError(error instanceof Error ? error.message : 'Drag-drop ingestion failed.');
+        }
+      } finally {
+        ingestAbortRef.current = null;
+      }
+    }).then((u) => {
+      if (!active) {
+        u?.();
+      } else {
+        unlistenFn = u;
+      }
+    });
+    return () => {
+      active = false;
+      unlistenFn?.();
+    };
+  }, [desktopAvailable]);
 
   async function handleSaveOnb() {
     const saved = await saveOpenNotebookSettings(onb);
@@ -538,7 +587,7 @@ export default function SystemHealth() {
               <StatusBadge tone="success">Desktop Shell</StatusBadge>
               <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingest a local CFA folder</h3>
               <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
-                Point QuantVault at a folder of CFA curriculum PDFs on disk; the native shell will walk it, extract text, chunk by page, classify by topic, and store in your local source vault. Duplicates (by SHA-256) are skipped automatically.
+                Point QuantVault at a folder of CFA curriculum PDFs on disk; the native shell will walk it, extract text, chunk by page, classify by topic, and store in your local source vault. Duplicates (by SHA-256) are skipped automatically. You can also drag-drop PDFs directly onto this window.
               </p>
             </div>
             <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
