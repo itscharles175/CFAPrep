@@ -35,6 +35,7 @@ import {
   readQueue as readTargetedQueue,
   runTargetedMaterialJob,
 } from '../lib/targetedMaterialQueue';
+import FigureExplainer from '../components/FigureExplainer/FigureExplainer';
 
 // Cache-management constants — used by refreshCacheBuckets / handleClearBucket.
 const CACHE_PREFIXES = {
@@ -1212,6 +1213,20 @@ export default function SystemHealth() {
             )}
           </>
         )}
+      </Surface>
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="qv-mb-3">
+          <StatusBadge tone="accent">Local AI</StatusBadge>
+          <h3 style={{ margin: 'var(--space-2) 0 0' }}>Figure understanding (vision)</h3>
+          <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
+            Drop a curriculum chart or diagram (PNG, JPEG, or WebP) and the locally loaded
+            multimodal model will describe it in exam terms. Requires a vision-capable model
+            loaded in LM Studio or Ollama — e.g. Gemma 4 E4B (Gemma 3+ accepts image inputs).
+            Falls back to a clear error if the loaded model is text-only.
+          </p>
+        </div>
+        <FigureExplainer topicTitle="Curriculum figure" />
       </Surface>
 
       <Surface tone="ops" className="ops-report-panel">
