@@ -79,19 +79,30 @@ export async function generateQuestionsFromCurriculum({ settings, topicTitle, ch
     '{"question": string, "options": [string, string, string], "correct": integer (0-based index of the correct option), "explanation": string}.';
   const user = `Topic: ${topicTitle}\n\nWrite ${count} questions grounded strictly in these excerpts:\n\n${context}`;
 
-  const response = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      temperature: 0.3,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-    }),
-    signal,
-  });
+  let response;
+  try {
+    response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      signal,
+    });
+  } catch (error) {
+    // Browser fetch to a different port is cross-origin. LM Studio and Ollama
+    // both ship with CORS disabled by default; the fetch fails as a TypeError
+    // long before any HTTP status. Make that fix actionable.
+    if (error?.name === 'AbortError') throw error;
+    throw new Error(
+      `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
+    );
+  }
   if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content || '';

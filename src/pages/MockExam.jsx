@@ -13,6 +13,8 @@ import {
   saveMockSectionState,
 } from '../lib/learning';
 import { SourceRail } from '../components/SourceContext';
+import { getLlmSettings } from '../lib/localLlm';
+import { generateMockExam, getCachedGeneratedMock, saveCachedGeneratedMock, toSyntheticMockContent } from '../lib/mockGenerator';
 
 function nowMs() {
   return Date.now();
@@ -141,11 +143,25 @@ export default function MockExam() {
   const level = params.level || 'level1';
   const [activePathway, setActivePathway] = useLevel3Pathway();
   const [contentState, setContentState] = useState({ level: null, pathway: null, levelContent: null, mock: null });
+  const [mode, setMode] = useState('blueprint');
+  const [generatedMock, setGeneratedMock] = useState(null);
+  const [genState, setGenState] = useState('idle');
+  const [genError, setGenError] = useState('');
+  const [genProgress, setGenProgress] = useState(null);
   const contentMatches = contentState.level === level && (level !== 'level3' || contentState.pathway === activePathway);
-  const levelContent = contentMatches ? contentState.levelContent : null;
-  const mock = contentMatches ? contentState.mock : null;
-  const loading = !contentMatches;
-  const items = useMemo(() => (levelContent && mock ? buildMockItems(level, levelContent, mock) : []), [level, levelContent, mock]);
+  // A generated mock is shaped into the same { levelContent, mock, items } the
+  // runner understands, so scoring/timing/persistence work unchanged.
+  const generatedView = useMemo(
+    () => (mode === 'generated' ? toSyntheticMockContent(generatedMock) : null),
+    [mode, generatedMock],
+  );
+  const levelContent = generatedView ? generatedView.levelContent : contentMatches ? contentState.levelContent : null;
+  const mock = generatedView ? generatedView.mock : contentMatches ? contentState.mock : null;
+  const loading = !generatedView && !contentMatches;
+  const items = useMemo(
+    () => (generatedView ? generatedView.items : levelContent && mock ? buildMockItems(level, levelContent, mock) : []),
+    [generatedView, level, levelContent, mock],
+  );
   const objectiveMap = useMemo(
     () => new Map((levelContent?.topics || []).flatMap((topic) => topic.learningObjectives).map((objective) => [objective.id, objective])),
     [levelContent],
@@ -165,7 +181,7 @@ export default function MockExam() {
   const [hydrated, setHydrated] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
   const [report, setReport] = useState(null);
-  const mockStateId = level === 'level3' ? `cfa-${level}-${activePathway}-mixed-mock` : `cfa-${level}-mixed-mock`;
+  const mockStateId = `${level === 'level3' ? `cfa-${level}-${activePathway}-mixed-mock` : `cfa-${level}-mixed-mock`}${generatedView ? '-generated' : ''}`;
   const item = items[current];
   const questionRows = useMemo(() => items.flatMap(questionRowsFromItem), [items]);
   const constructedItems = useMemo(() => items.filter((mockItem) => mockItem.type === 'constructed-response').map((mockItem) => mockItem.constructed), [items]);
@@ -192,6 +208,45 @@ export default function MockExam() {
       cancelled = true;
     };
   }, [activePathway, level]);
+
+  // Load any previously generated mock for this level so it survives reloads.
+  useEffect(() => {
+    let cancelled = false;
+    getCachedGeneratedMock(level).then((cached) => {
+      if (!cancelled) setGeneratedMock(cached || null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [level]);
+
+  async function handleGenerateMock() {
+    setGenState('loading');
+    setGenError('');
+    setGenProgress(null);
+    try {
+      const settings = await getLlmSettings();
+      if (!settings.enabled) {
+        setGenState('error');
+        setGenError('Enable a local model in System Health → Local AI to generate a mock from your curriculum.');
+        return;
+      }
+      const topics = (contentState.levelContent?.topics || []).map((topic) => ({ topic: topic.topic, title: topic.title }));
+      const generated = await generateMockExam({
+        level,
+        topics,
+        settings,
+        onProgress: (progress) => setGenProgress(progress),
+      });
+      await saveCachedGeneratedMock(level, generated);
+      setGeneratedMock(generated);
+      setMode('generated');
+      setGenState('done');
+    } catch (error) {
+      setGenState('error');
+      setGenError(error instanceof Error ? error.message : 'Mock generation failed.');
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -457,6 +512,52 @@ export default function MockExam() {
           </>
         }
       />
+
+      <Surface density="compact" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+        <InlineCluster align="between">
+          <div>
+            <StatusBadge tone="accent">Mock source</StatusBadge>
+            <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+              {generatedView
+                ? 'Questions generated from your ingested curriculum by your local model.'
+                : 'The hand-authored official-blueprint section. Generate a fresh set from your own curriculum below.'}
+            </p>
+            {genState === 'loading' && (
+              <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+                Generating{genProgress ? ` — ${genProgress.topicTitle} (${genProgress.done}/${genProgress.total})` : '…'}
+              </p>
+            )}
+            {genState === 'error' && <p style={{ color: 'var(--danger)', margin: 'var(--space-1) 0 0' }}>{genError}</p>}
+          </div>
+          <InlineCluster>
+            {generatedMock && (
+              <SegmentedControl
+                label="Mock source"
+                density="compact"
+                options={[
+                  { value: 'blueprint', label: 'Official' },
+                  { value: 'generated', label: 'Generated' },
+                ]}
+                value={mode}
+                onChange={(next) => {
+                  setMode(next);
+                  setCurrent(0);
+                  setSelected({});
+                  setConstructedResponses({});
+                  setRubricScores({});
+                  setFlags(new Set());
+                  setFinished(false);
+                  setReviewMode(false);
+                  setReport(null);
+                }}
+              />
+            )}
+            <button className="btn btn-secondary" onClick={handleGenerateMock} disabled={genState === 'loading'}>
+              {genState === 'loading' ? 'Generating…' : generatedMock ? 'Regenerate from curriculum' : 'Generate from curriculum'}
+            </button>
+          </InlineCluster>
+        </InlineCluster>
+      </Surface>
 
       {level === 'level3' && (
         <Surface density="compact" status="exam" style={{ marginBottom: 'var(--space-6)' }}>
