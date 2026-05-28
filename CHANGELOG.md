@@ -3,6 +3,91 @@
 All notable changes to QuantVault. Dates use `YYYY-MM-DD`. See `git log` for
 the full per-commit detail.
 
+## [0.4.0] — 2026-05-28
+
+Deferred-pillar push: every remaining roadmap item that can be implemented
+locally is now shipped or has a real, verified foundation. Three sub-agent
+waves on disjoint scopes plus four Pillar-spanning workstreams landed in
+this milestone.
+
+### Added
+- **Pillar 1 Phase 2 — SurrealDB strangler cutover.** 39 `db.settings.*`
+  callsites across 8 production files (`bootstrapAiContent.js`,
+  `localLlm.js`, `mockGenerator.js`, `openNotebook.ts`,
+  `PwaInstallPrompt.jsx`, `Dashboard.jsx`, `SystemHealth.jsx`,
+  `Today.jsx`) now route through `getStorage().settings.*` instead of
+  reaching directly into Dexie. `storage/index.ts` lazy-loads the
+  surrealdb driver via dynamic import so its `isows`/`ws` transitive
+  deps stay off the default startup path. Dexie remains the active
+  driver; switching is a one-line call.
+- **Pillar 6 — FSRS weight optimizer.** `src/lib/fsrsOptimizer.ts` fits
+  FSRS-4.5 parameters to the user's own `questionResults` history via
+  coordinate descent against binary-cross-entropy log-loss. Tunes
+  `request_retention` + `w[0..3]` + `w[15..16]`. Bounded — at most ~300
+  evaluations per fit. Refuses sample sizes below 50 historical
+  reviews. Persisted weights swap the active `fsrs()` instance on next
+  reload via `setSchedulerParameters`. New System Health panel:
+  **Fit from history → preview report → Apply / Reset to FSRS-4.5**.
+- **Pillar 6 — Item psychometrics (IRT-lite).** `itemPsychometrics.ts`
+  computes per-item empirical difficulty, point-biserial discrimination
+  (vs contemporaneous mastery on the same topic), and Wald-style
+  reliability SE. Flags items as `too-easy` / `too-hard` /
+  `low-discrimination` / `ok` / `insufficient-data`. System Health
+  panel: chip summary by flag + expandable top-10 flagged-item table.
+- **Pillar 3 — Multi-speaker AI study podcasts.** `lib/podcast.ts` +
+  `PodcastPanel.tsx`: local LLM generates a Coach/Student JSON dialog
+  script (cached per topic); kokoro-js (`af_heart` + `am_michael`
+  voices, ~80MB ONNX model cached in IndexedDB on first use) synthesises
+  each line offline; Play / Pause / Stop / per-segment download. Mounts
+  above AI practice in every CFA module with the first 6 ingested
+  curriculum chunks as grounding.
+- **Pillar 7 — Light / dark / system theme cutover.** Three-state
+  switcher in TopBar (Sun → Moon → Monitor). `[data-theme="light"]`
+  color-only token overrides in `tokens.css` + a
+  `prefers-color-scheme: light` default block. System mode flips live
+  with OS palette changes via `matchMedia`. Bootstrap call in `main.jsx`
+  runs before `createRoot` so first paint is flash-free.
+- **Pillar 7 — Inline-style sweep wave 1+2.** 226 → 173 then 174 → 140
+  inline `style={{ ... }}` props across Dashboard, SystemHealth,
+  Analytics, CfaDashboard, CfaModule, CfaConstructedResponse, CfaQuiz,
+  CfaVignette, ExcelModule, Calculators, Flashcards, MockExam,
+  ReviewInbox, OnboardingWizard — **87 props converted** to the
+  `.qv-stack-*`, `.qv-row-*`, `.qv-card`, `.qv-text-*`, `.qv-fs-*`,
+  `.qv-fw-*`, `.qv-mt-*`, `.qv-mb-*` utility-class layer.
+- **TypeScript migration.** 7 modules to `.ts`/`.tsx` via `git mv` so
+  blame history survives — `bootstrapAiContent`, `bootstrapSourceVault`,
+  `PwaInstallPrompt`, `ThemeContext`, `ToastContext`, `TopBar`,
+  `Primitives`. Each gets a proper props interface or exported value
+  type. One behavioral bug uncovered + fixed: `Surface`/`Panel` icons
+  now render lucide-react forwardRef objects via `createElement`
+  instead of dumping them as React children.
+- **Pillar 0 — PyInstaller scaffold.** `scripts/build-onb-binary.mjs`
+  produces a one-file `open-notebook(.exe)` from the FastAPI backend at
+  `spike/open-notebook/api/main.py` and copies it into
+  `src-tauri/resources/services/open-notebook/`. `tauri.conf.json`
+  `bundle.resources` now ships everything under `resources/services/`
+  into the installer; `services_dir()` already searched that path. New
+  `npm run build:onb-binary` script. Requires `pip install pyinstaller`
+  before first run; binaries are gitignored.
+
+### Verification gates (all green at tag)
+- `npx tsc --noEmit` — 0 errors
+- `npm run lint` — 0 errors, 0 warnings
+- `npx vitest run` — **259 tests across 33 files**
+- `npm run build` — 66 precache entries / 4.34 MB
+- `cargo build --manifest-path src-tauri/Cargo.toml` — clean
+- `cargo test` — 5 Rust unit tests
+- `npm audit --omit=dev --audit-level=high` — 0 vulnerabilities
+
+### Still open (genuinely beyond a local autonomous session)
+- L2 / L3 content expansion — blocked on the user supplying L2/L3
+  source PDFs to ingest; the `content:expand` CLI is ready and runs
+  per-level off the existing source bundle.
+- Vector + hybrid search inside SurrealDB — requires the SurrealDB
+  sidecar running and a schema migration. Driver is wired.
+- Figure / chart understanding in the curriculum reader.
+- Smoke + sidecar integration tests inside the Tauri shell.
+
 ## [0.3.0] — 2026-05-28
 
 Roadmap-completing milestone: every previously-deferred Pillar now ships or

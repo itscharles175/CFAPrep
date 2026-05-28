@@ -1,7 +1,7 @@
 {
   "name": "quantvault",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "engines": {
     "node": ">=24.0.0",
@@ -23,6 +23,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:build:debug": "tauri build --debug",
+    "build:onb-binary": "node scripts/build-onb-binary.mjs",
     "cfa:source:inventory": "node scripts/cfa-source-vault.mjs inventory",
     "cfa:source:ingest": "node scripts/cfa-source-vault.mjs ingest",
     "cfa:source:bundle": "node scripts/cfa-source-vault.mjs bundle",

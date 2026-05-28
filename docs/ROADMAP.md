@@ -50,7 +50,7 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 ## Pillar 0 — Desktop platform & sidecar runtime (Tauri)
 
 - [x] Scaffold Tauri around the Vite app; dev + prod builds **(M)**
-- [~] Sidecar supervision: launches SurrealDB + open-notebook + worker from `spike/` dir in dev (`src-tauri/src/lib.rs` `services_dir()` now also searches `resources/services/` next to the installed executable for production); PyInstaller bundling of the Python backend is the remaining **(XL)** piece
+- [~] Sidecar supervision: launches SurrealDB + open-notebook + worker from `spike/` dir in dev (`src-tauri/src/lib.rs` `services_dir()` searches `resources/services/` next to the installed executable for production); PyInstaller scaffold lands — `scripts/build-onb-binary.mjs` + `tauri.conf.json bundle.resources` ships everything under `resources/services/` into the installer; `pip install pyinstaller` then `npm run build:onb-binary` produces the binary. Pinning the heavy ML dep tree for a small build is the remaining **(L)** piece
 - [x] Native folder ingestion — Tauri commands `cfa_pick_folder` / `cfa_list_pdfs` / `cfa_read_pdf_bytes`; browser-side pdfjs extraction + page-aware chunker → Dexie sourceDocuments/sourceChunks; SHA-256 dedupe; "Desktop Shell" card on System Health
 - [x] OS drag-drop ingestion via `onDragDropEvent`; browser-native review reminders via Notification API. Native tray + global hotkey are Tauri-shell follow-ups
 - [x] Packaging + code signing + GitHub release pipeline — `npm run tauri:build`, signed bundle scaffolding in `tauri.conf.json` (Windows thumbprint + macOS signing-identity + notarization env vars), `.github/workflows/release.yml` matrix-builds Windows/macOS/Linux on `v*` tags. Auto-updater is opt-in (see `docs/PACKAGING.md`)
@@ -58,7 +58,7 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 ## Pillar 1 — One local brain (SurrealDB)
 
 - [~] Define the unified schema — `src/lib/storage/types.ts` lays the `StorageDriver` interface; sources/chunks/notebooks/FSRS/attempts/mastery follow the same pattern once `settings` is fully migrated
-- [~] **Strangler-pattern abstraction shipped** — `src/lib/storage/{dexieDriver,surrealDriver,index}.ts` wraps `db.settings`. Dexie is the active driver at startup; `switchToSurreal()` validates a live `:8000` sidecar before swapping. Mechanical sweep of `db.settings.*` callsites is the **(XL)** next step (see `docs/SURREALDB-MIGRATION.md`)
+- [x] **Strangler-pattern abstraction + Phase 2 sweep shipped** — `src/lib/storage/{dexieDriver,surrealDriver,index}.ts` wraps `db.settings`; `switchToSurreal()` validates a live `:8000` sidecar before swapping. Phase 2 done: 39 callsites across 8 production files (bootstrap, localLlm, mockGenerator, openNotebook, PwaInstallPrompt, Dashboard, SystemHealth, Today) now route through `getStorage().settings.*`. Dexie remains the active driver — only the SurrealDB schema migration + Phase 3 (other tables) is left **(L)**
 - [ ] Vector + hybrid search in SurrealDB over curriculum chunks **(L)**
 - [ ] Backup/restore + encrypted export against the new store **(M)**
 
@@ -67,7 +67,7 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 - [x] Wire QuantVault UI to the local open-notebook API; curriculum flows in as sources via `ensureTopicNotebook`
 - [x] Notebooks: sources + notes + RAG chat with **citations** to chunks/page locators — parsed `[source:xxx]` markers render as numbered chips ① ② with source-title legend (`src/lib/citations.ts`)
 - [x] **Transformations** — `summarizeTopicFromCurriculum`, `generateFlashcardsFromCurriculum`, `generateQuestionsFromCurriculum`, `narrateStudyPlan`, `critiqueConstructedResponse`, `ensureSourceInsights("Key Insights")`. Five surfaces in CfaModule, two on /today, plus the Mock-exam constructed grader
-- [ ] **AI study podcasts** — multi-speaker script (Gemma) → kokoro audio, fully local **(L)**
+- [x] **AI study podcasts** — multi-speaker Coach/Student script (Gemma 4 E4B) → kokoro-js TTS (`af_heart` + `am_michael`, ~80MB ONNX model cached in IndexedDB on first use). `PodcastPanel` mounts above AI practice in every CFA module with grounded source excerpts. Play / Pause / Stop / per-segment download. Stitching segments into a single WAV stream is the open polish **(M)**
 - [ ] Blend open-notebook's UI into QuantVault's design system (don't ship two visual languages) **(L)**
 
 ## Pillar 3 — AI core on Gemma 4 E4B
@@ -92,8 +92,8 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 ## Pillar 6 — Learning science & generative exams
 
 - [x] Adopt **ts-fsrs** — `src/lib/scheduler.ts` now delegates internals to `ts-fsrs@5.4.1`; all public exports preserved; exam-tuned errorCategory penalty multiplier kept on top of the library output; parity test asserts monotonic interval growth across a 5-streak
-- [ ] **FSRS optimizer** — fit weights to the user's review history **(L)**
-- [ ] Item psychometrics — IRT-lite difficulty calibration (`psychometricStats`) **(L)**
+- [x] **FSRS optimizer** — `src/lib/fsrsOptimizer.ts` fits FSRS-4.5 parameters to the user's `questionResults` history via coordinate descent against binary-cross-entropy log-loss. Tunes `request_retention` + `w[0..3]` + `w[15..16]`. Bounded ~300 evals; refuses sample sizes below 50 reviews. Persisted params swap the active `fsrs()` instance on next reload. System Health: **Fit from history → preview report → Apply / Reset**
+- [x] **Item psychometrics — IRT-lite** — `src/lib/itemPsychometrics.ts` computes per-item empirical difficulty + point-biserial discrimination + Wald reliability SE. Flags `too-easy` / `too-hard` / `low-discrimination` / `ok` / `insufficient-data`. System Health: chip summary by flag + expandable top-10 flagged-item table
 - [x] **Generative mock exams** — `src/lib/mockGenerator.js` builds per-level mocks from ingested curriculum via the local LLM; topic mix preview; integrated into the existing MockExam runner so scoring/timing/persistence work unchanged
 - [~] Smarter planning — exam-date countdown badge on `/today`; LLM "Why this plan today" narrative; remaining: interleaving + desirable-difficulty rules **(M)**
 
@@ -101,7 +101,7 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 - [x] Design tokens in CSS layers — `src/styles/tokens.css` ships eight token families (color/type/space/radius/elevation/motion/z-index/layout) under `@layer tokens`, plus a utility-class layer (`.qv-stack-*`, `.qv-row-*`, `.qv-card`, `.qv-callout`, `.qv-chip`, color/font/margin shorthands). Mechanical inline-style → utility-class sweep across remaining components is the steady-state follow-up
 - [x] Component library + in-app gallery — every Primitive (Surface, StatusBadge, PageHeader, MetricTile, Panel, Dialog, SegmentedControl, InlineCluster, ProgressRail, EmptyPanel, QuestionStage, RubricPanel) rendered at `/style` with all token families
-- [~] Theming — `prefers-reduced-motion` honoured at the token layer; light/dark + per-domain accent themes remain open **(M)**
+- [x] Theming — `prefers-reduced-motion` honoured at the token layer; **light/dark/system** three-state switcher in TopBar with `[data-theme="light"]` token overrides + `prefers-color-scheme` default block; bootstrap runs before `createRoot` to avoid first-paint flash. Per-domain accent themes remain **(M)**
 
 ## Pillar 8 — UX flows & navigation
 
@@ -125,8 +125,8 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 ## Pillar 11 — Infra & quality
 
 - [ ] Performance — virtualization, worker offload, sidecar startup time **(M)**
-- [ ] TypeScript rigor — migrate remaining `.jsx`/`.js` → `.tsx` **(L)**
-- [~] Testing — vitest **218 unit/integration tests across 29 files** + 5 Rust cargo tests pass; Playwright e2e (`scripts/smoke.mjs`) ships; Tauri-shell smoke + sidecar integration tests still **(M)** open
+- [~] TypeScript rigor — first wave done (7 modules: bootstrapAiContent, bootstrapSourceVault, PwaInstallPrompt, ThemeContext, ToastContext, TopBar, Primitives — each with explicit props/value types via `git mv` so blame survives). Remaining `.jsx`/`.js` migration is mechanical **(M)**
+- [~] Testing — vitest **259 unit/integration tests across 33 files** + 5 Rust cargo tests pass; Playwright e2e (`scripts/smoke.mjs`) ships; Tauri-shell smoke + sidecar integration tests still **(M)** open
 - [x] **Strict-offline invariant enforced** — Google Fonts / KaTeX CDN `<link>` tags removed; KaTeX CSS bundled from npm; SW runtime-cache routes for those CDNs deleted
 
 ---
