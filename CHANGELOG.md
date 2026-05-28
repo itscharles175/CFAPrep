@@ -3,6 +3,61 @@
 All notable changes to QuantVault. Dates use `YYYY-MM-DD`. See `git log` for
 the full per-commit detail.
 
+## [0.2.0] — 2026-05-28
+
+Roadmap-wide expansion: the v0.1.0 platform gets first-run onboarding,
+multimodal AI coaching across quiz/mock/constructed-response, interactive
+Knowledge Graph, six new Analytics charts (mastery, retention, forecast,
+calibration, item-type, streak heatmap), focused-mode `/today` with
+generated drills + LLM narrative + session timer + exam countdown, cache
+management, browser-native review reminders, and OS drag-drop ingestion.
+
+### Added (Pillars 0/3/4/8/9 + a11y polish)
+- **Pillar 0** — OS drag-drop ingestion: PDFs dropped on the Tauri window
+  auto-ingest through the same Rust + pdfjs pipeline; Cancel button on
+  every long-running ingestion.
+- **Pillar 0/8** — Browser-native review reminders via the Notification
+  API: opt-in from System Health, fires once per day on `/today` when
+  reviews are due.
+- **Pillar 3** — `explainWrongAnswer` AI coaching on missed questions
+  surfaced in both CfaQuiz review and MockExam review. `critiqueConstructed
+  Response` for Level III essays in both CfaConstructedResponse and the
+  MockExam constructed item. `narrateStudyPlan` for the "Why this plan
+  today" rationale on `/today`.
+- **Pillar 4** — `buildStudyPlan` orchestrator gets a UI-driven targeted
+  drill: from the weakest topic, generate three grounded MCQs via
+  `generateQuestionsFromCurriculum`, interactive answering with red/green
+  feedback and a Score line, "Why this plan today" LLM narrative.
+- **Pillar 6** — Generative mock-exam cancellation; per-topic mix preview.
+  Exam-date pacing surface (System Health stores `exam-date` setting,
+  `/today` shows a countdown badge with danger/warning/exam tones).
+- **Pillar 8** — `/today` focus-mode route + sidebar / quick-tools /
+  command-palette entries. Onboarding wizard (3-step modal mounts on a
+  blank Dashboard, persistent dismiss flag). Keyboard `?` help dialog,
+  visible Help button in TopBar. Pomodoro-style study session timer on
+  `/today` (▶/⏸/⏹ controls, persists a StudySession row on Stop).
+- **Pillar 9** — **Knowledge Graph** at `/knowledge-graph`: SVG canvas of
+  every topic across L1/L2/L3 with cross-level edges, mastery + curriculum
+  color overlays, search filter, side panel with topic details.
+- **Pillar 9 charts** — Mastery Over Time (line), 14-Day Review Load
+  Forecast (bar), 30-Day Retention Decay (line), Confidence Calibration
+  (scatter w/ 1:1 diagonal), Accuracy By Item Type (horizontal bar), and
+  12-week Study Streak Heatmap (GitHub-style SVG grid).
+- **Pillar 1/5** — App-cache management panel (5 buckets, per-bucket Clear
+  + Clear All), Reset onboarding button, `.qvsource` Import button.
+- **Pillar 5/10** — Free-text paste ingestion. Per-topic "no curriculum"
+  warning on the CFA dashboard. LM Studio model picker becomes a dropdown
+  after Test Connection.
+
+### Verification gates (all green)
+- `tsc --noEmit` clean
+- `eslint .` clean (0 errors, 0 warnings)
+- `vitest run` — **188 tests** across 27 files
+- `npm run build` — 61 precache entries / ~2.1 MB
+- `cargo test` (src-tauri) — 5/5 Rust unit tests
+- `npm audit --omit=dev --audit-level=high` — 0 vulnerabilities
+- `npm run content:validate` — 0 blockers across L1/L2/L3
+
 ## [0.1.0] — 2026-05-28
 
 The first "maximal-ambition" milestone: QuantVault becomes a real local-first
