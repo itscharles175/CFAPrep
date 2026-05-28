@@ -244,9 +244,16 @@ export default function CfaDashboard() {
                   <strong>{topic.label}</strong>
                   <small>{topic.weight} · {topic.questions} Q · {topic.vignettes} cases</small>
                   <small>{sourceCoverage?.topicCounts?.[topic.id] || 0} private source document(s) mapped</small>
-                  <StatusBadge tone={completed ? 'success' : ready ? 'exam' : 'warning'}>
-                    {completed ? 'complete' : ready ? 'exam-ready' : topic.maturity}
-                  </StatusBadge>
+                  <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+                    <StatusBadge tone={completed ? 'success' : ready ? 'exam' : 'warning'}>
+                      {completed ? 'complete' : ready ? 'exam-ready' : topic.maturity}
+                    </StatusBadge>
+                    {!sourceCoverage?.topicCounts?.[topic.id] && (
+                      <StatusBadge tone="warning" title="No ingested curriculum yet — grounded answers and the curriculum reader won't show real text for this topic.">
+                        no curriculum
+                      </StatusBadge>
+                    )}
+                  </div>
                 </Link>
               );
             })}
