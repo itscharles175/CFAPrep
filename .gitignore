@@ -17,6 +17,8 @@ dist-ssr
 .quantvault/
 *.qvsource
 qa-screenshots/
+spike/
+.claude/worktrees/
 
 # Editor directories and files
 .vscode/*
