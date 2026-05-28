@@ -16,29 +16,13 @@ const OFFLINE_CONTENT_CACHE = 'quantvault-offline-content-v1';
 precacheAndRoute(self.__WB_MANIFEST || []);
 cleanupOutdatedCaches();
 
-// Cache Google Fonts
-registerRoute(
-  ({ url }) => url.origin === 'https://fonts.googleapis.com' || url.origin === 'https://fonts.gstatic.com',
-  new CacheFirst({
-    cacheName: 'google-fonts',
-    plugins: [
-      new ExpirationPlugin({ maxEntries: 30, maxAgeSeconds: 365 * 24 * 60 * 60 }),
-      new CacheableResponsePlugin({ statuses: [0, 200] }),
-    ],
-  }),
-);
-
-// Cache KaTeX CDN resources
-registerRoute(
-  ({ url }) => url.origin === 'https://cdn.jsdelivr.net' && url.pathname.includes('katex'),
-  new CacheFirst({
-    cacheName: 'katex-cdn',
-    plugins: [
-      new ExpirationPlugin({ maxEntries: 20, maxAgeSeconds: 30 * 24 * 60 * 60 }),
-      new CacheableResponsePlugin({ statuses: [0, 200] }),
-    ],
-  }),
-);
+// Note: previous versions also registered CDN cache routes for Google Fonts
+// (fonts.googleapis.com/gstatic.com) and KaTeX CSS (cdn.jsdelivr.net). Those
+// CDN <link> tags have been removed from index.html — KaTeX CSS is now
+// bundled locally via the `katex` npm package (imported in main.jsx) and
+// fonts fall through to the OS system stack. The strict-offline invariant
+// means we never reach out to any third-party origin, so no runtime cache
+// for them is needed.
 
 // Cache images
 registerRoute(
