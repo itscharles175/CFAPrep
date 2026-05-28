@@ -4,7 +4,7 @@ import { ChevronRight, Inbox, RefreshCw, Sparkles, Target, TrendingUp } from 'lu
 import { PageHeader, StatusBadge, Surface } from '../components/ui/Primitives';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { buildStudyPlan } from '../lib/studyDirector';
-import { generateQuestionsFromCurriculum, getLlmSettings } from '../lib/localLlm';
+import { generateQuestionsFromCurriculum, getLlmSettings, narrateStudyPlan } from '../lib/localLlm';
 import { getCfaSourceReadingForTopic } from '../lib/cfaSourceVault';
 
 // Parse a /cfa/<level>/<topic> path produced by buildStudyPlan into its
@@ -44,6 +44,27 @@ export default function Today() {
   const [drill, setDrill] = useState({ state: 'idle', questions: [], error: '' });
   // Map of question.id -> selected option index. Empty until the user picks.
   const [drillAnswers, setDrillAnswers] = useState({});
+  const [narrative, setNarrative] = useState({ state: 'idle', text: '', error: '' });
+
+  async function generateNarrative() {
+    if (!plan) return;
+    setNarrative({ state: 'loading', text: '', error: '' });
+    try {
+      const settings = await getLlmSettings();
+      if (!settings.enabled) {
+        setNarrative({ state: 'error', text: '', error: 'Enable a local model in System Health → Local AI first.' });
+        return;
+      }
+      const text = await narrateStudyPlan({ settings, plan });
+      setNarrative({ state: 'done', text, error: '' });
+    } catch (error) {
+      setNarrative({
+        state: 'error',
+        text: '',
+        error: error instanceof Error ? error.message : 'Narrative generation failed.',
+      });
+    }
+  }
 
   async function refresh() {
     setRefreshing(true);
@@ -139,7 +160,38 @@ export default function Today() {
       ) : (
         <>
           <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
-            <p className="muted-copy" style={{ margin: 0 }}>{plan.headline}</p>
+            <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
+              <p className="muted-copy" style={{ margin: 0 }}>{plan.headline}</p>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={generateNarrative}
+                disabled={narrative.state === 'loading'}
+                title="Generate a personalized rationale for today's plan via your local model"
+              >
+                {narrative.state === 'loading' ? 'Thinking…' : narrative.text ? 'Regenerate narrative' : '🤖 Why this plan today'}
+              </button>
+            </div>
+
+            {narrative.state === 'done' && narrative.text && (
+              <p
+                style={{
+                  marginTop: 'var(--space-3)',
+                  padding: 'var(--space-3)',
+                  borderLeft: '3px solid var(--accent)',
+                  background: 'var(--surface-2, rgba(120,180,255,0.06))',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  whiteSpace: 'pre-line',
+                  lineHeight: 1.55,
+                }}
+              >
+                {narrative.text}
+              </p>
+            )}
+            {narrative.state === 'error' && (
+              <p style={{ color: 'var(--danger)', marginTop: 'var(--space-2)', fontSize: 'var(--fs-sm)' }}>
+                {narrative.error}
+              </p>
+            )}
             {top && (
               <Link
                 to={top.path}

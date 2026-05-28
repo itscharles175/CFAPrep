@@ -7,6 +7,7 @@ import {
   explainWrongAnswer,
   generateQuestionsFromCurriculum,
   getLlmSettings,
+  narrateStudyPlan,
   saveLlmSettings,
 } from './localLlm';
 import { db } from './progressStore';
@@ -265,5 +266,44 @@ describe('critiqueConstructedResponse', () => {
         rubric,
       }),
     ).rejects.toThrow(/CORS|OLLAMA_ORIGINS/);
+  });
+});
+
+describe('narrateStudyPlan', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('posts the plan with action list + counts and returns the model prose', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      choices: [{ message: { content: 'Start with the modified-duration review while it is still fresh...\n\nSuccess looks like...' } }],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const text = await narrateStudyPlan({
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma-4-e4b-it' },
+      plan: {
+        headline: '2 reviews due, 1 weak topic',
+        dueCount: 2,
+        weakCount: 1,
+        peakReviewDay: { date: '2026-05-30', count: 9 },
+        actions: [
+          { kind: 'review', title: 'Duration', reason: '42% retention' },
+          { kind: 'weak-topic', title: 'Equity', reason: '58% readiness' },
+        ],
+      },
+    });
+    expect(text).toContain('modified-duration');
+    const userMessage = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find((m) => m.role === 'user').content;
+    expect(userMessage).toContain('[review] Duration');
+    expect(userMessage).toContain('[weak-topic] Equity');
+    expect(userMessage).toContain('2026-05-30');
+  });
+
+  it('rejects an empty model response with a friendly error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ choices: [{ message: { content: '   ' } }] })));
+    await expect(
+      narrateStudyPlan({
+        settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+        plan: { headline: 'x', actions: [{ kind: 'continue', title: 'go', reason: 'idle' }] },
+      }),
+    ).rejects.toThrow(/empty narrative/);
   });
 });

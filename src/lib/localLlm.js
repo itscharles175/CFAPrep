@@ -229,6 +229,58 @@ export async function critiqueConstructedResponse({ settings, prompt, response, 
   return content.trim();
 }
 
+/**
+ * Personalized 2-paragraph narrative for a Study Director plan.
+ * Given the structured plan from buildStudyPlan, asks the local model to
+ * explain WHY today's prioritization makes sense in plain language — useful
+ * as a "coach's note" above the action list.
+ */
+export async function narrateStudyPlan({ settings, plan, signal }) {
+  const base = normalizeBaseUrl(settings?.baseUrl);
+  const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
+  const actionLines = (plan?.actions || [])
+    .slice(0, 6)
+    .map((action, index) => `${index + 1}. [${action.kind}] ${action.title} — ${action.reason}`)
+    .join('\n');
+  const system =
+    'You are a patient CFA study coach. The student has a prioritized action list from a spaced-repetition + readiness model. ' +
+    'Write a short 2-paragraph "why this plan today" rationale (max ~110 words total). ' +
+    'Paragraph 1: the single most important thing to start with and why, anchored to the listed action. ' +
+    'Paragraph 2: what success looks like at end of session + the 1-2 traps to avoid. ' +
+    'Be concrete, encouraging, exam-focused. Do not restate the plan as bullets; give prose.';
+  const user = `Headline: ${plan?.headline || ''}\nDue reviews: ${plan?.dueCount ?? 0}\nWeak topics: ${plan?.weakCount ?? 0}\n${plan?.peakReviewDay ? `Upcoming peak: ${plan.peakReviewDay.date} (${plan.peakReviewDay.count} items)\n` : ''}\nAction list:\n${actionLines}`;
+
+  let response;
+  try {
+    response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new Error(
+      `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+      { cause: error },
+    );
+  }
+  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('The model returned an empty narrative. Try a more capable local model.');
+  }
+  return content.trim();
+}
+
 export async function getCachedGeneratedQuestions(level, topic) {
   try {
     const row = await db.settings.get(`ai-questions:${level}:${topic}`);
