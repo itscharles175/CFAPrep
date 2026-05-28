@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useParams, Link } from 'react-router-dom';
 import { loadCfaTopicContent } from './cfaLoaders';
 import { level3PathwayForTopic } from './cfaLevel3Pathways';
@@ -55,6 +55,7 @@ export default function CfaModule() {
   const [askState, setAskState] = useState('idle');
   const [askError, setAskError] = useState('');
   const [sourceTitleMap, setSourceTitleMap] = useState(null);
+  const askAbortRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,6 +198,8 @@ export default function CfaModule() {
     setAskState('loading');
     setAskError('');
     setAskAnswer('');
+    const controller = new AbortController();
+    askAbortRef.current = controller;
     try {
       const settings = await getOpenNotebookSettings();
       if (!settings.enabled) {
@@ -212,6 +215,7 @@ export default function CfaModule() {
         // by relevance, so partial seeds force "not enough info" responses on
         // questions about deeper sections (front-matter only otherwise).
         seedChunks: reading.chunks,
+        signal: controller.signal,
       });
       // Progressive enhancement: per-source chat is truly scoped to this
       // topic's source but only works once insights have been generated for
@@ -224,7 +228,7 @@ export default function CfaModule() {
       if (sourceId) {
         const existing = await listSourceInsights(settings.baseUrl, sourceId).catch(() => []);
         if (existing.length > 0) {
-          const scoped = await chatWithSource({ baseUrl: settings.baseUrl, sourceId, message: question });
+          const scoped = await chatWithSource({ baseUrl: settings.baseUrl, sourceId, message: question, signal: controller.signal });
           answer = scoped.answer || 'No answer was returned.';
           usedScopedChat = true;
         } else {
@@ -234,8 +238,12 @@ export default function CfaModule() {
         }
       }
       if (!usedScopedChat) {
-        const result = await askGrounded({ baseUrl: settings.baseUrl, question });
+        const result = await askGrounded({ baseUrl: settings.baseUrl, question, signal: controller.signal });
         answer = result.answer || 'No answer was returned.';
+      }
+      if (controller.signal.aborted) {
+        setAskState('cancelled');
+        return;
       }
       setAskAnswer(answer);
       setAskState('done');
@@ -246,9 +254,19 @@ export default function CfaModule() {
         .then((map) => setSourceTitleMap(map))
         .catch(() => undefined);
     } catch (error) {
-      setAskState('error');
-      setAskError(error instanceof Error ? error.message : 'Grounded answer failed.');
+      if (controller.signal.aborted || error?.name === 'AbortError') {
+        setAskState('cancelled');
+      } else {
+        setAskState('error');
+        setAskError(error instanceof Error ? error.message : 'Grounded answer failed.');
+      }
+    } finally {
+      askAbortRef.current = null;
     }
+  }
+
+  function handleCancelAsk() {
+    askAbortRef.current?.abort();
   }
 
   async function handleSaveNote() {
@@ -457,6 +475,9 @@ export default function CfaModule() {
                   <button className="btn btn-primary" onClick={handleAskCurriculum} disabled={askState === 'loading' || !askQuestion.trim()}>
                     {askState === 'loading' ? 'Thinking…' : 'Ask'}
                   </button>
+                  {askState === 'loading' && (
+                    <button className="btn btn-secondary" onClick={handleCancelAsk}>Cancel</button>
+                  )}
                 </div>
                 {askState === 'loading' && (
                   <p className="muted-copy" style={{ marginTop: 'var(--space-2)' }}>
@@ -464,6 +485,11 @@ export default function CfaModule() {
                   </p>
                 )}
                 {askState === 'error' && <p style={{ color: 'var(--danger)', marginTop: 'var(--space-2)' }}>{askError}</p>}
+                {askState === 'cancelled' && (
+                  <p className="muted-copy" style={{ marginTop: 'var(--space-2)' }}>
+                    Ask cancelled. Any previously saved answer is still on this topic.
+                  </p>
+                )}
                 {askState === 'done' && askAnswer && (() => {
                   const { tokens, sourceIds } = parseCitations(askAnswer);
                   return (
