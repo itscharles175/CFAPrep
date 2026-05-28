@@ -264,6 +264,24 @@ export default function CfaModule() {
     setNoteSavedAt(note.updatedAt);
   }
 
+  /** Append the current grounded Q&A to this lesson's local note. */
+  async function handleSaveAskToNotes() {
+    if (!data || !topic || !askAnswer) return;
+    const stamp = new Date().toLocaleString();
+    const block = `## ${askQuestion} _(${stamp})_\n${askAnswer}`;
+    const nextBody = noteBody?.trim() ? `${noteBody.trim()}\n\n${block}\n` : `${block}\n`;
+    setNoteBody(nextBody);
+    const note = await saveNote({
+      type: 'lesson',
+      domain: 'cfa',
+      moduleId: `${level}:${topic}`,
+      title: `${data.title} lesson note`,
+      body: nextBody,
+      path: location.pathname,
+    });
+    setNoteSavedAt(note.updatedAt);
+  }
+
   async function handleToggleBookmark() {
     if (!data || !topic) return;
     const bookmark = await toggleBookmark({
@@ -481,6 +499,16 @@ export default function CfaModule() {
                             </sup>
                           ),
                         )}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={handleSaveAskToNotes}
+                          title="Append this Q&A to the topic's lesson note"
+                        >
+                          📌 Save Q&A to notes
+                        </button>
                       </div>
                       {sourceIds.length > 0 && (
                         <ol style={{ marginTop: 'var(--space-3)', paddingLeft: 'var(--space-5)', color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>
