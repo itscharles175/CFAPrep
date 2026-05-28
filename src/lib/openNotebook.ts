@@ -155,6 +155,21 @@ export async function listNotebooks(settings?: Pick<OpenNotebookSettings, 'baseU
   return Array.isArray(list) ? list : [];
 }
 
+export async function listSources(settings?: Pick<OpenNotebookSettings, 'baseUrl'>): Promise<OnbSource[]> {
+  const list = await request<OnbSource[]>(normalizeBaseUrl(settings?.baseUrl), '/api/sources', { timeoutMs: 15_000 });
+  return Array.isArray(list) ? list : [];
+}
+
+/** Fetch all sources once and return an id -> title map for citation rendering. */
+export async function fetchSourceTitleMap(baseUrl: string): Promise<Map<string, string>> {
+  const sources = await listSources({ baseUrl });
+  const map = new Map<string, string>();
+  for (const source of sources) {
+    if (source?.id && source.title) map.set(source.id, source.title);
+  }
+  return map;
+}
+
 export async function createNotebook(
   baseUrl: string,
   name: string,

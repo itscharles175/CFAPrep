@@ -17,11 +17,13 @@ import {
   chatWithSource,
   ensureSourceInsights,
   ensureTopicNotebook,
+  fetchSourceTitleMap,
   getCachedGroundedAnswer,
   getOpenNotebookSettings,
   listSourceInsights,
   saveCachedGroundedAnswer,
 } from '../../lib/openNotebook';
+import { parseCitations } from '../../lib/citations';
 
 export default function CfaModule() {
   const { level, topic } = useParams();
@@ -52,6 +54,7 @@ export default function CfaModule() {
   const [askAnswer, setAskAnswer] = useState('');
   const [askState, setAskState] = useState('idle');
   const [askError, setAskError] = useState('');
+  const [sourceTitleMap, setSourceTitleMap] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,6 +147,23 @@ export default function CfaModule() {
     };
   }, [level, topic]);
 
+  // Preload the open-notebook source-title map (when the backend is enabled)
+  // so rehydrated cited answers render named citations on first paint.
+  useEffect(() => {
+    let cancelled = false;
+    getOpenNotebookSettings().then((settings) => {
+      if (cancelled || !settings.enabled) return;
+      fetchSourceTitleMap(settings.baseUrl)
+        .then((map) => {
+          if (!cancelled) setSourceTitleMap(map);
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleGenerate() {
     setAiState('loading');
     setAiError('');
@@ -220,6 +240,11 @@ export default function CfaModule() {
       setAskAnswer(answer);
       setAskState('done');
       await saveCachedGroundedAnswer(level, topic, { question, answer });
+      // Refresh the source-title map so the citation legend can name the
+      // sources cited inline. Fire-and-forget; legend just falls back to ids.
+      fetchSourceTitleMap(settings.baseUrl)
+        .then((map) => setSourceTitleMap(map))
+        .catch(() => undefined);
     } catch (error) {
       setAskState('error');
       setAskError(error instanceof Error ? error.message : 'Grounded answer failed.');
@@ -421,11 +446,55 @@ export default function CfaModule() {
                   </p>
                 )}
                 {askState === 'error' && <p style={{ color: 'var(--danger)', marginTop: 'var(--space-2)' }}>{askError}</p>}
-                {askState === 'done' && askAnswer && (
-                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)', whiteSpace: 'pre-line' }}>
-                    {askAnswer}
-                  </div>
-                )}
+                {askState === 'done' && askAnswer && (() => {
+                  const { tokens, sourceIds } = parseCitations(askAnswer);
+                  return (
+                    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
+                      <div style={{ whiteSpace: 'pre-line', lineHeight: 1.55 }}>
+                        {tokens.map((token, ti) =>
+                          token.kind === 'text' ? (
+                            <span key={ti}>{token.text}</span>
+                          ) : (
+                            <sup key={ti} style={{ marginLeft: 2 }}>
+                              {token.refs.map((n, ri) => (
+                                <span
+                                  key={n}
+                                  title={`${sourceTitleMap?.get(sourceIds[n - 1]) || sourceIds[n - 1] || `Citation ${n}`}`}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    minWidth: 18,
+                                    padding: '0 4px',
+                                    marginLeft: ri === 0 ? 0 : 2,
+                                    fontSize: 'var(--fs-xs)',
+                                    fontWeight: 600,
+                                    borderRadius: 8,
+                                    background: 'var(--accent-soft, rgba(120,180,255,0.18))',
+                                    color: 'var(--accent, currentColor)',
+                                    border: '1px solid var(--accent, transparent)',
+                                  }}
+                                >
+                                  {n}
+                                </span>
+                              ))}
+                            </sup>
+                          ),
+                        )}
+                      </div>
+                      {sourceIds.length > 0 && (
+                        <ol style={{ marginTop: 'var(--space-3)', paddingLeft: 'var(--space-5)', color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>
+                          {sourceIds.map((id) => (
+                            <li key={id} style={{ marginBottom: 'var(--space-1)' }}>
+                              <strong style={{ color: 'var(--text-secondary)' }}>{sourceTitleMap?.get(id) || 'Curriculum source'}</strong>
+                              <span style={{ marginLeft: 'var(--space-2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 'var(--fs-xs)' }}>{id}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                    </div>
+                  );
+                })()}
               </Surface>
             </>
           ) : (
