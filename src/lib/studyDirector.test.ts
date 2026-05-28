@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { rankStudyActions } from './studyDirector';
+import { applyInterleavingRules, computeSpacingScore, rankStudyActions } from './studyDirector';
 import type { StudyAction } from './studyDirector';
 
 // ---------------------------------------------------------------------------
@@ -247,5 +247,84 @@ describe('buildStudyPlan (async orchestrator)', () => {
     const plan = await buildStudyPlan();
     expect(plan.actions).toHaveLength(1);
     expect(plan.actions[0].kind).toBe('continue');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Interleaving / desirable-difficulty rules
+// ---------------------------------------------------------------------------
+
+describe('applyInterleavingRules', () => {
+  it('with empty weak topics returns empty pickedTopics', () => {
+    const result = applyInterleavingRules([], []);
+    expect(result.pickedTopics).toEqual([]);
+    expect(result.spacingScore).toBe(0);
+    expect(result.rationale).toMatch(/no weak topics/i);
+  });
+
+  it('with a single weak topic, picks it for every slot', () => {
+    const result = applyInterleavingRules(
+      [{ topic: 'level1:fixed-income', mastery: 0.32 }],
+      [],
+      { slotCount: 6 },
+    );
+    expect(result.pickedTopics).toHaveLength(6);
+    expect(new Set(result.pickedTopics).size).toBe(1);
+    expect(result.pickedTopics[0]).toBe('level1:fixed-income');
+    // All-same → spacing score 0
+    expect(result.spacingScore).toBe(0);
+  });
+
+  it('with two weak topics, alternates at the interleave ratio', () => {
+    // ratio 0.5 → step 2 → every 2nd slot is secondary
+    const result = applyInterleavingRules(
+      [
+        { topic: 'fixed-income', mastery: 0.30 },
+        { topic: 'equity',       mastery: 0.55 },
+      ],
+      [],
+      { slotCount: 8, interleaveRatio: 0.5 },
+    );
+    expect(result.pickedTopics).toHaveLength(8);
+    // Slots 2, 4, 6, 8 (1-indexed) → secondary; slots 1, 3, 5, 7 → primary
+    expect(result.pickedTopics[0]).toBe('fixed-income');
+    expect(result.pickedTopics[1]).toBe('equity');
+    expect(result.pickedTopics[2]).toBe('fixed-income');
+    expect(result.pickedTopics[3]).toBe('equity');
+    expect(result.pickedTopics).toContain('fixed-income');
+    expect(result.pickedTopics).toContain('equity');
+  });
+
+  it('avoids the last-history topic when alternation is possible', () => {
+    // History indicates we JUST finished fixed-income — first slot should swap
+    // to the secondary even though primary (lowest mastery) would naturally be it.
+    const result = applyInterleavingRules(
+      [
+        { topic: 'fixed-income', mastery: 0.30 },
+        { topic: 'equity',       mastery: 0.55 },
+      ],
+      [{ topic: 'fixed-income', at: '2026-05-27T08:00:00.000Z' }],
+      { slotCount: 4, interleaveRatio: 0.5 },
+    );
+    expect(result.pickedTopics[0]).toBe('equity'); // swapped away from primary
+  });
+
+  it('spacingScore is 0 for all-same-topic and > 0 for any variation', () => {
+    expect(computeSpacingScore(['a', 'a', 'a', 'a'])).toBe(0);
+    expect(computeSpacingScore(['a', 'b', 'a', 'b'])).toBeGreaterThan(0);
+    // Perfectly alternating with N=4 → maxRun=1 → 1 - 1/4 = 0.75
+    expect(computeSpacingScore(['a', 'b', 'a', 'b'])).toBeCloseTo(0.75, 5);
+  });
+
+  it('rationale mentions desirable-difficulty floor when primary mastery is very low', () => {
+    const result = applyInterleavingRules(
+      [
+        { topic: 'fixed-income', mastery: 0.08 },
+        { topic: 'equity',       mastery: 0.55 },
+      ],
+      [],
+      { slotCount: 4, desirableDifficultyMin: 0.15 },
+    );
+    expect(result.rationale).toMatch(/desirable-difficulty/i);
   });
 });

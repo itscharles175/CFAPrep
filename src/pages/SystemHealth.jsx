@@ -30,6 +30,12 @@ import {
   persistPsychometricsReport,
   readCachedPsychometricsReport,
 } from '../lib/itemPsychometrics';
+import {
+  clearQueue as clearTargetedQueue,
+  generateTargetedMaterialJobs,
+  readQueue as readTargetedQueue,
+  runTargetedMaterialJob,
+} from '../lib/targetedMaterialQueue';
 
 // Cache-management constants — used by refreshCacheBuckets / handleClearBucket.
 const CACHE_PREFIXES = {
@@ -97,6 +103,11 @@ export default function SystemHealth() {
   const [psychReport, setPsychReport] = useState(null);
   const [psychBusy, setPsychBusy] = useState(false);
   const [psychError, setPsychError] = useState('');
+  // Auto-generated targeted material queue
+  const [targetedQueue, setTargetedQueue] = useState([]);
+  const [targetedBusy, setTargetedBusy] = useState(false);
+  const [targetedError, setTargetedError] = useState('');
+  const [targetedRunningId, setTargetedRunningId] = useState(null);
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -167,6 +178,9 @@ export default function SystemHealth() {
     readCachedPsychometricsReport().then((row) => {
       if (active) setPsychReport(row);
     });
+    readTargetedQueue().then((rows) => {
+      if (active) setTargetedQueue(rows);
+    });
     return () => {
       active = false;
     };
@@ -192,6 +206,67 @@ export default function SystemHealth() {
     await clearPsychometricsCache();
     setPsychReport(null);
     toast.info('Psychometrics cleared', 'Cache emptied — recompute any time.');
+  }
+
+  async function handleTargetedGenerate() {
+    setTargetedBusy(true);
+    setTargetedError('');
+    try {
+      const snapshots = await db.masterySnapshots.toArray();
+      const weakTopics = snapshots
+        .filter((snapshot) => snapshot.score < 55)
+        .map((snapshot) => ({
+          domain: snapshot.domain,
+          level: snapshot.topic.split(':')[0] || 'level1',
+          topic: snapshot.topic,
+          title: snapshot.title,
+          mastery: snapshot.score / 100,
+        }));
+      const jobs = await generateTargetedMaterialJobs({ weakTopics });
+      setTargetedQueue(jobs);
+      const pending = jobs.filter((job) => job.status === 'pending').length;
+      toast.success(
+        'Targeted material queue ready',
+        `${pending} job${pending !== 1 ? 's' : ''} pending across ${weakTopics.length} weak topic${weakTopics.length !== 1 ? 's' : ''}.`,
+      );
+    } catch (error) {
+      setTargetedError(error?.message || String(error));
+    } finally {
+      setTargetedBusy(false);
+    }
+  }
+
+  async function handleTargetedRunAll() {
+    setTargetedBusy(true);
+    setTargetedError('');
+    try {
+      const current = await readTargetedQueue();
+      const pending = current.filter((job) => job.status === 'pending');
+      let errors = 0;
+      for (const job of pending) {
+        setTargetedRunningId(job.id);
+        const result = await runTargetedMaterialJob(job);
+        if (result.status === 'error') errors += 1;
+      }
+      const refreshed = await readTargetedQueue();
+      setTargetedQueue(refreshed);
+      if (errors > 0) {
+        toast.warning('Targeted material partial', `${errors} job${errors !== 1 ? 's' : ''} failed — see status below.`);
+      } else if (pending.length > 0) {
+        toast.success('Targeted material complete', `${pending.length} job${pending.length !== 1 ? 's' : ''} finished.`);
+      }
+    } catch (error) {
+      setTargetedError(error?.message || String(error));
+    } finally {
+      setTargetedRunningId(null);
+      setTargetedBusy(false);
+    }
+  }
+
+  async function handleTargetedClear() {
+    await clearTargetedQueue();
+    setTargetedQueue([]);
+    toast.info('Queue cleared', 'Generate jobs again any time.');
   }
 
   async function handleFsrsFit() {
@@ -962,6 +1037,59 @@ export default function SystemHealth() {
             {psychReport && (
               <button className="btn btn-secondary btn-sm" onClick={handlePsychReset} disabled={psychBusy}>
                 Clear cache
+              </button>
+            )}
+          </div>
+        </div>
+      </Surface>
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <StatusBadge tone="exam">Auto-generated material</StatusBadge>
+            <h3 className="qv-m-0 qv-mt-2">Targeted AI material queue</h3>
+            <p className="qv-text-secondary qv-m-0">
+              Generate practice questions, flashcards, and topic summaries on-device for every weak topic. Each job is grounded in your ingested curriculum and saved to the same cache slots the rest of the app reads from.
+            </p>
+            {targetedQueue.length > 0 && (
+              <div className="qv-mt-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                {targetedQueue.map((job) => {
+                  const tone =
+                    job.status === 'done' ? 'qv-text-success'
+                      : job.status === 'error' ? 'qv-text-danger'
+                      : job.status === 'running' ? 'qv-text-warning'
+                      : 'qv-text-secondary';
+                  return (
+                    <div key={job.id} className="qv-fs-sm" style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', alignItems: 'baseline' }}>
+                      <span>
+                        <span className="qv-fw-semibold">{job.title}</span>
+                        <span className="qv-text-muted"> · {job.kind}</span>
+                        {targetedRunningId === job.id && <span className="qv-text-warning"> · running…</span>}
+                      </span>
+                      <span className={`qv-chip ${tone}`}>{job.status}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {targetedError && (
+              <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{targetedError}</p>
+            )}
+          </div>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary btn-sm" onClick={handleTargetedGenerate} disabled={targetedBusy}>
+              {targetedBusy ? 'Working…' : 'Generate jobs from weak topics'}
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleTargetedRunAll}
+              disabled={targetedBusy || !targetedQueue.some((j) => j.status === 'pending')}
+            >
+              Run all pending
+            </button>
+            {targetedQueue.length > 0 && (
+              <button className="btn btn-secondary btn-sm" onClick={handleTargetedClear} disabled={targetedBusy}>
+                Clear queue
               </button>
             )}
           </div>

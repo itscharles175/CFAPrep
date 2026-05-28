@@ -364,6 +364,21 @@ export async function saveCachedGeneratedFlashcards(level, topic, flashcards) {
   return payload;
 }
 
+export async function getCachedTopicSummary(level, topic) {
+  try {
+    const row = await getStorage().settings.get(`topic-summary:${level}:${topic}`);
+    return row?.value || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveCachedTopicSummary(level, topic, summary) {
+  const payload = { summary, generatedAt: new Date().toISOString() };
+  await getStorage().settings.put({ key: `topic-summary:${level}:${topic}`, value: payload, updatedAt: payload.generatedAt });
+  return payload;
+}
+
 /**
  * AI flashcard generator from curriculum excerpts.
  * Uses the local model to produce `{ front, back, locator? }` card objects
