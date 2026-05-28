@@ -30,6 +30,7 @@ const ContentOps = lazy(() => import('./pages/ContentOps'));
 const SystemHealth = lazy(() => import('./pages/SystemHealth'));
 const Today = lazy(() => import('./pages/Today'));
 const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
+const PwaInstallPrompt = lazy(() => import('./components/PwaInstallPrompt'));
 
 /* C5: Skeleton loading state instead of text-only fallback */
 function RouteFallback() {
@@ -232,6 +233,9 @@ export default function App() {
               })()}
             </Dialog>
           )}
+          <Suspense fallback={null}>
+            <PwaInstallPrompt />
+          </Suspense>
         </div>
       </ToastProvider>
     </ThemeProvider>

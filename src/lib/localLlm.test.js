@@ -5,6 +5,7 @@ import {
   checkLlmConnection,
   critiqueConstructedResponse,
   explainWrongAnswer,
+  generateFlashcardsFromCurriculum,
   generateQuestionsFromCurriculum,
   getLlmSettings,
   narrateStudyPlan,
@@ -305,5 +306,66 @@ describe('narrateStudyPlan', () => {
         plan: { headline: 'x', actions: [{ kind: 'continue', title: 'go', reason: 'idle' }] },
       }),
     ).rejects.toThrow(/empty narrative/);
+  });
+});
+
+describe('generateFlashcardsFromCurriculum', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const chunks = [
+    { locator: 'p.10', text: 'Modified duration estimates a bond price change for a 1pp yield shift.' },
+    { locator: 'p.11', text: 'Macaulay duration is the weighted average time to receive cash flows.' },
+  ];
+
+  it('posts a chat completion with model + low temp; parses a fenced JSON array of {front,back,locator}; returns objects with sequential flash-N ids', async () => {
+    const modelOutput =
+      '```json\n[\n' +
+      '  { "front": "What is modified duration?", "back": "It estimates bond price change for a 1pp yield shift.", "locator": "p.10" },\n' +
+      '  { "front": "Define Macaulay duration.", "back": "The weighted average time to receive cash flows.", "locator": "p.11" }\n' +
+      ']\n```';
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ choices: [{ message: { content: modelOutput } }] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const cards = await generateFlashcardsFromCurriculum({
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma-4-e4b-it' },
+      topicTitle: 'Fixed Income',
+      chunks,
+      count: 6,
+    });
+
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toMatchObject({ id: 'flash-1', front: 'What is modified duration?', locator: 'p.10' });
+    expect(cards[1].id).toBe('flash-2');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:1234/v1/chat/completions');
+    const body = JSON.parse(init.body);
+    expect(body.model).toBe('gemma-4-e4b-it');
+    expect(body.temperature).toBeLessThanOrEqual(0.3);
+  });
+
+  it('refuses to call the model when no chunks are supplied', async () => {
+    await expect(
+      generateFlashcardsFromCurriculum({
+        settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+        topicTitle: 'X',
+        chunks: [],
+        count: 6,
+      }),
+    ).rejects.toThrow(/No curriculum text/);
+  });
+
+  it('network failure rejects with the CORS-actionable wrapped error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await expect(
+      generateFlashcardsFromCurriculum({
+        settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+        topicTitle: 'X',
+        chunks,
+        count: 6,
+      }),
+    ).rejects.toThrow(/CORS|OLLAMA_ORIGINS/);
   });
 });

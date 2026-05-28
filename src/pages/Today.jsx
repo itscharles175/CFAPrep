@@ -47,6 +47,26 @@ export default function Today() {
   const [drillAnswers, setDrillAnswers] = useState({});
   const [narrative, setNarrative] = useState({ state: 'idle', text: '', error: '' });
   const [examCountdown, setExamCountdown] = useState(null);
+  const [journal, setJournal] = useState({ text: '', savedAt: null, dirty: false });
+  const journalKey = `journal:${new Date().toISOString().slice(0, 10)}`;
+
+  useEffect(() => {
+    let active = true;
+    db.settings.get(journalKey).then((row) => {
+      if (active && row?.value) setJournal({ text: row.value.text || '', savedAt: row.value.savedAt || null, dirty: false });
+    });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function saveJournal() {
+    const text = journal.text;
+    const stamp = new Date().toISOString();
+    await db.settings.put({ key: journalKey, value: { text, savedAt: stamp }, updatedAt: stamp });
+    setJournal({ text, savedAt: stamp, dirty: false });
+  }
   // Pomodoro-style study session timer.
   const [timer, setTimer] = useState({ state: 'idle', startedAt: null, accumulatedMs: 0 });
   const [displaySeconds, setDisplaySeconds] = useState(0);
@@ -512,6 +532,36 @@ export default function Today() {
               })()}
             </Surface>
           )}
+
+          <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-6)' }}>
+            <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+              <div>
+                <StatusBadge tone="accent">Daily journal</StatusBadge>
+                <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+                  One-paragraph reflection on today's study session. Stays in your local vault, per-date.
+                </p>
+              </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={saveJournal}
+                disabled={!journal.dirty}
+                title={journal.savedAt ? `Last saved ${new Date(journal.savedAt).toLocaleTimeString()}` : 'Save'}
+              >
+                {journal.dirty ? 'Save' : journal.savedAt ? 'Saved' : 'Save'}
+              </button>
+            </div>
+            <textarea
+              className="input"
+              rows={4}
+              style={{ width: '100%', marginTop: 'var(--space-2)', resize: 'vertical', fontFamily: 'inherit' }}
+              placeholder="What did I work on? What clicked? What still feels shaky? What is the smallest next step?"
+              value={journal.text}
+              onChange={(event) => setJournal((prev) => ({ ...prev, text: event.target.value, dirty: true }))}
+              onBlur={() => {
+                if (journal.dirty) saveJournal();
+              }}
+            />
+          </Surface>
         </>
       )}
     </div>

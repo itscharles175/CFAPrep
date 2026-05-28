@@ -295,3 +295,86 @@ export async function saveCachedGeneratedQuestions(level, topic, questions) {
   await db.settings.put({ key: `ai-questions:${level}:${topic}`, value: payload, updatedAt: payload.generatedAt });
   return payload;
 }
+
+export async function getCachedGeneratedFlashcards(level, topic) {
+  try {
+    const row = await db.settings.get(`flash-cards:${level}:${topic}`);
+    return row?.value || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveCachedGeneratedFlashcards(level, topic, flashcards) {
+  const payload = { flashcards, generatedAt: new Date().toISOString() };
+  await db.settings.put({ key: `flash-cards:${level}:${topic}`, value: payload, updatedAt: payload.generatedAt });
+  return payload;
+}
+
+/**
+ * AI flashcard generator from curriculum excerpts.
+ * Uses the local model to produce `{ front, back, locator? }` card objects
+ * grounded strictly in the provided curriculum chunks.
+ *
+ * @param {object} params
+ * @param {object} params.settings    - LLM settings (baseUrl, model, enabled)
+ * @param {string} params.topicTitle  - Human-readable topic label
+ * @param {Array<{ locator?: string, text: string }>} params.chunks
+ * @param {number} [params.count=6]   - How many cards to request
+ * @param {AbortSignal} [params.signal]
+ * @returns {Promise<Array<{ id: string, front: string, back: string, locator?: string }>>}
+ */
+export async function generateFlashcardsFromCurriculum({ settings, topicTitle, chunks, count = 6, signal }) {
+  const base = normalizeBaseUrl(settings?.baseUrl);
+  const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
+  const context = (chunks || [])
+    .map((chunk) => `[${chunk.locator || 'excerpt'}] ${chunk.text}`)
+    .join('\n\n')
+    .slice(0, 12000);
+  if (!context) throw new Error('No curriculum text available to ground generation.');
+
+  const system =
+    'You are a CFA tutor. Using ONLY the provided curriculum excerpts, write concise flashcards. ' +
+    'Front = a focused prompt (definition / formula / scenario). ' +
+    'Back = a precise 1-3 sentence answer + a citation locator if obvious from the excerpts. ' +
+    'Respond with a JSON array — no prose.';
+  const user = `Topic: ${topicTitle}\n\nWrite ${count} flashcards grounded strictly in these excerpts:\n\n${context}`;
+
+  let response;
+  try {
+    response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new Error(
+      `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
+      { cause: error },
+    );
+  }
+  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content || '';
+  const parsed = extractJsonArray(content);
+  if (!parsed) throw new Error('The model did not return parseable flashcards. Try a more capable local model.');
+
+  return parsed
+    .filter((item) => item && typeof item.front === 'string' && item.front.trim() && typeof item.back === 'string' && item.back.trim())
+    .slice(0, count)
+    .map((item, index) => ({
+      id: `flash-${index + 1}`,
+      front: item.front.trim(),
+      back: item.back.trim(),
+      ...(typeof item.locator === 'string' && item.locator.trim() ? { locator: item.locator.trim() } : {}),
+    }));
+}

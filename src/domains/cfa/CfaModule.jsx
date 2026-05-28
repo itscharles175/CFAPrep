@@ -11,7 +11,7 @@ import { EmptyPanel, PageHeader, ProgressRail, SegmentedControl, StatusBadge, Su
 import { SourceRail } from '../../components/SourceContext';
 import { getCfaSourceReadingForTopic } from '../../lib/cfaSourceVault';
 import { bootstrapSourceVault } from '../../lib/bootstrapSourceVault';
-import { generateQuestionsFromCurriculum, getCachedGeneratedQuestions, getLlmSettings, saveCachedGeneratedQuestions } from '../../lib/localLlm';
+import { generateFlashcardsFromCurriculum, generateQuestionsFromCurriculum, getCachedGeneratedFlashcards, getCachedGeneratedQuestions, getLlmSettings, saveCachedGeneratedFlashcards, saveCachedGeneratedQuestions } from '../../lib/localLlm';
 import {
   askGrounded,
   chatWithSource,
@@ -50,6 +50,10 @@ export default function CfaModule() {
   const [aiQuestions, setAiQuestions] = useState([]);
   const [aiState, setAiState] = useState('idle');
   const [aiError, setAiError] = useState('');
+  const [aiFlashcards, setAiFlashcards] = useState([]);
+  const [aiFlashState, setAiFlashState] = useState('idle');
+  const [aiFlashError, setAiFlashError] = useState('');
+  const aiFlashAbortRef = useRef(null);
   const [askQuestion, setAskQuestion] = useState('');
   const [askAnswer, setAskAnswer] = useState('');
   const [askState, setAskState] = useState('idle');
@@ -132,6 +136,21 @@ export default function CfaModule() {
     };
   }, [level, topic]);
 
+  // Phase 4b: rehydrate cached AI-generated flashcards for this topic.
+  useEffect(() => {
+    let cancelled = false;
+    if (!topic) return undefined;
+    getCachedGeneratedFlashcards(level, topic).then((cached) => {
+      if (cancelled) return;
+      setAiFlashcards(cached?.flashcards || []);
+      setAiFlashState(cached?.flashcards?.length ? 'done' : 'idle');
+      setAiFlashError('');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [level, topic]);
+
   // Rehydrate the last grounded Q&A for this topic so it survives navigation.
   useEffect(() => {
     let cancelled = false;
@@ -188,6 +207,48 @@ export default function CfaModule() {
       setAiState('error');
       setAiError(error instanceof Error ? error.message : 'Generation failed.');
     }
+  }
+
+  async function handleGenerateFlashcards() {
+    const controller = new AbortController();
+    aiFlashAbortRef.current = controller;
+    setAiFlashState('loading');
+    setAiFlashError('');
+    try {
+      const settings = await getLlmSettings();
+      if (!settings.enabled) {
+        setAiFlashState('error');
+        setAiFlashError('Enable a local model in System Health → Local AI first.');
+        return;
+      }
+      const cards = await generateFlashcardsFromCurriculum({
+        settings,
+        topicTitle: data.title,
+        chunks: reading.chunks.slice(0, 14),
+        count: 6,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) {
+        setAiFlashState('idle');
+        return;
+      }
+      setAiFlashcards(cards);
+      setAiFlashState('done');
+      await saveCachedGeneratedFlashcards(level, topic, cards);
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        setAiFlashState('idle');
+      } else {
+        setAiFlashState('error');
+        setAiFlashError(error instanceof Error ? error.message : 'Flashcard generation failed.');
+      }
+    } finally {
+      aiFlashAbortRef.current = null;
+    }
+  }
+
+  function handleCancelFlashcards() {
+    aiFlashAbortRef.current?.abort();
   }
 
   // Grounded RAG: ask the embedded open-notebook backend a question answered
@@ -451,6 +512,57 @@ export default function CfaModule() {
                       ))}
                     </ul>
                     {question.explanation && <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>{question.explanation}</p>}
+                  </div>
+                ))}
+              </Surface>
+
+              <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+                <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                  <div>
+                    <StatusBadge tone="accent">AI flashcards</StatusBadge>
+                    <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>Generate curriculum-grounded flashcards with your local model.</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                    {aiFlashState === 'loading' && (
+                      <button className="btn btn-secondary" onClick={handleCancelFlashcards}>Cancel</button>
+                    )}
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleGenerateFlashcards}
+                      disabled={aiFlashState === 'loading'}
+                    >
+                      {aiFlashState === 'loading' ? 'Generating…' : aiFlashcards.length ? 'Regenerate' : 'Generate'}
+                    </button>
+                  </div>
+                </div>
+                {aiFlashState === 'loading' && (
+                  <p className="muted-copy" style={{ margin: 0 }}>Building flashcards from curriculum excerpts…</p>
+                )}
+                {aiFlashState === 'error' && (
+                  <p style={{ color: 'var(--danger)', margin: 0 }}>{aiFlashError}</p>
+                )}
+                {aiFlashState === 'done' && aiFlashcards.map((card) => (
+                  <div key={card.id} style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
+                      <strong style={{ flex: 1 }}>{card.front}</strong>
+                      {card.locator && (
+                        <span
+                          style={{
+                            flexShrink: 0,
+                            fontSize: 'var(--fs-xs)',
+                            fontFamily: 'var(--font-mono, monospace)',
+                            background: 'var(--accent-soft, rgba(120,180,255,0.15))',
+                            color: 'var(--accent, currentColor)',
+                            border: '1px solid var(--accent, transparent)',
+                            borderRadius: 'var(--radius-sm, 4px)',
+                            padding: '1px 6px',
+                          }}
+                        >
+                          {card.locator}
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 'var(--space-2) 0 0' }}>{card.back}</p>
                   </div>
                 ))}
               </Surface>
