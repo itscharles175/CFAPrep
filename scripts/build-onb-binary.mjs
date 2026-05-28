@@ -12,9 +12,9 @@
  *
  * Prerequisites:
  *   - Python 3.11 or 3.12 on PATH
- *   - `pip install -r spike/open-notebook/requirements.txt` (or `uv sync` in
- *     the open-notebook checkout)
- *   - `pip install pyinstaller>=6.0`
+ *   - `pip install -r scripts/onb-minimal-requirements.txt` — the focused
+ *     pin set that excludes heavy provider SDKs we don't ship (saves ~100MB)
+ *   - `pip install pyinstaller==6.20.0`
  *
  * Output paths (relative to repo root):
  *   - Windows:  src-tauri/resources/services/open-notebook/open-notebook.exe
