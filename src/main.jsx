@@ -11,6 +11,7 @@ import { registerServiceWorker } from './registerServiceWorker';
 import { bootstrapSourceVault } from './lib/bootstrapSourceVault';
 import { bootstrapAiContent } from './lib/bootstrapAiContent';
 import { applyTheme, getStoredTheme } from './lib/theme';
+import { bootstrapFsrsParameters } from './lib/bootstrapFsrsParameters';
 
 // Apply the stored theme to <html> BEFORE React mounts so the first paint
 // already shows the correct palette. Without this, users with the light
@@ -33,3 +34,7 @@ bootstrapSourceVault();
 // Seed the AI-questions + AI-flashcards caches from `public/cfa-generated.json`
 // if a pre-generated companion bundle is present (see scripts/content-expand.mjs).
 bootstrapAiContent();
+
+// Apply persisted FSRS parameters if the user has run the optimizer; otherwise
+// the scheduler keeps FSRS-4.5 library defaults.
+bootstrapFsrsParameters();

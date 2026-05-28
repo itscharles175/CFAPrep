@@ -15,6 +15,14 @@ import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop
 import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 import { getStorage } from '../lib/storage';
+import {
+  clearPersistedParameters,
+  fitFSRSParameters,
+  persistOptimizedParameters,
+  readPersistedParameters,
+} from '../lib/fsrsOptimizer';
+import { setSchedulerParameters } from '../lib/scheduler';
+import { db } from '../lib/progressStore';
 
 // Cache-management constants — used by refreshCacheBuckets / handleClearBucket.
 const CACHE_PREFIXES = {
@@ -68,6 +76,10 @@ export default function SystemHealth() {
   const [pasteText, setPasteText] = useState('');
   const [pasteBusy, setPasteBusy] = useState(false);
   const [pasteError, setPasteError] = useState('');
+  const [fsrsCustom, setFsrsCustom] = useState(null);
+  const [fsrsFit, setFsrsFit] = useState(null); // last fit report
+  const [fsrsBusy, setFsrsBusy] = useState(false);
+  const [fsrsError, setFsrsError] = useState('');
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -132,10 +144,50 @@ export default function SystemHealth() {
     getStorage().settings.get('exam-date').then((row) => {
       if (active && row?.value) setExamDate(row.value);
     });
+    readPersistedParameters().then((row) => {
+      if (active) setFsrsCustom(row);
+    });
     return () => {
       active = false;
     };
   }, []);
+
+  async function handleFsrsFit() {
+    setFsrsBusy(true);
+    setFsrsError('');
+    setFsrsFit(null);
+    try {
+      const rows = await db.questionResults.toArray();
+      const report = await fitFSRSParameters(rows);
+      setFsrsFit(report);
+      if (!report.ok) {
+        setFsrsError(report.reason || 'Could not fit parameters.');
+      }
+    } catch (error) {
+      setFsrsError(error?.message || String(error));
+    } finally {
+      setFsrsBusy(false);
+    }
+  }
+
+  async function handleFsrsApply() {
+    if (!fsrsFit?.ok) return;
+    await persistOptimizedParameters(fsrsFit);
+    setSchedulerParameters({
+      request_retention: fsrsFit.optimizedParameters.request_retention,
+      w: fsrsFit.optimizedParameters.w,
+    });
+    setFsrsCustom(await readPersistedParameters());
+    toast.success('FSRS parameters applied', 'Future reviews will use your personalised schedule.');
+  }
+
+  async function handleFsrsReset() {
+    await clearPersistedParameters();
+    setSchedulerParameters(undefined);
+    setFsrsCustom(null);
+    setFsrsFit(null);
+    toast.info('FSRS reset', 'Scheduler reverted to FSRS-4.5 defaults.');
+  }
 
   async function handleSaveExamDate() {
     if (examDate) {
@@ -569,6 +621,59 @@ export default function SystemHealth() {
             {vaultHealth.repairActions.map((action) => <li key={action}>{action}</li>)}
           </ul>
         )}
+      </Surface>
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+          <div>
+            <StatusBadge tone="exam">FSRS Tuning</StatusBadge>
+            <h3 className="qv-m-0 qv-mt-2">Personalised spaced-repetition weights</h3>
+            <p className="qv-text-secondary qv-m-0">
+              Fit FSRS parameters to your own review history. Searches a principled subset of weights via coordinate descent against the binary-cross-entropy of your past predictions. Requires at least 50 historical reviews. Reverts to FSRS-4.5 library defaults with one click.
+            </p>
+            {fsrsCustom && (
+              <p className="qv-text-success qv-m-0 qv-mt-2 qv-fs-sm">
+                <strong>Active:</strong> request_retention ={' '}
+                <span className="qv-mono">{fsrsCustom.request_retention.toFixed(3)}</span>, fit on{' '}
+                {new Date(fsrsCustom.fittedAt).toLocaleDateString()} from{' '}
+                {fsrsCustom.reviewCount} reviews · improvement{' '}
+                {(fsrsCustom.improvement * 100).toFixed(1)}%
+              </p>
+            )}
+            {fsrsFit?.ok && (
+              <div className="qv-mt-2 qv-fs-sm qv-text-secondary">
+                <div>
+                  Original log-loss <span className="qv-mono">{fsrsFit.originalLoss.toFixed(3)}</span>{' '}
+                  → fitted <span className="qv-mono">{fsrsFit.optimizedLoss.toFixed(3)}</span>{' '}
+                  · <span className="qv-text-success">{(fsrsFit.improvement * 100).toFixed(1)}% improvement</span>
+                </div>
+                <div>
+                  request_retention <span className="qv-mono">{fsrsFit.originalParameters.request_retention.toFixed(3)}</span>{' '}
+                  → <span className="qv-mono">{fsrsFit.optimizedParameters.request_retention.toFixed(3)}</span>{' '}
+                  · {fsrsFit.cardCount} cards · {fsrsFit.iterations} evaluations
+                </div>
+              </div>
+            )}
+            {fsrsError && (
+              <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{fsrsError}</p>
+            )}
+          </div>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary btn-sm" onClick={handleFsrsFit} disabled={fsrsBusy}>
+              {fsrsBusy ? 'Fitting…' : 'Fit from history'}
+            </button>
+            {fsrsFit?.ok && (
+              <button className="btn btn-primary btn-sm" onClick={handleFsrsApply} disabled={fsrsBusy}>
+                Apply
+              </button>
+            )}
+            {fsrsCustom && (
+              <button className="btn btn-secondary btn-sm" onClick={handleFsrsReset} disabled={fsrsBusy}>
+                Reset to FSRS-4.5
+              </button>
+            )}
+          </div>
+        </div>
       </Surface>
 
       <Surface tone="ops" className="ops-report-panel">

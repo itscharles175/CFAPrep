@@ -16,14 +16,47 @@
  * Reference: https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
  */
 
-import { createEmptyCard, fsrs, Rating, State } from 'ts-fsrs';
-import type { Card, Grade } from 'ts-fsrs';
+import { createEmptyCard, default_w, default_request_retention, fsrs, Rating, State } from 'ts-fsrs';
+import type { Card, FSRS, Grade } from 'ts-fsrs';
 import type { Confidence, ErrorCategory, QuestionResult, ReviewItem } from './learningTypes';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Singleton FSRS instance with default FSRS-4.5 parameters */
-const f = fsrs();
+/**
+ * Cached FSRS instance.  Defaults to FSRS-4.5 library weights.  When the
+ * user runs the optimizer (see `fsrsOptimizer.ts`), `setSchedulerParameters`
+ * swaps this in-place with a fitted instance so all subsequent reviews use
+ * the personalised weights without forcing every caller to rewire.
+ */
+let f: FSRS = fsrs();
+
+/**
+ * Replace the active FSRS instance with one parameterised by `{request_retention, w}`.
+ * Called by the optimizer after a successful fit AND by the bootstrap path
+ * when persisted custom weights are detected on startup.  Pass `undefined`
+ * to revert to FSRS-4.5 library defaults.
+ */
+export function setSchedulerParameters(
+  params: { request_retention?: number; w?: number[] } | undefined,
+): void {
+  if (!params) {
+    f = fsrs();
+    return;
+  }
+  const w = params.w ?? Array.from(default_w);
+  // ts-fsrs typings narrow `w` to a fixed-length tuple; the runtime accepts a
+  // plain number[] of the appropriate length, so we widen at this boundary.
+  const partial = {
+    request_retention: params.request_retention ?? default_request_retention,
+    w,
+  } as Parameters<typeof fsrs>[0];
+  f = fsrs(partial);
+}
+
+/** Read the active FSRS instance — testing/debugging helper. */
+export function getActiveScheduler(): FSRS {
+  return f;
+}
 
 /** Map QuantVault confidence + correctness to ts-fsrs Grade (1–4, excludes Manual=0) */
 function toRating(correct: boolean, confidence: Confidence): Grade {
