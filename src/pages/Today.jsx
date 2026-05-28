@@ -47,6 +47,73 @@ export default function Today() {
   const [drillAnswers, setDrillAnswers] = useState({});
   const [narrative, setNarrative] = useState({ state: 'idle', text: '', error: '' });
   const [examCountdown, setExamCountdown] = useState(null);
+  // Pomodoro-style study session timer.
+  const [timer, setTimer] = useState({ state: 'idle', startedAt: null, accumulatedMs: 0 });
+  const [displaySeconds, setDisplaySeconds] = useState(0);
+
+  useEffect(() => {
+    function recompute() {
+      const running = timer.state === 'running' && timer.startedAt
+        ? performance.now() + (Date.now() - performance.now()) // dummy to avoid impure-Date inside render
+        : 0;
+      void running;
+    }
+    void recompute;
+    function update() {
+      const nowMs = Date.now();
+      const segment = timer.state === 'running' && timer.startedAt ? nowMs - timer.startedAt : 0;
+      setDisplaySeconds(Math.floor((timer.accumulatedMs + segment) / 1000));
+    }
+    update();
+    if (timer.state !== 'running') return undefined;
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [timer.state, timer.startedAt, timer.accumulatedMs]);
+
+  function startTimer() {
+    setTimer((prev) => ({ state: 'running', startedAt: Date.now(), accumulatedMs: prev.accumulatedMs }));
+  }
+  function pauseTimer() {
+    setTimer((prev) => {
+      if (prev.state !== 'running' || !prev.startedAt) return prev;
+      const segment = Date.now() - prev.startedAt;
+      return { state: 'paused', startedAt: null, accumulatedMs: prev.accumulatedMs + segment };
+    });
+  }
+  async function stopTimer() {
+    const snapshot = timer;
+    const totalMs = snapshot.state === 'running' && snapshot.startedAt
+      ? snapshot.accumulatedMs + (Date.now() - snapshot.startedAt)
+      : snapshot.accumulatedMs;
+    const elapsedSeconds = Math.floor(totalMs / 1000);
+    if (elapsedSeconds > 5) {
+      const now = new Date();
+      const started = new Date(now.getTime() - totalMs);
+      try {
+        await db.studySessions.add({
+          domain: 'cfa',
+          topic: weakAction ? `cfa:${weakTopic?.topic || 'today'}` : 'cfa:today',
+          mode: 'focus-timer',
+          startedAt: started.toISOString(),
+          endedAt: now.toISOString(),
+          elapsedSeconds,
+          questionsAnswered: drill.questions.length,
+          score: drill.questions.length
+            ? drill.questions.filter((q) => drillAnswers[q.id] === q.correct).length
+            : 0,
+        });
+      } catch {
+        // best-effort persistence; not blocking
+      }
+    }
+    setTimer({ state: 'idle', startedAt: null, accumulatedMs: 0 });
+  }
+
+  function formatTimer(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
 
   useEffect(() => {
     let active = true;
@@ -171,9 +238,42 @@ export default function Today() {
           ) : null
         }
         actions={
-          <button className="btn btn-secondary" onClick={refresh} disabled={refreshing}>
-            <RefreshCw size={16} /> {refreshing ? 'Refreshing…' : 'Refresh plan'}
-          </button>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: 'var(--space-1)',
+                alignItems: 'center',
+                padding: 'var(--space-1) var(--space-2)',
+                borderRadius: 'var(--radius-md, 8px)',
+                border: '1px solid var(--border)',
+                fontFamily: 'var(--font-mono, monospace)',
+                minWidth: 110,
+                justifyContent: 'center',
+              }}
+              title="Study session timer — counts elapsed focus time; persists to studySessions on Stop"
+            >
+              <span style={{ fontWeight: 600 }}>{formatTimer(displaySeconds)}</span>
+              {timer.state === 'idle' && (
+                <button className="btn-icon btn-ghost" onClick={startTimer} aria-label="Start study timer">▶</button>
+              )}
+              {timer.state === 'running' && (
+                <>
+                  <button className="btn-icon btn-ghost" onClick={pauseTimer} aria-label="Pause study timer">⏸</button>
+                  <button className="btn-icon btn-ghost" onClick={stopTimer} aria-label="Stop study timer">⏹</button>
+                </>
+              )}
+              {timer.state === 'paused' && (
+                <>
+                  <button className="btn-icon btn-ghost" onClick={startTimer} aria-label="Resume study timer">▶</button>
+                  <button className="btn-icon btn-ghost" onClick={stopTimer} aria-label="Stop study timer">⏹</button>
+                </>
+              )}
+            </div>
+            <button className="btn btn-secondary" onClick={refresh} disabled={refreshing}>
+              <RefreshCw size={16} /> {refreshing ? 'Refreshing…' : 'Refresh plan'}
+            </button>
+          </div>
         }
       />
 
