@@ -572,5 +572,50 @@ export async function saveCachedGroundedAnswer(
 ): Promise<CachedGroundedAnswer> {
   const payload: CachedGroundedAnswer = { ...entry, answeredAt: new Date().toISOString() };
   await db.settings.put({ key: answerCacheKey(level, topic), value: payload, updatedAt: payload.answeredAt });
+  // Also append to the rolling history (capped at 10 entries per topic).
+  await appendCachedGroundedAnswerHistory(level, topic, payload);
   return payload;
+}
+
+const ANSWER_HISTORY_MAX = 10;
+
+function answerHistoryCacheKey(level: string, topic: string): string {
+  return `open-notebook:answer-history:${level}:${topic}`;
+}
+
+/** Last N grounded answers for a topic (newest first). */
+export async function getCachedGroundedAnswerHistory(
+  level: string,
+  topic: string,
+): Promise<CachedGroundedAnswer[]> {
+  try {
+    const row = await db.settings.get(answerHistoryCacheKey(level, topic));
+    const list = row?.value as CachedGroundedAnswer[] | undefined;
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+async function appendCachedGroundedAnswerHistory(
+  level: string,
+  topic: string,
+  entry: CachedGroundedAnswer,
+): Promise<void> {
+  try {
+    const prior = await getCachedGroundedAnswerHistory(level, topic);
+    // Dedupe: skip if the previous head matches this question+answer exactly.
+    const filtered =
+      prior[0] && prior[0].question === entry.question && prior[0].answer === entry.answer
+        ? prior.slice(1)
+        : prior;
+    const next = [entry, ...filtered].slice(0, ANSWER_HISTORY_MAX);
+    await db.settings.put({
+      key: answerHistoryCacheKey(level, topic),
+      value: next,
+      updatedAt: entry.answeredAt,
+    });
+  } catch {
+    // Best-effort history — never block the primary save.
+  }
 }

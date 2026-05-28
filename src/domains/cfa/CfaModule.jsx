@@ -19,6 +19,7 @@ import {
   ensureTopicNotebook,
   fetchSourceTitleMap,
   getCachedGroundedAnswer,
+  getCachedGroundedAnswerHistory,
   getOpenNotebookSettings,
   listSourceInsights,
   saveCachedGroundedAnswer,
@@ -137,6 +138,7 @@ export default function CfaModule() {
   const [askError, setAskError] = useState('');
   const [sourceTitleMap, setSourceTitleMap] = useState(null);
   const askAbortRef = useRef(null);
+  const [askHistory, setAskHistory] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -232,12 +234,16 @@ export default function CfaModule() {
   useEffect(() => {
     let cancelled = false;
     if (!topic) return undefined;
-    getCachedGroundedAnswer(level, topic).then((cached) => {
+    Promise.all([
+      getCachedGroundedAnswer(level, topic),
+      getCachedGroundedAnswerHistory(level, topic),
+    ]).then(([cached, history]) => {
       if (cancelled) return;
       setAskQuestion(cached?.question || '');
       setAskAnswer(cached?.answer || '');
       setAskState(cached?.answer ? 'done' : 'idle');
       setAskError('');
+      setAskHistory(history || []);
     });
     return () => {
       cancelled = true;
@@ -386,6 +392,8 @@ export default function CfaModule() {
       setAskAnswer(answer);
       setAskState('done');
       await saveCachedGroundedAnswer(level, topic, { question, answer });
+      const refreshed = await getCachedGroundedAnswerHistory(level, topic);
+      setAskHistory(refreshed);
       // Refresh the source-title map so the citation legend can name the
       // sources cited inline. Fire-and-forget; legend just falls back to ids.
       fetchSourceTitleMap(settings.baseUrl)
@@ -717,6 +725,31 @@ export default function CfaModule() {
                     </div>
                   );
                 })()}
+                {askHistory.length > 1 && (
+                  <details style={{ marginTop: 'var(--space-3)' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                      Previous asks on this topic ({askHistory.length - 1})
+                    </summary>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginTop: 'var(--space-2)' }}>
+                      {askHistory.slice(1).map((entry, index) => (
+                        <div
+                          key={`${entry.answeredAt}-${index}`}
+                          style={{
+                            padding: 'var(--space-3)',
+                            borderRadius: 'var(--radius-md, 8px)',
+                            border: '1px solid var(--border)',
+                          }}
+                        >
+                          <small className="muted-copy">{new Date(entry.answeredAt).toLocaleString()}</small>
+                          <p style={{ margin: 'var(--space-1) 0 var(--space-2)', fontWeight: 600 }}>{entry.question}</p>
+                          <p style={{ margin: 0, whiteSpace: 'pre-line', color: 'var(--text-secondary)' }}>
+                            {entry.answer.length > 600 ? `${entry.answer.slice(0, 600)}…` : entry.answer}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </Surface>
             </>
           ) : (
