@@ -7,8 +7,10 @@ import { ArrowLeft, Target, BookOpen, Lightbulb, ChevronRight, Bookmark, StickyN
 import FormulaBlock from '../../components/FormulaBlock';
 import { useModuleProgress } from '../../hooks/useProgress';
 import { getBookmark, getNote, saveNote, toggleBookmark } from '../../lib/learning';
-import { EmptyPanel, PageHeader, ProgressRail, StatusBadge, Surface } from '../../components/ui/Primitives';
+import { EmptyPanel, PageHeader, ProgressRail, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
 import { SourceRail } from '../../components/SourceContext';
+import { getCfaSourceReadingForTopic } from '../../lib/cfaSourceVault';
+import { bootstrapSourceVault } from '../../lib/bootstrapSourceVault';
 
 export default function CfaModule() {
   const { level, topic } = useParams();
@@ -29,6 +31,9 @@ export default function CfaModule() {
   const [noteBody, setNoteBody] = useState('');
   const [noteSavedAt, setNoteSavedAt] = useState(null);
   const [bookmarked, setBookmarked] = useState(false);
+  const [reading, setReading] = useState({ document: null, chunks: [] });
+  const [readingView, setReadingView] = useState('lessons');
+  const [chunkLimit, setChunkLimit] = useState(6);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,6 +67,29 @@ export default function CfaModule() {
     }
 
     loadVaultState();
+    return () => {
+      cancelled = true;
+    };
+  }, [data, level, topic]);
+
+  // Phase 2: load the real ingested curriculum for this topic (if any) so the
+  // reader can toggle between native curriculum text and authored lessons.
+  useEffect(() => {
+    let cancelled = false;
+    if (!data || !topic) return undefined;
+    // Wait for the first-run curriculum import to finish (memoized, resolves
+    // immediately once populated) so the reader doesn't race the bootstrap.
+    Promise.resolve(bootstrapSourceVault())
+      .then(() => getCfaSourceReadingForTopic(level, topic))
+      .then((result) => {
+        if (cancelled) return;
+        setReading(result);
+        setChunkLimit(6);
+        setReadingView(result.chunks.length ? 'curriculum' : 'lessons');
+      })
+      .catch(() => {
+        if (!cancelled) setReading({ document: null, chunks: [] });
+      });
     return () => {
       cancelled = true;
     };
@@ -165,37 +193,85 @@ export default function CfaModule() {
             </div>
           </Surface>
 
-          {data.sections.map((section, i) => (
-            <Surface key={i} tone="study" className="animate-fade" style={{ marginBottom: 'var(--space-6)', animationDelay: `${i * 80}ms` }}>
-              <h2 style={{ marginTop: 0 }}>{section.title}</h2>
-              {section.content.split('\n\n').map((para, j) => (
-                <p key={j} style={{ whiteSpace: 'pre-line' }}>{para}</p>
-              ))}
+          {reading.chunks.length > 0 && (
+            <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-4)' }}>
+              <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
+                <div>
+                  <StatusBadge tone="success">Native curriculum</StatusBadge>
+                  <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+                    {reading.document?.title?.replace(/\s+libgenli$/i, '').slice(0, 64) || 'CFA curriculum'} · {reading.chunks.length} sections
+                  </p>
+                </div>
+                <SegmentedControl
+                  label="Reading source"
+                  density="compact"
+                  options={[
+                    { value: 'curriculum', label: 'Curriculum' },
+                    { value: 'lessons', label: 'Lessons' },
+                  ]}
+                  value={readingView}
+                  onChange={setReadingView}
+                />
+              </div>
+            </Surface>
+          )}
 
-              {section.keyPoints && (
-                <div className="key-concept">
-                  <h4><Lightbulb size={16} /> Key Points</h4>
-                  <ul style={{ margin: 0, paddingLeft: 'var(--space-5)' }}>
-                    {section.keyPoints.map((point, k) => (
-                      <li key={k} style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--fs-sm)' }}>{point}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </Surface>
-          ))}
-          {data.examples?.length > 0 && (
-            <Surface tone="study" status="success" style={{ marginBottom: 'var(--space-6)' }}>
-              <h2 style={{ marginTop: 0 }}>Worked Examples</h2>
-              {data.examples.slice(0, 4).map((example) => (
-                <div key={example.id} style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)', marginTop: 'var(--space-4)' }}>
-                  <span className="badge badge-blue">{example.formulaName || 'concept'}</span>
-                  <h3>{example.title}</h3>
-                  <p>{example.prompt}</p>
-                  <p style={{ color: 'var(--text-secondary)' }}>{example.walkthrough}</p>
-                </div>
+          {readingView === 'curriculum' && reading.chunks.length > 0 ? (
+            <>
+              {reading.chunks.slice(0, chunkLimit).map((chunk) => (
+                <Surface key={chunk.id} tone="study" className="animate-fade" style={{ marginBottom: 'var(--space-4)' }}>
+                  <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-2)', alignItems: 'flex-start' }}>
+                    <h3 style={{ margin: 0, fontSize: 'var(--fs-md)' }}>{chunk.heading || reading.document?.title?.replace(/\s+libgenli$/i, '') || 'Curriculum'}</h3>
+                    <StatusBadge tone="vault">{chunk.locator}</StatusBadge>
+                  </div>
+                  <p style={{ whiteSpace: 'pre-line', lineHeight: 1.7, margin: 0 }}>{chunk.text}</p>
+                </Surface>
               ))}
-            </Surface>
+              {chunkLimit < reading.chunks.length && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ marginBottom: 'var(--space-6)' }}
+                  onClick={() => setChunkLimit((limit) => limit + 6)}
+                >
+                  Show more curriculum ({reading.chunks.length - chunkLimit} sections left)
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              {data.sections.map((section, i) => (
+                <Surface key={i} tone="study" className="animate-fade" style={{ marginBottom: 'var(--space-6)', animationDelay: `${i * 80}ms` }}>
+                  <h2 style={{ marginTop: 0 }}>{section.title}</h2>
+                  {section.content.split('\n\n').map((para, j) => (
+                    <p key={j} style={{ whiteSpace: 'pre-line' }}>{para}</p>
+                  ))}
+
+                  {section.keyPoints && (
+                    <div className="key-concept">
+                      <h4><Lightbulb size={16} /> Key Points</h4>
+                      <ul style={{ margin: 0, paddingLeft: 'var(--space-5)' }}>
+                        {section.keyPoints.map((point, k) => (
+                          <li key={k} style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--fs-sm)' }}>{point}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </Surface>
+              ))}
+              {data.examples?.length > 0 && (
+                <Surface tone="study" status="success" style={{ marginBottom: 'var(--space-6)' }}>
+                  <h2 style={{ marginTop: 0 }}>Worked Examples</h2>
+                  {data.examples.slice(0, 4).map((example) => (
+                    <div key={example.id} style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)', marginTop: 'var(--space-4)' }}>
+                      <span className="badge badge-blue">{example.formulaName || 'concept'}</span>
+                      <h3>{example.title}</h3>
+                      <p>{example.prompt}</p>
+                      <p style={{ color: 'var(--text-secondary)' }}>{example.walkthrough}</p>
+                    </div>
+                  ))}
+                </Surface>
+              )}
+            </>
           )}
         </div>
 

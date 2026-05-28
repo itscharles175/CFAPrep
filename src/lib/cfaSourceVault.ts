@@ -480,6 +480,27 @@ export async function getCfaSourceChunks(documentId: string) {
   return db.sourceChunks.where('documentId').equals(documentId).sortBy('chunkIndex');
 }
 
+// Ordered curriculum reading for a topic: the best-matching ingested document
+// (canonical first, then most chunks) and its chunks in page order. Used to show
+// the real curriculum text in-app, with authored lessons as the fallback when a
+// topic has no ingested source.
+export async function getCfaSourceReadingForTopic(
+  level: string,
+  topicId: string,
+): Promise<{ document: CfaSourceDocument | null; chunks: CfaSourceChunk[] }> {
+  if (!topicId) return { document: null, chunks: [] };
+  const documents = await db.sourceDocuments.toArray();
+  const matches = documents.filter(
+    (document) => document.topicIds.includes(topicId) && (!level || document.level === level),
+  );
+  const best = matches.sort(
+    (a, b) => Number(Boolean(b.canonical)) - Number(Boolean(a.canonical)) || (b.chunkCount || 0) - (a.chunkCount || 0),
+  )[0];
+  if (!best) return { document: null, chunks: [] };
+  const chunks = await db.sourceChunks.where('documentId').equals(best.id).sortBy('chunkIndex');
+  return { document: best, chunks };
+}
+
 export async function searchCfaSourceVault(query: string, limit = 8): Promise<CfaSourceSearchResult[]> {
   const terms = searchTerms(query);
   if (!terms.length) return [];
