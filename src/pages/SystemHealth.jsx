@@ -9,6 +9,7 @@ import {
   getOpenNotebookSettings,
   saveOpenNotebookSettings,
 } from '../lib/openNotebook';
+import { ingestFolder, isTauri, pickCfaFolder } from '../lib/desktopIngestion';
 
 function downloadJson(payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -34,6 +35,11 @@ export default function SystemHealth() {
   const [onb, setOnb] = useState(null);
   const [onbStatus, setOnbStatus] = useState(null);
   const [onbTesting, setOnbTesting] = useState(false);
+  const desktopAvailable = isTauri();
+  const [ingestState, setIngestState] = useState('idle'); // idle | picking | running | done | error
+  const [ingestProgress, setIngestProgress] = useState(null);
+  const [ingestResult, setIngestResult] = useState(null);
+  const [ingestError, setIngestError] = useState('');
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -95,6 +101,31 @@ export default function SystemHealth() {
     const result = await checkLlmConnection(llm);
     setLlmStatus(result);
     setLlmTesting(false);
+  }
+
+  async function handleIngestFolder() {
+    setIngestError('');
+    setIngestResult(null);
+    setIngestProgress(null);
+    try {
+      setIngestState('picking');
+      const folder = await pickCfaFolder();
+      if (!folder) {
+        setIngestState('idle');
+        return;
+      }
+      setIngestState('running');
+      const result = await ingestFolder({
+        folder,
+        onProgress: (event) => setIngestProgress(event),
+      });
+      setIngestResult(result);
+      setIngestState('done');
+      setMessage(`Ingested ${result.ingested} new document(s) (${result.chunkCount} chunks). Skipped ${result.skipped} duplicate(s).`);
+    } catch (error) {
+      setIngestState('error');
+      setIngestError(error instanceof Error ? error.message : 'Folder ingestion failed.');
+    }
   }
 
   async function handleSaveOnb() {
@@ -296,6 +327,48 @@ export default function SystemHealth() {
           </>
         )}
       </Surface>
+
+      {desktopAvailable && (
+        <Surface tone="ops" className="ops-report-panel">
+          <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+            <div>
+              <StatusBadge tone="success">Desktop Shell</StatusBadge>
+              <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingest a local CFA folder</h3>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+                Point QuantVault at a folder of CFA curriculum PDFs on disk; the native shell will walk it, extract text, chunk by page, classify by topic, and store in your local source vault. Duplicates (by SHA-256) are skipped automatically.
+              </p>
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={handleIngestFolder}
+              disabled={ingestState === 'picking' || ingestState === 'running'}
+            >
+              {ingestState === 'picking' ? 'Waiting on picker…' : ingestState === 'running' ? 'Ingesting…' : 'Pick folder…'}
+            </button>
+          </div>
+          {ingestProgress && ingestState === 'running' && (
+            <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+              {ingestProgress.index + 1}/{ingestProgress.total} · {ingestProgress.fileName} · {ingestProgress.status}
+              {ingestProgress.message ? ` (${ingestProgress.message})` : ''}
+            </p>
+          )}
+          {ingestState === 'error' && (
+            <p style={{ color: 'var(--danger)', margin: 'var(--space-2) 0 0' }}>{ingestError}</p>
+          )}
+          {ingestState === 'done' && ingestResult && (
+            <div style={{ marginTop: 'var(--space-2)' }}>
+              <StatusBadge tone="success">
+                Ingested {ingestResult.ingested} · Skipped {ingestResult.skipped} · Chunks {ingestResult.chunkCount}
+              </StatusBadge>
+              {ingestResult.warnings.length > 0 && (
+                <p className="muted-copy" style={{ marginTop: 'var(--space-2)' }}>
+                  {ingestResult.warnings.length} file(s) had warnings — first: {ingestResult.warnings[0]}
+                </p>
+              )}
+            </div>
+          )}
+        </Surface>
+      )}
 
       <Surface tone="ops" className="ops-report-panel">
         <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
