@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bell, Menu, Moon, RefreshCw, Search, Sun, WifiOff, X } from 'lucide-react';
+import { Bell, HelpCircle, Menu, Moon, RefreshCw, Search, Sun, WifiOff, X } from 'lucide-react';
 import { buildSearchItems } from '../../data/catalog';
 import { level3TopicBelongsToPathway } from '../../domains/cfa/cfaLevel3Pathways';
 import { useLevel3Pathway } from '../../domains/cfa/useLevel3Pathway';
@@ -309,6 +309,14 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }) {
         >
           <Bell size={18} />
           {summary.upcomingReviews.length > 0 && <span className="notification-dot" />}
+        </button>
+        <button
+          className="btn-icon btn-ghost"
+          title="Keyboard shortcuts (press ?)"
+          aria-label="Open keyboard shortcuts help"
+          onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', shiftKey: true, bubbles: true }))}
+        >
+          <HelpCircle size={18} />
         </button>
         <button className="btn-icon btn-ghost" title="Toggle theme" onClick={toggleTheme}>
           {isDark ? <Moon size={18} /> : <Sun size={18} />}
