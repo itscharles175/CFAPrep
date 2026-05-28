@@ -161,13 +161,13 @@ function AssumptionActions({ title, text, assumptions = {}, metrics = {}, csvRow
   }
 
   return (
-    <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap', marginTop: 'var(--space-5)' }}>
+    <div className="qv-row-2" style={{ flexWrap: 'wrap', marginTop: 'var(--space-5)' }}>
       <button className="btn btn-secondary" onClick={copyAssumptions}>Copy Assumptions</button>
       <button className="btn btn-secondary" onClick={sendToNotes}>Send Result to Notes</button>
       <button className="btn btn-secondary" onClick={exportCsv}><Download size={14} /> CSV</button>
       <button className="btn btn-secondary" onClick={saveScenario}><Save size={14} /> Save Scenario</button>
       {onLoadScenario && <button className="btn btn-secondary" onClick={loadScenario}><Upload size={14} /> Load Scenario</button>}
-      {message && <span style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>{message}</span>}
+      {message && <span className="qv-text-muted qv-fs-sm">{message}</span>}
     </div>
   );
 }
@@ -243,7 +243,7 @@ function TVMCalculator() {
       <ResultCard label={result.label} value={currency(result.value)} />
       <div className="key-concept" style={{ marginTop: 'var(--space-5)' }}>
         <h4>Sign convention</h4>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', margin: 0 }}>
+        <p className="qv-text-secondary qv-fs-sm qv-m-0">
           Treat cash you invest as an outflow and cash you receive as an inflow when reconciling TVM answers with a financial calculator.
         </p>
       </div>

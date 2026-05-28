@@ -349,26 +349,26 @@ export default function CfaQuiz() {
             <h2 style={{ fontSize: 'var(--fs-3xl)', fontWeight: 800, marginBottom: 'var(--space-2)' }}>
               {pct >= 70 ? 'Strong pass' : pct >= 50 ? 'Useful reps logged' : 'Review queue updated'}
             </h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-8)' }}>
+            <p className="qv-text-secondary" style={{ marginBottom: 'var(--space-8)' }}>
               {topicData?.title || topic} - {modeLabel}
             </p>
 
             <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-8)', marginBottom: 'var(--space-8)', flexWrap: 'wrap' }}>
               <div>
                 <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800, color: pct >= 70 ? 'var(--success)' : 'var(--danger)' }}>{pct}%</div>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Score</div>
+                <div className="qv-fs-sm qv-text-muted">Score</div>
               </div>
               <div>
                 <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800 }}>{score}/{questions.length}</div>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Correct</div>
+                <div className="qv-fs-sm qv-text-muted">Correct</div>
               </div>
               <div>
                 <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800 }}>{missed.length}</div>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Scheduled weak reps</div>
+                <div className="qv-fs-sm qv-text-muted">Scheduled weak reps</div>
               </div>
               <div>
                 <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800 }}>{elapsedSeconds}s</div>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Time</div>
+                <div className="qv-fs-sm qv-text-muted">Time</div>
               </div>
             </div>
 
@@ -384,7 +384,7 @@ export default function CfaQuiz() {
 
           <Surface className="quiz-answer-review">
             <div className="flex-between" style={{ marginBottom: 'var(--space-4)' }}>
-              <h3 style={{ margin: 0 }}>Answer Review</h3>
+              <h3 className="qv-m-0">Answer Review</h3>
               <span className="badge badge-blue">{missed.length ? 'Missed questions first' : 'Clean run'}</span>
             </div>
             {[...answers]
@@ -402,15 +402,15 @@ export default function CfaQuiz() {
                       marginTop: index ? 'var(--space-4)' : 0,
                     }}
                   >
-                    <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+                    <div className="qv-row-3-start">
                       {answer.correct ? <CheckCircle2 size={18} color="var(--success)" /> : <XCircle size={18} color="var(--danger)" />}
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 700 }}>{question.question}</div>
-                        <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginTop: 'var(--space-2)' }}>
+                        <div className="qv-text-secondary qv-fs-sm qv-mt-2">
                           Your answer: {letters[answer.selected]} · Correct answer: {letters[answer.correctIndex]} · Confidence: {answer.confidence} · Error: {answer.errorCategory}
                         </div>
-                        <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', lineHeight: 1.6 }}>{question.explanation}</p>
-                        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <p className="qv-text-secondary qv-fs-sm" style={{ lineHeight: 1.6 }}>{question.explanation}</p>
+                        <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
                           <span className="badge badge-purple">{objective?.title || answer.learningObjective}</span>
                           {question.formula && <span className="badge badge-blue">Formula: {question.formula}</span>}
                           <Link to={`/cfa/${level}/${topic}`} className="btn btn-secondary" style={{ padding: 'var(--space-2) var(--space-3)' }}>
@@ -440,7 +440,7 @@ export default function CfaQuiz() {
                           </p>
                         )}
                         {aiExplain[question.id]?.state === 'error' && (
-                          <p style={{ color: 'var(--danger)', margin: 'var(--space-2) 0 0', fontSize: 'var(--fs-sm)' }}>
+                          <p className="qv-text-danger qv-fs-sm" style={{ margin: 'var(--space-2) 0 0' }}>
                             {aiExplain[question.id].error}
                           </p>
                         )}
@@ -463,7 +463,7 @@ export default function CfaQuiz() {
 
   return (
     <div className="page-container">
-      <Link to={`/cfa/${level}/${topic}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-6)' }}>
+      <Link to={`/cfa/${level}/${topic}`} className="qv-row-2 qv-text-secondary qv-fs-sm" style={{ display: 'inline-flex', marginBottom: 'var(--space-6)' }}>
         <ArrowLeft size={16} /> Back to {topicData?.title || topic}
       </Link>
 
@@ -477,7 +477,7 @@ export default function CfaQuiz() {
             density="compact"
           />
           {usedFallback && (
-            <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 'var(--space-3) 0 0' }}>
+            <p className="qv-text-muted qv-fs-sm" style={{ margin: 'var(--space-3) 0 0' }}>
               No targeted items are currently queued for this mode, so the full topic bank is loaded.
             </p>
           )}
@@ -486,13 +486,13 @@ export default function CfaQuiz() {
         <div className="quiz-header">
           <div>
             <div style={{ fontWeight: 700 }}>{topicData?.title || topic}</div>
-            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Level {level?.toUpperCase()} · {modeLabel}</div>
+            <div className="qv-fs-xs qv-text-muted">Level {level?.toUpperCase()} · {modeLabel}</div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+          <div className="qv-row-4">
             <span className={`badge ${q.difficulty === 'foundation' ? 'badge-green' : q.difficulty === 'intermediate' ? 'badge-blue' : 'badge-purple'}`}>
               {q.difficulty?.toUpperCase()}
             </span>
-            <span style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
+            <span className="qv-fs-sm qv-fw-semibold">
               {safeCurrent + 1} / {questions.length}
             </span>
           </div>
@@ -544,7 +544,7 @@ export default function CfaQuiz() {
           {confirmed && (
             <div className="quiz-explanation">
               <h4>{selected === q.correct ? 'Correct' : 'Incorrect'}</h4>
-              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.6 }}>{q.explanation}</p>
+              <p className="qv-fs-sm qv-text-secondary qv-m-0" style={{ lineHeight: 1.6 }}>{q.explanation}</p>
               {q.formula && <StatusBadge tone="accent" style={{ marginTop: 'var(--space-3)' }}>Related formula: {q.formula}</StatusBadge>}
               <SourceRail
                 compact
@@ -556,10 +556,10 @@ export default function CfaQuiz() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginTop: 'var(--space-5)' }}>
                 <div>
-                  <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 'var(--space-2)', fontWeight: 700 }}>
+                  <div className="qv-fs-xs qv-text-muted qv-mb-2 qv-fw-bold">
                     CONFIDENCE
                   </div>
-                  <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                  <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
                     {confidenceOptions.map((item) => (
                       <button
                         key={item.id}
@@ -573,7 +573,7 @@ export default function CfaQuiz() {
                   </div>
                 </div>
                 <label style={{ display: 'block' }}>
-                  <span style={{ display: 'block', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 'var(--space-2)', fontWeight: 700 }}>
+                  <span className="qv-fs-xs qv-text-muted qv-mb-2 qv-fw-bold" style={{ display: 'block' }}>
                     ERROR TYPE
                   </span>
                   <select
@@ -601,7 +601,7 @@ export default function CfaQuiz() {
           )}
         </QuestionStage>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--space-6)', gap: 'var(--space-3)' }}>
+        <div className="qv-row-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-6)' }}>
           {!confirmed ? (
             <button className="btn btn-primary btn-lg" onClick={handleConfirm} disabled={selected === null} style={{ opacity: selected === null ? 0.5 : 1 }}>
               Confirm Answer

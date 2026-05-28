@@ -127,7 +127,7 @@ function ReferenceBuilder() {
         </button>
       </div>
       <div className="calc-result">
-        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Resulting reference</div>
+        <div className="qv-fs-sm qv-text-muted">Resulting reference</div>
         <div className="calc-result-value">{reference}</div>
       </div>
     </ExerciseShell>
@@ -204,7 +204,7 @@ function XnpvBuilder() {
         <NumberField label="Annual Cash Flow" value={cashFlow} onChange={setCashFlow} suffix="$" />
       </div>
       <div className="calc-result">
-        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>NPV with time-zero outflow handled separately</div>
+        <div className="qv-fs-sm qv-text-muted">NPV with time-zero outflow handled separately</div>
         <div className="calc-result-value">{currency(npv)}</div>
       </div>
       <SpreadsheetGrid columns={['Year', 'Cash Flow', 'Discount Factor']} rows={rows} caption="NPV timing grid" />
@@ -382,7 +382,7 @@ export default function ExcelModule() {
               <p>{section.content}</p>
               <div className="key-concept">
                 <h4><Lightbulb size={16} /> Modeling Notes</h4>
-                <ul style={{ margin: 0, paddingLeft: 'var(--space-5)' }}>
+                <ul className="qv-m-0" style={{ paddingLeft: 'var(--space-5)' }}>
                   {section.keyPoints.map((point) => <li key={point}>{point}</li>)}
                 </ul>
               </div>

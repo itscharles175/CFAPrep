@@ -489,7 +489,7 @@ export default function QuantModule() {
               <p>{section.content}</p>
               <div className="key-concept">
                 <h4><Lightbulb size={16} /> Desk Notes</h4>
-                <ul style={{ margin: 0, paddingLeft: 'var(--space-5)' }}>
+                <ul className="qv-m-0" style={{ paddingLeft: 'var(--space-5)' }}>
                   {section.keyPoints.map((point) => <li key={point}>{point}</li>)}
                 </ul>
               </div>

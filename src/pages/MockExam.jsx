@@ -103,7 +103,7 @@ function MockQuestion({ question, selected, submitted = false, onSelect }) {
           );
         })}
       </div>
-      {submitted && <p style={{ color: 'var(--text-secondary)' }}>{question.explanation}</p>}
+      {submitted && <p className="qv-text-secondary">{question.explanation}</p>}
     </QuestionStage>
   );
 }
@@ -157,7 +157,7 @@ function ConstructedItem({ item, response, scores, onResponse, onScore }) {
     <Surface tone="study" status="exam">
       <StatusBadge tone="exam">Constructed Response</StatusBadge>
       <h2>{item.title}</h2>
-      <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>{item.prompt}</p>
+      <p className="qv-text-secondary" style={{ lineHeight: 1.7 }}>{item.prompt}</p>
       <textarea
         aria-label={`${item.title} response`}
         value={response || ''}
@@ -165,7 +165,7 @@ function ConstructedItem({ item, response, scores, onResponse, onScore }) {
         placeholder="Write a concise bullet response..."
         style={{ width: '100%', minHeight: 180, resize: 'vertical', marginTop: 'var(--space-4)' }}
       />
-      <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+      <div className="qv-row-2 qv-mt-3">
         <button
           className="btn btn-secondary"
           onClick={handleCritique}
@@ -193,7 +193,7 @@ function ConstructedItem({ item, response, scores, onResponse, onScore }) {
         </pre>
       )}
       {critique.state === 'error' && (
-        <p style={{ color: 'var(--danger)', marginTop: 'var(--space-2)', fontSize: 'var(--fs-sm)' }}>{critique.error}</p>
+        <p className="qv-text-danger qv-fs-sm qv-mt-2">{critique.error}</p>
       )}
       <div style={{ marginTop: 'var(--space-5)' }}>
         <RubricPanel
@@ -206,7 +206,7 @@ function ConstructedItem({ item, response, scores, onResponse, onScore }) {
       </div>
       <details style={{ marginTop: 'var(--space-5)' }}>
         <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Model answer</summary>
-        <p style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-3)' }}>{item.modelAnswer}</p>
+        <p className="qv-text-secondary qv-mt-3">{item.modelAnswer}</p>
       </details>
     </Surface>
   );
@@ -643,17 +643,17 @@ export default function MockExam() {
                       marginTop: index ? 'var(--space-4)' : 0,
                     }}
                   >
-                    <p style={{ fontWeight: 700, margin: '0 0 var(--space-2)' }}>{question.question}</p>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', margin: '0 0 var(--space-2)' }}>
+                    <p className="qv-fw-bold" style={{ margin: '0 0 var(--space-2)' }}>{question.question}</p>
+                    <p className="qv-text-secondary qv-fs-sm" style={{ margin: '0 0 var(--space-2)' }}>
                       Your answer: {pickedIndex !== undefined ? letters[pickedIndex] ?? pickedIndex : '—'} ·{' '}
                       Correct: {letters[correctIndex] ?? correctIndex}
                     </p>
                     {question.explanation && (
-                      <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', margin: '0 0 var(--space-3)', lineHeight: 1.6 }}>
+                      <p className="qv-text-secondary qv-fs-sm" style={{ margin: '0 0 var(--space-3)', lineHeight: 1.6 }}>
                         {question.explanation}
                       </p>
                     )}
-                    <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
                       <button
                         className="btn btn-secondary"
                         style={{ padding: 'var(--space-2) var(--space-3)' }}
@@ -678,7 +678,7 @@ export default function MockExam() {
                       </p>
                     )}
                     {aiEntry?.state === 'error' && (
-                      <p style={{ color: 'var(--danger)', margin: 'var(--space-2) 0 0', fontSize: 'var(--fs-sm)' }}>
+                      <p className="qv-text-danger qv-fs-sm" style={{ margin: 'var(--space-2) 0 0' }}>
                         {aiEntry.error}
                       </p>
                     )}
@@ -723,7 +723,7 @@ export default function MockExam() {
                 Generating{genProgress ? ` — ${genProgress.topicTitle} (${genProgress.done}/${genProgress.total})` : '…'}
               </p>
             )}
-            {genState === 'error' && <p style={{ color: 'var(--danger)', margin: 'var(--space-1) 0 0' }}>{genError}</p>}
+            {genState === 'error' && <p className="qv-text-danger" style={{ margin: 'var(--space-1) 0 0' }}>{genError}</p>}
             {genState === 'cancelled' && (
               <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
                 Generation cancelled. Any previous generated mock is still available below.
@@ -859,7 +859,7 @@ export default function MockExam() {
         <div className="flex-between" style={{ marginBottom: 'var(--space-5)' }}>
           <div>
             <span className="badge badge-purple">{item.type.replace('-', ' ')}</span>
-            <h2 style={{ marginTop: 'var(--space-3)' }}>{itemTitle(item)}</h2>
+            <h2 className="qv-mt-3">{itemTitle(item)}</h2>
           </div>
           <button className={`btn ${flags.has(itemId(item)) ? 'btn-primary' : 'btn-secondary'}`} onClick={toggleFlag}>
             <Flag size={16} /> {flags.has(itemId(item)) ? 'Flagged' : 'Flag'}
@@ -906,7 +906,7 @@ export default function MockExam() {
           />
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', marginTop: 'var(--space-6)' }}>
+        <div className="qv-row-between" style={{ marginTop: 'var(--space-6)' }}>
           <button className="btn btn-secondary" onClick={() => setCurrent((value) => Math.max(0, value - 1))} disabled={current === 0}>Previous</button>
           <div className="mock-nav-grid">
             {items.map((mockItem, index) => (

@@ -94,7 +94,7 @@ export default function Flashcards() {
           {revealed ? (
             <>
               <p style={{ whiteSpace: 'pre-line' }}>{card.back}</p>
-              <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+              <div className="qv-row-3" style={{ flexWrap: 'wrap' }}>
                 <button className="btn btn-secondary" onClick={() => nextCard('again')}>Again</button>
                 <button className="btn btn-primary" onClick={() => nextCard('known')}>Known</button>
                 <Link to={card.sourcePath} className="btn btn-secondary">Open Source</Link>

@@ -25,7 +25,7 @@ function Stepper({ step }) {
           {n}
         </span>
       ))}
-      <span className="muted-copy" style={{ fontSize: 'var(--fs-xs)' }}>
+      <span className="muted-copy qv-fs-xs">
         {step} / 3
       </span>
     </InlineCluster>
@@ -37,12 +37,12 @@ function Step1({ onContinue }) {
     <div className="onboarding-step">
       <StatusBadge tone="accent">Welcome</StatusBadge>
       <h3 style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>QuantVault is local-first</h3>
-      <p style={{ margin: 0 }}>
+      <p className="qv-m-0">
         Everything stays on your machine — no cloud, no account, no tracking. Three quick choices
         and you are set.
       </p>
       <Surface tone="study" density="compact" style={{ marginTop: 'var(--space-4)' }}>
-        <ul style={{ margin: 0, paddingLeft: 'var(--space-4)', lineHeight: 1.7 }}>
+        <ul className="qv-m-0" style={{ paddingLeft: 'var(--space-4)', lineHeight: 1.7 }}>
           <li>Choose a local model server (optional)</li>
           <li>Bring in your source documents (optional)</li>
           <li>Start studying immediately — nothing is required</li>
@@ -88,7 +88,7 @@ function Step2({ onPresetChosen, onSkip }) {
           }
         >
           LM Studio
-          <small style={{ display: 'block', fontWeight: 400, fontSize: 'var(--fs-xs)' }}>
+          <small className="qv-fs-xs" style={{ display: 'block', fontWeight: 400 }}>
             localhost:1234 · gemma-4-e4b-it
           </small>
         </button>
@@ -100,13 +100,13 @@ function Step2({ onPresetChosen, onSkip }) {
           }
         >
           Ollama
-          <small style={{ display: 'block', fontWeight: 400, fontSize: 'var(--fs-xs)' }}>
+          <small className="qv-fs-xs" style={{ display: 'block', fontWeight: 400 }}>
             localhost:11434 · llama3.1
           </small>
         </button>
       </InlineCluster>
 
-      <Surface tone="study" density="compact" status="warning" style={{ marginTop: 'var(--space-4)', fontSize: 'var(--fs-xs)' }}>
+      <Surface tone="study" density="compact" status="warning" className="qv-fs-xs" style={{ marginTop: 'var(--space-4)' }}>
         <strong>CORS note:</strong>
         <br />
         {CORS_NOTE_LM_STUDIO}
@@ -115,7 +115,7 @@ function Step2({ onPresetChosen, onSkip }) {
       </Surface>
 
       <InlineCluster align="end" style={{ marginTop: 'var(--space-5)' }}>
-        <button className="btn btn-ghost" onClick={onSkip} style={{ color: 'var(--text-muted)' }}>
+        <button className="btn btn-ghost qv-text-muted" onClick={onSkip}>
           Skip for now
         </button>
       </InlineCluster>
@@ -139,14 +139,14 @@ function Step3({ onDone }) {
         AI features and grounded answers light up once you have source documents in the local vault.
       </p>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+      <div className="qv-stack-2">
         <button
           className="btn btn-secondary"
           onClick={() => goToSystem('#vault-folder')}
           style={{ justifyContent: 'flex-start', textAlign: 'left' }}
         >
           <strong>Pick a folder of PDFs</strong>
-          <small style={{ display: 'block', fontWeight: 400, fontSize: 'var(--fs-xs)' }}>
+          <small className="qv-fs-xs" style={{ display: 'block', fontWeight: 400 }}>
             Desktop (Tauri) shell only
           </small>
         </button>
@@ -156,7 +156,7 @@ function Step3({ onDone }) {
           style={{ justifyContent: 'flex-start', textAlign: 'left' }}
         >
           <strong>Paste text</strong>
-          <small style={{ display: 'block', fontWeight: 400, fontSize: 'var(--fs-xs)' }}>
+          <small className="qv-fs-xs" style={{ display: 'block', fontWeight: 400 }}>
             Copy and paste raw curriculum text
           </small>
         </button>
@@ -166,14 +166,14 @@ function Step3({ onDone }) {
           style={{ justifyContent: 'flex-start', textAlign: 'left' }}
         >
           <strong>Import .qvsource bundle</strong>
-          <small style={{ display: 'block', fontWeight: 400, fontSize: 'var(--fs-xs)' }}>
+          <small className="qv-fs-xs" style={{ display: 'block', fontWeight: 400 }}>
             Import a pre-built source bundle file
           </small>
         </button>
       </div>
 
       <InlineCluster align="end" style={{ marginTop: 'var(--space-5)' }}>
-        <button className="btn btn-ghost" onClick={onDone} style={{ color: 'var(--text-muted)' }}>
+        <button className="btn btn-ghost qv-text-muted" onClick={onDone}>
           Skip — explore first
         </button>
         <button className="btn btn-primary" onClick={onDone}>
@@ -199,7 +199,7 @@ export function OnboardingWizard({ open, onClose }) {
       title={null}
       onClose={handleClose}
       actions={
-        <small className="muted-copy" style={{ fontSize: 'var(--fs-xs)' }}>
+        <small className="muted-copy qv-fs-xs">
           Enter to advance · Esc to dismiss
         </small>
       }
@@ -207,10 +207,9 @@ export function OnboardingWizard({ open, onClose }) {
       <InlineCluster style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
         <Stepper step={step} />
         <button
-          className="btn btn-ghost"
+          className="btn btn-ghost qv-fs-xs qv-text-muted"
           onClick={handleClose}
           aria-label="Skip onboarding"
-          style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}
         >
           Skip onboarding ✕
         </button>

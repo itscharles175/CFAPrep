@@ -189,14 +189,14 @@ export default function CfaVignette() {
                 <StatusBadge tone={selected[question.id] === question.correct ? 'success' : 'danger'}>
                   {selected[question.id] === question.correct ? 'Correct' : 'Review'}
                 </StatusBadge>
-                <p style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-3)' }}>{question.explanation}</p>
+                <p className="qv-text-secondary qv-mt-3">{question.explanation}</p>
               </div>
             )}
           </QuestionStage>
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+      <div className="qv-row-3" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
         {submitted ? (
           <button className="btn btn-primary" onClick={nextSet}>Next Vignette</button>
         ) : (

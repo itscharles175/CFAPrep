@@ -148,8 +148,8 @@ export default function ReviewInbox() {
           <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
             <div>
               <StatusBadge tone="vault">Adaptive task board</StatusBadge>
-              <h3 style={{ marginTop: 'var(--space-3)' }}>What To Do Next</h3>
-              <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)' }}>
+              <h3 className="qv-mt-3">What To Do Next</h3>
+              <p className="qv-text-secondary qv-fs-sm">
                 {studyPlan.daysToExam === null ? 'No exam date set.' : `${studyPlan.daysToExam} days to exam.`} Daily target: {studyPlan.dailyTargetMinutes} minutes.
               </p>
             </div>
@@ -182,7 +182,7 @@ export default function ReviewInbox() {
               <Link key={`${action.label}:${action.path}`} to={action.path} className="objective-row" style={{ textDecoration: 'none', color: 'inherit' }}>
                 <StatusBadge tone="accent">{action.label}</StatusBadge>
                 <h3>{action.title}</h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)' }}>{action.reason}</p>
+                <p className="qv-text-secondary qv-fs-sm">{action.reason}</p>
                 {action.reasonDetails?.length > 0 && (
                   <small className="muted-copy">{action.reasonDetails.slice(0, 2).join(' ')}</small>
                 )}
@@ -196,7 +196,7 @@ export default function ReviewInbox() {
         <Surface tone="study" status="exam" style={{ marginBottom: 'var(--space-6)' }}>
           <StatusBadge tone="accent">Local Tutor</StatusBadge>
           <h3>Weak Topic Summary</h3>
-          <p style={{ color: 'var(--text-secondary)' }}>{tutorResponse.text}</p>
+          <p className="qv-text-secondary">{tutorResponse.text}</p>
           <small>Sources: {tutorResponse.sourceIds.join(', ')}</small>
         </Surface>
       )}

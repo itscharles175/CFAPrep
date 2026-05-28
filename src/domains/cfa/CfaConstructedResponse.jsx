@@ -176,10 +176,10 @@ export default function CfaConstructedResponse() {
 
       <Surface tone="study" status="exam" style={{ marginBottom: 'var(--space-6)' }}>
         <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
-          <h2 style={{ margin: 0 }}>Prompt</h2>
+          <h2 className="qv-m-0">Prompt</h2>
           <CommandHint keys={['Ctrl', 'Enter']} label="submit response" />
         </div>
-        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>{item.prompt}</p>
+        <p className="qv-text-secondary" style={{ lineHeight: 1.7 }}>{item.prompt}</p>
         <textarea
           aria-label="Constructed response answer"
           value={response}
@@ -211,7 +211,7 @@ export default function CfaConstructedResponse() {
           <ProgressRail value={earnedPoints} max={item.rubric.maxPoints} label="Rubric points" detail={`${earnedPoints}/${item.rubric.maxPoints}`} tone="exam" />
         </div>
 
-        <div style={{ marginTop: 'var(--space-4)', display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="qv-row-2" style={{ marginTop: 'var(--space-4)', flexWrap: 'wrap' }}>
           <button
             type="button"
             className="btn btn-secondary"
@@ -236,7 +236,7 @@ export default function CfaConstructedResponse() {
             </button>
           )}
           {critique.state === 'loading' && (
-            <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Grading your response…</span>
+            <span className="qv-text-secondary" style={{ fontSize: '0.875rem' }}>Grading your response…</span>
           )}
         </div>
 
@@ -255,17 +255,16 @@ export default function CfaConstructedResponse() {
               borderRadius: '0 var(--radius-md) var(--radius-md) 0',
             }}
           >
-            <p style={{ margin: '0 0 var(--space-2)', fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+            <p className="qv-text-secondary qv-fw-semibold" style={{ margin: '0 0 var(--space-2)', fontSize: '0.875rem' }}>
               🤖 AI Rubric Critique
             </p>
             <pre
+              className="qv-m-0 qv-text-primary"
               style={{
-                margin: 0,
                 whiteSpace: 'pre-wrap',
                 fontFamily: 'inherit',
                 fontSize: '0.9rem',
                 lineHeight: 1.65,
-                color: 'var(--text-primary)',
               }}
             >
               {critique.text}
@@ -299,7 +298,7 @@ export default function CfaConstructedResponse() {
           <Surface tone="study" status="success" style={{ marginBottom: 'var(--space-6)' }}>
             <StatusBadge tone="success">Model answer revealed</StatusBadge>
             <h2>Model Answer</h2>
-            <p style={{ color: 'var(--text-secondary)' }}>{item.modelAnswer}</p>
+            <p className="qv-text-secondary">{item.modelAnswer}</p>
           </Surface>
           <SourceRail
             title="Constructed Response Source Context"
@@ -320,8 +319,8 @@ export default function CfaConstructedResponse() {
         </>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+      <div className="qv-row-between" style={{ flexWrap: 'wrap' }}>
+        <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
           {visibleItems.map((responseItem, index) => (
             <button
               key={responseItem.id}
