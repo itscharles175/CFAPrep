@@ -18,7 +18,6 @@ import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, 
 import { getStorage } from '../lib/storage';
 import {
   clearPersistedParameters,
-  fitFSRSParameters,
   persistOptimizedParameters,
   readPersistedParameters,
 } from '../lib/fsrsOptimizer';
@@ -26,10 +25,10 @@ import { setSchedulerParameters } from '../lib/scheduler';
 import { db } from '../lib/progressStore';
 import {
   clearPsychometricsCache,
-  computePsychometrics,
   persistPsychometricsReport,
   readCachedPsychometricsReport,
 } from '../lib/itemPsychometrics';
+import { computePsychometricsInWorker, fitFSRSInWorker } from '../lib/computeWorker';
 import {
   clearQueue as clearTargetedQueue,
   generateTargetedMaterialJobs,
@@ -191,7 +190,7 @@ export default function SystemHealth() {
     setPsychError('');
     try {
       const rows = await db.questionResults.toArray();
-      const report = computePsychometrics(rows);
+      const report = await computePsychometricsInWorker(rows);
       await persistPsychometricsReport(report);
       setPsychReport(report);
       toast.success('Psychometrics updated', `${report.totalItems} items scored across ${report.totalAttempts} attempts.`);
@@ -275,7 +274,7 @@ export default function SystemHealth() {
     setFsrsFit(null);
     try {
       const rows = await db.questionResults.toArray();
-      const report = await fitFSRSParameters(rows);
+      const report = await fitFSRSInWorker(rows);
       setFsrsFit(report);
       if (!report.ok) {
         setFsrsError(report.reason || 'Could not fit parameters.');

@@ -27,9 +27,25 @@ import {
 import { parseCitations } from '../../lib/citations';
 import { hasSpeechRecognition, hasSpeechSynthesis, recognizeOnce, recognizeOnceOffline, recordAudioForOfflineStt, sanitizeForSpeech, speak, stopSpeaking } from '../../lib/voice';
 import PodcastPanel from '../../components/PodcastPanel/PodcastPanel';
+import VirtualizedList from '../../components/VirtualizedList/VirtualizedList';
+
+// Virtualization-threshold: only virtualize once the deck/list crosses this
+// many items.  Below the threshold a plain render is cheaper and avoids the
+// fixed-height container.
+const VIRTUALIZE_THRESHOLD_FLASHCARDS = 12;
+const VIRTUALIZE_THRESHOLD_QUESTIONS = 8;
+const VIRTUALIZE_THRESHOLD_CHUNKS = 12;
+
+// Tuned heights for the virtualized rows.  Each row's inner content overflows
+// via `overflow: auto` so a slot can comfortably contain a long card/question.
+const FLASHCARD_ROW_HEIGHT = 220;
+const QUESTION_ROW_HEIGHT = 280;
+const CHUNK_ROW_HEIGHT = 360;
 
 // Interactive deck for AI-generated flashcards: front visible by default,
-// click reveals the back; small Show all / Hide all controls.
+// click reveals the back; small Show all / Hide all controls.  When the deck
+// crosses VIRTUALIZE_THRESHOLD_FLASHCARDS items, swap to the VirtualizedList
+// renderer so React only mounts the rows in the visible scroll window.
 function FlashcardDeck({ cards }) {
   const [revealed, setRevealed] = useState(new Set());
   const allShown = revealed.size === cards.length;
@@ -41,6 +57,61 @@ function FlashcardDeck({ cards }) {
       return next;
     });
   }
+
+  function renderCard(card) {
+    const isOpen = revealed.has(card.id);
+    return (
+      <div
+        style={{
+          borderTop: '1px solid var(--border)',
+          paddingTop: 'var(--space-3)',
+          marginTop: 'var(--space-3)',
+          cursor: 'pointer',
+          height: '100%',
+          overflowY: 'auto',
+          boxSizing: 'border-box',
+        }}
+        onClick={() => toggle(card.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggle(card.id);
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-expanded={isOpen}
+      >
+        <div className="qv-row-3-start" style={{ justifyContent: 'space-between' }}>
+          <strong style={{ flex: 1 }}>{card.front}</strong>
+          {card.locator && (
+            <span
+              style={{
+                flexShrink: 0,
+                fontSize: 'var(--fs-xs)',
+                fontFamily: 'var(--font-mono, monospace)',
+                background: 'var(--accent-soft, rgba(120,180,255,0.15))',
+                color: 'var(--accent, currentColor)',
+                border: '1px solid var(--accent, transparent)',
+                borderRadius: 'var(--radius-sm, 4px)',
+                padding: '1px 6px',
+              }}
+            >
+              {card.locator}
+            </span>
+          )}
+        </div>
+        {isOpen ? (
+          <p className="qv-text-secondary" style={{ margin: 'var(--space-2) 0 0' }}>{card.back}</p>
+        ) : (
+          <small className="muted-copy">Click to reveal</small>
+        )}
+      </div>
+    );
+  }
+
+  const shouldVirtualize = cards.length >= VIRTUALIZE_THRESHOLD_FLASHCARDS;
+
   return (
     <div>
       <div className="qv-mb-2" style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -52,55 +123,20 @@ function FlashcardDeck({ cards }) {
           {allShown ? 'Hide all' : 'Show all'}
         </button>
       </div>
-      {cards.map((card) => {
-        const isOpen = revealed.has(card.id);
-        return (
-          <div
-            key={card.id}
-            style={{
-              borderTop: '1px solid var(--border)',
-              paddingTop: 'var(--space-3)',
-              marginTop: 'var(--space-3)',
-              cursor: 'pointer',
-            }}
-            onClick={() => toggle(card.id)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                toggle(card.id);
-              }
-            }}
-            role="button"
-            tabIndex={0}
-            aria-expanded={isOpen}
-          >
-            <div className="qv-row-3-start" style={{ justifyContent: 'space-between' }}>
-              <strong style={{ flex: 1 }}>{card.front}</strong>
-              {card.locator && (
-                <span
-                  style={{
-                    flexShrink: 0,
-                    fontSize: 'var(--fs-xs)',
-                    fontFamily: 'var(--font-mono, monospace)',
-                    background: 'var(--accent-soft, rgba(120,180,255,0.15))',
-                    color: 'var(--accent, currentColor)',
-                    border: '1px solid var(--accent, transparent)',
-                    borderRadius: 'var(--radius-sm, 4px)',
-                    padding: '1px 6px',
-                  }}
-                >
-                  {card.locator}
-                </span>
-              )}
-            </div>
-            {isOpen ? (
-              <p className="qv-text-secondary" style={{ margin: 'var(--space-2) 0 0' }}>{card.back}</p>
-            ) : (
-              <small className="muted-copy">Click to reveal</small>
-            )}
-          </div>
-        );
-      })}
+      {shouldVirtualize ? (
+        <VirtualizedList
+          items={cards}
+          itemHeight={FLASHCARD_ROW_HEIGHT}
+          height={Math.min(600, FLASHCARD_ROW_HEIGHT * 3)}
+          overscan={4}
+          itemKey={(card) => card.id}
+          renderItem={(card) => renderCard(card)}
+        />
+      ) : (
+        cards.map((card) => (
+          <div key={card.id}>{renderCard(card)}</div>
+        ))
+      )}
     </div>
   );
 }
@@ -665,15 +701,34 @@ export default function CfaModule() {
 
           {readingView === 'curriculum' && reading.chunks.length > 0 ? (
             <>
-              {reading.chunks.slice(0, chunkLimit).map((chunk) => (
-                <Surface key={chunk.id} tone="study" className="animate-fade" style={{ marginBottom: 'var(--space-4)' }}>
-                  <div className="flex-between qv-mb-2" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
-                    <h3 className="qv-m-0 qv-fs-md">{chunk.heading || reading.document?.title?.replace(/\s+libgenli$/i, '') || 'Curriculum'}</h3>
-                    <StatusBadge tone="vault">{chunk.locator}</StatusBadge>
-                  </div>
-                  <p className="qv-m-0" style={{ whiteSpace: 'pre-line', lineHeight: 1.7 }}>{chunk.text}</p>
-                </Surface>
-              ))}
+              {(() => {
+                const visibleChunks = reading.chunks.slice(0, chunkLimit);
+                const shouldVirtualize = visibleChunks.length >= VIRTUALIZE_THRESHOLD_CHUNKS;
+                const renderChunk = (chunk) => (
+                  <Surface tone="study" className="animate-fade" style={{ marginBottom: 'var(--space-4)', height: shouldVirtualize ? '100%' : undefined, overflowY: shouldVirtualize ? 'auto' : undefined, boxSizing: 'border-box' }}>
+                    <div className="flex-between qv-mb-2" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+                      <h3 className="qv-m-0 qv-fs-md">{chunk.heading || reading.document?.title?.replace(/\s+libgenli$/i, '') || 'Curriculum'}</h3>
+                      <StatusBadge tone="vault">{chunk.locator}</StatusBadge>
+                    </div>
+                    <p className="qv-m-0" style={{ whiteSpace: 'pre-line', lineHeight: 1.7 }}>{chunk.text}</p>
+                  </Surface>
+                );
+                if (shouldVirtualize) {
+                  return (
+                    <VirtualizedList
+                      items={visibleChunks}
+                      itemHeight={CHUNK_ROW_HEIGHT}
+                      height={Math.min(900, CHUNK_ROW_HEIGHT * 3)}
+                      overscan={2}
+                      itemKey={(chunk) => chunk.id}
+                      renderItem={(chunk) => renderChunk(chunk)}
+                    />
+                  );
+                }
+                return visibleChunks.map((chunk) => (
+                  <div key={chunk.id}>{renderChunk(chunk)}</div>
+                ));
+              })()}
               {chunkLimit < reading.chunks.length && (
                 <button
                   className="btn btn-secondary"
@@ -734,19 +789,42 @@ export default function CfaModule() {
                   </button>
                 </div>
                 {aiState === 'error' && <p className="qv-text-danger qv-m-0">{aiError}</p>}
-                {aiQuestions.map((question, qi) => (
-                  <div key={question.id} style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
-                    <strong>{qi + 1}. {question.question}</strong>
-                    <ul style={{ margin: 'var(--space-2) 0', paddingLeft: 'var(--space-5)' }}>
-                      {question.options.map((option, oi) => (
-                        <li key={oi} style={{ color: oi === question.correct ? 'var(--success)' : 'var(--text-secondary)', fontWeight: oi === question.correct ? 700 : 400 }}>
-                          {option}{oi === question.correct ? ' ✓' : ''}
-                        </li>
-                      ))}
-                    </ul>
-                    {question.explanation && <p className="qv-text-muted qv-fs-sm qv-m-0">{question.explanation}</p>}
-                  </div>
-                ))}
+                {aiQuestions.length >= VIRTUALIZE_THRESHOLD_QUESTIONS ? (
+                  <VirtualizedList
+                    items={aiQuestions}
+                    itemHeight={QUESTION_ROW_HEIGHT}
+                    height={Math.min(720, QUESTION_ROW_HEIGHT * 3)}
+                    overscan={3}
+                    itemKey={(question) => question.id}
+                    renderItem={(question, qi) => (
+                      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)', height: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
+                        <strong>{qi + 1}. {question.question}</strong>
+                        <ul style={{ margin: 'var(--space-2) 0', paddingLeft: 'var(--space-5)' }}>
+                          {question.options.map((option, oi) => (
+                            <li key={oi} style={{ color: oi === question.correct ? 'var(--success)' : 'var(--text-secondary)', fontWeight: oi === question.correct ? 700 : 400 }}>
+                              {option}{oi === question.correct ? ' ✓' : ''}
+                            </li>
+                          ))}
+                        </ul>
+                        {question.explanation && <p className="qv-text-muted qv-fs-sm qv-m-0">{question.explanation}</p>}
+                      </div>
+                    )}
+                  />
+                ) : (
+                  aiQuestions.map((question, qi) => (
+                    <div key={question.id} style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
+                      <strong>{qi + 1}. {question.question}</strong>
+                      <ul style={{ margin: 'var(--space-2) 0', paddingLeft: 'var(--space-5)' }}>
+                        {question.options.map((option, oi) => (
+                          <li key={oi} style={{ color: oi === question.correct ? 'var(--success)' : 'var(--text-secondary)', fontWeight: oi === question.correct ? 700 : 400 }}>
+                            {option}{oi === question.correct ? ' ✓' : ''}
+                          </li>
+                        ))}
+                      </ul>
+                      {question.explanation && <p className="qv-text-muted qv-fs-sm qv-m-0">{question.explanation}</p>}
+                    </div>
+                  ))
+                )}
               </Surface>
 
               <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
