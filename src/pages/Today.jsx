@@ -526,7 +526,7 @@ export default function Today() {
             <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
               <div>
                 <StatusBadge tone="accent">Daily journal</StatusBadge>
-                <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+                <p className="muted-copy qv-mt-1" style={{ marginBottom: 0 }}>
                   One-paragraph reflection on today's study session. Stays in your local vault, per-date.
                 </p>
               </div>
