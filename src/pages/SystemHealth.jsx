@@ -10,6 +10,7 @@ import {
   saveOpenNotebookSettings,
 } from '../lib/openNotebook';
 import { ingestFolder, isTauri, pickCfaFolder } from '../lib/desktopIngestion';
+import { deleteCfaSourceDocument, getCfaSourceDocuments } from '../lib/cfaSourceVault';
 
 function downloadJson(payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -40,6 +41,8 @@ export default function SystemHealth() {
   const [ingestProgress, setIngestProgress] = useState(null);
   const [ingestResult, setIngestResult] = useState(null);
   const [ingestError, setIngestError] = useState('');
+  const [sourceDocs, setSourceDocs] = useState([]);
+  const [sourceDocsBusy, setSourceDocsBusy] = useState(false);
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -85,10 +88,34 @@ export default function SystemHealth() {
     getOpenNotebookSettings().then((settings) => {
       if (active) setOnb(settings);
     });
+    refreshSourceDocs();
     return () => {
       active = false;
     };
   }, []);
+
+  async function refreshSourceDocs() {
+    setSourceDocsBusy(true);
+    try {
+      const docs = await getCfaSourceDocuments();
+      setSourceDocs(docs);
+    } finally {
+      setSourceDocsBusy(false);
+    }
+  }
+
+  async function handleDeleteSourceDoc(documentId) {
+    if (!documentId) return;
+    setSourceDocsBusy(true);
+    try {
+      await deleteCfaSourceDocument(documentId);
+      await refreshSourceDocs();
+      setMessage('Source document removed from the local vault.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not delete the source document.');
+      setSourceDocsBusy(false);
+    }
+  }
 
   async function handleSaveLlm() {
     const saved = await saveLlmSettings(llm);
@@ -122,6 +149,7 @@ export default function SystemHealth() {
       setIngestResult(result);
       setIngestState('done');
       setMessage(`Ingested ${result.ingested} new document(s) (${result.chunkCount} chunks). Skipped ${result.skipped} duplicate(s).`);
+      await refreshSourceDocs();
     } catch (error) {
       setIngestState('error');
       setIngestError(error instanceof Error ? error.message : 'Folder ingestion failed.');
@@ -369,6 +397,63 @@ export default function SystemHealth() {
           )}
         </Surface>
       )}
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+          <div>
+            <StatusBadge tone="accent">Source Vault</StatusBadge>
+            <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingested source documents ({sourceDocs.length})</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+              Everything in your local vault — bundled `.qvsource` imports plus desktop folder ingestion. Deletes are scoped (the document and its chunks only) and irreversible.
+            </p>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={refreshSourceDocs} disabled={sourceDocsBusy}>
+            {sourceDocsBusy ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+        {sourceDocs.length === 0 ? (
+          <p className="muted-copy" style={{ margin: 0 }}>
+            No ingested documents yet. Import a `.qvsource` bundle or ingest a CFA folder from the desktop shell to populate the vault.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {sourceDocs.slice(0, 12).map((doc) => (
+              <div
+                key={doc.id}
+                className="flex-between"
+                style={{
+                  gap: 'var(--space-3)',
+                  alignItems: 'center',
+                  padding: 'var(--space-2) var(--space-3)',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title || doc.id}</strong>
+                  <small className="muted-copy">
+                    {doc.level} · {doc.sourceKind} · {doc.publisher || '—'} · {doc.chunkCount ?? 0} chunks · {doc.format || 'unknown'}
+                    {doc.topicIds?.length ? ` · ${doc.topicIds.slice(0, 4).join(', ')}` : ''}
+                  </small>
+                </div>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleDeleteSourceDoc(doc.id)}
+                  disabled={sourceDocsBusy}
+                  title="Delete this document and its chunks from the local vault"
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+            {sourceDocs.length > 12 && (
+              <p className="muted-copy" style={{ margin: 0 }}>
+                Showing 12 of {sourceDocs.length} documents.
+              </p>
+            )}
+          </div>
+        )}
+      </Surface>
 
       <Surface tone="ops" className="ops-report-panel">
         <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
