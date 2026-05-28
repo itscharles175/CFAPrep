@@ -383,6 +383,117 @@ export async function chatWithSource(params: {
   return parseSourceChatStream(text);
 }
 
+export interface OnbTransformation {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export async function listTransformations(
+  settings?: Pick<OpenNotebookSettings, 'baseUrl'>,
+): Promise<OnbTransformation[]> {
+  const list = await request<OnbTransformation[]>(
+    normalizeBaseUrl(settings?.baseUrl),
+    '/api/transformations',
+    { timeoutMs: 10_000 },
+  );
+  return Array.isArray(list) ? list : [];
+}
+
+export interface OnbSourceInsight {
+  id: string;
+  insight_type?: string;
+  content?: string;
+  created?: string;
+}
+
+export async function listSourceInsights(
+  baseUrl: string,
+  sourceId: string,
+): Promise<OnbSourceInsight[]> {
+  const list = await request<OnbSourceInsight[]>(
+    normalizeBaseUrl(baseUrl),
+    `/api/sources/${encodeURIComponent(sourceId)}/insights`,
+    { timeoutMs: 10_000 },
+  );
+  return Array.isArray(list) ? list : [];
+}
+
+/**
+ * Kick off open-notebook's "insight" pipeline for a source — applying a
+ * transformation (e.g. "Key Insights", "Dense Summary") via the worker queue.
+ * Returns the pending command record; insights become queryable via
+ * `listSourceInsights` after the worker finishes (typically tens of seconds).
+ */
+export async function triggerSourceInsight(params: {
+  baseUrl: string;
+  sourceId: string;
+  transformationId: string;
+  model?: string;
+  signal?: AbortSignal;
+}): Promise<{ status: string; command_id?: string }> {
+  return request<{ status: string; command_id?: string }>(
+    normalizeBaseUrl(params.baseUrl),
+    `/api/sources/${encodeURIComponent(params.sourceId)}/insights`,
+    {
+      method: 'POST',
+      body: { transformation_id: params.transformationId, ...(params.model ? { model_id: params.model } : {}) },
+      signal: params.signal,
+      timeoutMs: 30_000,
+    },
+  );
+}
+
+/**
+ * Ensure a source has at least one insight generated, so per-source chat can
+ * answer from real content rather than just the source title. Looks up the
+ * named transformation (default: "Key Insights"), kicks off generation if
+ * needed, then polls until insights appear or `maxWaitMs` elapses.
+ * Idempotent — a no-op if insights already exist.
+ *
+ * Returns true if insights are now present, false on timeout.
+ */
+export async function ensureSourceInsights(params: {
+  baseUrl: string;
+  sourceId: string;
+  /** Transformation name to look up; defaults to "Key Insights". */
+  transformationName?: string;
+  /** Override the language model used to synthesize insights. */
+  model?: string;
+  /** How long to poll before giving up. Default: 120 seconds. */
+  maxWaitMs?: number;
+  signal?: AbortSignal;
+}): Promise<boolean> {
+  const base = normalizeBaseUrl(params.baseUrl);
+  const existing = await listSourceInsights(base, params.sourceId);
+  if (existing.length > 0) return true;
+
+  const transformations = await listTransformations({ baseUrl: base });
+  const wanted = (params.transformationName || 'Key Insights').toLowerCase();
+  const transformation =
+    transformations.find((t) => t.name?.toLowerCase() === wanted) ||
+    transformations.find((t) => t.name?.toLowerCase().includes(wanted)) ||
+    transformations[0];
+  if (!transformation) return false;
+
+  await triggerSourceInsight({
+    baseUrl: base,
+    sourceId: params.sourceId,
+    transformationId: transformation.id,
+    model: params.model,
+    signal: params.signal,
+  });
+
+  const deadline = Date.now() + (params.maxWaitMs ?? 120_000);
+  while (Date.now() < deadline) {
+    if (params.signal?.aborted) return false;
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    const insights = await listSourceInsights(base, params.sourceId);
+    if (insights.length > 0) return true;
+  }
+  return false;
+}
+
 /** Exported for tests. Parses the `data: {json}` stream from the chat endpoint. */
 export function parseSourceChatStream(text: string): SourceChatAnswer {
   let answer = '';

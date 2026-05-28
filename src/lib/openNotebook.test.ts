@@ -5,12 +5,16 @@ import {
   askGrounded,
   chatWithSource,
   checkOpenNotebookConnection,
+  ensureSourceInsights,
   ensureTopicNotebook,
   getCachedGroundedAnswer,
   getOpenNotebookSettings,
+  listSourceInsights,
+  listTransformations,
   parseSourceChatStream,
   saveCachedGroundedAnswer,
   saveOpenNotebookSettings,
+  triggerSourceInsight,
 } from './openNotebook';
 import { db } from './progressStore';
 
@@ -220,6 +224,110 @@ describe('open-notebook client', () => {
     const parsed = parseSourceChatStream(stream);
     expect(parsed.answer).toBe('Duration measures price sensitivity to yield.');
     expect(parsed.citationSources).toEqual(['source:ur6v8hj8biai1tw8fmwg']);
+  });
+
+  it('lists transformations and existing source insights', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('/api/transformations')) {
+        return Promise.resolve(jsonResponse([
+          { id: 'transformation:1', name: 'Key Insights', description: 'x' },
+          { id: 'transformation:2', name: 'Dense Summary' },
+        ]));
+      }
+      if (url.includes('/insights')) {
+        return Promise.resolve(jsonResponse([{ id: 'insight:1', content: 'a key point' }]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const transformations = await listTransformations({ baseUrl: 'http://localhost:5055' });
+    expect(transformations.map((t) => t.name)).toEqual(['Key Insights', 'Dense Summary']);
+    const insights = await listSourceInsights('http://localhost:5055', 'source:abc');
+    expect(insights[0].content).toContain('key point');
+  });
+
+  it('triggerSourceInsight posts transformation + model id and returns command status', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      expect(url).toContain('/api/sources/source%3Aabc/insights');
+      const body = JSON.parse((init as RequestInit).body as string);
+      expect(body).toEqual({ transformation_id: 'transformation:1', model_id: 'model:gemma' });
+      return Promise.resolve(jsonResponse({ status: 'pending', command_id: 'command:42' }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await triggerSourceInsight({
+      baseUrl: 'http://localhost:5055',
+      sourceId: 'source:abc',
+      transformationId: 'transformation:1',
+      model: 'model:gemma',
+    });
+    expect(result.status).toBe('pending');
+    expect(result.command_id).toBe('command:42');
+  });
+
+  it('ensureSourceInsights is a no-op when insights already exist', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse([{ id: 'insight:existing', content: 'already there' }]));
+    vi.stubGlobal('fetch', fetchMock);
+    const ok = await ensureSourceInsights({
+      baseUrl: 'http://localhost:5055',
+      sourceId: 'source:abc',
+      maxWaitMs: 100,
+    });
+    expect(ok).toBe(true);
+    // exactly one call (the initial listSourceInsights) — no trigger, no poll
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ensureSourceInsights looks up "Key Insights", triggers it, and polls until insights appear', async () => {
+    let pollsBeforeInsightAppears = 1;
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/transformations')) {
+        return Promise.resolve(jsonResponse([
+          { id: 'transformation:other', name: 'Other' },
+          { id: 'transformation:key', name: 'Key Insights' },
+        ]));
+      }
+      if (url.includes('/insights') && init?.method === 'POST') {
+        const body = JSON.parse((init as RequestInit).body as string);
+        expect(body.transformation_id).toBe('transformation:key');
+        return Promise.resolve(jsonResponse({ status: 'pending' }));
+      }
+      // GET insights — empty initially, then non-empty after a couple polls
+      if (url.includes('/insights')) {
+        if (pollsBeforeInsightAppears-- > 0) return Promise.resolve(jsonResponse([]));
+        return Promise.resolve(jsonResponse([{ id: 'insight:new', content: 'a new insight' }]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const ok = await ensureSourceInsights({
+      baseUrl: 'http://localhost:5055',
+      sourceId: 'source:abc',
+      maxWaitMs: 30_000,
+    });
+    expect(ok).toBe(true);
+    const posts = fetchMock.mock.calls.filter((c) => (c[1] as RequestInit)?.method === 'POST');
+    expect(posts).toHaveLength(1);
+  }, 30_000);
+
+  it('ensureSourceInsights returns false when no transformations are available', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/insights')) return Promise.resolve(jsonResponse([]));
+      if (url.endsWith('/api/transformations')) return Promise.resolve(jsonResponse([]));
+      return Promise.resolve(jsonResponse([]));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const ok = await ensureSourceInsights({
+      baseUrl: 'http://localhost:5055',
+      sourceId: 'source:abc',
+      maxWaitMs: 100,
+    });
+    expect(ok).toBe(false);
+    // never POSTed (no transformation to apply)
+    expect(fetchMock.mock.calls.filter((c) => (c[1] as RequestInit)?.method === 'POST')).toHaveLength(0);
   });
 
   it('chatWithSource creates a session for the source, posts the message, returns the parsed answer', async () => {
