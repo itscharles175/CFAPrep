@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ComponentType, type SVGProps } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   Home, BookOpen, TrendingUp, Table2,
@@ -12,8 +12,11 @@ import {
 } from 'lucide-react';
 import { cfaTopics, excelModules, quantModules } from '../../data/catalog';
 import { appRoutes } from '../../routes/routeManifest';
+import type { AppRoute } from '../../routes/routeManifest';
 
-const cfaIconMap = {
+type LucideIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
+
+const cfaIconMap: Record<string, LucideIcon> = {
   ethics: Shield,
   'quant-methods': Sigma,
   economics: TrendingUp,
@@ -26,7 +29,7 @@ const cfaIconMap = {
   portfolio: PieChart,
 };
 
-const quantIconMap = {
+const quantIconMap: Record<string, LucideIcon> = {
   probability: Binary,
   'linear-algebra': Layers,
   'stochastic-calc': Flame,
@@ -35,7 +38,7 @@ const quantIconMap = {
   'portfolio-optimization': PieChart,
 };
 
-const excelIconMap = {
+const excelIconMap: Record<string, LucideIcon> = {
   fundamentals: Table2,
   'advanced-formulas': Sigma,
   'financial-functions': DollarSign,
@@ -43,7 +46,7 @@ const excelIconMap = {
   'vba-macros': Code,
 };
 
-const routeIconMap = {
+const routeIconMap: Record<string, LucideIcon> = {
   inbox: Inbox,
   'notebook-tabs': NotebookTabs,
   'badge-check': BadgeCheck,
@@ -58,11 +61,26 @@ const routeIconMap = {
 };
 
 const sidebarToolRouteIds = ['today', 'review', 'flashcards', 'vault', 'mock', 'analytics', 'knowledge-graph', 'calculators', 'formulas', 'content-ops', 'system'];
-const sidebarToolRoutes = appRoutes
+const sidebarToolRoutes: AppRoute[] = appRoutes
   .filter((route) => sidebarToolRouteIds.includes(route.id))
   .sort((a, b) => sidebarToolRouteIds.indexOf(a.id) - sidebarToolRouteIds.indexOf(b.id));
 
-function SidebarSection({ label, icon: Icon, basePath, items, collapsed, onNavigate }) {
+interface SidebarSubItem {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+interface SidebarSectionProps {
+  label: string;
+  icon: LucideIcon;
+  basePath: string;
+  items: SidebarSubItem[];
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}
+
+function SidebarSection({ label, icon: Icon, basePath, items, collapsed, onNavigate }: SidebarSectionProps) {
   const location = useLocation();
   const isActive = location.pathname.startsWith(basePath);
   const [expanded, setExpanded] = useState(isActive);
@@ -99,7 +117,7 @@ function SidebarSection({ label, icon: Icon, basePath, items, collapsed, onNavig
             <Gauge size={14} />
             <span>Overview</span>
           </NavLink>
-          {items.map(item => (
+          {items.map((item) => (
             <NavLink
               key={item.id}
               to={`${basePath}/${item.id}`}
@@ -116,7 +134,21 @@ function SidebarSection({ label, icon: Icon, basePath, items, collapsed, onNavig
   );
 }
 
-export default function Sidebar({ collapsed, open, mobileHidden = false, onToggle, onNavigate }) {
+interface SidebarProps {
+  collapsed?: boolean;
+  open?: boolean;
+  mobileHidden?: boolean;
+  onToggle?: () => void;
+  onNavigate?: () => void;
+}
+
+export default function Sidebar({
+  collapsed,
+  open,
+  mobileHidden = false,
+  onToggle,
+  onNavigate,
+}: SidebarProps) {
   return (
     <aside
       id="main-sidebar"
@@ -124,7 +156,7 @@ export default function Sidebar({ collapsed, open, mobileHidden = false, onToggl
       role="complementary"
       aria-label="Main navigation sidebar"
       hidden={mobileHidden}
-      inert={mobileHidden ? '' : undefined}
+      inert={mobileHidden ? true : undefined}
     >
       <div className="sidebar-header">
         <div className="sidebar-logo">Q</div>
@@ -153,7 +185,7 @@ export default function Sidebar({ collapsed, open, mobileHidden = false, onToggl
           label="CFA Program"
           icon={GraduationCap}
           basePath="/cfa"
-          items={cfaTopics.map(t => ({ ...t, id: `level1/${t.id}`, icon: cfaIconMap[t.id] || BookOpen }))}
+          items={cfaTopics.map((t) => ({ id: `level1/${t.id}`, label: t.label, icon: cfaIconMap[t.id] || BookOpen }))}
           collapsed={collapsed}
           onNavigate={onNavigate}
         />
@@ -162,7 +194,7 @@ export default function Sidebar({ collapsed, open, mobileHidden = false, onToggl
           label="Quant Finance"
           icon={BrainCircuit}
           basePath="/quant"
-          items={quantModules.map(module => ({ ...module, icon: quantIconMap[module.id] || Cpu }))}
+          items={quantModules.map((module) => ({ id: module.id, label: module.label, icon: quantIconMap[module.id] || Cpu }))}
           collapsed={collapsed}
           onNavigate={onNavigate}
         />
@@ -171,7 +203,7 @@ export default function Sidebar({ collapsed, open, mobileHidden = false, onToggl
           label="Excel Training"
           icon={Table2}
           basePath="/excel"
-          items={excelModules.map(module => ({ ...module, icon: excelIconMap[module.id] || GitBranch }))}
+          items={excelModules.map((module) => ({ id: module.id, label: module.label, icon: excelIconMap[module.id] || GitBranch }))}
           collapsed={collapsed}
           onNavigate={onNavigate}
         />

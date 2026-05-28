@@ -13,7 +13,11 @@ const CORS_NOTE_LM_STUDIO =
 const CORS_NOTE_OLLAMA =
   'Ollama: start with OLLAMA_ORIGINS=* set. The Tauri desktop shell does not need this.';
 
-function Stepper({ step }) {
+interface StepperProps {
+  step: number;
+}
+
+function Stepper({ step }: StepperProps) {
   return (
     <InlineCluster className="onboarding-stepper">
       {[1, 2, 3].map((n) => (
@@ -32,7 +36,11 @@ function Stepper({ step }) {
   );
 }
 
-function Step1({ onContinue }) {
+interface Step1Props {
+  onContinue: () => void;
+}
+
+function Step1({ onContinue }: Step1Props) {
   return (
     <div className="onboarding-step">
       <StatusBadge tone="accent">Welcome</StatusBadge>
@@ -57,10 +65,15 @@ function Step1({ onContinue }) {
   );
 }
 
-function Step2({ onPresetChosen, onSkip }) {
+interface Step2Props {
+  onPresetChosen: () => void;
+  onSkip: () => void;
+}
+
+function Step2({ onPresetChosen, onSkip }: Step2Props) {
   const [saving, setSaving] = useState(false);
 
-  async function handlePreset(baseUrl, model) {
+  async function handlePreset(baseUrl: string, model: string) {
     setSaving(true);
     try {
       await saveLlmSettings({ enabled: true, baseUrl, model });
@@ -123,10 +136,14 @@ function Step2({ onPresetChosen, onSkip }) {
   );
 }
 
-function Step3({ onDone }) {
+interface Step3Props {
+  onDone: () => void;
+}
+
+function Step3({ onDone }: Step3Props) {
   const navigate = useNavigate();
 
-  function goToSystem(fragment) {
+  function goToSystem(fragment: string) {
     navigate(`/system${fragment}`);
     onDone();
   }
@@ -184,7 +201,12 @@ function Step3({ onDone }) {
   );
 }
 
-export function OnboardingWizard({ open, onClose }) {
+export interface OnboardingWizardProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+export function OnboardingWizard({ open, onClose }: OnboardingWizardProps) {
   const [step, setStep] = useState(1);
 
   if (!open) return null;
@@ -204,7 +226,7 @@ export function OnboardingWizard({ open, onClose }) {
         </small>
       }
     >
-      <InlineCluster style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
+      <InlineCluster className="qv-mb-3" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <Stepper step={step} />
         <button
           className="btn btn-ghost qv-fs-xs qv-text-muted"

@@ -5,6 +5,7 @@ import {
   useId,
   useRef,
   type ComponentType,
+  type CSSProperties,
   type ElementType,
   type HTMLAttributes,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -110,10 +111,15 @@ interface InlineClusterProps {
   children?: ReactNode;
   align?: 'start' | 'center' | 'end';
   className?: string;
+  style?: CSSProperties;
 }
 
-export function InlineCluster({ children, align = 'start', className }: InlineClusterProps) {
-  return <div className={joinClasses('inline-cluster', `inline-cluster-${align}`, className)}>{children}</div>;
+export function InlineCluster({ children, align = 'start', className, style }: InlineClusterProps) {
+  return (
+    <div className={joinClasses('inline-cluster', `inline-cluster-${align}`, className)} style={style}>
+      {children}
+    </div>
+  );
 }
 
 interface IconFrameProps {

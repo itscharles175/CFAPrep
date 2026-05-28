@@ -347,7 +347,7 @@ export default function KnowledgeGraph() {
               </li>
             </ul>
           )}
-          <ul style={{ listStyle: 'none', padding: 0, marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <ul className="qv-stack-2 qv-mt-2" style={{ listStyle: 'none', padding: 0 }}>
             <li className="qv-row-2">
               <svg width="40" height="14" viewBox="0 0 40 14"><line x1="0" y1="7" x2="40" y2="7" stroke="var(--border)" strokeDasharray="4 4" /></svg>
               <span>Dashed edge: same topic across consecutive levels (the curriculum spiral)</span>

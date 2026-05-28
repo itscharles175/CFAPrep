@@ -4,14 +4,20 @@ import { ChevronRight, Inbox, RefreshCw, Sparkles, Target, TrendingUp } from 'lu
 import { PageHeader, StatusBadge, Surface } from '../components/ui/Primitives';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { buildStudyPlan } from '../lib/studyDirector';
+import type { StudyAction, StudyPlan } from '../lib/studyDirector';
 import { generateQuestionsFromCurriculum, getLlmSettings, narrateStudyPlan } from '../lib/localLlm';
 import { getCfaSourceReadingForTopic } from '../lib/cfaSourceVault';
 import { db } from '../lib/progressStore';
 import { getStorage } from '../lib/storage';
 
+interface TopicPath {
+  level: string;
+  topic: string;
+}
+
 // Parse a /cfa/<level>/<topic> path produced by buildStudyPlan into its
 // level + topic ids. Returns null for paths that don't fit the shape.
-function parseTopicPath(path) {
+function parseTopicPath(path: string | undefined): TopicPath | null {
   const match = /^\/cfa\/(level[1-3])\/([^/?#]+)/.exec(path || '');
   return match ? { level: match[1], topic: match[2] } : null;
 }
@@ -21,14 +27,21 @@ function parseTopicPath(path) {
 // on the CFA dashboard, but blows up the top action into a hero card and
 // stacks the rest below. Pure read-only; no actions besides Link navigation.
 
-function toneForKind(kind) {
+type Tone = 'warning' | 'danger' | 'exam' | 'success' | 'accent';
+
+function toneForKind(kind: StudyAction['kind']): Tone {
   if (kind === 'review') return 'warning';
   if (kind === 'weak-topic') return 'danger';
   if (kind === 'forecast-spike') return 'exam';
   return 'success';
 }
 
-function ActionIconRender({ kind, size }) {
+interface ActionIconRenderProps {
+  kind: StudyAction['kind'];
+  size: number;
+}
+
+function ActionIconRender({ kind, size }: ActionIconRenderProps) {
   // Inline per-kind JSX rather than `const Icon = iconForKind(kind)` so the
   // react-hooks/static-components lint stays happy (it flags any computed
   // component reference as "created during render").
@@ -38,23 +51,67 @@ function ActionIconRender({ kind, size }) {
   return <ChevronRight size={size} />;
 }
 
+interface AiQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correct: number;
+  explanation: string;
+}
+
+type DrillState =
+  | { state: 'idle'; questions: AiQuestion[]; error: '' }
+  | { state: 'loading'; questions: AiQuestion[]; error: '' }
+  | { state: 'done'; questions: AiQuestion[]; error: '' }
+  | { state: 'error'; questions: AiQuestion[]; error: string };
+
+type NarrativeState =
+  | { state: 'idle'; text: ''; error: '' }
+  | { state: 'loading'; text: ''; error: '' }
+  | { state: 'done'; text: string; error: '' }
+  | { state: 'error'; text: ''; error: string };
+
+interface ExamCountdown {
+  days: number;
+  date: string;
+}
+
+interface JournalState {
+  text: string;
+  savedAt: string | null;
+  dirty: boolean;
+}
+
+type TimerState =
+  | { state: 'idle'; startedAt: null; accumulatedMs: number }
+  | { state: 'running'; startedAt: number; accumulatedMs: number }
+  | { state: 'paused'; startedAt: null; accumulatedMs: number };
+
+interface JournalRowValue {
+  text?: string;
+  savedAt?: string | null;
+}
+
 export default function Today() {
-  const [activePathway] = useLevel3Pathway();
-  const [plan, setPlan] = useState(null);
+  const [activePathway] = useLevel3Pathway() as [string, (next: string) => void];
+  const [plan, setPlan] = useState<StudyPlan | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   // Targeted drill state — generates AI MCQs for the weakest topic on demand.
-  const [drill, setDrill] = useState({ state: 'idle', questions: [], error: '' });
+  const [drill, setDrill] = useState<DrillState>({ state: 'idle', questions: [], error: '' });
   // Map of question.id -> selected option index. Empty until the user picks.
-  const [drillAnswers, setDrillAnswers] = useState({});
-  const [narrative, setNarrative] = useState({ state: 'idle', text: '', error: '' });
-  const [examCountdown, setExamCountdown] = useState(null);
-  const [journal, setJournal] = useState({ text: '', savedAt: null, dirty: false });
+  const [drillAnswers, setDrillAnswers] = useState<Record<string, number>>({});
+  const [narrative, setNarrative] = useState<NarrativeState>({ state: 'idle', text: '', error: '' });
+  const [examCountdown, setExamCountdown] = useState<ExamCountdown | null>(null);
+  const [journal, setJournal] = useState<JournalState>({ text: '', savedAt: null, dirty: false });
   const journalKey = `journal:${new Date().toISOString().slice(0, 10)}`;
 
   useEffect(() => {
     let active = true;
     getStorage().settings.get(journalKey).then((row) => {
-      if (active && row?.value) setJournal({ text: row.value.text || '', savedAt: row.value.savedAt || null, dirty: false });
+      const value = (row as { value?: JournalRowValue } | undefined)?.value;
+      if (active && value) {
+        setJournal({ text: value.text || '', savedAt: value.savedAt || null, dirty: false });
+      }
     });
     return () => {
       active = false;
@@ -69,17 +126,10 @@ export default function Today() {
     setJournal({ text, savedAt: stamp, dirty: false });
   }
   // Pomodoro-style study session timer.
-  const [timer, setTimer] = useState({ state: 'idle', startedAt: null, accumulatedMs: 0 });
+  const [timer, setTimer] = useState<TimerState>({ state: 'idle', startedAt: null, accumulatedMs: 0 });
   const [displaySeconds, setDisplaySeconds] = useState(0);
 
   useEffect(() => {
-    function recompute() {
-      const running = timer.state === 'running' && timer.startedAt
-        ? performance.now() + (Date.now() - performance.now()) // dummy to avoid impure-Date inside render
-        : 0;
-      void running;
-    }
-    void recompute;
     function update() {
       const nowMs = Date.now();
       const segment = timer.state === 'running' && timer.startedAt ? nowMs - timer.startedAt : 0;
@@ -130,7 +180,7 @@ export default function Today() {
     setTimer({ state: 'idle', startedAt: null, accumulatedMs: 0 });
   }
 
-  function formatTimer(seconds) {
+  function formatTimer(seconds: number): string {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
@@ -139,12 +189,13 @@ export default function Today() {
   useEffect(() => {
     let active = true;
     getStorage().settings.get('exam-date').then((row) => {
-      if (!active || !row?.value) return;
-      const target = new Date(row.value);
+      const value = (row as { value?: string } | undefined)?.value;
+      if (!active || !value) return;
+      const target = new Date(value);
       if (Number.isNaN(target.getTime())) return;
       const diffMs = target.getTime() - Date.now();
       const days = Math.ceil(diffMs / 86400000);
-      setExamCountdown({ days, date: row.value });
+      setExamCountdown({ days, date: value });
     });
     return () => {
       active = false;
@@ -160,7 +211,7 @@ export default function Today() {
         setNarrative({ state: 'error', text: '', error: 'Enable a local model in System Health → Local AI first.' });
         return;
       }
-      const text = await narrateStudyPlan({ settings, plan });
+      const text = await narrateStudyPlan({ settings, plan, signal: undefined });
       setNarrative({ state: 'done', text, error: '' });
     } catch (error) {
       setNarrative({
@@ -221,7 +272,7 @@ export default function Today() {
   const weakTopic = weakAction ? parseTopicPath(weakAction.path) : null;
 
   async function generateDrill() {
-    if (!weakTopic) return;
+    if (!weakTopic || !weakAction) return;
     setDrill({ state: 'loading', questions: [], error: '' });
     try {
       const settings = await getLlmSettings();
@@ -243,6 +294,7 @@ export default function Today() {
         topicTitle: weakAction.title,
         chunks: reading.chunks.slice(0, 14),
         count: 3,
+        signal: undefined,
       });
       setDrill({ state: 'done', questions, error: '' });
       setDrillAnswers({});
@@ -284,6 +336,7 @@ export default function Today() {
         actions={
           <div className="qv-row-2">
             <div
+              className="today-timer-pill"
               style={{
                 display: 'flex',
                 gap: 'var(--space-1)',
@@ -328,7 +381,7 @@ export default function Today() {
       ) : (
         <>
           <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
-            <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
+            <div className="flex-between qv-row-3">
               <p className="muted-copy qv-m-0">{plan.headline}</p>
               <button
                 className="btn btn-secondary btn-sm"
@@ -356,14 +409,12 @@ export default function Today() {
             {top && (
               <Link
                 to={top.path}
+                className="qv-card-lg"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 'var(--space-4)',
                   marginTop: 'var(--space-4)',
-                  padding: 'var(--space-5)',
-                  borderRadius: 'var(--radius-lg, 12px)',
-                  border: '1px solid var(--border)',
                   background: 'var(--surface-2, rgba(120, 180, 255, 0.06))',
                   textDecoration: 'none',
                   color: 'inherit',
@@ -390,13 +441,10 @@ export default function Today() {
                   <li key={`${action.kind}-${index}`}>
                     <Link
                       to={action.path}
-                      className="flex-between"
+                      className="flex-between qv-card"
                       style={{
                         gap: 'var(--space-3)',
                         alignItems: 'center',
-                        padding: 'var(--space-3)',
-                        borderRadius: 'var(--radius-md, 8px)',
-                        border: '1px solid var(--border)',
                         textDecoration: 'none',
                         color: 'inherit',
                       }}
@@ -418,7 +466,7 @@ export default function Today() {
 
           {weakAction && (
             <Surface tone="study" status="warning" style={{ marginBottom: 'var(--space-6)' }}>
-              <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+              <div className="flex-between qv-row-3-start">
                 <div>
                   <StatusBadge tone="warning"><Sparkles size={14} /> Drill your weakest topic</StatusBadge>
                   <h3 className="qv-mt-2" style={{ marginBottom: 0 }}>{weakAction.title}</h3>
@@ -455,7 +503,7 @@ export default function Today() {
                     )}
                     {drill.questions.map((question, qi) => {
                       const picked = drillAnswers[question.id];
-                      const answered = picked != null;
+                      const isAnswered = picked != null;
                       return (
                         <div
                           key={question.id}
@@ -469,7 +517,7 @@ export default function Today() {
                               let bg = 'transparent';
                               let color = 'inherit';
                               let weight = 400;
-                              if (answered) {
+                              if (isAnswered) {
                                 if (oi === question.correct) {
                                   bg = 'rgba(52, 211, 153, 0.12)';
                                   color = 'var(--success)';
@@ -490,7 +538,7 @@ export default function Today() {
                                       prev[question.id] != null ? prev : { ...prev, [question.id]: oi },
                                     )
                                   }
-                                  disabled={answered}
+                                  disabled={isAnswered}
                                   style={{
                                     textAlign: 'left',
                                     padding: 'var(--space-2) var(--space-3)',
@@ -499,17 +547,17 @@ export default function Today() {
                                     background: bg,
                                     color,
                                     fontWeight: weight,
-                                    cursor: answered ? 'default' : 'pointer',
+                                    cursor: isAnswered ? 'default' : 'pointer',
                                   }}
                                 >
                                   {String.fromCharCode(65 + oi)}. {option}
-                                  {answered && oi === question.correct ? ' ✓' : ''}
-                                  {answered && oi === picked && oi !== question.correct ? ' ✗' : ''}
+                                  {isAnswered && oi === question.correct ? ' ✓' : ''}
+                                  {isAnswered && oi === picked && oi !== question.correct ? ' ✗' : ''}
                                 </button>
                               );
                             })}
                           </div>
-                          {answered && question.explanation && (
+                          {isAnswered && question.explanation && (
                             <p className="qv-text-muted qv-fs-sm qv-m-0">
                               {question.explanation}
                             </p>
@@ -524,7 +572,7 @@ export default function Today() {
           )}
 
           <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-6)' }}>
-            <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+            <div className="flex-between qv-row-3-start">
               <div>
                 <StatusBadge tone="accent">Daily journal</StatusBadge>
                 <p className="muted-copy qv-mt-1" style={{ marginBottom: 0 }}>
@@ -541,9 +589,9 @@ export default function Today() {
               </button>
             </div>
             <textarea
-              className="input"
+              className="input qv-mt-2"
               rows={4}
-              style={{ width: '100%', marginTop: 'var(--space-2)', resize: 'vertical', fontFamily: 'inherit' }}
+              style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
               placeholder="What did I work on? What clicked? What still feels shaky? What is the smallest next step?"
               value={journal.text}
               onChange={(event) => setJournal((prev) => ({ ...prev, text: event.target.value, dirty: true }))}

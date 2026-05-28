@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ComponentType } from 'react';
 import { Link } from 'react-router-dom';
 import {
   GraduationCap, BrainCircuit, Table2, Calculator,
   Clock, Target, BookOpen, ChevronRight,
   Flame, Zap, Trophy, Download, Upload, Trash2, CalendarClock,
-  Bookmark, StickyNote, ShieldAlert, Inbox, BadgeCheck, ClipboardList, BarChart3, Lock
+  Bookmark, StickyNote, ShieldAlert, Inbox, BadgeCheck, ClipboardList, BarChart3, Lock,
 } from 'lucide-react';
 import { domains } from '../data/catalog';
 import { useProgressSummary } from '../hooks/useProgress';
 import { exportVaultData, importVaultData, previewVaultImportPayload, resetVaultData } from '../lib/learning';
+import type { VaultImportPreview } from '../lib/learning';
 import { parseJsonFile } from '../lib/jsonFilePreflight';
 import { getCfaSourceDocuments } from '../lib/cfaSourceVault';
 import { getLlmSettings } from '../lib/localLlm';
@@ -29,13 +30,22 @@ import {
 } from '../components/ui/Primitives';
 import { OnboardingWizard } from '../components/Onboarding';
 
-const domainIcons = {
+type LucideIcon = ComponentType<{ size?: number; 'aria-hidden'?: boolean }>;
+
+const domainIcons: Record<string, LucideIcon> = {
   cfa: GraduationCap,
   quant: BrainCircuit,
   excel: Table2,
 };
 
-const quickTools = [
+interface QuickTool {
+  title: string;
+  icon: LucideIcon;
+  path: string;
+  desc: string;
+}
+
+const quickTools: QuickTool[] = [
   { title: 'Today', icon: CalendarClock, path: '/today', desc: 'One screen, one decision — what to study now' },
   { title: 'Review Inbox', icon: Inbox, path: '/review', desc: 'Due work and weak areas' },
   { title: 'Analytics', icon: BarChart3, path: '/analytics', desc: 'Readiness and trends' },
@@ -46,7 +56,14 @@ const quickTools = [
   { title: 'Quick Quiz', icon: Target, path: '/cfa/level1/ethics/quiz', desc: 'Test your knowledge' },
 ];
 
-function DomainCard({ domain, index }) {
+type DomainEntry = (typeof domains)[number];
+
+interface DomainCardProps {
+  domain: DomainEntry;
+  index: number;
+}
+
+function DomainCard({ domain, index }: DomainCardProps) {
   const Icon = domainIcons[domain.id] || BookOpen;
   const tone = domain.id === 'cfa' ? 'exam' : domain.id === 'quant' ? 'quant' : 'excel';
 
@@ -83,14 +100,14 @@ function DomainCard({ domain, index }) {
   );
 }
 
-function formatStudyTime(seconds) {
+function formatStudyTime(seconds: number): string {
   if (!seconds) return '0m';
   const minutes = Math.max(1, Math.round(seconds / 60));
   if (minutes < 60) return `${minutes}m`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-function downloadJson(payload) {
+function downloadJson(payload: unknown): void {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -100,35 +117,69 @@ function downloadJson(payload) {
   URL.revokeObjectURL(url);
 }
 
-function formatCount(value) {
+function formatCount(value: number | undefined | null): string {
   return Number(value || 0).toLocaleString();
 }
 
-function formatBackupDate(value) {
+function formatBackupDate(value: string | null | undefined): string {
   if (!value) return 'Unknown date';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-const importModeOptions = [
+type ImportMode = 'merge' | 'replace';
+type ConflictPolicy = 'keep-existing' | 'prefer-import' | 'replace';
+type ResetScope = 'attempts' | 'progress' | 'full';
+
+interface ImportModeOption {
+  value: ImportMode;
+  label: string;
+}
+
+interface ConflictPolicyOption {
+  value: ConflictPolicy;
+  label: string;
+}
+
+const importModeOptions: ImportModeOption[] = [
   { value: 'merge', label: 'Merge' },
   { value: 'replace', label: 'Replace' },
 ];
 
-const conflictPolicyOptions = [
+const conflictPolicyOptions: ConflictPolicyOption[] = [
   { value: 'prefer-import', label: 'Prefer Import' },
   { value: 'keep-existing', label: 'Keep Existing' },
 ];
 
+interface PendingImport {
+  payload: unknown;
+  encrypted: boolean;
+  preview: VaultImportPreview | null;
+  fileName: string;
+  sizeBytes: number;
+  parsedInWorker: boolean;
+}
+
+interface PendingReset {
+  scope: ResetScope;
+  label: string;
+}
+
+interface RefreshImportPreviewOptions {
+  mode?: ImportMode;
+  conflictPolicy?: ConflictPolicy;
+  includeSourceVault?: boolean;
+}
+
 export default function Dashboard() {
   const summary = useProgressSummary();
-  const importRef = useRef(null);
+  const importRef = useRef<HTMLInputElement | null>(null);
   const [vaultMessage, setVaultMessage] = useState('');
-  const [pendingImport, setPendingImport] = useState(null);
-  const [pendingReset, setPendingReset] = useState(null);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+  const [pendingReset, setPendingReset] = useState<PendingReset | null>(null);
   const [importPassphrase, setImportPassphrase] = useState('');
-  const [importMode, setImportMode] = useState('merge');
-  const [conflictPolicy, setConflictPolicy] = useState('prefer-import');
+  const [importMode, setImportMode] = useState<ImportMode>('merge');
+  const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>('prefer-import');
   const [includeSourceImport, setIncludeSourceImport] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -136,7 +187,7 @@ export default function Dashboard() {
   const [exportPassphraseConfirm, setExportPassphraseConfirm] = useState('');
   const [includeSourceExport, setIncludeSourceExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
-  const [sourceDocCount, setSourceDocCount] = useState(null);
+  const [sourceDocCount, setSourceDocCount] = useState<number | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   useEffect(() => {
@@ -219,12 +270,12 @@ export default function Dashboard() {
     }
   }
 
-  async function handleImport(event) {
+  async function handleImport(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
       const { payload, sizeBytes, parsedInWorker } = await parseJsonFile(file);
-      const encrypted = payload?.encryption?.encrypted === true;
+      const encrypted = (payload as { encryption?: { encrypted?: boolean } })?.encryption?.encrypted === true;
       const preview = encrypted
         ? null
         : await previewVaultImportPayload(payload, {
@@ -241,10 +292,11 @@ export default function Dashboard() {
     }
   }
 
-  async function refreshImportPreview(nextOptions = {}) {
+  async function refreshImportPreview(nextOptions: RefreshImportPreviewOptions = {}): Promise<VaultImportPreview | null> {
     if (!pendingImport) return null;
     const nextMode = nextOptions.mode || importMode;
-    const nextConflictPolicy = nextMode === 'replace' ? 'replace' : nextOptions.conflictPolicy || conflictPolicy;
+    const nextConflictPolicy: ConflictPolicy =
+      nextMode === 'replace' ? 'replace' : nextOptions.conflictPolicy || conflictPolicy;
     const nextIncludeSourceVault = nextOptions.includeSourceVault ?? includeSourceImport;
     setImportBusy(true);
     try {
@@ -262,8 +314,8 @@ export default function Dashboard() {
     }
   }
 
-  async function handleReset(scope) {
-    const labels = {
+  async function handleReset(scope: ResetScope) {
+    const labels: Record<ResetScope, string> = {
       attempts: 'quiz attempts and review schedule',
       progress: 'module progress, attempts, review schedule, mastery, artifacts, and study sessions',
       full: 'all local QuantVault data',
@@ -334,7 +386,7 @@ export default function Dashboard() {
 
       {sourceDocCount === 0 && (
         <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
-          <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
+          <div className="flex-between qv-row-3">
             <div>
               <StatusBadge tone="accent">Get started</StatusBadge>
               <h3 style={{ margin: 'var(--space-1) 0 0' }}>Bring your own curriculum into the vault</h3>
@@ -355,7 +407,7 @@ export default function Dashboard() {
               ? pendingImport.encrypted
                 ? 'Decrypt this QuantVault export, review the contents, then choose how to write it into this browser profile.'
                 : 'Review this QuantVault export before writing it into this browser profile.'
-              : `Reset ${pendingReset.label} on this device? This changes only local browser data.`
+              : `Reset ${pendingReset?.label} on this device? This changes only local browser data.`
           }
           onClose={() => { setPendingImport(null); setPendingReset(null); setImportPassphrase(''); }}
           actions={
@@ -364,7 +416,7 @@ export default function Dashboard() {
               <button
                 className="btn btn-primary"
                 onClick={pendingImport ? confirmImport : confirmReset}
-                disabled={importBusy || (pendingImport && (!pendingImport.preview?.valid || (pendingImport.encrypted && !importPassphrase)))}
+                disabled={importBusy || (pendingImport != null && (!pendingImport.preview?.valid || (pendingImport.encrypted && !importPassphrase)))}
               >
                 {pendingImport ? 'Import Data' : 'Reset Data'}
               </button>
@@ -413,8 +465,9 @@ export default function Dashboard() {
                 options={importModeOptions}
                 value={importMode}
                 onChange={(value) => {
-                  setImportMode(value);
-                  refreshImportPreview({ mode: value });
+                  const next = value as ImportMode;
+                  setImportMode(next);
+                  refreshImportPreview({ mode: next });
                 }}
               />
               {importMode === 'merge' && (
@@ -423,8 +476,9 @@ export default function Dashboard() {
                   options={conflictPolicyOptions}
                   value={conflictPolicy}
                   onChange={(value) => {
-                    setConflictPolicy(value);
-                    refreshImportPreview({ conflictPolicy: value });
+                    const next = value as ConflictPolicy;
+                    setConflictPolicy(next);
+                    refreshImportPreview({ conflictPolicy: next });
                   }}
                 />
               )}

@@ -965,11 +965,7 @@ export default function CfaModule() {
                       {askHistory.slice(1).map((entry, index) => (
                         <div
                           key={`${entry.answeredAt}-${index}`}
-                          style={{
-                            padding: 'var(--space-3)',
-                            borderRadius: 'var(--radius-md, 8px)',
-                            border: '1px solid var(--border)',
-                          }}
+                          className="qv-card"
                         >
                           <small className="muted-copy">{new Date(entry.answeredAt).toLocaleString()}</small>
                           <p style={{ margin: 'var(--space-1) 0 var(--space-2)', fontWeight: 600 }}>{entry.question}</p>

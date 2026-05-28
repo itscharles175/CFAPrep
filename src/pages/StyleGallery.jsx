@@ -19,7 +19,7 @@ import {
 
 function TokenLabel({ name }) {
   return (
-    <code style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
+    <code className="qv-fs-xs qv-text-muted qv-mono">
       {name}
     </code>
   );
@@ -123,7 +123,7 @@ function ColorSwatch({ token }) {
       />
       <TokenLabel name={token} />
       {hex && (
-        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-muted)' }}>{hex}</span>
+        <span className="qv-fs-xs qv-text-muted">{hex}</span>
       )}
     </div>
   );
@@ -249,7 +249,7 @@ function SpacingSection() {
     <GallerySection id="spacing">
       <SectionTitle>Spacing</SectionTitle>
       <SectionDesc>8-step modular scale based on 4 px. Each box is sized at the token value.</SectionDesc>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+      <div className="qv-stack-3">
         {SPACE_TOKENS.map((token) => (
           <div key={token} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-6)' }}>
             <div style={{ width: 140 }}>
@@ -307,7 +307,7 @@ function RadiusSection() {
               }}
             />
             <TokenLabel name={token} />
-            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-muted)' }}>{label}</span>
+            <span className="qv-fs-xs qv-text-muted">{label}</span>
           </div>
         ))}
       </div>
@@ -399,7 +399,7 @@ function MotionBox({ token, label, reducedPreview }) {
         }}
       />
       <TokenLabel name={token} />
-      <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-muted)' }}>{label}</span>
+      <span className="qv-fs-xs qv-text-muted">{label}</span>
     </div>
   );
 }
@@ -487,7 +487,7 @@ function ComponentsSection() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--space-4)' }}>
           {['default', 'study', 'exam', 'vault', 'quant', 'excel', 'ops', 'metric'].map((tone) => (
             <Surface key={tone} tone={tone}>
-              <code style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-muted)' }}>tone="{tone}"</code>
+              <code className="qv-fs-xs qv-text-muted">tone="{tone}"</code>
             </Surface>
           ))}
         </div>
@@ -578,7 +578,7 @@ function ComponentsSection() {
               <StatusBadge tone="accent">Token</StatusBadge>
               <StatusBadge tone="exam">System</StatusBadge>
               <StatusBadge tone="vault">Primitives</StatusBadge>
-              <code style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-muted)' }}>align="{align}"</code>
+              <code className="qv-fs-xs qv-text-muted">align="{align}"</code>
             </InlineCluster>
           </div>
         ))}
