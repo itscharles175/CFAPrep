@@ -11,7 +11,7 @@ use tauri_plugin_dialog::DialogExt;
 #[derive(Default)]
 struct Sidecars(Mutex<Vec<Child>>);
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct PdfEntry {
     path: String,
     name: String,
@@ -179,6 +179,64 @@ fn spawn_sidecars() -> Vec<Child> {
     }
 
     kids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn pathdiff_strips_root_and_normalizes_separators() {
+        let root = PathBuf::from("C:/users/me/cfa");
+        let path = PathBuf::from("C:/users/me/cfa/level1/volume1.pdf");
+        assert_eq!(pathdiff_to_string(&path, &root), "level1/volume1.pdf");
+    }
+
+    #[test]
+    fn pathdiff_returns_empty_when_not_under_root() {
+        let root = PathBuf::from("C:/a");
+        let path = PathBuf::from("C:/b/file.pdf");
+        assert_eq!(pathdiff_to_string(&path, &root), "");
+    }
+
+    #[test]
+    fn list_pdfs_errors_for_missing_directory() {
+        let result = cfa_list_pdfs("Z:/quantvault-does-not-exist-xyzzy".into());
+        assert!(result.is_err());
+        let message = result.unwrap_err();
+        assert!(message.contains("Not a directory"));
+    }
+
+    #[test]
+    fn list_pdfs_walks_recursively_and_filters_to_pdfs() {
+        // Build a temp tree with one PDF, one .txt, and one nested PDF.
+        let tmp = std::env::temp_dir().join("qv-test-list-pdfs");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("nested")).unwrap();
+        fs::write(tmp.join("a.pdf"), b"%PDF-1.4 stub").unwrap();
+        fs::write(tmp.join("notes.txt"), b"ignore me").unwrap();
+        fs::write(tmp.join("nested/b.pdf"), b"%PDF-1.4 stub b").unwrap();
+
+        let entries = cfa_list_pdfs(tmp.to_string_lossy().to_string()).expect("walk");
+        let names: Vec<_> = entries.iter().map(|e| e.name.clone()).collect();
+        assert!(names.contains(&"a.pdf".to_string()));
+        assert!(names.contains(&"b.pdf".to_string()));
+        assert_eq!(entries.len(), 2);
+        // Relative paths are forward-slash normalized.
+        let nested = entries.iter().find(|e| e.name == "b.pdf").unwrap();
+        assert_eq!(nested.relative, "nested/b.pdf");
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn read_pdf_bytes_refuses_non_pdf_paths() {
+        let result = cfa_read_pdf_bytes("/tmp/not-a-pdf.txt".into());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("non-PDF"));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
