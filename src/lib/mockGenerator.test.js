@@ -129,6 +129,34 @@ describe('mockGenerator', () => {
     expect(result.questions[0].id).toBe('gen-b-1');
   });
 
+  it('respects an AbortSignal and throws AbortError before calling more topics', async () => {
+    getCfaSourceReadingForTopic.mockResolvedValue({ chunks: [{ locator: 'p.1', text: 't' }] });
+    generateQuestionsFromCurriculum.mockResolvedValue([q('ok')]);
+    const controller = new AbortController();
+    // Abort after the first topic is processed by aborting before the second iteration.
+    let firstCall = true;
+    generateQuestionsFromCurriculum.mockImplementation(async () => {
+      if (firstCall) {
+        firstCall = false;
+        controller.abort();
+      }
+      return [q('ok')];
+    });
+    await expect(
+      generateMockExam({
+        level: 'level1',
+        topics: [
+          { topic: 'a', title: 'A' },
+          { topic: 'b', title: 'B' },
+        ],
+        settings: {},
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    // Only the first topic's generate call ran.
+    expect(generateQuestionsFromCurriculum).toHaveBeenCalledTimes(1);
+  });
+
   it('surfaces a connection failure instead of silently skipping every topic', async () => {
     getCfaSourceReadingForTopic.mockResolvedValue({ chunks: [{ locator: 'p.1', text: 't' }] });
     generateQuestionsFromCurriculum.mockRejectedValue(new Error('Could not reach http://localhost:1234/v1 from the browser. Enable CORS in LM Studio.'));

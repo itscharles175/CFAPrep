@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Download, Flag, ListChecks, PenLine, Timer, Trophy } from 'lucide-react';
 import { loadCfaLevelContent, loadCfaMockExam } from '../domains/cfa/cfaLoaders';
@@ -146,6 +146,7 @@ export default function MockExam() {
   const [mode, setMode] = useState('blueprint');
   const [generatedMock, setGeneratedMock] = useState(null);
   const [genState, setGenState] = useState('idle');
+  const genAbortRef = useRef(null);
   const [genError, setGenError] = useState('');
   const [genProgress, setGenProgress] = useState(null);
   const contentMatches = contentState.level === level && (level !== 'level3' || contentState.pathway === activePathway);
@@ -224,6 +225,8 @@ export default function MockExam() {
     setGenState('loading');
     setGenError('');
     setGenProgress(null);
+    const controller = new AbortController();
+    genAbortRef.current = controller;
     try {
       const settings = await getLlmSettings();
       if (!settings.enabled) {
@@ -236,16 +239,31 @@ export default function MockExam() {
         level,
         topics,
         settings,
+        signal: controller.signal,
         onProgress: (progress) => setGenProgress(progress),
       });
+      if (controller.signal.aborted) {
+        setGenState('cancelled');
+        return;
+      }
       await saveCachedGeneratedMock(level, generated);
       setGeneratedMock(generated);
       setMode('generated');
       setGenState('done');
     } catch (error) {
-      setGenState('error');
-      setGenError(error instanceof Error ? error.message : 'Mock generation failed.');
+      if (controller.signal.aborted || error?.name === 'AbortError') {
+        setGenState('cancelled');
+      } else {
+        setGenState('error');
+        setGenError(error instanceof Error ? error.message : 'Mock generation failed.');
+      }
+    } finally {
+      genAbortRef.current = null;
     }
+  }
+
+  function handleCancelGenerateMock() {
+    genAbortRef.current?.abort();
   }
 
   useEffect(() => {
@@ -528,6 +546,11 @@ export default function MockExam() {
               </p>
             )}
             {genState === 'error' && <p style={{ color: 'var(--danger)', margin: 'var(--space-1) 0 0' }}>{genError}</p>}
+            {genState === 'cancelled' && (
+              <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+                Generation cancelled. Any previous generated mock is still available below.
+              </p>
+            )}
             {generatedMock && (() => {
               const byTopic = new Map();
               for (const question of generatedMock.questions || []) {
@@ -577,6 +600,9 @@ export default function MockExam() {
             <button className="btn btn-secondary" onClick={handleGenerateMock} disabled={genState === 'loading'}>
               {genState === 'loading' ? 'Generating…' : generatedMock ? 'Regenerate from curriculum' : 'Generate from curriculum'}
             </button>
+            {genState === 'loading' && (
+              <button className="btn btn-secondary" onClick={handleCancelGenerateMock}>Cancel</button>
+            )}
           </InlineCluster>
         </InlineCluster>
       </Surface>
