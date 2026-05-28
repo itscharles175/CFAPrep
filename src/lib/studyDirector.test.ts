@@ -169,3 +169,83 @@ describe('rankStudyActions — pure function', () => {
     expect(plan.dueCount).toBe(5);
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildStudyPlan — async orchestrator that fetches from progressStore /
+// scheduler. We mock those modules so the test is hermetic.
+// ---------------------------------------------------------------------------
+
+vi.mock('./progressStore', async () => {
+  const fakeDb = {
+    lessonProgress: {
+      orderBy: () => ({
+        reverse: () => ({
+          first: async () => ({ path: '/cfa/level1/fixed-income' }),
+        }),
+      }),
+    },
+    // Stubs for any other tables imported by progressStore; never called in
+    // these tests so the shape doesn't matter.
+    settings: { get: async () => null, put: async () => undefined, clear: async () => undefined },
+  };
+  return {
+    db: fakeDb,
+    getDueReviews: vi.fn().mockResolvedValue([
+      {
+        title: 'Modified duration',
+        path: '/cfa/level1/fixed-income/quiz',
+        ease: 2.3,
+        intervalDays: 5,
+        dueAt: '2026-05-27T00:00:00Z',
+        stability: 8,
+        elapsedDays: 4,
+      },
+    ]),
+    getReadinessByTopic: vi.fn().mockResolvedValue([
+      { id: 'r1', domain: 'cfa', topic: 'level1:equity', title: 'Equity', readinessScore: 55 },
+    ]),
+    forecastReviewLoad: vi.fn().mockResolvedValue([
+      { date: '2026-05-28', count: 3, averageRetention: 0.7, atRiskCount: 1 },
+      { date: '2026-05-29', count: 12, averageRetention: 0.6, atRiskCount: 4 }, // spike
+      { date: '2026-05-30', count: 2, averageRetention: 0.8, atRiskCount: 0 },
+    ]),
+    getMasterySummary: vi.fn().mockResolvedValue({
+      snapshots: [],
+      weakObjectives: [
+        { id: 'w1', domain: 'cfa', topic: 'level1:fsa', title: 'FSA — Income Stmt', score: 48 },
+      ],
+      averageScore: 60,
+    }),
+  };
+});
+
+vi.mock('./scheduler', () => ({
+  currentRetrievability: vi.fn().mockReturnValue(0.42),
+}));
+
+import { buildStudyPlan } from './studyDirector';
+
+describe('buildStudyPlan (async orchestrator)', () => {
+  it('composes due reviews, weak topics, and a forecast spike into one plan', async () => {
+    const plan = await buildStudyPlan();
+    expect(plan.dueCount).toBe(1);
+    expect(plan.weakCount).toBeGreaterThan(0);
+    const kinds = plan.actions.map((a) => a.kind);
+    expect(kinds).toContain('review');
+    expect(kinds).toContain('weak-topic');
+    expect(kinds).toContain('forecast-spike');
+    // Peak day from the mocked forecast
+    expect(plan.peakReviewDay?.date).toBe('2026-05-29');
+  });
+
+  it('returns a minimal continue plan when fetchData throws', async () => {
+    const progress = await import('./progressStore');
+    (progress.getDueReviews as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    (progress.getReadinessByTopic as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    (progress.forecastReviewLoad as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    (progress.getMasterySummary as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    const plan = await buildStudyPlan();
+    expect(plan.actions).toHaveLength(1);
+    expect(plan.actions[0].kind).toBe('continue');
+  });
+});
