@@ -270,6 +270,39 @@ describe('critiqueConstructedResponse', () => {
   });
 });
 
+describe('summarizeTopicFromCurriculum', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('posts the topic + excerpts and returns trimmed prose', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      choices: [{ message: { content: '  Fixed Income at its core estimates price-yield sensitivity. ...  ' } }],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { summarizeTopicFromCurriculum } = await import('./localLlm');
+    const text = await summarizeTopicFromCurriculum({
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma-4-e4b-it' },
+      topicTitle: 'Fixed Income',
+      chunks: [{ locator: 'p.10', text: 'Duration measures bond price sensitivity.' }],
+    });
+    expect(text.startsWith('Fixed Income')).toBe(true);
+    expect(text.endsWith('...')).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.temperature).toBeLessThan(0.5);
+    expect(body.messages.find((m) => m.role === 'user').content).toContain('Topic: Fixed Income');
+  });
+
+  it('rejects when no chunks are supplied', async () => {
+    const { summarizeTopicFromCurriculum } = await import('./localLlm');
+    await expect(
+      summarizeTopicFromCurriculum({
+        settings: { baseUrl: 'http://localhost:1234/v1' },
+        topicTitle: 'X',
+        chunks: [],
+      }),
+    ).rejects.toThrow(/No curriculum text/);
+  });
+});
+
 describe('narrateStudyPlan', () => {
   afterEach(() => vi.restoreAllMocks());
 

@@ -11,7 +11,7 @@ import { EmptyPanel, PageHeader, ProgressRail, SegmentedControl, StatusBadge, Su
 import { SourceRail } from '../../components/SourceContext';
 import { getCfaSourceReadingForTopic } from '../../lib/cfaSourceVault';
 import { bootstrapSourceVault } from '../../lib/bootstrapSourceVault';
-import { generateFlashcardsFromCurriculum, generateQuestionsFromCurriculum, getCachedGeneratedFlashcards, getCachedGeneratedQuestions, getLlmSettings, saveCachedGeneratedFlashcards, saveCachedGeneratedQuestions } from '../../lib/localLlm';
+import { generateFlashcardsFromCurriculum, generateQuestionsFromCurriculum, getCachedGeneratedFlashcards, getCachedGeneratedQuestions, getLlmSettings, saveCachedGeneratedFlashcards, saveCachedGeneratedQuestions, summarizeTopicFromCurriculum } from '../../lib/localLlm';
 import {
   askGrounded,
   chatWithSource,
@@ -132,6 +132,7 @@ export default function CfaModule() {
   const [aiFlashState, setAiFlashState] = useState('idle');
   const [aiFlashError, setAiFlashError] = useState('');
   const aiFlashAbortRef = useRef(null);
+  const [summaryState, setSummaryState] = useState({ state: 'idle', text: '', error: '' });
   const [askQuestion, setAskQuestion] = useState('');
   const [askAnswer, setAskAnswer] = useState('');
   const [askState, setAskState] = useState('idle');
@@ -266,6 +267,33 @@ export default function CfaModule() {
       cancelled = true;
     };
   }, []);
+
+  async function handleSummarize() {
+    setSummaryState({ state: 'loading', text: '', error: '' });
+    try {
+      const settings = await getLlmSettings();
+      if (!settings.enabled) {
+        setSummaryState({ state: 'error', text: '', error: 'Enable a local model in System Health → Local AI first.' });
+        return;
+      }
+      if (!reading.chunks?.length) {
+        setSummaryState({ state: 'error', text: '', error: 'No ingested curriculum for this topic — import a .qvsource bundle or ingest a folder in System Health.' });
+        return;
+      }
+      const text = await summarizeTopicFromCurriculum({
+        settings,
+        topicTitle: data.title,
+        chunks: reading.chunks.slice(0, 14),
+      });
+      setSummaryState({ state: 'done', text, error: '' });
+    } catch (error) {
+      setSummaryState({
+        state: 'error',
+        text: '',
+        error: error instanceof Error ? error.message : 'Summary failed.',
+      });
+    }
+  }
 
   async function handleGenerate() {
     setAiState('loading');
@@ -574,6 +602,36 @@ export default function CfaModule() {
                   Show more curriculum ({reading.chunks.length - chunkLimit} sections left)
                 </button>
               )}
+
+              <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+                <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                  <div>
+                    <StatusBadge tone="accent">AI summary</StatusBadge>
+                    <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>3-4 paragraph exam-focused review of this topic.</p>
+                  </div>
+                  <button className="btn btn-secondary" onClick={handleSummarize} disabled={summaryState.state === 'loading'}>
+                    {summaryState.state === 'loading' ? 'Summarizing…' : summaryState.text ? 'Regenerate summary' : 'Summarize'}
+                  </button>
+                </div>
+                {summaryState.state === 'error' && (
+                  <p style={{ color: 'var(--danger)', margin: 0 }}>{summaryState.error}</p>
+                )}
+                {summaryState.state === 'done' && summaryState.text && (
+                  <p
+                    style={{
+                      margin: 'var(--space-3) 0 0',
+                      padding: 'var(--space-3)',
+                      borderLeft: '3px solid var(--accent)',
+                      background: 'var(--surface-2, rgba(120,180,255,0.06))',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      whiteSpace: 'pre-line',
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    {summaryState.text}
+                  </p>
+                )}
+              </Surface>
 
               <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
                 <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-2)' }}>

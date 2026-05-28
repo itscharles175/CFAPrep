@@ -281,6 +281,59 @@ export async function narrateStudyPlan({ settings, plan, signal }) {
   return content.trim();
 }
 
+/**
+ * Quick AI-generated summary of a topic's curriculum chunks. 3-4 paragraphs:
+ * the core idea, the key formulas/distinctions, the common exam traps.
+ */
+export async function summarizeTopicFromCurriculum({ settings, topicTitle, chunks, signal }) {
+  const base = normalizeBaseUrl(settings?.baseUrl);
+  const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
+  const context = (chunks || [])
+    .map((chunk) => `[${chunk.locator || 'excerpt'}] ${chunk.text}`)
+    .join('\n\n')
+    .slice(0, 12000);
+  if (!context) throw new Error('No curriculum text available to summarize.');
+
+  const system =
+    'You are a CFA exam tutor. Using ONLY the provided curriculum excerpts, write a focused 3-4 paragraph review summary of the topic for an exam-prep student. ' +
+    'Paragraph 1: the core idea + why it matters on the exam. ' +
+    'Paragraph 2: the key formulas, definitions, or distinctions the student MUST memorize. ' +
+    'Paragraph 3: 2-3 common exam traps + how to avoid them. ' +
+    'Paragraph 4 (optional): one mnemonic or quick mental model. ' +
+    'Output plain prose, no bullets, no headings.';
+  const user = `Topic: ${topicTitle}\n\nExcerpts:\n\n${context}`;
+
+  let response;
+  try {
+    response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.25,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new Error(
+      `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+      { cause: error },
+    );
+  }
+  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('The model returned an empty summary. Try a more capable local model.');
+  }
+  return content.trim();
+}
+
 export async function getCachedGeneratedQuestions(level, topic) {
   try {
     const row = await db.settings.get(`ai-questions:${level}:${topic}`);
