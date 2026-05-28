@@ -45,7 +45,17 @@ describe('route visual metadata', () => {
     expect(criticalIds.has('cfa-quiz')).toBe(true);
     expect(criticalIds.has('vault')).toBe(true);
     expect(criticalIds.has('system')).toBe(true);
+    expect(criticalIds.has('today')).toBe(true);
     expect(appRoutes.find((route) => route.id === 'cfa-module')?.offlineWarmup?.priority).toBe('critical');
     expect(appRoutes.find((route) => route.id === 'system')?.routeActions.map((action) => action.id)).toContain('encrypted-backup');
+  });
+
+  it('exposes /today as a routable focus-mode landing', () => {
+    const today = appRoutes.find((route) => route.id === 'today');
+    expect(today).toBeDefined();
+    expect(today?.path).toBe('/today');
+    expect(today?.navGroup).toBe('home');
+    expect(today?.preferredLayout).toBe('dashboard');
+    expect(today?.iconKey).toBe('sun');
   });
 });
