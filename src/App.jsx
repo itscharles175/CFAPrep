@@ -30,6 +30,7 @@ const ContentOps = lazy(() => import('./pages/ContentOps'));
 const SystemHealth = lazy(() => import('./pages/SystemHealth'));
 const Today = lazy(() => import('./pages/Today'));
 const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
+const StyleGallery = lazy(() => import('./pages/StyleGallery'));
 const PwaInstallPrompt = lazy(() => import('./components/PwaInstallPrompt'));
 
 /* C5: Skeleton loading state instead of text-only fallback */
@@ -86,6 +87,7 @@ export default function App() {
     system: <SystemHealth />,
     today: <Today />,
     'knowledge-graph': <KnowledgeGraph />,
+    style: <StyleGallery />,
   };
 
   useEffect(() => {

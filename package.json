@@ -19,6 +19,7 @@
     "audit": "npm audit --omit=dev",
     "content:validate": "node --import ./scripts/register-ts-loader.mjs scripts/content-validate.mjs",
     "content:report": "node --import ./scripts/register-ts-loader.mjs scripts/content-report.mjs",
+    "content:expand": "node scripts/content-expand.mjs",
     "cfa:source:inventory": "node scripts/cfa-source-vault.mjs inventory",
     "cfa:source:ingest": "node scripts/cfa-source-vault.mjs ingest",
     "cfa:source:bundle": "node scripts/cfa-source-vault.mjs bundle",

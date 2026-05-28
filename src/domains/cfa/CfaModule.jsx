@@ -25,6 +25,7 @@ import {
   saveCachedGroundedAnswer,
 } from '../../lib/openNotebook';
 import { parseCitations } from '../../lib/citations';
+import { hasSpeechRecognition, hasSpeechSynthesis, recognizeOnce, sanitizeForSpeech, speak, stopSpeaking } from '../../lib/voice';
 
 // Interactive deck for AI-generated flashcards: front visible by default,
 // click reveals the back; small Show all / Hide all controls.
@@ -140,6 +141,8 @@ export default function CfaModule() {
   const [sourceTitleMap, setSourceTitleMap] = useState(null);
   const askAbortRef = useRef(null);
   const [askHistory, setAskHistory] = useState([]);
+  const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'speaking'
+  const voiceAbortRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -364,8 +367,10 @@ export default function CfaModule() {
 
   // Grounded RAG: ask the embedded open-notebook backend a question answered
   // strictly from this topic's ingested curriculum (cited synthesis).
-  async function handleAskCurriculum() {
-    const question = askQuestion.trim();
+  // Accepts an optional questionOverride so the mic handler can pass a
+  // freshly-captured transcript without waiting for React state to settle.
+  async function handleAskCurriculum(questionOverride) {
+    const question = (typeof questionOverride === 'string' ? questionOverride : askQuestion).trim();
     if (!question) return;
     setAskState('loading');
     setAskError('');
@@ -441,6 +446,46 @@ export default function CfaModule() {
 
   function handleCancelAsk() {
     askAbortRef.current?.abort();
+  }
+
+  async function handleMicClick() {
+    if (voiceState === 'listening') {
+      voiceAbortRef.current?.abort();
+      return;
+    }
+    const controller = new AbortController();
+    voiceAbortRef.current = controller;
+    setVoiceState('listening');
+    try {
+      const { transcript } = await recognizeOnce({ lang: 'en-US', signal: controller.signal });
+      setAskQuestion(transcript);
+      setVoiceState('idle');
+      // Auto-trigger ask with the transcript directly (state hasn't settled yet).
+      if (transcript.trim()) {
+        handleAskCurriculum(transcript);
+      }
+    } catch (_error) {
+      setVoiceState('idle');
+    }
+  }
+
+  async function handleSpeakClick() {
+    if (!askAnswer) return;
+    if (voiceState === 'speaking') {
+      stopSpeaking();
+      setVoiceState('idle');
+      return;
+    }
+    const controller = new AbortController();
+    voiceAbortRef.current = controller;
+    setVoiceState('speaking');
+    try {
+      await speak(sanitizeForSpeech(askAnswer), { lang: 'en-US', rate: 1.05, signal: controller.signal });
+    } catch (_error) {
+      // AbortError or synthesis error — either way just reset
+    } finally {
+      setVoiceState('idle');
+    }
   }
 
   async function handleSaveNote() {
@@ -709,10 +754,27 @@ export default function CfaModule() {
                   <button className="btn btn-primary" onClick={handleAskCurriculum} disabled={askState === 'loading' || !askQuestion.trim()}>
                     {askState === 'loading' ? 'Thinking…' : 'Ask'}
                   </button>
+                  {hasSpeechRecognition() && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleMicClick}
+                      disabled={askState === 'loading'}
+                      aria-label={voiceState === 'listening' ? 'Stop listening' : 'Dictate question'}
+                      title={voiceState === 'listening' ? 'Stop listening' : 'Dictate question'}
+                    >
+                      {voiceState === 'listening' ? 'Listening…' : '🎤'}
+                    </button>
+                  )}
                   {askState === 'loading' && (
                     <button className="btn btn-secondary" onClick={handleCancelAsk}>Cancel</button>
                   )}
                 </div>
+                {hasSpeechRecognition() && (
+                  <p style={{ margin: 'var(--space-1) 0 0', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+                    Voice input may use the browser's network STT on Chrome — type to stay strictly offline.
+                  </p>
+                )}
                 {askState === 'loading' && (
                   <p className="muted-copy" style={{ marginTop: 'var(--space-2)' }}>
                     Embedding curriculum and synthesizing a grounded answer — the first ask for a topic takes longer while sources index.
@@ -760,7 +822,18 @@ export default function CfaModule() {
                           ),
                         )}
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+                        {hasSpeechSynthesis() && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={handleSpeakClick}
+                            aria-label={voiceState === 'speaking' ? 'Stop speaking' : 'Read answer aloud'}
+                            title={voiceState === 'speaking' ? 'Stop speaking' : 'Read answer aloud'}
+                          >
+                            {voiceState === 'speaking' ? '⏹ Stop' : '🔊 Speak'}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="btn btn-secondary btn-sm"

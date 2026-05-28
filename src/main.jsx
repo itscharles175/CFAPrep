@@ -3,11 +3,13 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
+import './styles/tokens.css';
 // KaTeX CSS bundled locally from npm — the strict-offline invariant forbids
 // the cdn.jsdelivr.net `katex.min.css` that used to be linked from index.html.
 import 'katex/dist/katex.min.css';
 import { registerServiceWorker } from './registerServiceWorker';
 import { bootstrapSourceVault } from './lib/bootstrapSourceVault';
+import { bootstrapAiContent } from './lib/bootstrapAiContent';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -21,3 +23,7 @@ registerServiceWorker();
 
 // Load the ingested CFA curriculum into the local source vault on first run.
 bootstrapSourceVault();
+
+// Seed the AI-questions + AI-flashcards caches from `public/cfa-generated.json`
+// if a pre-generated companion bundle is present (see scripts/content-expand.mjs).
+bootstrapAiContent();

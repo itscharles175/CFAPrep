@@ -28,7 +28,8 @@ export type AppRouteId =
   | 'content-ops'
   | 'system'
   | 'today'
-  | 'knowledge-graph';
+  | 'knowledge-graph'
+  | 'style';
 
 export interface AppRoute {
   id: AppRouteId;
@@ -113,6 +114,7 @@ const baseAppRoutes: BaseAppRoute[] = [
   { id: 'system', path: '/system', expectedText: 'System', domain: 'ops', navGroup: 'ops', iconKey: 'hard-drive', accentRole: 'ops', preferredLayout: 'ops', smokeRoute: '/system', screenshotRoute: '/system' },
   { id: 'today', path: '/today', expectedText: 'Today', domain: 'home', navGroup: 'home', iconKey: 'sun', accentRole: 'study', preferredLayout: 'dashboard', smokeRoute: '/today', screenshotRoute: '/today' },
   { id: 'knowledge-graph', path: '/knowledge-graph', expectedText: 'Knowledge Graph', domain: 'analytics', navGroup: 'tools', iconKey: 'network', accentRole: 'analytics', preferredLayout: 'dashboard', smokeRoute: '/knowledge-graph', screenshotRoute: '/knowledge-graph' },
+  { id: 'style', path: '/style', expectedText: 'Style', domain: 'tool', navGroup: 'tools', iconKey: 'palette', accentRole: 'study', preferredLayout: 'tool', smokeRoute: '/style', screenshotRoute: '/style' },
 ];
 
 const routeLabels: Partial<Record<AppRouteId, string>> = {
@@ -138,6 +140,7 @@ const routeLabels: Partial<Record<AppRouteId, string>> = {
   system: 'System Health',
   today: 'Today',
   'knowledge-graph': 'Knowledge Graph',
+  style: 'Style Gallery',
 };
 
 const offlineCriticalRouteIds = new Set<AppRouteId>([
@@ -359,6 +362,7 @@ export const commandRoutes: CommandRoute[] = [
   { id: 'action:backup', title: 'Export Vault Backup', subtitle: 'Download all local data as JSON', path: '/vault', keywords: ['export backup vault json local data'], action: 'backup' },
   { id: 'action:repair', title: 'Repair Local Vault', subtitle: 'Rebuild indexes and clean corrupted rows', path: '/review', keywords: ['repair vault rebuild indexes corrupted rows'], action: 'repair' },
   { id: 'action:theme', title: 'Toggle Theme', subtitle: 'Switch light or dark mode', path: '/', keywords: ['toggle theme light dark'], action: 'theme' },
+  { id: 'command:style', title: 'Open Style Gallery', subtitle: 'Tokens, primitives, and the visual system', path: '/style', keywords: ['style gallery tokens primitives design system colors typography'] },
 ];
 
 export const smokeRoutes: Array<[string, string]> = [
