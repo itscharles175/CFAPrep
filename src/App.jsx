@@ -99,6 +99,28 @@ export default function App() {
     return () => query.removeEventListener?.('change', update);
   }, []);
 
+  // Per-domain accent: drive a `data-domain` attribute on <body> from the URL.
+  // tokens.css overrides --color-accent and --accent under matching selectors
+  // so chips, callouts, and buttons re-tint without per-component changes.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const path = location.pathname;
+    let domain = '';
+    if (path.startsWith('/cfa')) domain = 'cfa';
+    else if (path.startsWith('/excel')) domain = 'excel';
+    else if (path.startsWith('/quant')) domain = 'quant';
+    if (domain) {
+      document.body.setAttribute('data-domain', domain);
+    } else {
+      document.body.removeAttribute('data-domain');
+    }
+    return () => {
+      // Cleanup runs on unmount or before the next effect — leaving the
+      // attribute in place between transitions avoids a flash to the default
+      // accent while the next route is loading.
+    };
+  }, [location.pathname]);
+
   useEffect(() => {
     function handleKeyDown(event) {
       // `?` opens the keyboard-help dialog; skip if the user is typing into a

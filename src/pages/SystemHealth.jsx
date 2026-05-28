@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Database, Download, HardDrive, KeyRound, ShieldCheck, WifiOff, Wrench } from 'lucide-react';
+import { Database, Download, HardDrive, KeyRound, ShieldCheck, Upload, WifiOff, Wrench } from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
-import { exportVaultData, getVaultHealthReport, previewVaultRepair } from '../lib/learning';
+import { exportVaultData, getVaultHealthReport, importVaultData, previewVaultRepair } from '../lib/learning';
+import { decryptVaultBackup, encryptVaultBackup } from '../lib/encryptedBackup';
 import { cacheCriticalOfflineRoutes, getOfflineReadinessReport } from '../lib/offlineContentCache';
 import { checkLlmConnection, getLlmSettings, LLM_PRESETS, saveLlmSettings } from '../lib/localLlm';
 import {
@@ -55,6 +56,13 @@ export default function SystemHealth() {
   const [cacheNames, setCacheNames] = useState([]);
   const [message, setMessage] = useState('');
   const [backupPassphrase, setBackupPassphrase] = useState('');
+  // AES-GCM-256 encrypted export/import (sibling to plaintext export). The
+  // confirm field guards typos before we hand the passphrase to the KDF — once
+  // the blob is sealed, there is no recovery.
+  const [backupPassphraseConfirm, setBackupPassphraseConfirm] = useState('');
+  const [encryptedBusy, setEncryptedBusy] = useState(false);
+  const [encryptedImportPassphrase, setEncryptedImportPassphrase] = useState('');
+  const [pendingEncryptedFile, setPendingEncryptedFile] = useState(null);
   const [vaultHealth, setVaultHealth] = useState(null);
   const [offlineReadiness, setOfflineReadiness] = useState(null);
   const [persisted, setPersisted] = useState(null);
@@ -572,6 +580,82 @@ export default function SystemHealth() {
     setMessage('Plaintext backup exported from the advanced path. Prefer encrypted backups for normal vault moves.');
   }
 
+  // ---------------------------------------------------------------------------
+  // Encrypted export/import (AES-GCM-256 over PBKDF2-SHA256, 200k iterations)
+  //
+  // Uses the new `encryptedBackup` library — a thin standalone envelope around
+  // the existing plaintext export. The legacy "Encrypted Backup" button in the
+  // PageHeader still calls the old in-progressStore encryption path; this
+  // section is the user-facing replacement that we recommend in the help copy.
+  // ---------------------------------------------------------------------------
+  async function handleEncryptedExportV2() {
+    if (backupPassphrase.length < 8) {
+      setMessage('Encrypted export needs a passphrase of at least 8 characters.');
+      toast.warning('Passphrase too short', 'Use 8 characters or more.');
+      return;
+    }
+    if (backupPassphrase !== backupPassphraseConfirm) {
+      setMessage('Passphrases do not match.');
+      toast.warning('Passphrase mismatch', 'Re-type the same passphrase in both fields.');
+      return;
+    }
+    setEncryptedBusy(true);
+    try {
+      const plaintext = await exportVaultData();
+      const blob = await encryptVaultBackup(JSON.stringify(plaintext), backupPassphrase);
+      const file = new Blob([JSON.stringify(blob, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(file);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `quantvault-encrypted-${new Date().toISOString().slice(0, 10)}.qvenc.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setBackupPassphrase('');
+      setBackupPassphraseConfirm('');
+      const summary = 'Encrypted backup downloaded as .qvenc.json. Store the passphrase separately — without it the blob is unrecoverable.';
+      setMessage(summary);
+      toast.success('Encrypted backup ready', summary);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Could not encrypt the vault backup.';
+      setMessage(detail);
+      toast.error('Encrypted export failed', detail);
+    } finally {
+      setEncryptedBusy(false);
+    }
+  }
+
+  async function handleImportEncryptedBackup() {
+    if (!pendingEncryptedFile) {
+      setMessage('Pick a .qvenc.json file to import first.');
+      return;
+    }
+    if (!encryptedImportPassphrase) {
+      setMessage('Enter the passphrase the file was encrypted with.');
+      return;
+    }
+    setEncryptedBusy(true);
+    try {
+      const text = await pendingEncryptedFile.text();
+      const envelope = JSON.parse(text);
+      const plaintext = await decryptVaultBackup(envelope, encryptedImportPassphrase);
+      const payload = JSON.parse(plaintext);
+      await importVaultData(payload, 'merge');
+      setEncryptedImportPassphrase('');
+      setPendingEncryptedFile(null);
+      const summary = `Imported encrypted backup ${pendingEncryptedFile.name} into the local vault (merge).`;
+      setMessage(summary);
+      toast.success('Encrypted backup imported', summary);
+      const nextHealth = await getVaultHealthReport();
+      setVaultHealth(nextHealth);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Could not import the encrypted backup.';
+      setMessage(detail);
+      toast.error('Encrypted import failed', detail);
+    } finally {
+      setEncryptedBusy(false);
+    }
+  }
+
   async function handleRepairPreview() {
     const report = await previewVaultRepair();
     setVaultHealth(report);
@@ -655,6 +739,111 @@ export default function SystemHealth() {
             {vaultHealth.repairActions.map((action) => <li key={action}>{action}</li>)}
           </ul>
         )}
+      </Surface>
+
+      <Surface tone="vault" className="ops-report-panel">
+        <div className="qv-mb-3">
+          <StatusBadge tone="vault">Encrypted Export</StatusBadge>
+          <h3 style={{ margin: 'var(--space-2) 0 0' }}>AES-GCM-256 backup &amp; restore</h3>
+          <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
+            Locally encrypts your full vault export with a passphrase (PBKDF2-SHA256, 200,000 iterations → 256-bit AES-GCM key).
+            The downloaded <code className="qv-mono">.qvenc.json</code> is safe to keep alongside cloud sync — without the
+            passphrase it is unrecoverable. Importing accepts the same format and merges into your local vault.
+          </p>
+        </div>
+        <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+          <label className="qv-stack-1">
+            <span className="qv-fs-xs qv-text-muted">Passphrase (min 8 chars)</span>
+            <input
+              className="input"
+              type="password"
+              minLength={8}
+              value={backupPassphrase}
+              onChange={(event) => setBackupPassphrase(event.target.value)}
+              placeholder="passphrase"
+              aria-label="Encrypted backup passphrase"
+              autoComplete="new-password"
+            />
+          </label>
+          <label className="qv-stack-1">
+            <span className="qv-fs-xs qv-text-muted">Confirm passphrase</span>
+            <input
+              className="input"
+              type="password"
+              minLength={8}
+              value={backupPassphraseConfirm}
+              onChange={(event) => setBackupPassphraseConfirm(event.target.value)}
+              placeholder="passphrase (again)"
+              aria-label="Confirm encrypted backup passphrase"
+              autoComplete="new-password"
+            />
+          </label>
+          <div className="qv-stack-1" style={{ justifyContent: 'flex-end' }}>
+            <button
+              className="btn btn-primary"
+              onClick={handleEncryptedExportV2}
+              disabled={
+                encryptedBusy ||
+                backupPassphrase.length < 8 ||
+                backupPassphrase !== backupPassphraseConfirm
+              }
+              title={
+                backupPassphrase.length < 8
+                  ? 'Passphrase must be at least 8 characters'
+                  : backupPassphrase !== backupPassphraseConfirm
+                    ? 'Passphrases do not match'
+                    : 'Encrypt and download .qvenc.json'
+              }
+            >
+              <KeyRound size={16} /> {encryptedBusy ? 'Working…' : 'Encrypted Export'}
+            </button>
+          </div>
+        </div>
+        <hr style={{ border: 'none', borderTop: '1px solid var(--color-border)', margin: 'var(--space-4) 0' }} />
+        <div className="qv-mb-2">
+          <strong>Import Encrypted Backup</strong>
+          <p className="qv-text-secondary qv-fs-sm qv-m-0">
+            Decrypts a <code className="qv-mono">.qvenc.json</code> file with its passphrase and merges the contained vault data.
+          </p>
+        </div>
+        <div className="grid-3" style={{ gap: 'var(--space-3)' }}>
+          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} aria-disabled={encryptedBusy}>
+            <Upload size={14} style={{ marginRight: 'var(--space-1)' }} />
+            {pendingEncryptedFile ? pendingEncryptedFile.name : 'Pick .qvenc.json'}
+            <input
+              type="file"
+              accept=".qvenc.json,.json,application/json"
+              style={{ display: 'none' }}
+              onChange={(event) => {
+                const file = event.target.files?.[0] || null;
+                setPendingEncryptedFile(file);
+                event.target.value = '';
+              }}
+              disabled={encryptedBusy}
+            />
+          </label>
+          <label className="qv-stack-1">
+            <span className="qv-fs-xs qv-text-muted">Passphrase</span>
+            <input
+              className="input"
+              type="password"
+              value={encryptedImportPassphrase}
+              onChange={(event) => setEncryptedImportPassphrase(event.target.value)}
+              placeholder="passphrase used to encrypt"
+              aria-label="Encrypted backup import passphrase"
+              autoComplete="current-password"
+            />
+          </label>
+          <div className="qv-stack-1" style={{ justifyContent: 'flex-end' }}>
+            <button
+              className="btn btn-secondary"
+              onClick={handleImportEncryptedBackup}
+              disabled={encryptedBusy || !pendingEncryptedFile || !encryptedImportPassphrase}
+            >
+              <Download size={16} /> {encryptedBusy ? 'Working…' : 'Import Encrypted Backup'}
+            </button>
+          </div>
+        </div>
       </Surface>
 
       <Surface tone="ops" className="ops-report-panel">

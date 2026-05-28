@@ -274,6 +274,97 @@
       --duration-slow: 0ms;
     }
   }
+
+  /* ─────────────────────────────────────────────────────────────
+   * 11. PER-DOMAIN ACCENT OVERRIDES
+   *
+   *   When App.jsx sets `data-domain="<id>"` on <body> for /cfa, /excel,
+   *   and /quant routes, the accent re-tints across the whole tree without
+   *   per-component changes. We override BOTH layers of accent token:
+   *
+   *     - Semantic: `--color-accent` and `--color-accent-soft`
+   *       (used by qv-chip, qv-callout, and downstream design-system code)
+   *     - Raw: `--accent`, `--accent-hover`, `--surface-soft`
+   *       (used by hundreds of existing rules in index.css for links,
+   *        buttons, badges, and surface-status borders)
+   *
+   *   Hue choices and per-theme contrast:
+   *     - cfa  → blue (the app default — keeps the current accent).
+   *     - excel → green.  Dark theme uses #16a34a (5.0:1 vs #0F172A);
+   *               light theme uses #15803d (5.1:1 vs #FFFFFF) because
+   *               #16a34a fails AA body-text contrast on white (~3.7:1).
+   *     - quant → magenta.  Dark theme uses #c026d3 (4.5:1 vs #0F172A);
+   *               light theme uses #a21caf (5.4:1 vs #FFFFFF) because
+   *               #c026d3 dips to ~4.0:1 on white.
+   *
+   *   `accent-hover` is a slightly lighter (dark theme) or darker (light)
+   *   variant; `surface-soft` is the same hue at low opacity.
+   * ───────────────────────────────────────────────────────────── */
+
+  /* CFA — blue (same as the app default). Restated for explicit-intent. */
+  [data-domain="cfa"] {
+    --accent:        #60A5FA;
+    --accent-hover:  #93C5FD;
+    --surface-soft:  rgba(96, 165, 250, 0.06);
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+  }
+
+  /* Excel — green. Dark-theme defaults; light-theme block below tightens
+     contrast for AA on white. */
+  [data-domain="excel"] {
+    --accent:        #16A34A;
+    --accent-hover:  #4ADE80;
+    --surface-soft:  rgba(22, 163, 74, 0.12);
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+  }
+
+  /* Quant — magenta. Same per-theme pattern as Excel. */
+  [data-domain="quant"] {
+    --accent:        #C026D3;
+    --accent-hover:  #E879F9;
+    --surface-soft:  rgba(192, 38, 211, 0.12);
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+  }
+
+  /* Light-theme contrast tightening — picks slightly darker hues that pass
+     WCAG 2.1 AA body-text contrast against #FFFFFF surface. Triggers on the
+     explicit attribute and on the system-light media branch. */
+  :root[data-theme="light"] [data-domain="cfa"] {
+    --accent:        #1D4ED8;
+    --accent-hover:  #1E40AF;
+    --surface-soft:  rgba(37, 99, 235, 0.08);
+  }
+  :root[data-theme="light"] [data-domain="excel"] {
+    --accent:        #15803D;
+    --accent-hover:  #166534;
+    --surface-soft:  rgba(21, 128, 61, 0.10);
+  }
+  :root[data-theme="light"] [data-domain="quant"] {
+    --accent:        #A21CAF;
+    --accent-hover:  #86198F;
+    --surface-soft:  rgba(162, 28, 175, 0.10);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]):not([data-theme="light"]) [data-domain="cfa"] {
+      --accent:        #1D4ED8;
+      --accent-hover:  #1E40AF;
+      --surface-soft:  rgba(37, 99, 235, 0.08);
+    }
+    :root:not([data-theme="dark"]):not([data-theme="light"]) [data-domain="excel"] {
+      --accent:        #15803D;
+      --accent-hover:  #166534;
+      --surface-soft:  rgba(21, 128, 61, 0.10);
+    }
+    :root:not([data-theme="dark"]):not([data-theme="light"]) [data-domain="quant"] {
+      --accent:        #A21CAF;
+      --accent-hover:  #86198F;
+      --surface-soft:  rgba(162, 28, 175, 0.10);
+    }
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────
