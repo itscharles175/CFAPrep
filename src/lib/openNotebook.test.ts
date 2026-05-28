@@ -5,7 +5,9 @@ import {
   askGrounded,
   checkOpenNotebookConnection,
   ensureTopicNotebook,
+  getCachedGroundedAnswer,
   getOpenNotebookSettings,
+  saveCachedGroundedAnswer,
   saveOpenNotebookSettings,
 } from './openNotebook';
 import { db } from './progressStore';
@@ -148,5 +150,22 @@ describe('open-notebook client', () => {
     // exactly one source POST (seeded on first creation, not on reuse)
     const sourcePosts = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/sources/json'));
     expect(sourcePosts).toHaveLength(1);
+  });
+
+  it('caches the last grounded answer per topic so it survives navigation', async () => {
+    expect(await getCachedGroundedAnswer('level1', 'fixed-income')).toBeNull();
+    const saved = await saveCachedGroundedAnswer('level1', 'fixed-income', {
+      question: 'What is duration?',
+      answer: 'Duration measures price sensitivity to yield.',
+    });
+    expect(saved.answeredAt).toBeTruthy();
+
+    const loaded = await getCachedGroundedAnswer('level1', 'fixed-income');
+    expect(loaded).toMatchObject({
+      question: 'What is duration?',
+      answer: 'Duration measures price sensitivity to yield.',
+    });
+    // keyed per topic — a different topic is unaffected
+    expect(await getCachedGroundedAnswer('level1', 'equity')).toBeNull();
   });
 });

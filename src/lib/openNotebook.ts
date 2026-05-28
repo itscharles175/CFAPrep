@@ -286,3 +286,36 @@ export async function ensureTopicNotebook(params: {
 
   return notebook.id;
 }
+
+export interface CachedGroundedAnswer {
+  question: string;
+  answer: string;
+  answeredAt: string;
+}
+
+function answerCacheKey(level: string, topic: string): string {
+  return `open-notebook:answer:${level}:${topic}`;
+}
+
+/** Last grounded Q&A for a topic, so it survives navigation/reload. */
+export async function getCachedGroundedAnswer(
+  level: string,
+  topic: string,
+): Promise<CachedGroundedAnswer | null> {
+  try {
+    const row = await db.settings.get(answerCacheKey(level, topic));
+    return (row?.value as CachedGroundedAnswer) || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveCachedGroundedAnswer(
+  level: string,
+  topic: string,
+  entry: { question: string; answer: string },
+): Promise<CachedGroundedAnswer> {
+  const payload: CachedGroundedAnswer = { ...entry, answeredAt: new Date().toISOString() };
+  await db.settings.put({ key: answerCacheKey(level, topic), value: payload, updatedAt: payload.answeredAt });
+  return payload;
+}

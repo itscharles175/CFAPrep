@@ -12,7 +12,7 @@ import { SourceRail } from '../../components/SourceContext';
 import { getCfaSourceReadingForTopic } from '../../lib/cfaSourceVault';
 import { bootstrapSourceVault } from '../../lib/bootstrapSourceVault';
 import { generateQuestionsFromCurriculum, getCachedGeneratedQuestions, getLlmSettings, saveCachedGeneratedQuestions } from '../../lib/localLlm';
-import { askGrounded, ensureTopicNotebook, getOpenNotebookSettings } from '../../lib/openNotebook';
+import { askGrounded, ensureTopicNotebook, getCachedGroundedAnswer, getOpenNotebookSettings, saveCachedGroundedAnswer } from '../../lib/openNotebook';
 
 export default function CfaModule() {
   const { level, topic } = useParams();
@@ -119,6 +119,22 @@ export default function CfaModule() {
     };
   }, [level, topic]);
 
+  // Rehydrate the last grounded Q&A for this topic so it survives navigation.
+  useEffect(() => {
+    let cancelled = false;
+    if (!topic) return undefined;
+    getCachedGroundedAnswer(level, topic).then((cached) => {
+      if (cancelled) return;
+      setAskQuestion(cached?.question || '');
+      setAskAnswer(cached?.answer || '');
+      setAskState(cached?.answer ? 'done' : 'idle');
+      setAskError('');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [level, topic]);
+
   async function handleGenerate() {
     setAiState('loading');
     setAiError('');
@@ -167,8 +183,10 @@ export default function CfaModule() {
       });
       void notebookId; // the notebook scopes which sources the ask flow draws from
       const result = await askGrounded({ baseUrl: settings.baseUrl, question });
-      setAskAnswer(result.answer || 'No answer was returned.');
+      const answer = result.answer || 'No answer was returned.';
+      setAskAnswer(answer);
       setAskState('done');
+      await saveCachedGroundedAnswer(level, topic, { question, answer });
     } catch (error) {
       setAskState('error');
       setAskError(error instanceof Error ? error.message : 'Grounded answer failed.');
