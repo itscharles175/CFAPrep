@@ -1,4 +1,4 @@
-import { db } from './progressStore';
+import { getStorage } from './storage';
 
 // Local-LLM integration. Targets an OpenAI-compatible chat endpoint exposed by a
 // local model server (Ollama at :11434/v1, LM Studio at :1234/v1). No cloud, no
@@ -20,7 +20,7 @@ export const LLM_PRESETS = [
 
 export async function getLlmSettings() {
   try {
-    const row = await db.settings.get(SETTINGS_KEY);
+    const row = await getStorage().settings.get(SETTINGS_KEY);
     return { ...DEFAULT_LLM_SETTINGS, ...(row?.value || {}) };
   } catch {
     return { ...DEFAULT_LLM_SETTINGS };
@@ -29,7 +29,7 @@ export async function getLlmSettings() {
 
 export async function saveLlmSettings(settings) {
   const merged = { ...DEFAULT_LLM_SETTINGS, ...settings };
-  await db.settings.put({ key: SETTINGS_KEY, value: merged, updatedAt: new Date().toISOString() });
+  await getStorage().settings.put({ key: SETTINGS_KEY, value: merged, updatedAt: new Date().toISOString() });
   return merged;
 }
 
@@ -336,7 +336,7 @@ export async function summarizeTopicFromCurriculum({ settings, topicTitle, chunk
 
 export async function getCachedGeneratedQuestions(level, topic) {
   try {
-    const row = await db.settings.get(`ai-questions:${level}:${topic}`);
+    const row = await getStorage().settings.get(`ai-questions:${level}:${topic}`);
     return row?.value || null;
   } catch {
     return null;
@@ -345,13 +345,13 @@ export async function getCachedGeneratedQuestions(level, topic) {
 
 export async function saveCachedGeneratedQuestions(level, topic, questions) {
   const payload = { questions, generatedAt: new Date().toISOString() };
-  await db.settings.put({ key: `ai-questions:${level}:${topic}`, value: payload, updatedAt: payload.generatedAt });
+  await getStorage().settings.put({ key: `ai-questions:${level}:${topic}`, value: payload, updatedAt: payload.generatedAt });
   return payload;
 }
 
 export async function getCachedGeneratedFlashcards(level, topic) {
   try {
-    const row = await db.settings.get(`flash-cards:${level}:${topic}`);
+    const row = await getStorage().settings.get(`flash-cards:${level}:${topic}`);
     return row?.value || null;
   } catch {
     return null;
@@ -360,7 +360,7 @@ export async function getCachedGeneratedFlashcards(level, topic) {
 
 export async function saveCachedGeneratedFlashcards(level, topic, flashcards) {
   const payload = { flashcards, generatedAt: new Date().toISOString() };
-  await db.settings.put({ key: `flash-cards:${level}:${topic}`, value: payload, updatedAt: payload.generatedAt });
+  await getStorage().settings.put({ key: `flash-cards:${level}:${topic}`, value: payload, updatedAt: payload.generatedAt });
   return payload;
 }
 

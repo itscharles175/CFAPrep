@@ -1,4 +1,4 @@
-import { db } from './progressStore';
+import { getStorage } from './storage';
 
 // Embedded open-notebook integration. open-notebook runs as a local Tauri
 // sidecar (FastAPI on :5055, backed by SurrealDB and a surreal-commands job
@@ -75,7 +75,7 @@ function normalizeBaseUrl(baseUrl?: string): string {
 
 export async function getOpenNotebookSettings(): Promise<OpenNotebookSettings> {
   try {
-    const row = await db.settings.get(SETTINGS_KEY);
+    const row = await getStorage().settings.get(SETTINGS_KEY);
     return { ...DEFAULT_OPEN_NOTEBOOK_SETTINGS, ...((row?.value as Partial<OpenNotebookSettings>) || {}) };
   } catch {
     return { ...DEFAULT_OPEN_NOTEBOOK_SETTINGS };
@@ -86,7 +86,7 @@ export async function saveOpenNotebookSettings(
   settings: Partial<OpenNotebookSettings>,
 ): Promise<OpenNotebookSettings> {
   const merged = { ...DEFAULT_OPEN_NOTEBOOK_SETTINGS, ...settings };
-  await db.settings.put({ key: SETTINGS_KEY, value: merged, updatedAt: new Date().toISOString() });
+  await getStorage().settings.put({ key: SETTINGS_KEY, value: merged, updatedAt: new Date().toISOString() });
   return merged;
 }
 
@@ -262,7 +262,7 @@ type TopicNotebookMap = Record<string, TopicNotebookEntry | string>;
 
 async function loadTopicNotebookMap(): Promise<Record<string, TopicNotebookEntry>> {
   try {
-    const row = await db.settings.get(NOTEBOOK_MAP_KEY);
+    const row = await getStorage().settings.get(NOTEBOOK_MAP_KEY);
     const raw = (row?.value as TopicNotebookMap) || {};
     const normalized: Record<string, TopicNotebookEntry> = {};
     for (const [key, value] of Object.entries(raw)) {
@@ -275,7 +275,7 @@ async function loadTopicNotebookMap(): Promise<Record<string, TopicNotebookEntry
 }
 
 async function saveTopicNotebookMap(map: Record<string, TopicNotebookEntry>): Promise<void> {
-  await db.settings.put({ key: NOTEBOOK_MAP_KEY, value: map, updatedAt: new Date().toISOString() });
+  await getStorage().settings.put({ key: NOTEBOOK_MAP_KEY, value: map, updatedAt: new Date().toISOString() });
 }
 
 /**
@@ -558,7 +558,7 @@ export async function getCachedGroundedAnswer(
   topic: string,
 ): Promise<CachedGroundedAnswer | null> {
   try {
-    const row = await db.settings.get(answerCacheKey(level, topic));
+    const row = await getStorage().settings.get(answerCacheKey(level, topic));
     return (row?.value as CachedGroundedAnswer) || null;
   } catch {
     return null;
@@ -571,7 +571,7 @@ export async function saveCachedGroundedAnswer(
   entry: { question: string; answer: string },
 ): Promise<CachedGroundedAnswer> {
   const payload: CachedGroundedAnswer = { ...entry, answeredAt: new Date().toISOString() };
-  await db.settings.put({ key: answerCacheKey(level, topic), value: payload, updatedAt: payload.answeredAt });
+  await getStorage().settings.put({ key: answerCacheKey(level, topic), value: payload, updatedAt: payload.answeredAt });
   // Also append to the rolling history (capped at 10 entries per topic).
   await appendCachedGroundedAnswerHistory(level, topic, payload);
   return payload;
@@ -589,7 +589,7 @@ export async function getCachedGroundedAnswerHistory(
   topic: string,
 ): Promise<CachedGroundedAnswer[]> {
   try {
-    const row = await db.settings.get(answerHistoryCacheKey(level, topic));
+    const row = await getStorage().settings.get(answerHistoryCacheKey(level, topic));
     const list = row?.value as CachedGroundedAnswer[] | undefined;
     return Array.isArray(list) ? list : [];
   } catch {
@@ -610,7 +610,7 @@ async function appendCachedGroundedAnswerHistory(
         ? prior.slice(1)
         : prior;
     const next = [entry, ...filtered].slice(0, ANSWER_HISTORY_MAX);
-    await db.settings.put({
+    await getStorage().settings.put({
       key: answerHistoryCacheKey(level, topic),
       value: next,
       updatedAt: entry.answeredAt,

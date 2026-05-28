@@ -7,6 +7,7 @@ import { buildStudyPlan } from '../lib/studyDirector';
 import { generateQuestionsFromCurriculum, getLlmSettings, narrateStudyPlan } from '../lib/localLlm';
 import { getCfaSourceReadingForTopic } from '../lib/cfaSourceVault';
 import { db } from '../lib/progressStore';
+import { getStorage } from '../lib/storage';
 
 // Parse a /cfa/<level>/<topic> path produced by buildStudyPlan into its
 // level + topic ids. Returns null for paths that don't fit the shape.
@@ -52,7 +53,7 @@ export default function Today() {
 
   useEffect(() => {
     let active = true;
-    db.settings.get(journalKey).then((row) => {
+    getStorage().settings.get(journalKey).then((row) => {
       if (active && row?.value) setJournal({ text: row.value.text || '', savedAt: row.value.savedAt || null, dirty: false });
     });
     return () => {
@@ -64,7 +65,7 @@ export default function Today() {
   async function saveJournal() {
     const text = journal.text;
     const stamp = new Date().toISOString();
-    await db.settings.put({ key: journalKey, value: { text, savedAt: stamp }, updatedAt: stamp });
+    await getStorage().settings.put({ key: journalKey, value: { text, savedAt: stamp }, updatedAt: stamp });
     setJournal({ text, savedAt: stamp, dirty: false });
   }
   // Pomodoro-style study session timer.
@@ -137,7 +138,7 @@ export default function Today() {
 
   useEffect(() => {
     let active = true;
-    db.settings.get('exam-date').then((row) => {
+    getStorage().settings.get('exam-date').then((row) => {
       if (!active || !row?.value) return;
       const target = new Date(row.value);
       if (Number.isNaN(target.getTime())) return;

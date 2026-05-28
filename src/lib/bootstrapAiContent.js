@@ -1,4 +1,4 @@
-import { db } from './progressStore';
+import { getStorage } from './storage';
 
 // Bootstrap pre-generated AI content into the in-app caches on first run.
 //
@@ -41,7 +41,7 @@ export async function bootstrapAiContent() {
 
   // Skip if this exact generatedAt has already been imported.
   try {
-    const marker = await db.settings.get(BOOTSTRAP_MARKER_KEY);
+    const marker = await getStorage().settings.get(BOOTSTRAP_MARKER_KEY);
     if (marker?.value === payload.generatedAt) {
       return { seeded: 0, skipped: 0, source: 'already-imported' };
     }
@@ -57,9 +57,9 @@ export async function bootstrapAiContent() {
       if (entry?.questions?.length) {
         const qKey = answerCacheKeyForAi(level, topic);
         try {
-          const existing = await db.settings.get(qKey);
+          const existing = await getStorage().settings.get(qKey);
           if (!existing?.value?.questions?.length) {
-            await db.settings.put({
+            await getStorage().settings.put({
               key: qKey,
               value: {
                 questions: entry.questions,
@@ -80,9 +80,9 @@ export async function bootstrapAiContent() {
       if (entry?.flashcards?.length) {
         const fKey = flashCacheKeyForAi(level, topic);
         try {
-          const existing = await db.settings.get(fKey);
+          const existing = await getStorage().settings.get(fKey);
           if (!existing?.value?.flashcards?.length) {
-            await db.settings.put({
+            await getStorage().settings.put({
               key: fKey,
               value: {
                 flashcards: entry.flashcards,
@@ -103,7 +103,7 @@ export async function bootstrapAiContent() {
   }
 
   try {
-    await db.settings.put({
+    await getStorage().settings.put({
       key: BOOTSTRAP_MARKER_KEY,
       value: payload.generatedAt,
       updatedAt: new Date().toISOString(),

@@ -1,4 +1,4 @@
-import { db } from './progressStore';
+import { getStorage } from './storage';
 import { generateQuestionsFromCurriculum } from './localLlm';
 import { getCfaSourceReadingForTopic } from './cfaSourceVault';
 
@@ -113,7 +113,7 @@ export function toSyntheticMockContent(generated) {
 
 export async function getCachedGeneratedMock(level) {
   try {
-    const row = await db.settings.get(`generated-mock:${level}`);
+    const row = await getStorage().settings.get(`generated-mock:${level}`);
     return row?.value || null;
   } catch {
     return null;
@@ -121,6 +121,6 @@ export async function getCachedGeneratedMock(level) {
 }
 
 export async function saveCachedGeneratedMock(level, generated) {
-  await db.settings.put({ key: `generated-mock:${level}`, value: generated, updatedAt: new Date().toISOString() });
+  await getStorage().settings.put({ key: `generated-mock:${level}`, value: generated, updatedAt: new Date().toISOString() });
   return generated;
 }

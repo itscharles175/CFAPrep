@@ -14,7 +14,7 @@ import {
 import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop, pickCfaFolder } from '../lib/desktopIngestion';
 import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
-import { db } from '../lib/progressStore';
+import { getStorage } from '../lib/storage';
 
 // Cache-management constants — used by refreshCacheBuckets / handleClearBucket.
 const CACHE_PREFIXES = {
@@ -129,7 +129,7 @@ export default function SystemHealth() {
   useEffect(() => {
     let active = true;
     refreshCacheBuckets();
-    db.settings.get('exam-date').then((row) => {
+    getStorage().settings.get('exam-date').then((row) => {
       if (active && row?.value) setExamDate(row.value);
     });
     return () => {
@@ -139,11 +139,11 @@ export default function SystemHealth() {
 
   async function handleSaveExamDate() {
     if (examDate) {
-      await db.settings.put({ key: 'exam-date', value: examDate, updatedAt: new Date().toISOString() });
+      await getStorage().settings.put({ key: 'exam-date', value: examDate, updatedAt: new Date().toISOString() });
       setMessage(`Exam date set to ${examDate}.`);
       toast.success('Exam date saved', 'Countdown will appear on /today.');
     } else {
-      await db.settings.delete('exam-date');
+      await getStorage().settings.delete('exam-date');
       setMessage('Exam date cleared.');
     }
   }
@@ -270,7 +270,7 @@ export default function SystemHealth() {
   // Cache-bucket helpers
   // ---------------------------------------------------------------------------
   async function refreshCacheBuckets() {
-    const rows = await db.settings.toArray();
+    const rows = await getStorage().settings.toArray();
     const counts = {
       'ai-questions': 0,
       'generated-mock': 0,
@@ -299,7 +299,7 @@ export default function SystemHealth() {
   async function handleClearBucket(bucket) {
     setCacheBusy(true);
     try {
-      const rows = await db.settings.toArray();
+      const rows = await getStorage().settings.toArray();
       const keysToDelete = [];
       for (const row of rows) {
         const { key } = row;
@@ -316,7 +316,7 @@ export default function SystemHealth() {
           if (prefix && key.startsWith(prefix)) keysToDelete.push(key);
         }
       }
-      await db.settings.bulkDelete(keysToDelete);
+      await getStorage().settings.bulkDelete(keysToDelete);
       await refreshCacheBuckets();
       const msg = `Cleared ${keysToDelete.length} row(s) from the "${bucket}" bucket.`;
       setMessage(msg);
@@ -333,11 +333,11 @@ export default function SystemHealth() {
   async function handleClearAllCaches() {
     setCacheBusy(true);
     try {
-      const rows = await db.settings.toArray();
+      const rows = await getStorage().settings.toArray();
       const keysToDelete = rows
         .map((row) => row.key)
         .filter((key) => !SKIP_KEYS.has(key));
-      await db.settings.bulkDelete(keysToDelete);
+      await getStorage().settings.bulkDelete(keysToDelete);
       await refreshCacheBuckets();
       const msg = `Cleared ${keysToDelete.length} cached row(s) from app caches.`;
       setMessage(msg);
@@ -854,7 +854,7 @@ export default function SystemHealth() {
             <button
               className="btn btn-secondary btn-sm"
               onClick={async () => {
-                await db.settings.delete('onboarding-dismissed');
+                await getStorage().settings.delete('onboarding-dismissed');
                 setMessage('Onboarding will re-open on your next Dashboard visit.');
                 toast.success('Onboarding reset', 'Visit / to see the first-run wizard again.');
               }}

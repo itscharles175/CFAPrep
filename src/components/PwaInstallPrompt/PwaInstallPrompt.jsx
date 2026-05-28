@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { db } from '../../lib/progressStore';
+import { getStorage } from '../../lib/storage';
 
 const DISMISS_KEY = 'pwa-install-dismissed';
 
@@ -18,7 +18,7 @@ export function PwaInstallPrompt() {
       if (alive) setVisible(true);
     }
 
-    db.settings.get(DISMISS_KEY).then((row) => {
+    getStorage().settings.get(DISMISS_KEY).then((row) => {
       if (!alive || row?.value) return;
       handlerRef.current = handleBeforeInstallPrompt;
       window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -40,7 +40,7 @@ export function PwaInstallPrompt() {
     await promptEvent.prompt();
     const { outcome } = await promptEvent.userChoice;
     if (outcome === 'dismissed') {
-      await db.settings.put({ key: DISMISS_KEY, value: true, updatedAt: new Date().toISOString() });
+      await getStorage().settings.put({ key: DISMISS_KEY, value: true, updatedAt: new Date().toISOString() });
     }
     eventRef.current = null;
   }
@@ -48,7 +48,7 @@ export function PwaInstallPrompt() {
   async function handleDismiss() {
     setVisible(false);
     eventRef.current = null;
-    await db.settings.put({ key: DISMISS_KEY, value: true, updatedAt: new Date().toISOString() });
+    await getStorage().settings.put({ key: DISMISS_KEY, value: true, updatedAt: new Date().toISOString() });
   }
 
   if (!visible) return null;

@@ -12,7 +12,7 @@ import { exportVaultData, importVaultData, previewVaultImportPayload, resetVault
 import { parseJsonFile } from '../lib/jsonFilePreflight';
 import { getCfaSourceDocuments } from '../lib/cfaSourceVault';
 import { getLlmSettings } from '../lib/localLlm';
-import { db } from '../lib/progressStore';
+import { getStorage } from '../lib/storage';
 import {
   IconFrame,
   Dialog,
@@ -158,7 +158,7 @@ export default function Dashboard() {
         const [docs, llmSettings, dismissedRow] = await Promise.all([
           getCfaSourceDocuments(),
           getLlmSettings(),
-          db.settings.get('onboarding-dismissed').catch(() => undefined),
+          getStorage().settings.get('onboarding-dismissed').catch(() => undefined),
         ]);
         if (!active) return;
         if (docs.length === 0 && llmSettings.enabled === false && !dismissedRow) {
@@ -176,7 +176,7 @@ export default function Dashboard() {
 
   async function handleOnboardingClose() {
     try {
-      await db.settings.put({ key: 'onboarding-dismissed', value: true, updatedAt: new Date().toISOString() });
+      await getStorage().settings.put({ key: 'onboarding-dismissed', value: true, updatedAt: new Date().toISOString() });
     } catch {
       // Non-fatal
     }

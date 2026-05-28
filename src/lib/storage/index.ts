@@ -1,21 +1,36 @@
 import { dexieDriver } from './dexieDriver';
-import { surrealDriver } from './surrealDriver';
 import type { StorageDriver, StorageRegistry } from './types';
 
 /**
  * Singleton registry.  Dexie is always the default active driver.
- * The SurrealDB driver is registered but never activated unless the caller
- * explicitly calls `switchToSurreal()` AND the sidecar is reachable.
+ * The SurrealDB driver is lazy-loaded (dynamic import) the first time the
+ * caller explicitly requests a switch, so the dormant SurrealDB client (and
+ * its `isows`/`ws` transitive deps) never load in the default startup path
+ * or in tests that don't exercise it.
  */
 export const storageRegistry: StorageRegistry = {
   active: dexieDriver,
   drivers: {
     dexie: dexieDriver,
-    surrealdb: surrealDriver,
+    // surrealdb is lazily populated by switchDriver('surrealdb').
   },
 
   async switchDriver(name: 'dexie' | 'surrealdb'): Promise<{ ok: boolean; error?: string }> {
-    const driver: StorageDriver | undefined = this.drivers[name];
+    let driver: StorageDriver | undefined = this.drivers[name];
+
+    // Lazy-load the SurrealDB driver on first use so its transitive imports
+    // (the `surrealdb` JS client + `isows` + `ws`) stay off the default path.
+    if (!driver && name === 'surrealdb') {
+      try {
+        const mod = await import('./surrealDriver');
+        driver = mod.surrealDriver;
+        this.drivers[name] = driver;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `Failed to load surrealdb driver: ${msg}` };
+      }
+    }
+
     if (!driver) {
       return { ok: false, error: `Unknown storage driver: ${name}` };
     }
