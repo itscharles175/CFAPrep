@@ -26,6 +26,7 @@ import { useProgressSummary } from '../../hooks/useProgress';
 import { ActionBar, MetricTile, PageHeader, ProgressRail, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
 import { SourceCoverageMeter } from '../../components/SourceContext';
 import { getCfaSourceCoverageMap, getCfaSourceMapStatus } from '../../lib/cfaSourceVault';
+import { buildStudyPlan } from '../../lib/studyDirector';
 
 const iconMap = {
   ethics: Shield,
@@ -72,6 +73,7 @@ export default function CfaDashboard() {
   const [activePathway, setActivePathway] = useLevel3Pathway();
   const [sourceCoverage, setSourceCoverage] = useState(null);
   const [sourceStatus, setSourceStatus] = useState(null);
+  const [studyPlan, setStudyPlan] = useState(null);
   const cfaLevels = useMemo(() => getCfaLevelSummaries({ level3Pathway: activePathway }), [activePathway]);
   const runtimeReport = getCfaRuntimeReport();
   const activeLevels = runtimeReport.levels;
@@ -90,6 +92,18 @@ export default function CfaDashboard() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    buildStudyPlan({ pathway: activePathway })
+      .then((plan) => {
+        if (active) setStudyPlan(plan);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [activePathway, summary.questionsAnswered]);
 
   return (
     <div className="page-container">
@@ -118,6 +132,44 @@ export default function CfaDashboard() {
         <MetricTile label="Questions" value={summary.questionsAnswered.toLocaleString()} detail="Recorded answer rows" icon={Target} tone="accent" />
         <MetricTile label="Weakest Signal" value={firstWeak ? `${firstWeak.score}%` : '-'} detail={firstWeak?.title || 'No weak objective yet'} icon={Inbox} tone="warning" />
       </div>
+
+      {studyPlan && studyPlan.actions.length > 0 && (
+        <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+          <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
+            <div>
+              <StatusBadge tone="accent">Study Director</StatusBadge>
+              <h3 style={{ margin: 'var(--space-1) 0 0' }}>{studyPlan.headline}</h3>
+              <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+                Prioritized from your local FSRS queue, topic readiness, and upcoming review load.
+              </p>
+            </div>
+          </div>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {studyPlan.actions.slice(0, 4).map((action, index) => {
+              const ActionIcon = action.kind === 'review' ? Inbox : action.kind === 'weak-topic' ? Target : action.kind === 'forecast-spike' ? TrendingUp : ChevronRight;
+              const toneByKind = { review: 'warning', 'weak-topic': 'danger', 'forecast-spike': 'exam', continue: 'success' };
+              return (
+                <li key={`${action.kind}-${index}`}>
+                  <Link
+                    to={action.path}
+                    className="flex-between"
+                    style={{ gap: 'var(--space-3)', alignItems: 'center', padding: 'var(--space-3)', borderRadius: 'var(--radius-md, 8px)', border: '1px solid var(--border)', textDecoration: 'none', color: 'inherit' }}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                      <ActionIcon size={18} />
+                      <span>
+                        <strong style={{ display: 'block' }}>{action.title}</strong>
+                        <small className="muted-copy">{action.reason}</small>
+                      </span>
+                    </span>
+                    <StatusBadge tone={toneByKind[action.kind] || 'accent'}>{action.kind.replace('-', ' ')}</StatusBadge>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </Surface>
+      )}
 
       <SourceCoverageMeter coverage={sourceCoverage} status={sourceStatus} title="Native CFA Source Layer" />
 
