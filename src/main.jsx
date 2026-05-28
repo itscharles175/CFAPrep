@@ -10,6 +10,12 @@ import 'katex/dist/katex.min.css';
 import { registerServiceWorker } from './registerServiceWorker';
 import { bootstrapSourceVault } from './lib/bootstrapSourceVault';
 import { bootstrapAiContent } from './lib/bootstrapAiContent';
+import { applyTheme, getStoredTheme } from './lib/theme';
+
+// Apply the stored theme to <html> BEFORE React mounts so the first paint
+// already shows the correct palette. Without this, users with the light
+// theme persisted would see a one-frame dark flash while React boots.
+applyTheme(getStoredTheme());
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

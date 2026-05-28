@@ -173,6 +173,99 @@
     --sidebar-width-collapsed: 64px;
   }
 
+  /* ─────────────────────────────────────────────────────────────
+   * 9. LIGHT THEME — semantic color overrides only
+   *
+   *   Light-mode swap rebinds the raw palette references in index.css
+   *   (--bg-primary, --text-primary, …) which then propagate up through
+   *   the semantic aliases above. The block below RESTATES the semantic
+   *   mappings at the token layer so a reviewer auditing `tokens.css`
+   *   can read the full light-theme intent without flipping files.
+   *
+   *   Only color/surface tokens get themed. Spacing, typography, radius,
+   *   elevation, motion, z-index, and layout stay theme-agnostic.
+   *
+   *   Light backgrounds: `#FFFFFF` surfaces over an `#F4F7FB` canvas,
+   *   text on near-black `#0F172A` — verified WCAG AA (≥4.5:1) body
+   *   contrast against both surface colors.
+   * ───────────────────────────────────────────────────────────── */
+
+  :root[data-theme="light"] {
+    --color-bg-canvas:    var(--bg-primary);
+    --color-bg-surface:   var(--bg-secondary);
+    --color-bg-surface-2: var(--bg-card);
+
+    --color-text-primary:   var(--text-primary);
+    --color-text-secondary: var(--text-secondary);
+    --color-text-muted:     var(--text-muted);
+
+    --color-border:        var(--border);
+    --color-border-strong: var(--border-hover);
+
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+
+    --color-success: var(--success);
+    --color-warning: var(--warning);
+    --color-danger:  var(--danger);
+    --color-exam:    var(--exam);
+
+    --color-domain-cfa:       var(--exam);
+    --color-domain-quant:     var(--quant);
+    --color-domain-excel:     var(--excel);
+    --color-domain-vault:     var(--vault);
+    --color-domain-analytics: var(--study);
+    --color-domain-ops:       var(--ops);
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+   * 10. SYSTEM PREFERENCE — pick light when the OS asks for it and
+   *     the user has NOT chosen an explicit override. The
+   *     `:not([data-theme="..."])` guard makes the explicit
+   *     `data-theme` attribute always win, in both directions.
+   *
+   *     The raw palette rebinds in `index.css` already cover the
+   *     `[data-theme="light"]` case; this media query routes the
+   *     same rebinds when no explicit attribute is set.
+   * ───────────────────────────────────────────────────────────── */
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]):not([data-theme="light"]) {
+      /* Re-bind the raw palette tokens that `index.css` flips for
+         `[data-theme="light"]`. Keeping this list in sync with that
+         block is intentional — it lets users on a system-light OS
+         experience the same light palette without storing a choice. */
+      --bg-primary: #F4F7FB;
+      --bg-secondary: #FFFFFF;
+      --bg-card: #FFFFFF;
+      --bg-hover: #CBD5E1;
+      --text-primary: #0F172A;
+      --text-secondary: #334155;
+      --text-muted: #334155;
+      --accent: #1D4ED8;
+      --accent-hover: #1E40AF;
+      --exam: #8A5A05;
+      --study: #155E75;
+      --vault: #0F766E;
+      --ops: #92400E;
+      --quant: #6D28D9;
+      --excel: #065F46;
+      --danger: #B91C1C;
+      --success: #047857;
+      --border: rgba(15, 23, 42, 0.1);
+      --border-hover: rgba(15, 23, 42, 0.2);
+      --input-bg: #FFFFFF;
+      --focus-ring: rgba(37, 99, 235, 0.16);
+      --chart-grid: rgba(15, 23, 42, 0.1);
+      --glass-bg: rgba(255, 255, 255, 0.94);
+      --glass-border: rgba(15, 23, 42, 0.1);
+      --surface-raised: rgba(255, 255, 255, 0.98);
+      --surface-panel: rgba(255, 255, 255, 0.92);
+      --surface-data: rgba(15, 23, 42, 0.045);
+      --surface-soft: rgba(37, 99, 235, 0.055);
+    }
+  }
+
   /* Honour the OS accessibility setting: zero all motion durations */
   @media (prefers-reduced-motion: reduce) {
     :root {

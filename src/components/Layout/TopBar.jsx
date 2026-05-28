@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bell, HelpCircle, Menu, Moon, RefreshCw, Search, Sun, WifiOff, X } from 'lucide-react';
+import { Bell, HelpCircle, Menu, Monitor, Moon, RefreshCw, Search, Sun, WifiOff, X } from 'lucide-react';
 import { buildSearchItems } from '../../data/catalog';
 import { level3TopicBelongsToPathway } from '../../domains/cfa/cfaLevel3Pathways';
 import { useLevel3Pathway } from '../../domains/cfa/useLevel3Pathway';
@@ -43,7 +43,7 @@ function downloadJson(payload) {
 
 export default function TopBar({ collapsed, navOpen = false, onMenuToggle }) {
   const navigate = useNavigate();
-  const { isDark, toggleTheme } = useTheme();
+  const { theme, cycleTheme } = useTheme();
   const summary = useProgressSummary();
   const [activePathway] = useLevel3Pathway();
   const [query, setQuery] = useState('');
@@ -183,8 +183,8 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }) {
       const rows = Object.values(preview.counts).reduce((sum, count) => sum + count, 0);
       setCommandMessage(`Vault repair complete. ${rows} rows checked.`);
     } else if (item.action === 'theme') {
-      toggleTheme();
-      setCommandMessage('Theme toggled.');
+      cycleTheme();
+      setCommandMessage('Theme cycled.');
     } else {
       navigate(item.path);
     }
@@ -318,8 +318,19 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }) {
         >
           <HelpCircle size={18} />
         </button>
-        <button className="btn-icon btn-ghost" title="Toggle theme" onClick={toggleTheme}>
-          {isDark ? <Moon size={18} /> : <Sun size={18} />}
+        <button
+          className="btn-icon btn-ghost"
+          title={`Theme: ${theme} (click to cycle Light → Dark → System)`}
+          aria-label={`Theme: ${theme}. Click to cycle through Light, Dark, and System.`}
+          onClick={cycleTheme}
+        >
+          {theme === 'light' ? (
+            <Sun size={18} />
+          ) : theme === 'dark' ? (
+            <Moon size={18} />
+          ) : (
+            <Monitor size={18} />
+          )}
         </button>
       </div>
 

@@ -1,30 +1,85 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import {
+  applyTheme,
+  getActiveTheme,
+  getStoredTheme,
+  setTheme as persistTheme,
+} from '../lib/theme';
 
 const ThemeContext = createContext(null);
 
-function initialTheme() {
-  if (typeof window === 'undefined') return 'dark';
-  const stored = window.localStorage.getItem('quantvault:theme');
-  if (stored === 'light' || stored === 'dark') return stored;
-  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+const CYCLE = ['light', 'dark', 'system'];
+
+function getSystemPalette() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'dark';
+  }
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
 export function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState(initialTheme);
+  // The initial value is whatever bootstrap (`src/main.jsx`) already applied to
+  // <html>, so React's first render matches the DOM state exactly — no flash.
+  const [theme, setThemeState] = useState(() => getStoredTheme());
+  // Track only the OS preference here; `resolved` is then a pure derivation
+  // of `theme` + `systemPalette`. This keeps us off the
+  // "setState-in-useEffect" antipattern (react-hooks/set-state-in-effect).
+  const [systemPalette, setSystemPalette] = useState(() => getSystemPalette());
 
+  // Subscribe to system preference changes so 'system' users follow their OS.
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem('quantvault:theme', theme);
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return undefined;
+    }
+    const query = window.matchMedia('(prefers-color-scheme: light)');
+    const handle = (event) => setSystemPalette(event.matches ? 'light' : 'dark');
+    query.addEventListener?.('change', handle);
+    return () => query.removeEventListener?.('change', handle);
+  }, []);
+
+  const resolved = theme === 'system' ? systemPalette : theme;
+
+  const setTheme = useCallback((next) => {
+    persistTheme(next);
+    setThemeState(next);
+  }, []);
+
+  // Legacy two-state toggle (light <-> dark) preserved for existing callers.
+  // 'system' resolves to its current active palette first, then flips.
+  const toggleTheme = useCallback(() => {
+    setTheme(getActiveTheme(theme) === 'dark' ? 'light' : 'dark');
+  }, [theme, setTheme]);
+
+  // Three-state cycle for the TopBar switcher: Light → Dark → System → …
+  const cycleTheme = useCallback(() => {
+    const index = CYCLE.indexOf(theme);
+    const next = CYCLE[(index + 1) % CYCLE.length];
+    setTheme(next);
+  }, [theme, setTheme]);
+
+  // Keep <html data-theme="…"> in sync if anything else clears it (e.g. HMR).
+  useEffect(() => {
+    applyTheme(theme);
   }, [theme]);
 
   const value = useMemo(
     () => ({
-      theme,
-      isDark: theme === 'dark',
-      toggleTheme: () => setTheme((current) => (current === 'dark' ? 'light' : 'dark')),
+      theme,        // 'light' | 'dark' | 'system'
+      resolved,     // 'light' | 'dark'  (the palette that is actually showing)
+      isDark: resolved === 'dark',
+      setTheme,
+      toggleTheme,
+      cycleTheme,
     }),
-    [theme],
+    [theme, resolved, setTheme, toggleTheme, cycleTheme],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
