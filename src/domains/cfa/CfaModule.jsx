@@ -25,6 +25,83 @@ import {
 } from '../../lib/openNotebook';
 import { parseCitations } from '../../lib/citations';
 
+// Interactive deck for AI-generated flashcards: front visible by default,
+// click reveals the back; small Show all / Hide all controls.
+function FlashcardDeck({ cards }) {
+  const [revealed, setRevealed] = useState(new Set());
+  const allShown = revealed.size === cards.length;
+  function toggle(id) {
+    setRevealed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-2)' }}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => setRevealed(allShown ? new Set() : new Set(cards.map((c) => c.id)))}
+        >
+          {allShown ? 'Hide all' : 'Show all'}
+        </button>
+      </div>
+      {cards.map((card) => {
+        const isOpen = revealed.has(card.id);
+        return (
+          <div
+            key={card.id}
+            style={{
+              borderTop: '1px solid var(--border)',
+              paddingTop: 'var(--space-3)',
+              marginTop: 'var(--space-3)',
+              cursor: 'pointer',
+            }}
+            onClick={() => toggle(card.id)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggle(card.id);
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            aria-expanded={isOpen}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
+              <strong style={{ flex: 1 }}>{card.front}</strong>
+              {card.locator && (
+                <span
+                  style={{
+                    flexShrink: 0,
+                    fontSize: 'var(--fs-xs)',
+                    fontFamily: 'var(--font-mono, monospace)',
+                    background: 'var(--accent-soft, rgba(120,180,255,0.15))',
+                    color: 'var(--accent, currentColor)',
+                    border: '1px solid var(--accent, transparent)',
+                    borderRadius: 'var(--radius-sm, 4px)',
+                    padding: '1px 6px',
+                  }}
+                >
+                  {card.locator}
+                </span>
+              )}
+            </div>
+            {isOpen ? (
+              <p style={{ color: 'var(--text-secondary)', margin: 'var(--space-2) 0 0' }}>{card.back}</p>
+            ) : (
+              <small className="muted-copy">Click to reveal</small>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function CfaModule() {
   const { level, topic } = useParams();
   const location = useLocation();
@@ -541,30 +618,9 @@ export default function CfaModule() {
                 {aiFlashState === 'error' && (
                   <p style={{ color: 'var(--danger)', margin: 0 }}>{aiFlashError}</p>
                 )}
-                {aiFlashState === 'done' && aiFlashcards.map((card) => (
-                  <div key={card.id} style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
-                      <strong style={{ flex: 1 }}>{card.front}</strong>
-                      {card.locator && (
-                        <span
-                          style={{
-                            flexShrink: 0,
-                            fontSize: 'var(--fs-xs)',
-                            fontFamily: 'var(--font-mono, monospace)',
-                            background: 'var(--accent-soft, rgba(120,180,255,0.15))',
-                            color: 'var(--accent, currentColor)',
-                            border: '1px solid var(--accent, transparent)',
-                            borderRadius: 'var(--radius-sm, 4px)',
-                            padding: '1px 6px',
-                          }}
-                        >
-                          {card.locator}
-                        </span>
-                      )}
-                    </div>
-                    <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 'var(--space-2) 0 0' }}>{card.back}</p>
-                  </div>
-                ))}
+                {aiFlashState === 'done' && aiFlashcards.length > 0 && (
+                  <FlashcardDeck cards={aiFlashcards} />
+                )}
               </Surface>
 
               <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
