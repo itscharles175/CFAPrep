@@ -11,7 +11,7 @@ import {
   listNotebooks as listOnbNotebooks,
   saveOpenNotebookSettings,
 } from '../lib/openNotebook';
-import { ingestFolder, isTauri, pickCfaFolder } from '../lib/desktopIngestion';
+import { ingestFolder, ingestTextSource, isTauri, pickCfaFolder } from '../lib/desktopIngestion';
 import { deleteCfaSourceDocument, getCfaSourceDocuments } from '../lib/cfaSourceVault';
 
 function downloadJson(payload) {
@@ -47,6 +47,11 @@ export default function SystemHealth() {
   const [sourceDocsBusy, setSourceDocsBusy] = useState(false);
   const [onbNotebooks, setOnbNotebooks] = useState([]);
   const [onbNotebooksBusy, setOnbNotebooksBusy] = useState(false);
+  const [pasteTitle, setPasteTitle] = useState('');
+  const [pasteTopic, setPasteTopic] = useState('');
+  const [pasteText, setPasteText] = useState('');
+  const [pasteBusy, setPasteBusy] = useState(false);
+  const [pasteError, setPasteError] = useState('');
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -140,6 +145,29 @@ export default function SystemHealth() {
       setOnbNotebooks([]);
     } finally {
       setOnbNotebooksBusy(false);
+    }
+  }
+
+  async function handleIngestPastedText() {
+    setPasteError('');
+    setPasteBusy(true);
+    try {
+      const title = pasteTitle.trim() || 'Pasted source';
+      const topicIds = pasteTopic.trim() ? [pasteTopic.trim()] : [];
+      const result = await ingestTextSource({ title, text: pasteText, topicIds });
+      await refreshSourceDocs();
+      setMessage(
+        result.deduped
+          ? `Same text was already ingested as ${result.documentId}.`
+          : `Pasted "${title}" ingested (${result.chunkCount} chunks).`,
+      );
+      setPasteText('');
+      setPasteTitle('');
+      setPasteTopic('');
+    } catch (error) {
+      setPasteError(error instanceof Error ? error.message : 'Could not ingest pasted text.');
+    } finally {
+      setPasteBusy(false);
     }
   }
 
@@ -551,6 +579,41 @@ export default function SystemHealth() {
             )}
           </div>
         )}
+      </Surface>
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div style={{ marginBottom: 'var(--space-3)' }}>
+          <StatusBadge tone="accent">Paste a source</StatusBadge>
+          <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingest free text directly into the vault</h3>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+            For lecture notes, blog excerpts, or any non-PDF material you want to use in grounded answers. Same chunker/dedupe path as PDF ingestion; SHA-256 of the text serves as the document id.
+          </p>
+        </div>
+        <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Title</span>
+            <input className="input" value={pasteTitle} onChange={(event) => setPasteTitle(event.target.value)} placeholder="e.g. Fixed Income lecture notes" />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Topic id (optional)</span>
+            <input className="input" value={pasteTopic} onChange={(event) => setPasteTopic(event.target.value)} placeholder="e.g. fixed-income" />
+          </label>
+        </div>
+        <textarea
+          className="input"
+          rows={6}
+          style={{ width: '100%', marginBottom: 'var(--space-2)', fontFamily: 'inherit' }}
+          value={pasteText}
+          onChange={(event) => setPasteText(event.target.value)}
+          placeholder="Paste curriculum text, lecture notes, or any non-PDF source material..."
+        />
+        <div className="flex-between" style={{ gap: 'var(--space-2)', alignItems: 'center' }}>
+          <small className="muted-copy">{pasteText.length.toLocaleString()} character(s)</small>
+          <button className="btn btn-primary" onClick={handleIngestPastedText} disabled={pasteBusy || !pasteText.trim()}>
+            {pasteBusy ? 'Ingesting…' : 'Ingest paste'}
+          </button>
+        </div>
+        {pasteError && <p style={{ color: 'var(--danger)', margin: 'var(--space-2) 0 0' }}>{pasteError}</p>}
       </Surface>
 
       <Surface tone="ops" className="ops-report-panel">

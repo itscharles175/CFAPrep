@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { classifyPath, isTauri, pageChunksFromPages } from './desktopIngestion';
+import { afterEach, describe, expect, it } from 'vitest';
+import { classifyPath, ingestTextSource, isTauri, pageChunksFromPages } from './desktopIngestion';
+import { db } from './progressStore';
 
 describe('desktopIngestion (pure helpers)', () => {
   it('isTauri returns false in plain browser / jsdom test env', () => {
@@ -58,5 +59,47 @@ describe('desktopIngestion (pure helpers)', () => {
     const pages = [{ pageNumber: 1, text: '!!! --- ... ??? !!!' }];
     const chunks = pageChunksFromPages(pages, 'd', 'h', [], '2026-05-27T00:00:00Z');
     expect(chunks).toHaveLength(0);
+  });
+
+  describe('ingestTextSource', () => {
+    afterEach(async () => {
+      await db.sourceDocuments.clear();
+      await db.sourceChunks.clear();
+    });
+
+    it('persists a document + chunks for a pasted text source and dedupes on re-ingest', async () => {
+      const text = `Modified duration estimates a bond's percentage price change for a 1pp shift in yield. `.repeat(20);
+      const first = await ingestTextSource({
+        title: 'Modified Duration notes',
+        text,
+        topicIds: ['fixed-income'],
+        level: 'level1',
+        publisher: 'Lecture notes',
+      });
+      expect(first.deduped).toBe(false);
+      expect(first.chunkCount).toBeGreaterThan(0);
+      expect(first.documentId.startsWith('paste:')).toBe(true);
+
+      const doc = await db.sourceDocuments.get(first.documentId);
+      expect(doc).toBeDefined();
+      expect(doc?.title).toBe('Modified Duration notes');
+      expect(doc?.sourceKind).toBe('user-source');
+      expect(doc?.format).toBe('text');
+      expect(doc?.topicIds).toEqual(['fixed-income']);
+      const chunks = await db.sourceChunks.where('documentId').equals(first.documentId).toArray();
+      expect(chunks.length).toBe(first.chunkCount);
+      expect(chunks[0].locator).toMatch(/^p\. 1$/);
+
+      // Same text → dedupes (same documentId, no new write).
+      const second = await ingestTextSource({ title: 'Different title same text', text });
+      expect(second.deduped).toBe(true);
+      expect(second.documentId).toBe(first.documentId);
+      const docs = await db.sourceDocuments.toArray();
+      expect(docs).toHaveLength(1);
+    });
+
+    it('rejects empty text', async () => {
+      await expect(ingestTextSource({ title: 'x', text: '   ' })).rejects.toThrow(/empty/);
+    });
   });
 });

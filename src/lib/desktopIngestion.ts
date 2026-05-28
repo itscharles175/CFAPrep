@@ -259,6 +259,65 @@ export async function extractPdfPages(bytes: Uint8Array): Promise<{ pages: PageT
 // SHA-256 via Web Crypto — used both for dedupe and the documentId derivation.
 // ---------------------------------------------------------------------------
 
+/**
+ * Ingest a free-text source (paste, clipboard, lecture transcript). Creates a
+ * sourceDocument + page-aware chunks indistinguishable from the bundled or
+ * desktop-PDF pipeline so all downstream features (RAG, source-vault search,
+ * citation legend) work uniformly. Skips silently if the same text was already
+ * ingested (sha256 dedupe).
+ */
+export async function ingestTextSource(params: {
+  title: string;
+  text: string;
+  topicIds?: string[];
+  level?: CfaSourceLevel;
+  publisher?: string;
+}): Promise<{ documentId: string; chunkCount: number; deduped: boolean }> {
+  const text = (params.text || '').trim();
+  if (!text) throw new Error('Pasted text is empty.');
+  const title = (params.title || 'Pasted source').trim();
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(text);
+  const hash = await sha256Hex(bytes);
+  const documentId = `paste:${hash.slice(0, 16)}`;
+
+  const existing = await db.sourceDocuments.get(documentId);
+  if (existing) return { documentId, chunkCount: existing.chunkCount ?? 0, deduped: true };
+
+  const importedAt = new Date().toISOString();
+  // Synthesize one "page" so the chunker's locator code yields p.1 references.
+  const chunks = pageChunksFromPages(
+    [{ pageNumber: 1, text }],
+    documentId,
+    hash,
+    params.topicIds || [],
+    importedAt,
+  );
+  const document: CfaSourceDocument = {
+    id: documentId,
+    title,
+    level: params.level || 'unknown',
+    publisher: params.publisher || 'User Paste',
+    sourceKind: 'user-source',
+    format: 'text',
+    sha256: hash,
+    sizeBytes: bytes.byteLength,
+    pageCount: 1,
+    extractableTextChars: text.length,
+    canonical: false,
+    coverageTags: [params.level || 'unknown', 'user-source'],
+    topicIds: params.topicIds || [],
+    chunkCount: chunks.length,
+    importedAt,
+    privateUseOnly: true,
+  };
+  await db.transaction('rw', db.sourceDocuments, db.sourceChunks, async () => {
+    await db.sourceDocuments.put(document);
+    await db.sourceChunks.bulkPut(chunks);
+  });
+  return { documentId, chunkCount: chunks.length, deduped: false };
+}
+
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   // Cast through ArrayBufferView so TS accepts it as a BufferSource regardless
   // of whether the underlying buffer is ArrayBuffer or SharedArrayBuffer.
