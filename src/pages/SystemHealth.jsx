@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Database, Download, HardDrive, KeyRound, ShieldCheck, WifiOff, Wrench } from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
 import { exportVaultData, getVaultHealthReport, previewVaultRepair } from '../lib/learning';
@@ -39,10 +39,11 @@ export default function SystemHealth() {
   const [onbStatus, setOnbStatus] = useState(null);
   const [onbTesting, setOnbTesting] = useState(false);
   const desktopAvailable = isTauri();
-  const [ingestState, setIngestState] = useState('idle'); // idle | picking | running | done | error
+  const [ingestState, setIngestState] = useState('idle'); // idle | picking | running | done | error | cancelled
   const [ingestProgress, setIngestProgress] = useState(null);
   const [ingestResult, setIngestResult] = useState(null);
   const [ingestError, setIngestError] = useState('');
+  const ingestAbortRef = useRef(null);
   const [sourceDocs, setSourceDocs] = useState([]);
   const [sourceDocsBusy, setSourceDocsBusy] = useState(false);
   const [onbNotebooks, setOnbNotebooks] = useState([]);
@@ -236,6 +237,8 @@ export default function SystemHealth() {
     setIngestError('');
     setIngestResult(null);
     setIngestProgress(null);
+    const controller = new AbortController();
+    ingestAbortRef.current = controller;
     try {
       setIngestState('picking');
       const folder = await pickCfaFolder();
@@ -246,16 +249,27 @@ export default function SystemHealth() {
       setIngestState('running');
       const result = await ingestFolder({
         folder,
+        signal: controller.signal,
         onProgress: (event) => setIngestProgress(event),
       });
       setIngestResult(result);
-      setIngestState('done');
+      setIngestState(controller.signal.aborted ? 'cancelled' : 'done');
       setMessage(`Ingested ${result.ingested} new document(s) (${result.chunkCount} chunks). Skipped ${result.skipped} duplicate(s).`);
       await refreshSourceDocs();
     } catch (error) {
-      setIngestState('error');
-      setIngestError(error instanceof Error ? error.message : 'Folder ingestion failed.');
+      if (controller.signal.aborted) {
+        setIngestState('cancelled');
+      } else {
+        setIngestState('error');
+        setIngestError(error instanceof Error ? error.message : 'Folder ingestion failed.');
+      }
+    } finally {
+      ingestAbortRef.current = null;
     }
+  }
+
+  function handleCancelIngest() {
+    ingestAbortRef.current?.abort();
   }
 
   async function handleSaveOnb() {
@@ -527,18 +541,28 @@ export default function SystemHealth() {
                 Point QuantVault at a folder of CFA curriculum PDFs on disk; the native shell will walk it, extract text, chunk by page, classify by topic, and store in your local source vault. Duplicates (by SHA-256) are skipped automatically.
               </p>
             </div>
-            <button
-              className="btn btn-primary"
-              onClick={handleIngestFolder}
-              disabled={ingestState === 'picking' || ingestState === 'running'}
-            >
-              {ingestState === 'picking' ? 'Waiting on picker…' : ingestState === 'running' ? 'Ingesting…' : 'Pick folder…'}
-            </button>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+              <button
+                className="btn btn-primary"
+                onClick={handleIngestFolder}
+                disabled={ingestState === 'picking' || ingestState === 'running'}
+              >
+                {ingestState === 'picking' ? 'Waiting on picker…' : ingestState === 'running' ? 'Ingesting…' : 'Pick folder…'}
+              </button>
+              {ingestState === 'running' && (
+                <button className="btn btn-secondary" onClick={handleCancelIngest}>Cancel</button>
+              )}
+            </div>
           </div>
           {ingestProgress && ingestState === 'running' && (
             <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
               {ingestProgress.index + 1}/{ingestProgress.total} · {ingestProgress.fileName} · {ingestProgress.status}
               {ingestProgress.message ? ` (${ingestProgress.message})` : ''}
+            </p>
+          )}
+          {ingestState === 'cancelled' && (
+            <p className="muted-copy" style={{ margin: 'var(--space-2) 0 0' }}>
+              Ingestion cancelled. Anything ingested so far has been kept in the vault.
             </p>
           )}
           {ingestState === 'error' && (
