@@ -1,6 +1,13 @@
 // QuantVault desktop shell — supervises the local sidecars (SurrealDB,
 // open-notebook API, and its job worker) and hosts the QuantVault UI as the
 // webview. Fully offline; everything runs on the user's machine.
+//
+// Sidecar resolution (`services_dir`) currently expects a `spike/` directory
+// next to the working dir containing the SurrealDB binary + the open-notebook
+// clone with its `.venv`. That's a dev-time arrangement only. Production
+// packaging (Pillar 0, still open) needs to bundle the Python backend via
+// PyInstaller into Tauri's `resourceDir()` and update this path resolution.
+// Set the `QV_SERVICES_DIR` env var to override the search at runtime.
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Mutex;
