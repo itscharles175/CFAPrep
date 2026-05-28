@@ -150,6 +150,7 @@ const offlineCriticalRouteIds = new Set<AppRouteId>([
   'vault',
   'flashcards',
   'system',
+  'today',
 ]);
 
 const keyboardScopesByRoute: Partial<Record<AppRouteId, string[]>> = {
