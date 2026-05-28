@@ -6,6 +6,7 @@ import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { buildStudyPlan } from '../lib/studyDirector';
 import { generateQuestionsFromCurriculum, getLlmSettings, narrateStudyPlan } from '../lib/localLlm';
 import { getCfaSourceReadingForTopic } from '../lib/cfaSourceVault';
+import { db } from '../lib/progressStore';
 
 // Parse a /cfa/<level>/<topic> path produced by buildStudyPlan into its
 // level + topic ids. Returns null for paths that don't fit the shape.
@@ -45,6 +46,22 @@ export default function Today() {
   // Map of question.id -> selected option index. Empty until the user picks.
   const [drillAnswers, setDrillAnswers] = useState({});
   const [narrative, setNarrative] = useState({ state: 'idle', text: '', error: '' });
+  const [examCountdown, setExamCountdown] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    db.settings.get('exam-date').then((row) => {
+      if (!active || !row?.value) return;
+      const target = new Date(row.value);
+      if (Number.isNaN(target.getTime())) return;
+      const diffMs = target.getTime() - Date.now();
+      const days = Math.ceil(diffMs / 86400000);
+      setExamCountdown({ days, date: row.value });
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function generateNarrative() {
     if (!plan) return;
@@ -143,6 +160,13 @@ export default function Today() {
               <StatusBadge tone="warning">{plan.dueCount} review{plan.dueCount === 1 ? '' : 's'} due</StatusBadge>
               <StatusBadge tone="danger">{plan.weakCount} weak topic{plan.weakCount === 1 ? '' : 's'}</StatusBadge>
               {plan.peakReviewDay && <StatusBadge tone="exam">Peak {plan.peakReviewDay.date} · {plan.peakReviewDay.count}</StatusBadge>}
+              {examCountdown && (
+                <StatusBadge tone={examCountdown.days < 14 ? 'danger' : examCountdown.days < 60 ? 'warning' : 'exam'}>
+                  {examCountdown.days <= 0
+                    ? `Exam ${examCountdown.days === 0 ? 'today' : `${-examCountdown.days}d ago`}`
+                    : `${examCountdown.days}d to exam`}
+                </StatusBadge>
+              )}
             </>
           ) : null
         }

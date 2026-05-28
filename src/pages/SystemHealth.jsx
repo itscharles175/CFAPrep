@@ -62,6 +62,7 @@ export default function SystemHealth() {
   const [onbNotebooksBusy, setOnbNotebooksBusy] = useState(false);
   const [cacheBuckets, setCacheBuckets] = useState(null);
   const [cacheBusy, setCacheBusy] = useState(false);
+  const [examDate, setExamDate] = useState('');
   const [pasteTitle, setPasteTitle] = useState('');
   const [pasteTopic, setPasteTopic] = useState('');
   const [pasteText, setPasteText] = useState('');
@@ -123,6 +124,29 @@ export default function SystemHealth() {
     if (onb?.enabled) refreshOnbNotebooks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onb?.enabled, onb?.baseUrl]);
+
+  // Load cache buckets + exam date on mount.
+  useEffect(() => {
+    let active = true;
+    refreshCacheBuckets();
+    db.settings.get('exam-date').then((row) => {
+      if (active && row?.value) setExamDate(row.value);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleSaveExamDate() {
+    if (examDate) {
+      await db.settings.put({ key: 'exam-date', value: examDate, updatedAt: new Date().toISOString() });
+      setMessage(`Exam date set to ${examDate}.`);
+      toast.success('Exam date saved', 'Countdown will appear on /today.');
+    } else {
+      await db.settings.delete('exam-date');
+      setMessage('Exam date cleared.');
+    }
+  }
 
   async function refreshSourceDocs() {
     setSourceDocsBusy(true);
@@ -545,6 +569,28 @@ export default function SystemHealth() {
             {vaultHealth.repairActions.map((action) => <li key={action}>{action}</li>)}
           </ul>
         )}
+      </Surface>
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
+          <div>
+            <StatusBadge tone="exam">Exam Date</StatusBadge>
+            <h3 style={{ margin: 'var(--space-2) 0 0' }}>Target exam date (pacing)</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+              Drives the countdown on /today and feeds future exam-date pacing logic. Leave empty to disable.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+            <input
+              type="date"
+              className="input"
+              value={examDate}
+              onChange={(event) => setExamDate(event.target.value)}
+              aria-label="Target CFA exam date"
+            />
+            <button className="btn btn-primary btn-sm" onClick={handleSaveExamDate}>Save</button>
+          </div>
+        </div>
       </Surface>
 
       <Surface tone="ops" className="ops-report-panel">
