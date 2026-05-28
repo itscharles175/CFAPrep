@@ -28,6 +28,7 @@ import { parseCitations } from '../../lib/citations';
 import { hasSpeechRecognition, hasSpeechSynthesis, recognizeOnce, recognizeOnceOffline, recordAudioForOfflineStt, sanitizeForSpeech, speak, stopSpeaking } from '../../lib/voice';
 import PodcastPanel from '../../components/PodcastPanel/PodcastPanel';
 import { CitationChip, SourceLegend } from '../../components/OpenNotebook/OpenNotebookPrimitives';
+import { localGroundedAnswer } from '../../lib/localRag';
 import VirtualizedList from '../../components/VirtualizedList/VirtualizedList';
 
 // Virtualization-threshold: only virtualize once the deck/list crosses this
@@ -421,8 +422,32 @@ export default function CfaModule() {
     try {
       const settings = await getOpenNotebookSettings();
       if (!settings.enabled) {
-        setAskState('error');
-        setAskError('Enable the embedded notebook in System Health → Embedded Notebook first.');
+        // No embedded notebook — fall back to the fully-local semantic RAG
+        // path (chunk retrieval through the storage abstraction + local LLM).
+        // Works offline with no sidecar; uses the same numbered-citation shape.
+        const llmSettings = await getLlmSettings();
+        if (!llmSettings.enabled) {
+          setAskState('error');
+          setAskError('Enable either the embedded notebook or a local model in System Health to ask grounded questions.');
+          return;
+        }
+        const local = await localGroundedAnswer({
+          question,
+          domain: 'cfa',
+          level,
+          topic,
+          settings: llmSettings,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) {
+          setAskState('cancelled');
+          return;
+        }
+        setAskAnswer(local.answer);
+        setAskState('done');
+        await saveCachedGroundedAnswer(level, topic, { question, answer: local.answer });
+        const refreshedLocal = await getCachedGroundedAnswerHistory(level, topic);
+        setAskHistory(refreshedLocal);
         return;
       }
       const { sourceId } = await ensureTopicNotebook({

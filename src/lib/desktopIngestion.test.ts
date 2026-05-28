@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { classifyPath, ingestTextSource, isTauri, pageChunksFromPages } from './desktopIngestion';
+import { classifyPath, extractStructure, ingestTextSource, isTauri, pageChunksFromPages } from './desktopIngestion';
 import { db } from './progressStore';
 
 describe('desktopIngestion (pure helpers)', () => {
@@ -55,10 +55,74 @@ describe('desktopIngestion (pure helpers)', () => {
     expect(chunks.some((c) => /264|265/.test(c.locator))).toBe(true);
   });
 
+  it('populates learningOutcomes on a chunk whose page text contains LOS', () => {
+    const losBlock =
+      'LEARNING OUTCOMES The candidate should be able to: a. calculate the value of a bond; ' +
+      'b. describe the term structure; c. compare credit spreads across issuers. ';
+    const pages = [{ pageNumber: 12, text: losBlock + 'filler '.repeat(120) }];
+    const chunks = pageChunksFromPages(pages, 'desktop:los', 'hash:los', ['fixed-income'], '2026-05-27T00:00:00Z');
+    expect(chunks.length).toBeGreaterThan(0);
+    const tagged = chunks.find((chunk) => (chunk.learningOutcomes?.length ?? 0) > 0);
+    expect(tagged).toBeDefined();
+    expect(tagged?.learningOutcomes).toEqual(
+      expect.arrayContaining(['calculate the value of a bond', 'describe the term structure']),
+    );
+    expect(tagged?.losVerbs).toEqual(expect.arrayContaining(['calculate', 'describe', 'compare']));
+  });
+
   it('drops chunks that fail the normalized-length floor (mostly punctuation)', () => {
     const pages = [{ pageNumber: 1, text: '!!! --- ... ??? !!!' }];
     const chunks = pageChunksFromPages(pages, 'd', 'h', [], '2026-05-27T00:00:00Z');
     expect(chunks).toHaveLength(0);
+  });
+
+  describe('extractStructure (LOS + heading)', () => {
+    it('pulls 3 LOS from a "candidate should be able to" lettered block', () => {
+      const s = extractStructure('The candidate should be able to: a. calculate X; b. describe Y; c. compare Z');
+      expect(s.learningOutcomes).toEqual(['calculate X', 'describe Y', 'compare Z']);
+    });
+
+    it('returns the opening verbs (deduplicated, lowercased) for that block', () => {
+      const s = extractStructure('The candidate should be able to: a. calculate X; b. describe Y; c. compare Z');
+      expect(s.losVerbs).toEqual(['calculate', 'describe', 'compare']);
+    });
+
+    it('returns an empty learningOutcomes array for plain prose with no LOS', () => {
+      const s = extractStructure(
+        'Modified duration estimates a bond price change for a small shift in yield. This is ordinary prose about fixed income.',
+      );
+      expect(s.learningOutcomes).toEqual([]);
+      expect(s.losVerbs).toEqual([]);
+    });
+
+    it('detects a bulleted LOS list introduced by "Learning Outcomes"', () => {
+      const s = extractStructure('Learning Outcomes • evaluate the credit risk • identify the spread duration');
+      expect(s.learningOutcomes).toContain('evaluate the credit risk');
+      expect(s.losVerbs).toContain('evaluate');
+    });
+
+    it('caps the LOS list at 20', () => {
+      let text = 'The candidate should be able to: ';
+      for (let i = 0; i < 30; i += 1) {
+        text += `${String.fromCharCode(97 + (i % 26))}. calculate item number ${i}; `;
+      }
+      const s = extractStructure(text);
+      expect(s.learningOutcomes).toHaveLength(20);
+    });
+
+    it('still extracts a "LEARNING MODULE 5: Fixed Income" heading', () => {
+      const s = extractStructure('LEARNING MODULE 5: Fixed Income duration and convexity discussion follows.');
+      expect(s.heading).toContain('LEARNING MODULE 5');
+      expect(s.heading).toContain('Fixed Income');
+    });
+
+    it('catches a "STUDY SESSION 3" heading but not the word "reading" mid-prose', () => {
+      const session = extractStructure('STUDY SESSION 3 introduces the topics for this level.');
+      expect(session.heading).toContain('STUDY SESSION 3');
+
+      const prose = extractStructure('The candidate enjoyed reading the chapter on the topic of bond pricing.');
+      expect(prose.heading).toBeUndefined();
+    });
   });
 
   describe('ingestTextSource', () => {

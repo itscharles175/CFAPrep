@@ -48,6 +48,10 @@ export type CfaSourceChunk = {
   topicIds: string[];
   sourceHash: string;
   importedAt: string;
+  /** Individual Learning Outcome Statements detected in this chunk (CFA curriculum). */
+  learningOutcomes?: string[];
+  /** Lowercased, deduplicated action verbs that opened each detected LOS. */
+  losVerbs?: string[];
 };
 
 export type CfaSourceIndex = {

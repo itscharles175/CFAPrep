@@ -243,11 +243,118 @@ export interface PageText {
   text: string;
 }
 
-const HEADING_PATTERN = /\b(?:LEARNING MODULE|READING|LEARNING OUTCOMES)\b[^.]{0,90}/i;
+// Section headings in CFA curriculum text. The original variants ("LEARNING
+// MODULE", "READING", "LEARNING OUTCOMES") match case-insensitively anywhere.
+// The broadened variants ("STUDY SESSION", "TOPIC", "MODULE n") are scoped to
+// an ALL-CAPS run so we don't match the words "topic" / "module" / "reading"
+// when they appear mid-sentence in ordinary prose. A trailing letter-bearing
+// label (number, colon, or title text) is required so a bare capitalized word
+// in a sentence ("The READING was long.") doesn't qualify.
+const HEADING_PATTERN =
+  /\b(?:LEARNING MODULE|READING|LEARNING OUTCOMES|STUDY SESSION|TOPIC|MODULE)\b(?:\s+\d+)?(?:[ :.–-][^.]{0,90})?/;
 
 function headingForSlice(text: string): string | undefined {
   const match = text.match(HEADING_PATTERN);
-  return match ? match[0].replace(/\s+/g, ' ').trim().slice(0, 90) : undefined;
+  if (!match) return undefined;
+  return match[0].replace(/\s+/g, ' ').trim().slice(0, 90);
+}
+
+// ---------------------------------------------------------------------------
+// LOS (Learning Outcome Statement) extraction. CFA LOS are highly patterned:
+// a "The candidate should be able to:" / "Learning Outcomes" lead-in followed
+// by a lettered or bulleted list, each item opening with one of a fixed set of
+// command verbs. We exploit that structure to pull out individual statements.
+// ---------------------------------------------------------------------------
+
+export interface ExtractedStructure {
+  heading?: string; // best section heading found (existing behavior, kept)
+  learningOutcomes: string[]; // individual LOS statements detected in the text
+  losVerbs: string[]; // the action verbs that opened each LOS (calculate, describe, …)
+}
+
+// The CFA LOS command-word set. Order doesn't matter; it's joined into an
+// alternation. Verbs are matched case-insensitively at the start of a statement.
+const LOS_COMMAND_VERBS = [
+  'calculate',
+  'describe',
+  'explain',
+  'compare',
+  'contrast',
+  'demonstrate',
+  'determine',
+  'evaluate',
+  'identify',
+  'interpret',
+  'analyze',
+  'estimate',
+  'formulate',
+  'justify',
+  'recommend',
+  'distinguish',
+  'define',
+  'derive',
+  'construct',
+  'classify',
+  'prepare',
+] as const;
+
+const LOS_VERB_ALTERNATION = LOS_COMMAND_VERBS.join('|');
+
+// A LOS line: optional list marker (a. / b) / • / - / digit.) then a command
+// verb then the rest of the statement up to a terminating ; or . or newline or
+// the next list marker. The verb is captured in group 1.
+const LOS_LINE_PATTERN = new RegExp(
+  String.raw`(?:^|[;\n••\-–]|\b[a-z]\.|\b[a-z]\)|\b\d{1,2}\.)\s*(` +
+    LOS_VERB_ALTERNATION +
+    String.raw`)\b[^;.\n••]*`,
+  'gi',
+);
+
+// Lead-in phrases that introduce a LOS section. We only mine for LOS once we've
+// seen one of these, which guards against random sentences that happen to begin
+// with a command verb (e.g. "Describe the chart below.").
+const LOS_LEADIN_PATTERN =
+  /(?:the candidate should be able to|learning outcomes?|learning outcome statements?)\s*:?/i;
+
+const MAX_LOS = 20;
+const MAX_LOS_LENGTH = 200;
+
+export function extractStructure(text: string): ExtractedStructure {
+  const heading = headingForSlice(text);
+  const learningOutcomes: string[] = [];
+  const verbSet = new Set<string>();
+
+  const leadIn = text.match(LOS_LEADIN_PATTERN);
+  if (leadIn && typeof leadIn.index === 'number') {
+    // Only scan the region after the lead-in phrase so unrelated command-verb
+    // sentences earlier in the chunk aren't swept up as outcomes.
+    const region = text.slice(leadIn.index + leadIn[0].length);
+    const pattern = new RegExp(LOS_LINE_PATTERN.source, 'gi');
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(region)) !== null) {
+      if (match[0].trim().length === 0) {
+        // Zero-width safety: advance to avoid an infinite loop.
+        pattern.lastIndex += 1;
+        continue;
+      }
+      const verb = match[1].toLowerCase();
+      const statement = match[0]
+        .replace(/^[\s;••\-–]*(?:[a-z][.)]|\d{1,2}\.)?\s*/i, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, MAX_LOS_LENGTH);
+      if (!statement) continue;
+      learningOutcomes.push(statement);
+      verbSet.add(verb);
+      if (learningOutcomes.length >= MAX_LOS) break;
+    }
+  }
+
+  return {
+    heading,
+    learningOutcomes,
+    losVerbs: [...verbSet],
+  };
 }
 
 function normalizeText(value: string): string {
@@ -283,17 +390,20 @@ export function pageChunksFromPages(
     if (normalizedChunk.length >= 80) {
       const startPage = slice[0].page;
       const endPage = slice[slice.length - 1].page;
+      const structure = extractStructure(chunkText);
       chunks.push({
         id: `${documentId}:chunk:${String(chunks.length + 1).padStart(4, '0')}`,
         documentId,
         chunkIndex: chunks.length,
         locator: startPage === endPage ? `p. ${startPage}` : `p. ${startPage}-${endPage}`,
-        heading: headingForSlice(chunkText),
+        heading: structure.heading,
         text: chunkText,
         normalizedText: normalizedChunk,
         topicIds,
         sourceHash: hash,
         importedAt,
+        ...(structure.learningOutcomes.length ? { learningOutcomes: structure.learningOutcomes } : {}),
+        ...(structure.losVerbs.length ? { losVerbs: structure.losVerbs } : {}),
       });
     }
     if (index + wordsPerChunk >= words.length) break;
