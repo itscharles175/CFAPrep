@@ -70,6 +70,7 @@ export default function KnowledgeGraph() {
   const [hoverId, setHoverId] = useState(null);
   const [colorMode, setColorMode] = useState('coverage'); // 'coverage' | 'mastery'
   const [masteryByTopic, setMasteryByTopic] = useState(null);
+  const [filter, setFilter] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -157,6 +158,19 @@ export default function KnowledgeGraph() {
   const height = FIRST_ROW_Y + maxRows * ROW_HEIGHT + 40;
   const width = 1160;
 
+  // Search-filter highlighting: a node matches if its title contains the
+  // filter (case-insensitive); the topic id is also matched so users can
+  // type `fixed-income` directly.
+  const normalizedFilter = filter.trim().toLowerCase();
+  function matchesFilter(node) {
+    if (!normalizedFilter) return true;
+    return (
+      node.title.toLowerCase().includes(normalizedFilter) ||
+      node.topicId.toLowerCase().includes(normalizedFilter)
+    );
+  }
+  const filterMatches = normalizedFilter ? allNodes.filter(matchesFilter).length : null;
+
   const selected = hoverId ? nodesById.get(hoverId) : null;
 
   return (
@@ -180,16 +194,30 @@ export default function KnowledgeGraph() {
           </>
         }
         actions={
-          <SegmentedControl
-            label="Color overlay"
-            density="compact"
-            options={[
-              { value: 'coverage', label: 'Curriculum' },
-              { value: 'mastery', label: 'Mastery' },
-            ]}
-            value={colorMode}
-            onChange={setColorMode}
-          />
+          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              className="input"
+              type="search"
+              placeholder="Filter topics…"
+              aria-label="Filter knowledge graph by topic"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              style={{ minWidth: 180 }}
+            />
+            {normalizedFilter && (
+              <StatusBadge tone="accent">{filterMatches} match{filterMatches === 1 ? '' : 'es'}</StatusBadge>
+            )}
+            <SegmentedControl
+              label="Color overlay"
+              density="compact"
+              options={[
+                { value: 'coverage', label: 'Curriculum' },
+                { value: 'mastery', label: 'Mastery' },
+              ]}
+              value={colorMode}
+              onChange={setColorMode}
+            />
+          </div>
         }
       />
 
@@ -240,6 +268,7 @@ export default function KnowledgeGraph() {
             {/* Nodes */}
             {allNodes.map((node) => {
               const isActive = hoverId === node.id;
+              const matches = matchesFilter(node);
               return (
                 <Link key={node.id} to={`/cfa/${node.levelId}/${node.topicId}`} role="link" aria-label={`Open ${node.title}`}>
                   <g
@@ -257,7 +286,7 @@ export default function KnowledgeGraph() {
                       fill={colorMode === 'mastery' ? masteryColor(node.mastery) : nodeColor(node.hasCurriculum)}
                       stroke={isActive ? 'var(--text-primary, #f8fafc)' : 'transparent'}
                       strokeWidth={2}
-                      opacity={isActive ? 1 : 0.85}
+                      opacity={matches ? (isActive ? 1 : 0.85) : 0.18}
                     />
                     <text
                       x={node.x + node.radius + 8}

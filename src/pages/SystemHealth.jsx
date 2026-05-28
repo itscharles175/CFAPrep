@@ -755,6 +755,17 @@ export default function SystemHealth() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={async () => {
+                await db.settings.delete('onboarding-dismissed');
+                setMessage('Onboarding will re-open on your next Dashboard visit.');
+                toast.success('Onboarding reset', 'Visit / to see the first-run wizard again.');
+              }}
+              title="Re-arm the first-run onboarding wizard for your next Dashboard visit"
+            >
+              Reset onboarding
+            </button>
             <button className="btn btn-secondary btn-sm" onClick={refreshCacheBuckets} disabled={cacheBusy}>
               Refresh
             </button>
