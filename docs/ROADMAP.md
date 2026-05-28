@@ -49,9 +49,9 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 ## Pillar 0 — Desktop platform & sidecar runtime (Tauri)
 
-- [ ] Scaffold Tauri around the Vite app; dev + prod builds **(M)**
-- [ ] Sidecar supervision: bundle & launch SurrealDB + embedded open-notebook (PyInstaller) + reuse Ollama; health checks, lifecycle, ports **(XL)**
-- [ ] Native folder ingestion — read/watch the CFA folder via Tauri fs; pdf.js + page-image extraction in a worker **(L)**
+- [x] Scaffold Tauri around the Vite app; dev + prod builds **(M)**
+- [~] Sidecar supervision: launches SurrealDB + open-notebook + worker from `spike/` dir in dev (`src-tauri/src/lib.rs`); PyInstaller bundling of the Python backend for prod still **(XL)** open
+- [x] Native folder ingestion — Tauri commands `cfa_pick_folder` / `cfa_list_pdfs` / `cfa_read_pdf_bytes`; browser-side pdfjs extraction + page-aware chunker → Dexie sourceDocuments/sourceChunks; SHA-256 dedupe; "Desktop Shell" card on System Health
 - [ ] Native reminders, tray, global hotkey to "Today"; `.qvsource` file association; OS drag-drop **(M)**
 - [ ] Packaging + code signing + auto-update; GitHub release pipeline **(L)**
 
@@ -64,23 +64,23 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 ## Pillar 2 — Notebook workspace (forked open-notebook, embedded)
 
-- [ ] Wire QuantVault UI to the local open-notebook API; curriculum flows in as sources **(L)**
-- [ ] Notebooks: sources + notes + RAG chat with **citations** to chunks/page locators **(M)**
-- [ ] **Transformations** — summarize / extract flashcards / key-points / generate questions from any source **(M)**
+- [x] Wire QuantVault UI to the local open-notebook API; curriculum flows in as sources via `ensureTopicNotebook`
+- [x] Notebooks: sources + notes + RAG chat with **citations** to chunks/page locators — parsed `[source:xxx]` markers render as numbered chips ① ② with source-title legend (`src/lib/citations.ts`)
+- [~] **Transformations** — `ensureSourceInsights` runs "Key Insights" transformation; full transformation menu UI **(M)** open
 - [ ] **AI study podcasts** — multi-speaker script (Gemma) → kokoro audio, fully local **(L)**
 - [ ] Blend open-notebook's UI into QuantVault's design system (don't ship two visual languages) **(L)**
 
 ## Pillar 3 — AI core on Gemma 4 E4B
 
-- [ ] Standardize the model client on Gemma 4 E4B; streaming (SSE); 128K-aware context budgeting **(M)**
-- [ ] Semantic RAG over SurrealDB vectors; tutor grounded in real books **(L)**
-- [ ] "Explain this" / "why was I wrong" coaching anywhere **(M)**
+- [~] Standardize the model client on Gemma 4 E4B; per-source chat streams SSE-style today; askGrounded global path is JSON. 128K-aware context budgeting still **(M)** open
+- [~] Semantic RAG — works against open-notebook embeddings today; SurrealDB-vector path **(L)** waits on Pillar 1
+- [x] "Explain this" / "why was I wrong" coaching — "🤖 Explain with AI" on every missed quiz question, backed by `explainWrongAnswer` in `localLlm.js`
 - [ ] Constructed-response (L3 essay) grading against rubrics **(L)**
 
 ## Pillar 4 — Agentic study director
 
-- [ ] Tool-calling agent over the local data (reviews due, weak objectives, readiness, calendar) **(XL)**
-- [ ] Weekly plan generation + daily adaptation from performance **(L)**
+- [~] Tool-calling agent **(XL)** — basic `rankStudyActions` ranker + async `buildStudyPlan` orchestrator ship; true tool-calling agent loop still open
+- [x] Plan generation — `buildStudyPlan` runs over FSRS queue + readiness + 14-day forecast and re-runs on pathway/progress change
 - [ ] Auto-generates targeted material (questions, drills, notebook summaries) into the queue **(L)**
 
 ## Pillar 5 — Multimodal + voice
@@ -94,7 +94,7 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 - [ ] Adopt **ts-fsrs** + migrate the hand-rolled scheduler **(L)**
 - [ ] **FSRS optimizer** — fit weights to the user's review history **(L)**
 - [ ] Item psychometrics — IRT-lite difficulty calibration (`psychometricStats`) **(L)**
-- [ ] **Generative mock exams** — AI assembles full timed exams calibrated to weak areas + difficulty **(L)**
+- [x] **Generative mock exams** — `src/lib/mockGenerator.js` builds per-level mocks from ingested curriculum via the local LLM; topic mix preview; integrated into the existing MockExam runner so scoring/timing/persistence work unchanged
 - [ ] Smarter planning — exam-date pacing, interleaving, desirable difficulty **(M)**
 
 ## Pillar 7 — Design system & visual craft *(bedrock)*
@@ -105,26 +105,29 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 ## Pillar 8 — UX flows & navigation
 
-- [ ] Command palette (⌘K) on existing route/command data **(M)**
-- [ ] "Today" focus mode (Review → due → weak → mock) via `nextRecommendation` **(M)**
-- [ ] First-run onboarding (folder, model, exam date, pathway); native window UX, breadcrumbs, keyboard scopes **(M)**
+- [x] Command palette (⌘K) — TopBar input filters routes/tools/commands from the manifest with combobox+listbox ARIA
+- [x] "Today" focus mode — new `/today` route with hero top-action card + then-list, surfaced in sidebar Tools + Dashboard quick-tools + ⌘K
+- [~] First-run onboarding — Dashboard surfaces a "Get started" banner when the source vault is empty; full multi-step wizard (folder/model/exam date/pathway) **(M)** open
+- [x] Keyboard help dialog — `?` opens a Dialog listing global + route-scoped shortcuts from `keyboardHelp` metadata
 
 ## Pillar 9 — Data viz & dashboards
 
-- [ ] Exam-readiness cockpit + retention-forecast curves **(L)**
-- [ ] Mastery-over-time, FSRS decay, calibration plot, error breakdown, streak heatmap **(M)**
+- [~] Exam-readiness cockpit (existing tiles + Study Director panel) — retention-forecast curve ships as a 14-day BarChart on Analytics; deeper readiness curves still **(L)**
+- [~] Mastery-over-time line chart ships on Analytics; FSRS decay / calibration plot / error breakdown / streak heatmap still **(M)** open
 - [ ] Interactive curriculum knowledge-graph canvas (over the SurrealDB graph) **(L)**
 
 ## Pillar 10 — Content coverage
 
-- [ ] Better structure extraction (Learning Modules / LOS, headings, figures/tables) **(L)**
+- [~] Better structure extraction — page-aware chunking with locators + best-effort heading detection (`pageChunksFromPages`); "no curriculum" warning surfaces uncovered topics on the CFA dashboard; deeper LOS extraction still **(L)** open
 - [ ] Breadth — L2/L3 PDFs, deepen Quant/Excel **(L)**
+- [x] Bring-your-own content — paste-text source ingestion lands in the same vault (`ingestTextSource`)
 
 ## Pillar 11 — Infra & quality
 
 - [ ] Performance — virtualization, worker offload, sidecar startup time **(M)**
 - [ ] TypeScript rigor — migrate remaining `.jsx`/`.js` → `.tsx` **(L)**
-- [ ] Testing — Playwright e2e + Tauri smoke + sidecar integration tests **(M)**
+- [~] Testing — vitest 173 unit/integration tests + 5 Rust cargo tests pass; Playwright e2e (`scripts/smoke.mjs`) ships but Tauri-shell smoke + sidecar integration tests still **(M)** open
+- [x] **Strict-offline invariant enforced** — Google Fonts / KaTeX CDN `<link>` tags removed; KaTeX CSS bundled from npm; SW runtime-cache routes for those CDNs deleted
 
 ---
 
