@@ -9,21 +9,31 @@ import {
   rebuildCfaSourceLinksForTargets,
   setCfaSourceLinkOverride,
 } from '../lib/cfaSourceVault';
+import type {
+  CfaSourceLevel,
+  CfaSourceMapStatus,
+  CfaSourcePriority,
+  CfaSourceSnippet,
+  CfaSourceTarget,
+} from '../lib/cfaSourceTypes';
 import { InlineCluster, ProgressRail, StatusBadge, Surface } from './ui/Primitives';
 
-function levelLabel(level) {
+type SourceTargetInput = Omit<CfaSourceTarget, 'id'> & { id?: string };
+type SourceTone = 'success' | 'exam' | 'warning' | 'vault';
+
+function levelLabel(level: CfaSourceLevel | string | null | undefined): string {
   if (!level) return 'source';
   return level.replace('level', 'Level ');
 }
 
-function sourceTone(priority) {
+function sourceTone(priority: CfaSourcePriority | string | null | undefined): SourceTone {
   if (priority?.startsWith('official')) return 'success';
   if (priority === 'prep-provider') return 'exam';
   if (priority === 'reference') return 'warning';
   return 'vault';
 }
 
-export function SourceCitationChip({ snippet }) {
+export function SourceCitationChip({ snippet }: { snippet: CfaSourceSnippet }) {
   return (
     <span className="source-citation-chip">
       <ShieldCheck size={12} aria-hidden="true" />
@@ -32,7 +42,14 @@ export function SourceCitationChip({ snippet }) {
   );
 }
 
-export function SourceSnippet({ snippet, onPin, onDismiss, compact = false }) {
+export interface SourceSnippetProps {
+  snippet: CfaSourceSnippet;
+  onPin?: (snippet: CfaSourceSnippet) => void;
+  onDismiss?: (snippet: CfaSourceSnippet) => void;
+  compact?: boolean;
+}
+
+export function SourceSnippet({ snippet, onPin, onDismiss, compact = false }: SourceSnippetProps) {
   return (
     <div className={`source-snippet ${compact ? 'source-snippet-compact' : ''}`}>
       <div className="source-snippet-head">
@@ -68,9 +85,18 @@ export function SourceSnippet({ snippet, onPin, onDismiss, compact = false }) {
   );
 }
 
-export function SourceRail({ target, title = 'Source Context', subtitle, limit = 4, compact = false, className }) {
+export interface SourceRailProps {
+  target?: SourceTargetInput | null;
+  title?: string;
+  subtitle?: string;
+  limit?: number;
+  compact?: boolean;
+  className?: string;
+}
+
+export function SourceRail({ target, title = 'Source Context', subtitle, limit = 4, compact = false, className }: SourceRailProps) {
   const stableTarget = useMemo(() => (target ? buildCfaSourceTarget(target) : null), [target]);
-  const [snippets, setSnippets] = useState([]);
+  const [snippets, setSnippets] = useState<CfaSourceSnippet[]>([]);
   const [loading, setLoading] = useState(Boolean(stableTarget));
 
   async function refresh() {
@@ -106,14 +132,14 @@ export function SourceRail({ target, title = 'Source Context', subtitle, limit =
     };
   }, [limit, stableTarget]);
 
-  async function handlePin(snippet) {
+  async function handlePin(snippet: CfaSourceSnippet) {
     if (!stableTarget) return;
     if (snippet.pinned) await clearCfaSourceLinkOverride(stableTarget.id, snippet.chunk.id);
     else await setCfaSourceLinkOverride(stableTarget.id, snippet.chunk.id, 'pin');
     refresh();
   }
 
-  async function handleDismiss(snippet) {
+  async function handleDismiss(snippet: CfaSourceSnippet) {
     if (!stableTarget) return;
     await setCfaSourceLinkOverride(stableTarget.id, snippet.chunk.id, 'dismiss');
     refresh();
@@ -144,8 +170,14 @@ export function SourceRail({ target, title = 'Source Context', subtitle, limit =
   );
 }
 
-export function SourceCoverageMeter({ coverage, status, title = 'Source Coverage' }) {
-  const officialPct = status?.documentCount ? Math.round((status.officialDocumentCount / status.documentCount) * 100) : 0;
+export interface SourceCoverageMeterProps {
+  coverage?: Partial<CfaSourceMapStatus> | null;
+  status?: Partial<CfaSourceMapStatus> | null;
+  title?: string;
+}
+
+export function SourceCoverageMeter({ coverage, status, title = 'Source Coverage' }: SourceCoverageMeterProps) {
+  const officialPct = status?.documentCount ? Math.round(((status.officialDocumentCount ?? 0) / status.documentCount) * 100) : 0;
   return (
     <Surface tone="vault" density="compact" className="source-coverage-meter">
       <div className="source-rail-head">
@@ -160,8 +192,8 @@ export function SourceCoverageMeter({ coverage, status, title = 'Source Coverage
   );
 }
 
-export function SourceMapStatus({ title = 'Source Map Status' }) {
-  const [status, setStatus] = useState(null);
+export function SourceMapStatus({ title = 'Source Map Status' }: { title?: string }) {
+  const [status, setStatus] = useState<CfaSourceMapStatus | null>(null);
   useEffect(() => {
     let active = true;
     getCfaSourceMapStatus().then((next) => {
@@ -182,7 +214,17 @@ export function SourceMapStatus({ title = 'Source Map Status' }) {
   );
 }
 
-export function SourceLinkManager({ targets = [], onRebuilt }) {
+export interface SourceLinkRebuildResult {
+  targets: number;
+  links: number;
+}
+
+export interface SourceLinkManagerProps {
+  targets?: CfaSourceTarget[];
+  onRebuilt?: (result: SourceLinkRebuildResult) => void;
+}
+
+export function SourceLinkManager({ targets = [], onRebuilt }: SourceLinkManagerProps) {
   const [busy, setBusy] = useState(false);
   async function rebuild() {
     setBusy(true);

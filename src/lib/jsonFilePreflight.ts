@@ -1,9 +1,15 @@
 const DEFAULT_WORKER_THRESHOLD = 750_000;
 
-function parseJsonInWorker(text) {
+interface JsonWorkerMessage {
+  ok?: boolean;
+  payload?: unknown;
+  error?: string;
+}
+
+function parseJsonInWorker(text: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./jsonParseWorker.js', import.meta.url), { type: 'module' });
-    worker.onmessage = (event) => {
+    worker.onmessage = (event: MessageEvent<JsonWorkerMessage>) => {
       worker.terminate();
       if (event.data?.ok) {
         resolve(event.data.payload);
@@ -11,7 +17,7 @@ function parseJsonInWorker(text) {
         reject(new Error(event.data?.error || 'Unable to parse JSON file.'));
       }
     };
-    worker.onerror = (event) => {
+    worker.onerror = (event: ErrorEvent) => {
       worker.terminate();
       reject(new Error(event.message || 'Unable to parse JSON file.'));
     };
@@ -19,7 +25,17 @@ function parseJsonInWorker(text) {
   });
 }
 
-export async function parseJsonFile(file, { workerThreshold = DEFAULT_WORKER_THRESHOLD } = {}) {
+export interface ParseJsonOptions {
+  workerThreshold?: number;
+}
+
+export interface ParseJsonResult {
+  payload: unknown;
+  sizeBytes: number;
+  parsedInWorker: boolean;
+}
+
+export async function parseJsonFile(file: File, { workerThreshold = DEFAULT_WORKER_THRESHOLD }: ParseJsonOptions = {}): Promise<ParseJsonResult> {
   const text = await file.text();
   const canUseWorker = typeof Worker !== 'undefined' && text.length >= workerThreshold;
   return {

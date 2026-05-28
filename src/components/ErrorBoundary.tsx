@@ -1,21 +1,39 @@
 import { Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import { EmptyPanel } from './ui/Primitives';
+
+export interface ErrorBoundaryFallbackProps {
+  error: Error | null;
+  reset: () => void;
+}
+
+export interface ErrorBoundaryProps {
+  children?: ReactNode;
+  name?: string;
+  level?: 'page' | 'section';
+  fallback?: (props: ErrorBoundaryFallbackProps) => ReactNode;
+}
+
+export interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
 
 /**
  * A5: Granular error boundary that catches render errors and displays
  * a recovery UI instead of white-screening the entire app.
  */
-export default class ErrorBoundary extends Component {
-  constructor(props) {
+export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error, info) {
+  componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('[ErrorBoundary]', this.props.name || 'unknown', error, info.componentStack);
   }
 
@@ -23,7 +41,7 @@ export default class ErrorBoundary extends Component {
     this.setState({ hasError: false, error: null });
   };
 
-  render() {
+  render(): ReactNode {
     if (this.state.hasError) {
       if (this.props.fallback) {
         return this.props.fallback({ error: this.state.error, reset: this.handleReset });
@@ -58,7 +76,7 @@ export default class ErrorBoundary extends Component {
  * Use around each domain route group so a crash in CFA doesn't
  * affect Quant or Excel.
  */
-export function DomainErrorBoundary({ name, children }) {
+export function DomainErrorBoundary({ name, children }: { name?: string; children?: ReactNode }) {
   return (
     <ErrorBoundary name={name} level="page">
       {children}
@@ -69,7 +87,7 @@ export function DomainErrorBoundary({ name, children }) {
 /**
  * A5: Widget-level error boundary for isolating calculator/chart crashes.
  */
-export function WidgetErrorBoundary({ name, children }) {
+export function WidgetErrorBoundary({ name, children }: { name?: string; children?: ReactNode }) {
   return (
     <ErrorBoundary name={name} level="section">
       {children}

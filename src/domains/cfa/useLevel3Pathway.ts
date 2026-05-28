@@ -5,16 +5,20 @@ import {
   normalizeLevel3Pathway,
   writeLevel3PathwayToStorage,
 } from './cfaLevel3Pathways';
+import type { Level3Pathway } from './cfaLevel3Pathways';
 
-export function useLevel3Pathway() {
-  const [activePathway, setActivePathwayState] = useState(() => level3PathwayFromStorage());
+export type UseLevel3PathwayResult = [Level3Pathway, (pathway: string | null | undefined) => void];
+
+export function useLevel3Pathway(): UseLevel3PathwayResult {
+  const [activePathway, setActivePathwayState] = useState<Level3Pathway>(() => level3PathwayFromStorage());
 
   useEffect(() => {
-    function handlePathwayChange(event) {
-      setActivePathwayState(normalizeLevel3Pathway(event.detail?.pathway));
+    function handlePathwayChange(event: Event) {
+      const detail = (event as CustomEvent<{ pathway?: string }>).detail;
+      setActivePathwayState(normalizeLevel3Pathway(detail?.pathway));
     }
 
-    function handleStorage(event) {
+    function handleStorage(event: StorageEvent) {
       if (event.key === 'quantvault:level3-pathway') setActivePathwayState(normalizeLevel3Pathway(event.newValue));
     }
 
@@ -26,7 +30,7 @@ export function useLevel3Pathway() {
     };
   }, []);
 
-  function setActivePathway(pathway) {
+  function setActivePathway(pathway: string | null | undefined) {
     setActivePathwayState(writeLevel3PathwayToStorage(pathway));
   }
 

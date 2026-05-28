@@ -7,9 +7,12 @@ import {
   subscribeProgressChanges,
   toggleModuleCompleted,
 } from '../lib/learning';
+import type { DomainId, LessonProgress } from '../lib/learningTypes';
 
-export function useProgressSummary() {
-  const [summary, setSummary] = useState(emptyProgressSummary);
+export type ProgressSummary = typeof emptyProgressSummary;
+
+export function useProgressSummary(): ProgressSummary {
+  const [summary, setSummary] = useState<ProgressSummary>(emptyProgressSummary);
 
   useEffect(() => {
     const subscription = progressSummaryQuery().subscribe({
@@ -23,8 +26,21 @@ export function useProgressSummary() {
   return summary;
 }
 
-export function useModuleProgress({ domain, moduleId, title, path }) {
-  const [progress, setProgress] = useState(null);
+export interface ModuleProgressInput {
+  domain: DomainId;
+  moduleId: string;
+  title: string;
+  path: string;
+}
+
+export interface ModuleProgressResult {
+  progress: LessonProgress | null;
+  completed: boolean;
+  toggleComplete: () => Promise<void>;
+}
+
+export function useModuleProgress({ domain, moduleId, title, path }: ModuleProgressInput): ModuleProgressResult {
+  const [progress, setProgress] = useState<LessonProgress | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,14 +48,14 @@ export function useModuleProgress({ domain, moduleId, title, path }) {
     async function refresh() {
       if (!domain || !moduleId) return;
       const row = await recordModuleVisit({ domain, moduleId, title, path });
-      if (!cancelled) setProgress(row);
+      if (!cancelled) setProgress(row ?? null);
     }
 
     refresh();
 
     const handleProgressChange = async () => {
       const row = await getLessonProgress(domain, moduleId);
-      if (!cancelled) setProgress(row);
+      if (!cancelled) setProgress(row ?? null);
     };
 
     const unsubscribe = subscribeProgressChanges(handleProgressChange);
@@ -51,7 +67,7 @@ export function useModuleProgress({ domain, moduleId, title, path }) {
 
   async function toggleComplete() {
     const row = await toggleModuleCompleted({ domain, moduleId, title, path });
-    setProgress(row);
+    setProgress(row ?? null);
   }
 
   return {

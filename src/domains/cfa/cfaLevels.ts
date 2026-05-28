@@ -4,8 +4,16 @@ import {
   getLevel2RuntimeStatus,
   getLevel3RuntimeStatus,
 } from './contentPacks';
+import type {
+  CfaLevelContent,
+  CfaTopicContent,
+  ConstructedResponseItem,
+  MockExam,
+  Vignette,
+} from '../../lib/contentTypes';
+import type { Question } from '../../lib/learningTypes';
 
-function topicKey(level, topic) {
+function topicKey(level: string, topic: string): string {
   return level === 'level1' ? topic : `${level}:${topic}`;
 }
 
@@ -57,34 +65,39 @@ export const cfaAllFlashcards = cfaAllTopics.flatMap((topic) => topic.flashcards
 export const cfaAllSkillLabs = cfaAllTopics.flatMap((topic) => topic.skillLabs);
 export const cfaAllConstructedResponses = cfaAllTopics.flatMap((topic) => topic.constructedResponses);
 
-export function getCfaLevelContent(level = 'level1') {
+export function getCfaLevelContent(level = 'level1'): CfaLevelContent {
   return cfaLevelContent.find((item) => item.id === level) || cfaLevelContent[0];
 }
 
-export function getCfaTopicContent(level = 'level1', topicId) {
+export function getCfaTopicContent(level = 'level1', topicId?: string): CfaTopicContent | null {
   return getCfaLevelContent(level).topics.find((topic) => topic.id === topicId) || null;
 }
 
-export function getCfaQuestions({ level = 'level1', topic } = {}) {
+export interface CfaQueryOptions {
+  level?: string;
+  topic?: string;
+}
+
+export function getCfaQuestions({ level = 'level1', topic }: CfaQueryOptions = {}): Question[] {
   if (topic) return getCfaTopicContent(level, topic)?.questions || [];
   return getCfaLevelContent(level).topics.flatMap((item) => item.questions);
 }
 
-export function getCfaVignettes({ level = 'level1', topic } = {}) {
+export function getCfaVignettes({ level = 'level1', topic }: CfaQueryOptions = {}): Vignette[] {
   if (topic) return getCfaTopicContent(level, topic)?.vignettes || [];
   return getCfaLevelContent(level).topics.flatMap((item) => item.vignettes);
 }
 
-export function getCfaConstructedResponses({ level = 'level3', topic } = {}) {
+export function getCfaConstructedResponses({ level = 'level3', topic }: CfaQueryOptions = {}): ConstructedResponseItem[] {
   if (topic) return getCfaTopicContent(level, topic)?.constructedResponses || [];
   return getCfaLevelContent(level).topics.flatMap((item) => item.constructedResponses);
 }
 
-export function getCfaMockExam(level = 'level1', mockId) {
+export function getCfaMockExam(level = 'level1', mockId?: string): MockExam {
   const mocks = getCfaLevelContent(level).mockExams;
   return mocks.find((mock) => mock.id === mockId) || mocks[0];
 }
 
-export function getCfaTopicKey(level, topic) {
+export function getCfaTopicKey(level: string, topic: string): string {
   return topicKey(level, topic);
 }

@@ -1,4 +1,9 @@
-const exactFormulas = {
+export interface FormulaLexiconEntry {
+  latex: string;
+  description: string;
+}
+
+const exactFormulas: Record<string, FormulaLexiconEntry> = {
   'accounting equation': {
     latex: '\\text{Assets} = \\text{Liabilities} + \\text{Equity}',
     description: 'Balances resources, claims, and owner residual interest.',
@@ -809,7 +814,7 @@ const exactFormulas = {
   },
 };
 
-const aliasMap = {
+const aliasMap: Record<string, string> = {
   'capm': 'capital asset pricing model',
   'dcf value bridge': 'discounted cash flow value',
   'equity factor exposure check': 'factor exposure check',
@@ -822,10 +827,14 @@ const aliasMap = {
   'wacc': 'weighted average cost of capital',
 };
 
-const normalizedExactFormulas = Object.fromEntries(Object.entries(exactFormulas).map(([key, entry]) => [normalizeFormulaName(key), entry]));
-const normalizedAliasMap = Object.fromEntries(Object.entries(aliasMap).map(([key, value]) => [normalizeFormulaName(key), normalizeFormulaName(value)]));
+const normalizedExactFormulas: Record<string, FormulaLexiconEntry> = Object.fromEntries(
+  Object.entries(exactFormulas).map(([key, entry]) => [normalizeFormulaName(key), entry]),
+);
+const normalizedAliasMap: Record<string, string> = Object.fromEntries(
+  Object.entries(aliasMap).map(([key, value]) => [normalizeFormulaName(key), normalizeFormulaName(value)]),
+);
 
-function normalizeFormulaName(value) {
+function normalizeFormulaName(value: unknown): string {
   return String(value || '')
     .toLowerCase()
     .replace(/&/g, 'and')
@@ -833,16 +842,23 @@ function normalizeFormulaName(value) {
     .trim();
 }
 
-function displayName(value) {
+function displayName(value: unknown): string {
   return String(value || 'Decision metric').replace(/[^a-zA-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function lookupFormula(name) {
+function lookupFormula(name: unknown): FormulaLexiconEntry | undefined {
   const key = normalizeFormulaName(name);
   return normalizedExactFormulas[key] || normalizedExactFormulas[normalizedAliasMap[key]];
 }
 
-function fallbackFormula({ level = 'level1', topicId = 'cfa', name = 'Decision metric', index = 0 }) {
+export interface CfaFormulaInput {
+  level?: string;
+  topicId?: string;
+  name?: string;
+  index?: number;
+}
+
+function fallbackFormula({ level = 'level1', topicId = 'cfa', name = 'Decision metric', index = 0 }: CfaFormulaInput): FormulaLexiconEntry {
   const label = displayName(name);
   const suffix = index + 1;
   if (level === 'level3') {
@@ -869,12 +885,12 @@ function fallbackFormula({ level = 'level1', topicId = 'cfa', name = 'Decision m
   };
 }
 
-export function enrichCfaFormula(input) {
+export function enrichCfaFormula(input?: CfaFormulaInput | null): FormulaLexiconEntry {
   const entry = lookupFormula(input?.name);
   if (entry) return entry;
   return fallbackFormula(input || {});
 }
 
-export function isGenericCfaFormulaText(value) {
+export function isGenericCfaFormulaText(value: unknown): boolean {
   return /Relevant input|Decision base|Case input|Policy input|Input_\\{|Decision_\\{|Input\\s*\\}?\s*\\\\rightarrow\\s*\\\\text\\{Decision/i.test(String(value || ''));
 }

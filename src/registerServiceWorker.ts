@@ -1,11 +1,11 @@
-export function registerServiceWorker() {
+export function registerServiceWorker(): void {
   if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return;
 
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')
       .then((registration) => {
-        function notifyUpdateAvailable(worker) {
+        function notifyUpdateAvailable(worker: ServiceWorker | null) {
           window.dispatchEvent(
             new CustomEvent('quantvault:pwa-update', {
               detail: {
