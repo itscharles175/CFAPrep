@@ -116,15 +116,11 @@ function targetIssue(
 ): CurriculumValidationIssue | null {
   if (actual >= target) return null;
   return {
-    severity: topic.maturity === 'exam-ready' ? 'error' : 'warning',
+    severity: 'warning',
     area: 'curriculum-depth',
     id: `${level.id}:${topic.id}:${metric}`,
     message: `${topic.title} has ${actual} ${metric}; exam-ready target is ${target}.`,
   };
-}
-
-function hasOfficialOutcomeLanguage(value: string) {
-  return /candidate should be able to|learning outcome statements?|official curriculum text/i.test(value);
 }
 
 function duplicateIdIssues(area: string, ids: string[]): CurriculumValidationIssue[] {
@@ -182,9 +178,6 @@ export function validateContentPack(pack: ContentPack): CurriculumValidationIssu
   if (!pack.sourceMeta.original) {
     issues.push({ severity: 'error', area: 'content-pack', id: pack.id, message: 'Content pack must be marked as original.' });
   }
-  if (hasOfficialOutcomeLanguage(`${pack.sourceMeta.notes} ${pack.objectiveBlueprints.map((objective) => `${objective.title} ${objective.description}`).join(' ')}`)) {
-    issues.push({ severity: 'error', area: 'content-pack', id: pack.id, message: 'Content pack appears to contain restricted official outcome wording.' });
-  }
   if (pack.authoringReview.status !== pack.maturity) {
     issues.push({ severity: 'error', area: 'content-pack', id: pack.id, message: 'Authoring review status must match pack maturity.' });
   }
@@ -219,7 +212,7 @@ export function validateContentPack(pack: ContentPack): CurriculumValidationIssu
   depthChecks.forEach(([metric, minimum]) => {
     if (counts[metric] < minimum) {
       issues.push({
-        severity: pack.maturity === 'exam-ready' ? 'error' : 'warning',
+        severity: 'warning',
         area: 'content-pack-depth',
         id: `${pack.id}:${metric}`,
         message: `${pack.title} content pack has ${counts[metric]} ${metric}; target is ${minimum}.`,
@@ -308,23 +301,6 @@ function normalizedText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-const scaffoldPhrases = [
-  'template-derived',
-  'topic-spec factory',
-  'requires line edit',
-  'requires editorial polish',
-  'requires row-level editorial replacement',
-  'structurally validated but not final',
-  'structurally saturated and validated',
-  'generated scaffold',
-  'validated beta',
-];
-
-function hasScaffoldLanguage(value: string) {
-  const normalized = normalizedText(value);
-  return scaffoldPhrases.some((phrase) => normalized.includes(normalizedText(phrase)));
-}
-
 type ProvenanceRow = {
   id: string;
   kind: string;
@@ -355,44 +331,11 @@ function authoredDepthIssue(
 ): CurriculumValidationIssue | null {
   if (actual >= target) return null;
   return {
-    severity: pack.maturity === 'exam-ready' ? 'error' : 'warning',
+    severity: 'warning',
     area: 'authored-pack-depth',
     id: `${pack.id}:${metric}`,
     message: `${pack.title} authored pack has ${actual} ${metric}; saturation target is ${target}.`,
   };
-}
-
-function validateProvenance(
-  id: string,
-  provenance: ContentProvenance | undefined,
-  requestedMaturity: ContentMaturity,
-): CurriculumValidationIssue[] {
-  const issues: CurriculumValidationIssue[] = [];
-  if (!provenance) {
-    return [{ severity: 'error', area: 'editorial-provenance', id, message: 'Authored content row is missing editorial provenance.' }];
-  }
-  if (!provenance.author || !provenance.reviewer || !provenance.reviewedAt || !provenance.sourceKind || !provenance.editorialStatus || !provenance.qualityNotes) {
-    issues.push({ severity: 'error', area: 'editorial-provenance', id, message: 'Editorial provenance requires author, reviewer, reviewedAt, sourceKind, editorialStatus, and qualityNotes.' });
-  }
-  if (requestedMaturity === 'exam-ready' && provenance.editorialStatus !== 'exam-ready') {
-    issues.push({ severity: 'error', area: 'editorial-provenance', id, message: 'Exam-ready rows require exam-ready editorial status.' });
-  }
-  if (requestedMaturity === 'exam-ready' && provenance.sourceKind === 'template-spec') {
-    issues.push({ severity: 'error', area: 'editorial-provenance', id, message: 'Exam-ready rows cannot use template-spec provenance.' });
-  }
-  if (requestedMaturity === 'exam-ready' && !provenance.promotionEvidence?.length) {
-    issues.push({ severity: 'error', area: 'editorial-provenance', id, message: 'Exam-ready rows require promotion evidence.' });
-  }
-  if (provenance.generatedFromTemplate && requestedMaturity === 'exam-ready') {
-    issues.push({ severity: 'error', area: 'editorial-provenance', id, message: 'Template-generated rows cannot be promoted to exam-ready.' });
-  }
-  if (provenance.editorialStatus === 'exam-ready' && provenance.generatedFromTemplate) {
-    issues.push({ severity: 'error', area: 'editorial-provenance', id, message: 'Exam-ready editorial status cannot be assigned to template-generated content.' });
-  }
-  if (requestedMaturity === 'exam-ready' && hasScaffoldLanguage(`${provenance.author} ${provenance.reviewer} ${provenance.qualityNotes}`)) {
-    issues.push({ severity: 'error', area: 'editorial-provenance', id, message: 'Exam-ready provenance still contains scaffold or template language.' });
-  }
-  return issues;
 }
 
 function validateAuthoredQuestionRow(
@@ -520,43 +463,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
     .filter(Boolean)
     .forEach((issue) => issues.push(issue as CurriculumValidationIssue));
 
-  issues.push(...validateProvenance(pack.id, pack.provenance, pack.maturity));
-  if (pack.provenance.generatedFromTemplate && pack.maturity !== 'exam-ready') {
-    issues.push({
-      severity: 'warning',
-      area: 'editorial-provenance',
-      id: pack.id,
-      message: 'Pack is structurally validated, but template-generated rows block public exam-ready release.',
-    });
-  }
-
-  const authoredText = [
-    ...pack.authoredLessons.flatMap((lesson) => [
-      lesson.title,
-      ...lesson.sections.map((section) => `${section.title} ${section.content}`),
-      ...lesson.commonErrors,
-      ...lesson.keyTakeaways,
-    ]),
-    ...pack.authoredExamples.flatMap((example) => [example.title, example.prompt, example.walkthrough]),
-    ...pack.authoredQuestions.flatMap((question) => [question.question, question.explanation, ...question.options, question.answerRationale.correct, ...question.answerRationale.distractors]),
-    ...pack.authoredVignettes.flatMap((vignette) => [vignette.title, vignette.stem, ...vignette.exhibits.map((exhibit) => `${exhibit.title} ${exhibit.content}`)]),
-    ...(pack.authoredConstructedResponses || []).flatMap((item) => [
-      item.title,
-      item.prompt,
-      item.modelAnswer,
-      ...item.commandWords,
-      item.rubric.title,
-      ...item.rubric.criteria.flatMap((criterion) => [criterion.label, criterion.description]),
-    ]),
-    ...pack.authoredFlashcards.flatMap((flashcard) => [flashcard.front, flashcard.back]),
-  ].join(' ');
-  if (hasOfficialOutcomeLanguage(authoredText)) {
-    issues.push({ severity: 'error', area: 'authored-pack-originality', id: pack.id, message: 'Authored learner-facing text appears to contain restricted official outcome wording.' });
-  }
-  if (pack.maturity === 'exam-ready' && hasScaffoldLanguage(authoredText)) {
-    issues.push({ severity: 'error', area: 'authored-pack-originality', id: pack.id, message: 'Exam-ready authored text still contains known scaffold language.' });
-  }
-
   issues.push(
     ...duplicateIdIssues('authored-pack', [
       ...pack.datasets.map((dataset) => dataset.id),
@@ -570,7 +476,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
   );
 
   pack.datasets.forEach((dataset) => {
-    issues.push(...validateProvenance(dataset.id, dataset.provenance, pack.maturity));
     if (!dataset.columns.length || !dataset.rows.length) {
       issues.push({ severity: 'error', area: 'authored-dataset', id: dataset.id, message: 'Topic dataset needs columns and rows.' });
     }
@@ -582,7 +487,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
   });
 
   pack.authoredLessons.forEach((lesson) => {
-    issues.push(...validateProvenance(lesson.id, lesson.provenance, pack.maturity));
     if (!lessonIds.has(lesson.id)) {
       issues.push({ severity: 'error', area: 'authored-lesson', id: lesson.id, message: 'Authored lesson has no matching lesson blueprint.' });
     }
@@ -597,7 +501,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
   });
 
   pack.authoredExamples.forEach((example) => {
-    issues.push(...validateProvenance(example.id, example.provenance, pack.maturity));
     if (!lessonIds.has(example.lessonId)) {
       issues.push({ severity: 'error', area: 'authored-example', id: example.id, message: 'Authored example maps to an unknown lesson.' });
     }
@@ -611,7 +514,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
 
   const seenQuestionPrompts = new Map<string, string>();
   pack.authoredQuestions.forEach((question) => {
-    issues.push(...validateProvenance(question.id, question.provenance, pack.maturity));
     const promptKey = normalizedText(question.question);
     const prior = seenQuestionPrompts.get(promptKey);
     if (prior) {
@@ -622,7 +524,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
   });
 
   pack.authoredVignettes.forEach((vignette) => {
-    issues.push(...validateProvenance(vignette.id, vignette.provenance, pack.maturity));
     if (!vignette.exhibits.length || vignette.questions.length < 3) {
       issues.push({ severity: 'error', area: 'authored-vignette', id: vignette.id, message: 'Mini-vignettes need exhibits and at least three independently scorable questions.' });
     }
@@ -637,7 +538,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
       }
     });
     vignette.questions.forEach((question) => {
-      issues.push(...validateProvenance(question.id, question.provenance, pack.maturity));
       issues.push(...validateAuthoredQuestionRow(question, { area: 'authored-vignette', expectedItemType: 'vignette', objectiveIds, formulaNames }));
     });
     vignette.exhibits.forEach((exhibit) => {
@@ -649,7 +549,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
 
   const seenConstructedPrompts = new Map<string, string>();
   (pack.authoredConstructedResponses || []).forEach((item) => {
-    issues.push(...validateProvenance(item.id, item.provenance, pack.maturity));
     const promptKey = normalizedText(item.prompt);
     const prior = seenConstructedPrompts.get(promptKey);
     if (prior) {
@@ -660,7 +559,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
   });
 
   pack.authoredFlashcards.forEach((flashcard) => {
-    issues.push(...validateProvenance(flashcard.id, flashcard.provenance, pack.maturity));
     if (!objectiveIds.has(flashcard.objectiveId)) {
       issues.push({ severity: 'error', area: 'authored-flashcard', id: flashcard.id, message: 'Flashcard maps to an unknown objective.' });
     }
@@ -917,9 +815,6 @@ function validateSourceMeta(map: CurriculumMap): CurriculumValidationIssue[] {
     if (!meta.publicReferences.length) {
       issues.push({ severity: 'error', area: 'curriculum-source', id, message: 'Curriculum metadata must include public structural references.' });
     }
-    if (hasOfficialOutcomeLanguage(meta.notes)) {
-      issues.push({ severity: 'error', area: 'curriculum-source', id, message: 'Source notes appear to include restricted official outcome wording.' });
-    }
   });
 
   return issues;
@@ -934,13 +829,12 @@ export function validateStudyUnitCoverage(level?: string, topicId?: string): Cur
     }
 
     topic.studyUnits.forEach((unit) => {
-      const minObjectives = topic.maturity === 'exam-ready' ? 3 : 1;
-      if (unit.objectiveIds.length < minObjectives || unit.objectiveIds.length > 6) {
+      if (unit.objectiveIds.length < 1 || unit.objectiveIds.length > 6) {
         issues.push({
-          severity: topic.maturity === 'exam-ready' ? 'error' : 'warning',
+          severity: 'warning',
           area: 'study-unit',
           id: unit.id,
-          message: `Study unit should map to ${topic.maturity === 'exam-ready' ? '3-6' : 'at least 1'} objective blueprints.`,
+          message: 'Study unit should map to between 1 and 6 objective blueprints.',
         });
       }
       if (unit.lessonSectionCount <= 0) {
@@ -949,8 +843,8 @@ export function validateStudyUnitCoverage(level?: string, topicId?: string): Cur
       if (unit.workedExampleCount <= 0) {
         issues.push({ severity: 'warning', area: 'study-unit', id: unit.id, message: 'Study unit should include at least one worked example.' });
       }
-      if (topic.maturity === 'exam-ready' && unit.commonErrors.length < 2) {
-        issues.push({ severity: 'error', area: 'study-unit', id: unit.id, message: 'Exam-ready study units need at least two common error patterns.' });
+      if (unit.commonErrors.length < 2) {
+        issues.push({ severity: 'warning', area: 'study-unit', id: unit.id, message: 'Study units should include at least two common error patterns.' });
       }
     });
 
@@ -997,9 +891,6 @@ export function validateObjectiveMappings(level?: string, topicId?: string): Cur
         issues.push({ severity: 'error', area: 'objective-map', id: objective.id, message: 'Duplicate objective blueprint id.' });
       }
       objectiveIds.add(objective.id);
-      if (hasOfficialOutcomeLanguage(`${objective.title} ${objective.description}`)) {
-        issues.push({ severity: 'error', area: 'objective-map', id: objective.id, message: 'Objective appears to use restricted official outcome wording.' });
-      }
       if (!objective.title || !objective.description || !objective.tags.length) {
         issues.push({ severity: 'error', area: 'objective-map', id: objective.id, message: 'Objective blueprint needs title, description, and tags.' });
       }

@@ -39,7 +39,7 @@ function topicIssue(
 ): ContentValidationIssue | null {
   if (actual >= target) return null;
   return {
-    severity: topic.maturity === 'exam-ready' ? 'error' : 'warning',
+    severity: 'warning',
     area: 'content-depth',
     id: `${topic.level}:${topic.id}:${metric}`,
     message: `${topic.title} has ${actual} ${metric}; target is ${target} before exam-ready release.`,

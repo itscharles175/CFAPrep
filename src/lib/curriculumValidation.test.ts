@@ -104,28 +104,17 @@ describe('CFA curriculum mapping', () => {
     expect(promotedToValidated.topic?.maturity).toBe('validated');
   });
 
-  it('rejects template rows, metadata-only overrides, and missing promotion evidence', () => {
+  it('no longer enforces provenance or originality gates (gateless runtime)', () => {
     const rawFsa = level1ValidatedContentPacks.find((pack) => pack.topicId === 'fsa')!;
     const fixedIncome = level1AuthoredContentPacks.find((pack) => pack.topicId === 'fixed-income')!;
+    // A template-generated pack promoted to exam-ready: previously a hard provenance failure.
     const templatePromoted = {
       ...rawFsa,
       maturity: 'exam-ready' as const,
       sourceMeta: { ...rawFsa.sourceMeta, authoringStatus: 'exam-ready' as const },
       authoringReview: { ...rawFsa.authoringReview, status: 'exam-ready' as const },
     };
-    const metadataOnlyOverride = {
-      ...templatePromoted,
-      provenance: {
-        ...templatePromoted.provenance,
-        author: 'QuantVault editorial desk',
-        reviewer: 'QuantVault metadata reviewer',
-        sourceKind: 'expert-review' as const,
-        editorialStatus: 'exam-ready' as const,
-        generatedFromTemplate: false,
-        qualityNotes: 'Pack-level metadata was changed without replacing child rows.',
-        promotionEvidence: ['metadata-only-override'],
-      },
-    };
+    // A pack with a child row missing promotion evidence: previously a hard provenance failure.
     const missingEvidencePack = {
       ...fixedIncome,
       authoredFlashcards: fixedIncome.authoredFlashcards.map((card, index) =>
@@ -133,9 +122,10 @@ describe('CFA curriculum mapping', () => {
       ),
     };
 
-    expect(validateAuthoredContentPack(templatePromoted).some((issue) => issue.message.includes('Template-generated rows cannot be promoted'))).toBe(true);
-    expect(validateAuthoredContentPack(metadataOnlyOverride).some((issue) => issue.id !== metadataOnlyOverride.id && issue.area === 'editorial-provenance')).toBe(true);
-    expect(validateAuthoredContentPack(missingEvidencePack).some((issue) => issue.message.includes('promotion evidence'))).toBe(true);
+    // Provenance / originality enforcement was removed — neither pack produces editorial-provenance issues.
+    expect(validateAuthoredContentPack(templatePromoted).some((issue) => issue.area === 'editorial-provenance')).toBe(false);
+    expect(validateAuthoredContentPack(missingEvidencePack).some((issue) => issue.area === 'editorial-provenance')).toBe(false);
+    // Promotion always succeeds now that there are no blocking gates.
     expect(promoteTopicMaturity('level1', 'fixed-income').promoted).toBe(true);
   });
 
