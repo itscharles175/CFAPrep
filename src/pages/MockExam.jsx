@@ -528,6 +528,28 @@ export default function MockExam() {
               </p>
             )}
             {genState === 'error' && <p style={{ color: 'var(--danger)', margin: 'var(--space-1) 0 0' }}>{genError}</p>}
+            {generatedMock && (() => {
+              const byTopic = new Map();
+              for (const question of generatedMock.questions || []) {
+                const key = question.topicTitle || question.topic || '—';
+                byTopic.set(key, (byTopic.get(key) || 0) + 1);
+              }
+              const entries = [...byTopic.entries()].sort((a, b) => b[1] - a[1]);
+              if (entries.length === 0) return null;
+              const stamp = new Date(generatedMock.generatedAt || Date.now()).toLocaleString();
+              return (
+                <div style={{ marginTop: 'var(--space-2)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                  <small className="muted-copy" style={{ width: '100%' }}>
+                    Topic mix · {generatedMock.questions.length} question{generatedMock.questions.length === 1 ? '' : 's'} generated {stamp}
+                  </small>
+                  {entries.map(([title, count]) => (
+                    <StatusBadge key={title} tone="accent">
+                      {title} · {count}
+                    </StatusBadge>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
           <InlineCluster>
             {generatedMock && (
