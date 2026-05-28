@@ -115,7 +115,7 @@ function StudyStreakHeatmap() {
         <p className="muted-copy">No question attempts in the last 12 weeks — answer some questions to see your streak.</p>
       ) : (
         <>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+          <p className="qv-fs-sm qv-text-secondary" style={{ marginBottom: 12 }}>
             <strong>{total12w}</strong> question{total12w !== 1 ? 's' : ''} answered in the last 12 weeks
           </p>
           <svg
@@ -143,10 +143,10 @@ function StudyStreakHeatmap() {
             ))}
           </svg>
           {/* Legend */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Less</span>
+          <div className="qv-row-2" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+            <span className="qv-text-muted" style={{ fontSize: 11 }}>Less</span>
             {LEGEND_BUCKETS.map(({ label, color }) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div key={label} className="qv-row-1">
                 <div
                   style={{
                     width: CELL,
@@ -158,10 +158,10 @@ function StudyStreakHeatmap() {
                   }}
                   title={label}
                 />
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
+                <span className="qv-text-muted" style={{ fontSize: 11 }}>{label}</span>
               </div>
             ))}
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>More</span>
+            <span className="qv-text-muted" style={{ fontSize: 11 }}>More</span>
           </div>
         </>
       )}

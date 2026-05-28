@@ -604,8 +604,8 @@ export default function Dashboard() {
             >
               <IconFrame icon={tool.icon} />
               <div>
-                <div style={{ fontWeight: 600 }}>{tool.title}</div>
-                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>{tool.desc}</div>
+                <div className="qv-fw-semibold">{tool.title}</div>
+                <div className="qv-fs-xs qv-text-muted">{tool.desc}</div>
               </div>
               <ChevronRight size={16} color="var(--text-muted)" style={{ marginLeft: 'auto' }} />
             </Panel>

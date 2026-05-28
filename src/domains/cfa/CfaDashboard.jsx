@@ -155,7 +155,7 @@ export default function CfaDashboard() {
                     className="flex-between"
                     style={{ gap: 'var(--space-3)', alignItems: 'center', padding: 'var(--space-3)', borderRadius: 'var(--radius-md, 8px)', border: '1px solid var(--border)', textDecoration: 'none', color: 'inherit' }}
                   >
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                    <span className="qv-row-3">
                       <ActionIcon size={18} />
                       <span>
                         <strong style={{ display: 'block' }}>{action.title}</strong>
@@ -198,7 +198,7 @@ export default function CfaDashboard() {
               <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start', marginBottom: 'var(--space-4)' }}>
                 <div>
                   <h2 style={{ margin: 'var(--space-3) 0 var(--space-1)' }}>{level.title}</h2>
-                  <p style={{ color: 'var(--text-secondary)', margin: 0 }}>{level.examFormat}</p>
+                  <p className="qv-text-secondary qv-m-0">{level.examFormat}</p>
                 </div>
                 <Link to={`/cfa/${level.id}/mock`} className="btn btn-secondary btn-sm">Mock</Link>
               </div>
@@ -244,7 +244,7 @@ export default function CfaDashboard() {
                   <strong>{topic.label}</strong>
                   <small>{topic.weight} · {topic.questions} Q · {topic.vignettes} cases</small>
                   <small>{sourceCoverage?.topicCounts?.[topic.id] || 0} private source document(s) mapped</small>
-                  <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+                  <div className="qv-row-1" style={{ flexWrap: 'wrap' }}>
                     <StatusBadge tone={completed ? 'success' : ready ? 'exam' : 'warning'}>
                       {completed ? 'complete' : ready ? 'exam-ready' : topic.maturity}
                     </StatusBadge>

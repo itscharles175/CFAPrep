@@ -516,7 +516,7 @@ export default function SystemHealth() {
         title="Offline & Data Safety"
         subtitle="Inspect local storage, cache state, service-worker availability, and backup readiness."
         actions={
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
             <input
               className="input"
               type="password"
@@ -544,11 +544,11 @@ export default function SystemHealth() {
           <div>
             <StatusBadge tone="vault">Vault Safety</StatusBadge>
             <h3>Local Vault Health</h3>
-            <p style={{ color: 'var(--text-secondary)' }}>
+            <p className="qv-text-secondary">
               Schema v{vaultHealth?.schemaVersion || '-'} · {vaultHealth?.schemaHash || 'checking'} · persistent storage {persisted === null ? 'unknown' : persisted ? 'granted' : 'not granted'}
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={handleRepairPreview}><Wrench size={16} /> Repair Preview</button>
             <button className="btn btn-secondary" onClick={handlePersistStorage}>Persist Storage</button>
             <button className="btn btn-secondary" onClick={handlePlaintextBackup}><Download size={16} /> Plaintext Export</button>
@@ -565,7 +565,7 @@ export default function SystemHealth() {
           <div><strong>{vaultHealth?.calculatorScenarios?.length ?? 0}</strong><small>Calculator scenarios</small></div>
         </div>
         {vaultHealth?.repairActions?.length > 0 && (
-          <ul style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-4)' }}>
+          <ul className="qv-text-secondary" style={{ marginTop: 'var(--space-4)' }}>
             {vaultHealth.repairActions.map((action) => <li key={action}>{action}</li>)}
           </ul>
         )}
@@ -576,7 +576,7 @@ export default function SystemHealth() {
           <div>
             <StatusBadge tone="exam">Browser Reminders</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>Native review reminders</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+            <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
               Grant permission once and QuantVault will surface a desktop notification when you have reviews due. No network — fires from the local service worker.
             </p>
           </div>
@@ -608,11 +608,11 @@ export default function SystemHealth() {
           <div>
             <StatusBadge tone="exam">Exam Date</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>Target exam date (pacing)</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+            <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
               Drives the countdown on /today and feeds future exam-date pacing logic. Leave empty to disable.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+          <div className="qv-row-2">
             <input
               type="date"
               className="input"
@@ -630,7 +630,7 @@ export default function SystemHealth() {
           <div>
             <StatusBadge tone="accent">Local AI</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>On-device generation (Ollama / LM Studio)</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+            <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
               Point QuantVault at a local OpenAI-compatible model server. Fully offline — no cloud, no API key. Powers practice generated from your ingested curriculum.
             </p>
           </div>
@@ -638,12 +638,12 @@ export default function SystemHealth() {
         {llm && (
           <>
             <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Base URL</span>
+              <label className="qv-stack-1">
+                <span className="qv-fs-xs qv-text-muted">Base URL</span>
                 <input className="input" value={llm.baseUrl} onChange={(event) => setLlm({ ...llm, baseUrl: event.target.value })} placeholder="http://localhost:11434/v1" aria-label="Local model base URL" />
               </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Model</span>
+              <label className="qv-stack-1">
+                <span className="qv-fs-xs qv-text-muted">Model</span>
                 {llmStatus?.ok && llmStatus.models.length > 0 ? (
                   <select
                     className="input"
@@ -664,12 +664,12 @@ export default function SystemHealth() {
                   <input className="input" value={llm.model} onChange={(event) => setLlm({ ...llm, model: event.target.value })} placeholder="llama3.1" aria-label="Local model name" />
                 )}
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
+              <label className="qv-row-2" style={{ marginTop: 'var(--space-5)' }}>
                 <input type="checkbox" checked={llm.enabled} onChange={(event) => setLlm({ ...llm, enabled: event.target.checked })} />
                 <span>Enable AI generation</span>
               </label>
             </div>
-            <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
               {LLM_PRESETS.map((preset) => (
                 <button key={preset.label} className="btn btn-secondary btn-sm" onClick={() => setLlm({ ...llm, baseUrl: preset.baseUrl })}>{preset.label}</button>
               ))}
@@ -682,7 +682,7 @@ export default function SystemHealth() {
               )}
             </div>
             {llmStatus?.ok && llmStatus.models.length > 0 && (
-              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', marginTop: 'var(--space-2)' }}>
+              <p className="qv-text-muted qv-fs-xs qv-mt-2">
                 Available models: {llmStatus.models.slice(0, 8).join(', ')}
               </p>
             )}
@@ -695,7 +695,7 @@ export default function SystemHealth() {
           <div>
             <StatusBadge tone="accent">Embedded Notebook</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>Grounded RAG over your curriculum (open-notebook)</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+            <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
               QuantVault embeds open-notebook as a local sidecar (FastAPI + SurrealDB + job worker). It builds per-topic notebooks from your ingested CFA volumes and answers questions with cited, source-grounded synthesis. Fully offline.
             </p>
           </div>
@@ -703,16 +703,16 @@ export default function SystemHealth() {
         {onb && (
           <>
             <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Backend URL</span>
+              <label className="qv-stack-1">
+                <span className="qv-fs-xs qv-text-muted">Backend URL</span>
                 <input className="input" value={onb.baseUrl} onChange={(event) => setOnb({ ...onb, baseUrl: event.target.value })} placeholder="http://localhost:5055" aria-label="Open-notebook backend URL" />
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
+              <label className="qv-row-2" style={{ marginTop: 'var(--space-5)' }}>
                 <input type="checkbox" checked={onb.enabled} onChange={(event) => setOnb({ ...onb, enabled: event.target.checked })} />
                 <span>Enable grounded RAG</span>
               </label>
             </div>
-            <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
               <button className="btn btn-primary" onClick={handleSaveOnb}>Save</button>
               <button className="btn btn-secondary" onClick={handleTestOnb} disabled={onbTesting}>{onbTesting ? 'Testing…' : 'Test Connection'}</button>
               {onbStatus && (
@@ -722,7 +722,7 @@ export default function SystemHealth() {
               )}
             </div>
             {onbStatus?.ok && (
-              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', marginTop: 'var(--space-2)' }}>
+              <p className="qv-text-muted qv-fs-xs qv-mt-2">
                 Language: {onbStatus.languageModel || '—'} · Embedding: {onbStatus.embeddingModel || '—'}
               </p>
             )}
@@ -736,7 +736,7 @@ export default function SystemHealth() {
             <div>
               <StatusBadge tone="accent">Notebook Backend</StatusBadge>
               <h3 style={{ margin: 'var(--space-2) 0 0' }}>Embedded open-notebook notebooks ({onbNotebooks.length})</h3>
-              <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+              <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
                 Notebooks the backend currently holds. Deleting one removes its sources, insights, and chat sessions from the embedded SurrealDB; QuantVault re-creates per-topic notebooks on demand when asks resume.
               </p>
             </div>
@@ -745,11 +745,11 @@ export default function SystemHealth() {
             </button>
           </div>
           {onbNotebooks.length === 0 ? (
-            <p className="muted-copy" style={{ margin: 0 }}>
+            <p className="muted-copy qv-m-0">
               {onbNotebooksBusy ? 'Loading…' : 'No notebooks yet on the backend. Ask a question on any CFA topic to create one.'}
             </p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            <div className="qv-stack-2">
               {onbNotebooks.slice(0, 20).map((notebook) => (
                 <div
                   key={notebook.id}
@@ -780,7 +780,7 @@ export default function SystemHealth() {
                 </div>
               ))}
               {onbNotebooks.length > 20 && (
-                <p className="muted-copy" style={{ margin: 0 }}>
+                <p className="muted-copy qv-m-0">
                   Showing 20 of {onbNotebooks.length} notebooks.
                 </p>
               )}
@@ -795,11 +795,11 @@ export default function SystemHealth() {
             <div>
               <StatusBadge tone="success">Desktop Shell</StatusBadge>
               <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingest a local CFA folder</h3>
-              <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+              <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
                 Point QuantVault at a folder of CFA curriculum PDFs on disk; the native shell will walk it, extract text, chunk by page, classify by topic, and store in your local source vault. Duplicates (by SHA-256) are skipped automatically. You can also drag-drop PDFs directly onto this window.
               </p>
             </div>
-            <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+            <div className="qv-row-2" style={{ flexShrink: 0 }}>
               <button
                 className="btn btn-primary"
                 onClick={handleIngestFolder}
@@ -827,7 +827,7 @@ export default function SystemHealth() {
             <p style={{ color: 'var(--danger)', margin: 'var(--space-2) 0 0' }}>{ingestError}</p>
           )}
           {ingestState === 'done' && ingestResult && (
-            <div style={{ marginTop: 'var(--space-2)' }}>
+            <div className="qv-mt-2">
               <StatusBadge tone="success">
                 Ingested {ingestResult.ingested} · Skipped {ingestResult.skipped} · Chunks {ingestResult.chunkCount}
               </StatusBadge>
@@ -846,11 +846,11 @@ export default function SystemHealth() {
           <div>
             <StatusBadge tone="accent">App Caches</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>App caches</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+            <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
               Rows written to the settings store by AI-practice, generative mocks, and grounded Q&amp;A. Clearing a bucket removes generated content but not persistent settings (LLM config, open-notebook config, onboarding).
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+          <div className="qv-row-2" style={{ flexShrink: 0 }}>
             <button
               className="btn btn-secondary btn-sm"
               onClick={async () => {
@@ -871,9 +871,9 @@ export default function SystemHealth() {
           </div>
         </div>
         {cacheBuckets === null ? (
-          <p className="muted-copy" style={{ margin: 0 }}>Loading…</p>
+          <p className="muted-copy qv-m-0">Loading…</p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <div className="qv-stack-2">
             {[
               { id: 'ai-questions', label: 'AI-practice generated questions', prefix: 'ai-questions:*' },
               { id: 'generated-mock', label: 'Saved generative mock exams', prefix: 'generated-mock:*' },
@@ -916,11 +916,11 @@ export default function SystemHealth() {
           <div>
             <StatusBadge tone="accent">Source Vault</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingested source documents ({sourceDocs.length})</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+            <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
               Everything in your local vault — bundled `.qvsource` imports plus desktop folder ingestion. Deletes are scoped (the document and its chunks only) and irreversible.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+          <div className="qv-row-2" style={{ flexShrink: 0 }}>
             <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }} aria-disabled={sourceDocsBusy}>
               Import .qvsource
               <input
@@ -944,11 +944,11 @@ export default function SystemHealth() {
           </div>
         </div>
         {sourceDocs.length === 0 ? (
-          <p className="muted-copy" style={{ margin: 0 }}>
+          <p className="muted-copy qv-m-0">
             No ingested documents yet. Import a `.qvsource` bundle or ingest a CFA folder from the desktop shell to populate the vault.
           </p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <div className="qv-stack-2">
             {sourceDocs.slice(0, 12).map((doc) => (
               <div
                 key={doc.id}
@@ -979,7 +979,7 @@ export default function SystemHealth() {
               </div>
             ))}
             {sourceDocs.length > 12 && (
-              <p className="muted-copy" style={{ margin: 0 }}>
+              <p className="muted-copy qv-m-0">
                 Showing 12 of {sourceDocs.length} documents.
               </p>
             )}
@@ -988,20 +988,20 @@ export default function SystemHealth() {
       </Surface>
 
       <Surface tone="ops" className="ops-report-panel">
-        <div style={{ marginBottom: 'var(--space-3)' }}>
+        <div className="qv-mb-3">
           <StatusBadge tone="accent">Paste a source</StatusBadge>
           <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingest free text directly into the vault</h3>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+          <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
             For lecture notes, blog excerpts, or any non-PDF material you want to use in grounded answers. Same chunker/dedupe path as PDF ingestion; SHA-256 of the text serves as the document id.
           </p>
         </div>
         <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Title</span>
+          <label className="qv-stack-1">
+            <span className="qv-fs-xs qv-text-muted">Title</span>
             <input className="input" value={pasteTitle} onChange={(event) => setPasteTitle(event.target.value)} placeholder="e.g. Fixed Income lecture notes" />
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Topic id (optional)</span>
+          <label className="qv-stack-1">
+            <span className="qv-fs-xs qv-text-muted">Topic id (optional)</span>
             <input className="input" value={pasteTopic} onChange={(event) => setPasteTopic(event.target.value)} placeholder="e.g. fixed-income" />
           </label>
         </div>
@@ -1026,7 +1026,7 @@ export default function SystemHealth() {
         <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
           <div>
             <h3 style={{ marginTop: 0 }}>Offline Readiness</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+            <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
               {offlineReadiness?.cacheName || 'quantvault-offline-content'} · {offlineReadiness?.cachedCount ?? 0}/{offlineReadiness?.totalCriticalRoutes ?? 0} critical routes cached
             </p>
           </div>
@@ -1053,13 +1053,13 @@ export default function SystemHealth() {
             ))}
           </div>
         ) : (
-          <p style={{ color: 'var(--text-secondary)' }}>No cache buckets are currently visible in this browser context.</p>
+          <p className="qv-text-secondary">No cache buckets are currently visible in this browser context.</p>
         )}
       </Surface>
 
       <Surface tone="vault">
         <h3 style={{ marginTop: 0 }}>Backup Reminder</h3>
-        <p style={{ color: 'var(--text-secondary)' }}>
+        <p className="qv-text-secondary">
           QuantVault is local-first. Export a backup before clearing browser data, moving devices, or starting a long mock-exam cycle.
         </p>
         {message && <p style={{ color: 'var(--success)' }}>{message}</p>}

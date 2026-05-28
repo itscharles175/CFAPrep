@@ -42,7 +42,7 @@ function FlashcardDeck({ cards }) {
   }
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-2)' }}>
+      <div className="qv-mb-2" style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button
           type="button"
           className="btn btn-secondary btn-sm"
@@ -73,7 +73,7 @@ function FlashcardDeck({ cards }) {
             tabIndex={0}
             aria-expanded={isOpen}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
+            <div className="qv-row-3-start" style={{ justifyContent: 'space-between' }}>
               <strong style={{ flex: 1 }}>{card.front}</strong>
               {card.locator && (
                 <span
@@ -93,7 +93,7 @@ function FlashcardDeck({ cards }) {
               )}
             </div>
             {isOpen ? (
-              <p style={{ color: 'var(--text-secondary)', margin: 'var(--space-2) 0 0' }}>{card.back}</p>
+              <p className="qv-text-secondary" style={{ margin: 'var(--space-2) 0 0' }}>{card.back}</p>
             ) : (
               <small className="muted-copy">Click to reveal</small>
             )}
@@ -624,8 +624,8 @@ export default function CfaModule() {
         {/* Main Content */}
         <div className="module-content">
           <Surface tone="study" status="exam" className="objective-rail" style={{ marginBottom: 'var(--space-6)' }}>
-            <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-2)' }}>
-              <h2 style={{ margin: 0 }}>Objective Rail</h2>
+            <div className="flex-between qv-mb-2" style={{ gap: 'var(--space-3)' }}>
+              <h2 className="qv-m-0">Objective Rail</h2>
               <StatusBadge tone="exam">{data.learningObjectives.length} mapped</StatusBadge>
             </div>
             <ProgressRail value={completed ? data.sections.length : Math.max(1, Math.floor(data.sections.length / 3))} max={data.sections.length} label="Reading progress" tone="exam" />
@@ -666,11 +666,11 @@ export default function CfaModule() {
             <>
               {reading.chunks.slice(0, chunkLimit).map((chunk) => (
                 <Surface key={chunk.id} tone="study" className="animate-fade" style={{ marginBottom: 'var(--space-4)' }}>
-                  <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-2)', alignItems: 'flex-start' }}>
-                    <h3 style={{ margin: 0, fontSize: 'var(--fs-md)' }}>{chunk.heading || reading.document?.title?.replace(/\s+libgenli$/i, '') || 'Curriculum'}</h3>
+                  <div className="flex-between qv-mb-2" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+                    <h3 className="qv-m-0 qv-fs-md">{chunk.heading || reading.document?.title?.replace(/\s+libgenli$/i, '') || 'Curriculum'}</h3>
                     <StatusBadge tone="vault">{chunk.locator}</StatusBadge>
                   </div>
-                  <p style={{ whiteSpace: 'pre-line', lineHeight: 1.7, margin: 0 }}>{chunk.text}</p>
+                  <p className="qv-m-0" style={{ whiteSpace: 'pre-line', lineHeight: 1.7 }}>{chunk.text}</p>
                 </Surface>
               ))}
               {chunkLimit < reading.chunks.length && (
@@ -684,7 +684,7 @@ export default function CfaModule() {
               )}
 
               <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
-                <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                <div className="flex-between qv-mb-2" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
                   <div>
                     <StatusBadge tone="accent">AI summary</StatusBadge>
                     <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>3-4 paragraph exam-focused review of this topic.</p>
@@ -694,7 +694,7 @@ export default function CfaModule() {
                   </button>
                 </div>
                 {summaryState.state === 'error' && (
-                  <p style={{ color: 'var(--danger)', margin: 0 }}>{summaryState.error}</p>
+                  <p className="qv-text-danger qv-m-0">{summaryState.error}</p>
                 )}
                 {summaryState.state === 'done' && summaryState.text && (
                   <p
@@ -714,7 +714,7 @@ export default function CfaModule() {
               </Surface>
 
               <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
-                <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                <div className="flex-between qv-mb-2" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
                   <div>
                     <StatusBadge tone="accent">AI practice</StatusBadge>
                     <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>Generate questions from this curriculum with your local model.</p>
@@ -723,7 +723,7 @@ export default function CfaModule() {
                     {aiState === 'loading' ? 'Generating…' : aiQuestions.length ? 'Regenerate' : 'Generate'}
                   </button>
                 </div>
-                {aiState === 'error' && <p style={{ color: 'var(--danger)', margin: 0 }}>{aiError}</p>}
+                {aiState === 'error' && <p className="qv-text-danger qv-m-0">{aiError}</p>}
                 {aiQuestions.map((question, qi) => (
                   <div key={question.id} style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
                     <strong>{qi + 1}. {question.question}</strong>
@@ -734,18 +734,18 @@ export default function CfaModule() {
                         </li>
                       ))}
                     </ul>
-                    {question.explanation && <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>{question.explanation}</p>}
+                    {question.explanation && <p className="qv-text-muted qv-fs-sm qv-m-0">{question.explanation}</p>}
                   </div>
                 ))}
               </Surface>
 
               <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
-                <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                <div className="flex-between qv-mb-2" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
                   <div>
                     <StatusBadge tone="accent">AI flashcards</StatusBadge>
                     <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>Generate curriculum-grounded flashcards with your local model.</p>
                   </div>
-                  <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <div className="qv-row-2">
                     {aiFlashState === 'loading' && (
                       <button className="btn btn-secondary" onClick={handleCancelFlashcards}>Cancel</button>
                     )}
@@ -759,10 +759,10 @@ export default function CfaModule() {
                   </div>
                 </div>
                 {aiFlashState === 'loading' && (
-                  <p className="muted-copy" style={{ margin: 0 }}>Building flashcards from curriculum excerpts…</p>
+                  <p className="muted-copy qv-m-0">Building flashcards from curriculum excerpts…</p>
                 )}
                 {aiFlashState === 'error' && (
-                  <p style={{ color: 'var(--danger)', margin: 0 }}>{aiFlashError}</p>
+                  <p className="qv-text-danger qv-m-0">{aiFlashError}</p>
                 )}
                 {aiFlashState === 'done' && aiFlashcards.length > 0 && (
                   <FlashcardDeck cards={aiFlashcards} />
@@ -770,13 +770,13 @@ export default function CfaModule() {
               </Surface>
 
               <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
-                <div style={{ marginBottom: 'var(--space-2)' }}>
+                <div className="qv-mb-2">
                   <StatusBadge tone="accent">Ask the curriculum</StatusBadge>
                   <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
                     Grounded RAG over this topic's ingested volume via the embedded notebook — cited, source-only answers.
                   </p>
                 </div>
-                <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                <div className="qv-row-2" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
                   <input
                     className="input"
                     style={{ flex: '1 1 320px' }}
@@ -790,7 +790,7 @@ export default function CfaModule() {
                     {askState === 'loading' ? 'Thinking…' : 'Ask'}
                   </button>
                   {(hasSpeechRecognition() || hasMediaDevices) && (
-                    <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
+                    <div className="qv-row-1">
                       {/* Mode toggle */}
                       <button
                         type="button"
@@ -853,12 +853,12 @@ export default function CfaModule() {
                   )}
                 </div>
                 {voiceMode === 'browser' && hasSpeechRecognition() && (
-                  <p style={{ margin: 'var(--space-1) 0 0', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+                  <p className="qv-fs-xs qv-text-muted" style={{ margin: 'var(--space-1) 0 0' }}>
                     Voice input may use the browser's network STT on Chrome — type to stay strictly offline.
                   </p>
                 )}
                 {voiceMode === 'offline' && hasMediaDevices && (
-                  <p style={{ margin: 'var(--space-1) 0 0', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+                  <p className="qv-fs-xs qv-text-muted" style={{ margin: 'var(--space-1) 0 0' }}>
                     First use downloads ~40 MB Whisper model; cached locally after.
                     {voiceProgress && voiceProgress.status === 'progress' && voiceProgress.progress != null && (
                       <> Downloading Whisper model… {Math.round(voiceProgress.progress)}%</>
@@ -866,13 +866,13 @@ export default function CfaModule() {
                   </p>
                 )}
                 {askState === 'loading' && (
-                  <p className="muted-copy" style={{ marginTop: 'var(--space-2)' }}>
+                  <p className="muted-copy qv-mt-2">
                     Embedding curriculum and synthesizing a grounded answer — the first ask for a topic takes longer while sources index.
                   </p>
                 )}
-                {askState === 'error' && <p style={{ color: 'var(--danger)', marginTop: 'var(--space-2)' }}>{askError}</p>}
+                {askState === 'error' && <p className="qv-text-danger qv-mt-2">{askError}</p>}
                 {askState === 'cancelled' && (
-                  <p className="muted-copy" style={{ marginTop: 'var(--space-2)' }}>
+                  <p className="muted-copy qv-mt-2">
                     Ask cancelled. Any previously saved answer is still on this topic.
                   </p>
                 )}
@@ -937,7 +937,7 @@ export default function CfaModule() {
                         <ol style={{ marginTop: 'var(--space-3)', paddingLeft: 'var(--space-5)', color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>
                           {sourceIds.map((id) => (
                             <li key={id} style={{ marginBottom: 'var(--space-1)' }}>
-                              <strong style={{ color: 'var(--text-secondary)' }}>{sourceTitleMap?.get(id) || 'Curriculum source'}</strong>
+                              <strong className="qv-text-secondary">{sourceTitleMap?.get(id) || 'Curriculum source'}</strong>
                               <span style={{ marginLeft: 'var(--space-2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 'var(--fs-xs)' }}>{id}</span>
                             </li>
                           ))}
@@ -947,11 +947,11 @@ export default function CfaModule() {
                   );
                 })()}
                 {askHistory.length > 1 && (
-                  <details style={{ marginTop: 'var(--space-3)' }}>
-                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                  <details className="qv-mt-3">
+                    <summary className="qv-fw-semibold" style={{ cursor: 'pointer' }}>
                       Previous asks on this topic ({askHistory.length - 1})
                     </summary>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginTop: 'var(--space-2)' }}>
+                    <div className="qv-stack-3 qv-mt-2">
                       {askHistory.slice(1).map((entry, index) => (
                         <div
                           key={`${entry.answeredAt}-${index}`}
@@ -963,7 +963,7 @@ export default function CfaModule() {
                         >
                           <small className="muted-copy">{new Date(entry.answeredAt).toLocaleString()}</small>
                           <p style={{ margin: 'var(--space-1) 0 var(--space-2)', fontWeight: 600 }}>{entry.question}</p>
-                          <p style={{ margin: 0, whiteSpace: 'pre-line', color: 'var(--text-secondary)' }}>
+                          <p className="qv-m-0 qv-text-secondary" style={{ whiteSpace: 'pre-line' }}>
                             {entry.answer.length > 600 ? `${entry.answer.slice(0, 600)}…` : entry.answer}
                           </p>
                         </div>
@@ -1002,7 +1002,7 @@ export default function CfaModule() {
                       <span className="badge badge-blue">{example.formulaName || 'concept'}</span>
                       <h3>{example.title}</h3>
                       <p>{example.prompt}</p>
-                      <p style={{ color: 'var(--text-secondary)' }}>{example.walkthrough}</p>
+                      <p className="qv-text-secondary">{example.walkthrough}</p>
                     </div>
                   ))}
                 </Surface>
@@ -1039,7 +1039,7 @@ export default function CfaModule() {
                 <FormulaBlock key={i} {...f} />
               ))
             ) : (
-              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>No formulas for this topic.</p>
+              <p className="qv-text-muted qv-fs-sm">No formulas for this topic.</p>
             )}
           </Surface>
 
@@ -1065,7 +1065,7 @@ export default function CfaModule() {
           />
 
           <Surface tone="vault" density="compact">
-            <div className="flex-between" style={{ marginBottom: 'var(--space-3)' }}>
+            <div className="flex-between qv-mb-3">
               <h3 style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
                 <StickyNote size={18} color="var(--accent)" /> Local Notes
               </h3>
@@ -1090,8 +1090,8 @@ export default function CfaModule() {
                 lineHeight: 1.5,
               }}
             />
-            <div className="flex-between" style={{ marginTop: 'var(--space-3)', gap: 'var(--space-3)' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-xs)' }}>
+            <div className="flex-between qv-mt-3" style={{ gap: 'var(--space-3)' }}>
+              <span className="qv-text-muted qv-fs-xs">
                 {noteSavedAt ? `Saved ${new Date(noteSavedAt).toLocaleString()}` : 'Stored locally on this device'}
               </span>
               <button className="btn btn-primary" onClick={handleSaveNote}>Save Note</button>
@@ -1109,8 +1109,8 @@ export default function CfaModule() {
           >
             <Target size={20} color="var(--accent)" />
             <div>
-              <div style={{ fontWeight: 600 }}>Practice Quiz</div>
-              <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Test your understanding</div>
+              <div className="qv-fw-semibold">Practice Quiz</div>
+              <div className="qv-fs-xs qv-text-muted">Test your understanding</div>
             </div>
             <ChevronRight size={16} color="var(--text-muted)" style={{ marginLeft: 'auto' }} />
           </Link>
