@@ -1,4 +1,5 @@
 import { getStorage } from './storage';
+import { packExcerpts, pickBudget, renderExcerpts } from './contextBudget';
 
 // Local-LLM integration. Targets an OpenAI-compatible chat endpoint exposed by a
 // local model server (Ollama at :11434/v1, LM Studio at :1234/v1). No cloud, no
@@ -11,7 +12,40 @@ export const DEFAULT_LLM_SETTINGS = {
   enabled: false,
   baseUrl: 'http://localhost:11434/v1',
   model: 'llama3.1',
+  /**
+   * Optional explicit override for the model's context window.  When unset,
+   * the budget is inferred from the model name (e.g. `-cw32768`,
+   * `-ctx131072`, or a `128k` keyword) and falls back to 32768 — the
+   * realistic LM Studio default for Gemma 4 E4B.  Setting this matters
+   * when you've loaded a non-default window via `lms load -c <N>`.
+   */
+  contextWindow: 32768,
 };
+
+/**
+ * Pack curriculum chunks into a string under the model's context budget.
+ *
+ * The default character-cap (`maxChars`) was previously a single hard-coded
+ * 12000 across every caller; that worked for Gemma at 32K but silently
+ * truncated long chunks under tighter loads (e.g. the 4K fallback we saw
+ * after model crashes).  This shared helper consults `contextBudget` so
+ * every caller gets the same deterministic budget per settings object.
+ */
+export function packCurriculumChunks(settings, chunks, opts = {}) {
+  const budget = pickBudget({ modelName: settings?.model, contextWindow: settings?.contextWindow });
+  // Reserve a slice of the user-and-grounding budget for the chunks
+  // themselves; the rest stays available for the question / topic text.
+  const groundingTokens = Math.max(512, Math.floor(budget.forUserAndGrounding * 0.75));
+  const packed = packExcerpts(chunks || [], groundingTokens, (c) => c?.text || '');
+  const rendered = renderExcerpts(packed.kept, (c) => c?.locator || (opts.defaultLocator ?? 'excerpt'), (c) => c?.text || '');
+  return {
+    text: rendered,
+    keptCount: packed.kept.length,
+    droppedCount: packed.dropped.length,
+    tokens: packed.estimatedTokens,
+    budget,
+  };
+}
 
 export const LLM_PRESETS = [
   { label: 'Ollama', baseUrl: 'http://localhost:11434/v1' },
@@ -67,10 +101,8 @@ function extractJsonArray(text) {
 export async function generateQuestionsFromCurriculum({ settings, topicTitle, chunks, count = 3, signal }) {
   const base = normalizeBaseUrl(settings?.baseUrl);
   const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
-  const context = (chunks || [])
-    .map((chunk) => `[${chunk.locator || 'excerpt'}] ${chunk.text}`)
-    .join('\n\n')
-    .slice(0, 12000);
+  const packed = packCurriculumChunks(settings, chunks);
+  const context = packed.text;
   if (!context) throw new Error('No curriculum text available to ground generation.');
 
   const system =
@@ -288,10 +320,8 @@ export async function narrateStudyPlan({ settings, plan, signal }) {
 export async function summarizeTopicFromCurriculum({ settings, topicTitle, chunks, signal }) {
   const base = normalizeBaseUrl(settings?.baseUrl);
   const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
-  const context = (chunks || [])
-    .map((chunk) => `[${chunk.locator || 'excerpt'}] ${chunk.text}`)
-    .join('\n\n')
-    .slice(0, 12000);
+  const packed = packCurriculumChunks(settings, chunks);
+  const context = packed.text;
   if (!context) throw new Error('No curriculum text available to summarize.');
 
   const system =
@@ -395,10 +425,8 @@ export async function saveCachedTopicSummary(level, topic, summary) {
 export async function generateFlashcardsFromCurriculum({ settings, topicTitle, chunks, count = 6, signal }) {
   const base = normalizeBaseUrl(settings?.baseUrl);
   const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
-  const context = (chunks || [])
-    .map((chunk) => `[${chunk.locator || 'excerpt'}] ${chunk.text}`)
-    .join('\n\n')
-    .slice(0, 12000);
+  const packed = packCurriculumChunks(settings, chunks);
+  const context = packed.text;
   if (!context) throw new Error('No curriculum text available to ground generation.');
 
   const system =

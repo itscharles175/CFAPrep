@@ -128,22 +128,26 @@ describe('generateQuestionsFromCurriculum', () => {
     ).rejects.toThrow(/No curriculum text/);
   });
 
-  it('truncates the context to keep prompts under the model window', async () => {
+  it('packs the context under the model window via contextBudget', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({ choices: [{ message: { content: '[{"question":"q","options":["a","b"],"correct":0}]' } }] }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const giantChunks = Array.from({ length: 200 }, (_, i) => ({ locator: `p.${i}`, text: 'x'.repeat(200) }));
+    // 600 chunks × 200 chars = 120 000 chars — guaranteed to exceed
+    // every reasonable budget so the packer MUST drop some.
+    const giantChunks = Array.from({ length: 600 }, (_, i) => ({ locator: `p.${i}`, text: 'x'.repeat(200) }));
     await generateQuestionsFromCurriculum({
-      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma', contextWindow: 8192 },
       topicTitle: 'X',
       chunks: giantChunks,
       count: 1,
     });
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     const userMessage = body.messages.find((m) => m.role === 'user').content;
-    // Context sliced to <= 12000 chars per the helper.
-    expect(userMessage.length).toBeLessThan(20_000);
+    // With an 8K window, ~75% of ~5.6K user budget is for grounding ≈ 4200 tokens
+    // ≈ 15 000 chars. Confirm the prompt was packed below the full input.
+    expect(userMessage.length).toBeLessThan(120_000);
+    expect(userMessage.length).toBeLessThan(25_000);
   });
 });
 
