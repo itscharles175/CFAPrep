@@ -10,11 +10,25 @@ import { exportVaultData, repairVaultData } from '../../lib/learning';
 import { searchCfaSourceVault } from '../../lib/cfaSourceVault';
 import { commandRoutes } from '../../routes/routeManifest';
 
-function normalizeSearch(value) {
+// Unified shape used to render the command-palette results. Both
+// `buildSearchItems` and `commandRoutes` items conform to this, and
+// `sourceResults` are produced locally inside this component.
+interface SearchResultItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  type: string;
+  path: string;
+  keywords: string[];
+  disabled?: boolean;
+  action?: 'backup' | 'repair' | 'theme';
+}
+
+function normalizeSearch(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-function scoreSearchItem(item, terms) {
+function scoreSearchItem(item: SearchResultItem, terms: string[]): number {
   const title = normalizeSearch(item.title);
   const subtitle = normalizeSearch(item.subtitle || '');
   const keywords = normalizeSearch(item.keywords.join(' '));
@@ -27,11 +41,11 @@ function scoreSearchItem(item, terms) {
   }, 0);
 }
 
-function commandResultDomId(id) {
+function commandResultDomId(id: string): string {
   return `command-result-${String(id).replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
 }
 
-function downloadJson(payload) {
+function downloadJson(payload: unknown): void {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -41,24 +55,30 @@ function downloadJson(payload) {
   URL.revokeObjectURL(url);
 }
 
-export default function TopBar({ collapsed, navOpen = false, onMenuToggle }) {
+interface TopBarProps {
+  collapsed?: boolean;
+  navOpen?: boolean;
+  onMenuToggle?: () => void;
+}
+
+export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: TopBarProps) {
   const navigate = useNavigate();
   const { theme, cycleTheme } = useTheme();
   const summary = useProgressSummary();
-  const [activePathway] = useLevel3Pathway();
+  const [activePathway] = useLevel3Pathway() as [string, (next: string) => void];
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [offline, setOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
-  const [cacheVersion, setCacheVersion] = useState(null);
-  const [applyUpdate, setApplyUpdate] = useState(null);
+  const [offline, setOffline] = useState<boolean>(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+  const [cacheVersion, setCacheVersion] = useState<string | null>(null);
+  const [applyUpdate, setApplyUpdate] = useState<(() => void) | null>(null);
   const [commandMessage, setCommandMessage] = useState('');
-  const [sourceResults, setSourceResults] = useState([]);
-  const inputRef = useRef(null);
-  const searchRef = useRef(null);
+  const [sourceResults, setSourceResults] = useState<SearchResultItem[]>([]);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const searchRef = useRef<HTMLDivElement | null>(null);
   const searchItems = useMemo(() => buildSearchItems({ level3Pathway: activePathway }), [activePathway]);
-  const commandItems = useMemo(
+  const commandItems = useMemo<SearchResultItem[]>(
     () => [
       ...searchItems,
       ...commandRoutes.map((item) => ({
@@ -69,7 +89,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }) {
     [searchItems],
   );
 
-  const results = useMemo(() => {
+  const results = useMemo<SearchResultItem[]>(() => {
     const normalized = normalizeSearch(query);
     if (!normalized) return commandItems.slice(0, 8);
     const terms = normalized.split(' ');
@@ -119,15 +139,15 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }) {
   }, [activePathway, query]);
 
   useEffect(() => {
-    function handlePointerDown(event) {
-      if (!searchRef.current?.contains(event.target)) setSearchOpen(false);
+    function handlePointerDown(event: MouseEvent) {
+      if (!searchRef.current?.contains(event.target as Node)) setSearchOpen(false);
     }
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, []);
 
   useEffect(() => {
-    function handleKeyDown(event) {
+    function handleKeyDown(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setSearchOpen(true);
@@ -153,12 +173,14 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }) {
       setOffline(true);
     }
 
-    function handlePwaVersion(event) {
-      setCacheVersion(event.detail);
+    function handlePwaVersion(event: Event) {
+      const detail = (event as CustomEvent<string>).detail;
+      setCacheVersion(detail);
     }
 
-    function handlePwaUpdate(event) {
-      setApplyUpdate(() => event.detail.applyUpdate);
+    function handlePwaUpdate(event: Event) {
+      const detail = (event as CustomEvent<{ applyUpdate: () => void }>).detail;
+      setApplyUpdate(() => detail.applyUpdate);
     }
 
     window.addEventListener('online', handleOnline);
@@ -173,7 +195,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }) {
     };
   }, []);
 
-  async function goToResult(item) {
+  async function goToResult(item: SearchResultItem) {
     if (item.disabled) return;
     if (item.action === 'backup') {
       downloadJson(await exportVaultData());

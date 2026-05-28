@@ -1,15 +1,56 @@
-import { createElement, isValidElement, useEffect, useId, useRef } from 'react';
+import {
+  createElement,
+  isValidElement,
+  useEffect,
+  useId,
+  useRef,
+  type ComponentType,
+  type ElementType,
+  type HTMLAttributes,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 
-function joinClasses(...parts) {
+// An icon can be a React element already (`<Icon size={12} />`) or a
+// component reference to render (`Icon`). Lucide icons are forwardRef
+// objects, which TypeScript treats as `ComponentType`-compatible.
+type IconLike =
+  | ReactElement
+  | ComponentType<{ size?: number; 'aria-hidden'?: boolean }>;
+
+function joinClasses(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
 }
 
-function iconNode(icon, size = 18) {
+function iconNode(icon: IconLike | undefined, size = 18): ReactNode {
   if (!icon) return null;
   if (isValidElement(icon)) return icon;
-  return createElement(icon, { size, 'aria-hidden': true });
+  // Anything else is treated as a component type (function, class, or
+  // forwardRef/memo object — including `lucide-react` icons).
+  return createElement(icon as ComponentType<{ size?: number; 'aria-hidden'?: boolean }>, {
+    size,
+    'aria-hidden': true,
+  });
+}
+
+type Tone = string;
+type Density = string;
+type Status = string;
+
+interface SurfaceProps {
+  as?: ElementType;
+  tone?: Tone;
+  density?: Density;
+  status?: Status;
+  interactive?: boolean;
+  className?: string;
+  children?: ReactNode;
+  // Polymorphic surface — accept any extra props (router `to`, `onClick`,
+  // ARIA, data-*, etc.) and forward them to the underlying element.
+  [key: string]: unknown;
 }
 
 export function Surface({
@@ -21,7 +62,7 @@ export function Surface({
   className,
   children,
   ...props
-}) {
+}: SurfaceProps) {
   return (
     <Component
       className={joinClasses(
@@ -39,7 +80,14 @@ export function Surface({
   );
 }
 
-export function StatusBadge({ children, tone = 'accent', icon, className, ...props }) {
+interface StatusBadgeProps extends HTMLAttributes<HTMLSpanElement> {
+  children?: ReactNode;
+  tone?: Tone;
+  icon?: IconLike;
+  className?: string;
+}
+
+export function StatusBadge({ children, tone = 'accent', icon, className, ...props }: StatusBadgeProps) {
   return (
     <span className={joinClasses('status-badge', `status-badge-${tone}`, className)} {...props}>
       {iconNode(icon, 12)}
@@ -48,15 +96,35 @@ export function StatusBadge({ children, tone = 'accent', icon, className, ...pro
   );
 }
 
-export function ActionBar({ children, align = 'end', className }) {
+interface ActionBarProps {
+  children?: ReactNode;
+  align?: 'start' | 'center' | 'end';
+  className?: string;
+}
+
+export function ActionBar({ children, align = 'end', className }: ActionBarProps) {
   return <div className={joinClasses('action-bar', `action-bar-${align}`, className)}>{children}</div>;
 }
 
-export function InlineCluster({ children, align = 'start', className }) {
+interface InlineClusterProps {
+  children?: ReactNode;
+  align?: 'start' | 'center' | 'end';
+  className?: string;
+}
+
+export function InlineCluster({ children, align = 'start', className }: InlineClusterProps) {
   return <div className={joinClasses('inline-cluster', `inline-cluster-${align}`, className)}>{children}</div>;
 }
 
-export function IconFrame({ icon, tone = 'accent', size = 18, className, children }) {
+interface IconFrameProps {
+  icon?: IconLike;
+  tone?: Tone;
+  size?: number;
+  className?: string;
+  children?: ReactNode;
+}
+
+export function IconFrame({ icon, tone = 'accent', size = 18, className, children }: IconFrameProps) {
   return (
     <span className={joinClasses('icon-frame', `icon-frame-${tone}`, className)} aria-hidden={!children}>
       {children || iconNode(icon, size)}
@@ -64,7 +132,17 @@ export function IconFrame({ icon, tone = 'accent', size = 18, className, childre
   );
 }
 
-export function PageHeader({ badge, title, subtitle, actions, tone = 'study', eyebrow, meta }) {
+interface PageHeaderProps {
+  badge?: ReactNode;
+  title?: ReactNode;
+  subtitle?: ReactNode;
+  actions?: ReactNode;
+  tone?: Tone;
+  eyebrow?: ReactNode;
+  meta?: ReactNode;
+}
+
+export function PageHeader({ badge, title, subtitle, actions, tone = 'study', eyebrow, meta }: PageHeaderProps) {
   return (
     <header className={joinClasses('page-header', `page-header-${tone}`)}>
       <div className="page-header-copy">
@@ -82,7 +160,25 @@ export function PageHeader({ badge, title, subtitle, actions, tone = 'study', ey
   );
 }
 
-export function PageSection({ eyebrow, title, subtitle, actions, children, tone = 'default', className }) {
+interface PageSectionProps {
+  eyebrow?: ReactNode;
+  title?: ReactNode;
+  subtitle?: ReactNode;
+  actions?: ReactNode;
+  children?: ReactNode;
+  tone?: Tone;
+  className?: string;
+}
+
+export function PageSection({
+  eyebrow,
+  title,
+  subtitle,
+  actions,
+  children,
+  tone = 'default',
+  className,
+}: PageSectionProps) {
   return (
     <section className={joinClasses('page-section', `page-section-${tone}`, className)}>
       {(eyebrow || title || subtitle || actions) && (
@@ -100,6 +196,24 @@ export function PageSection({ eyebrow, title, subtitle, actions, children, tone 
   );
 }
 
+interface PanelProps {
+  as?: ElementType;
+  title?: ReactNode;
+  eyebrow?: ReactNode;
+  subtitle?: ReactNode;
+  icon?: IconLike;
+  actions?: ReactNode;
+  footer?: ReactNode;
+  children?: ReactNode;
+  tone?: Tone;
+  density?: Density;
+  status?: Status;
+  interactive?: boolean;
+  className?: string;
+  // Forward any extra DOM/router props (e.g. `to`, `onClick`, ARIA, data-*).
+  [key: string]: unknown;
+}
+
 export function Panel({
   as: Component = 'div',
   title,
@@ -115,7 +229,7 @@ export function Panel({
   interactive = false,
   className,
   ...props
-}) {
+}: PanelProps) {
   return (
     <Surface
       as={Component}
@@ -145,11 +259,25 @@ export function Panel({
   );
 }
 
-export function StatGrid({ children, columns = 3, className }) {
+interface StatGridProps {
+  children?: ReactNode;
+  columns?: number;
+  className?: string;
+}
+
+export function StatGrid({ children, columns = 3, className }: StatGridProps) {
   return <div className={joinClasses('stat-grid', `stat-grid-${columns}`, className)}>{children}</div>;
 }
 
-export function StatCell({ label, value, tone = 'accent', detail, className }) {
+interface StatCellProps {
+  label?: ReactNode;
+  value?: ReactNode;
+  tone?: Tone;
+  detail?: ReactNode;
+  className?: string;
+}
+
+export function StatCell({ label, value, tone = 'accent', detail, className }: StatCellProps) {
   return (
     <div className={joinClasses('stat-cell', `stat-cell-${tone}`, className)}>
       <small>{label}</small>
@@ -159,7 +287,15 @@ export function StatCell({ label, value, tone = 'accent', detail, className }) {
   );
 }
 
-export function EmptyPanel({ title, description, action, tone = 'default', className }) {
+interface EmptyPanelProps {
+  title?: ReactNode;
+  description?: ReactNode;
+  action?: ReactNode;
+  tone?: Tone;
+  className?: string;
+}
+
+export function EmptyPanel({ title, description, action, tone = 'default', className }: EmptyPanelProps) {
   return (
     <Surface tone={tone} className={joinClasses('empty-panel', className)}>
       <h2>{title}</h2>
@@ -169,7 +305,17 @@ export function EmptyPanel({ title, description, action, tone = 'default', class
   );
 }
 
-export function MetricTile({ label, value, detail, icon, tone = 'accent', status, className }) {
+interface MetricTileProps {
+  label?: ReactNode;
+  value?: ReactNode;
+  detail?: ReactNode;
+  icon?: IconLike;
+  tone?: Tone;
+  status?: Status;
+  className?: string;
+}
+
+export function MetricTile({ label, value, detail, icon, tone = 'accent', status, className }: MetricTileProps) {
   return (
     <Surface tone="metric" density="compact" status={status || tone} className={joinClasses('metric-tile', className)}>
       <div className={joinClasses('metric-tile-icon', `metric-tile-icon-${tone}`)}>{iconNode(icon)}</div>
@@ -182,11 +328,16 @@ export function MetricTile({ label, value, detail, icon, tone = 'accent', status
   );
 }
 
-export function MetricCard(props) {
+export function MetricCard(props: MetricTileProps) {
   return <MetricTile {...props} />;
 }
 
-export function CommandHint({ keys, label }) {
+interface CommandHintProps {
+  keys: string | string[];
+  label?: ReactNode;
+}
+
+export function CommandHint({ keys, label }: CommandHintProps) {
   const renderedKeys = Array.isArray(keys) ? keys : [keys];
   return (
     <span className="command-hint">
@@ -198,10 +349,25 @@ export function CommandHint({ keys, label }) {
   );
 }
 
-export function ProgressRail({ value = 0, max = 100, label, detail, tone = 'accent' }) {
+interface ProgressRailProps {
+  value?: number;
+  max?: number;
+  label?: ReactNode;
+  detail?: ReactNode;
+  tone?: Tone;
+}
+
+export function ProgressRail({ value = 0, max = 100, label, detail, tone = 'accent' }: ProgressRailProps) {
   const pct = Math.max(0, Math.min(100, Math.round((value / Math.max(1, max)) * 100)));
   return (
-    <div className="progress-rail" aria-label={label} aria-valuemin={0} aria-valuemax={max} aria-valuenow={value} role="progressbar">
+    <div
+      className="progress-rail"
+      aria-label={typeof label === 'string' ? label : undefined}
+      aria-valuemin={0}
+      aria-valuemax={max}
+      aria-valuenow={value}
+      role="progressbar"
+    >
       {(label || detail) && (
         <div className="progress-rail-label">
           <span>{label}</span>
@@ -215,8 +381,22 @@ export function ProgressRail({ value = 0, max = 100, label, detail, tone = 'acce
   );
 }
 
-export function SegmentedControl({ label, options, value, onChange, density = 'default' }) {
-  function moveFocus(event, index) {
+interface SegmentedOption {
+  value: string;
+  label: ReactNode;
+  icon?: IconLike;
+}
+
+interface SegmentedControlProps {
+  label?: string;
+  options: SegmentedOption[];
+  value: string;
+  onChange: (value: string) => void;
+  density?: Density;
+}
+
+export function SegmentedControl({ label, options, value, onChange, density = 'default' }: SegmentedControlProps) {
+  function moveFocus(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
     if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
     const lastIndex = options.length - 1;
@@ -227,7 +407,8 @@ export function SegmentedControl({ label, options, value, onChange, density = 'd
     if (event.key === 'End') nextIndex = lastIndex;
     const next = options[nextIndex];
     onChange(next.value);
-    event.currentTarget.parentElement?.querySelectorAll('[role="radio"]')?.[nextIndex]?.focus();
+    const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]');
+    buttons?.[nextIndex]?.focus();
   }
 
   return (
@@ -254,24 +435,34 @@ export function SegmentedControl({ label, options, value, onChange, density = 'd
   );
 }
 
-export function Dialog({ title, description, children, actions, onClose, labelledBy, className }) {
+interface DialogProps {
+  title?: ReactNode;
+  description?: ReactNode;
+  children?: ReactNode;
+  actions?: ReactNode;
+  onClose?: () => void;
+  labelledBy?: string;
+  className?: string;
+}
+
+export function Dialog({ title, description, children, actions, onClose, labelledBy, className }: DialogProps) {
   const titleId = useId();
   const descriptionId = useId();
-  const dialogRef = useRef(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const previous = document.activeElement;
-    const firstFocusable = dialogRef.current?.querySelector(
+    const previous = document.activeElement as HTMLElement | null;
+    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(
       'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
     );
     (firstFocusable || dialogRef.current)?.focus?.();
-    function handleKeyDown(event) {
+    function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         onClose?.();
         return;
       }
       if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = dialogRef.current.querySelectorAll(
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
       if (!focusable.length) return;
@@ -293,7 +484,11 @@ export function Dialog({ title, description, children, actions, onClose, labelle
   }, [onClose]);
 
   return (
-    <div className="confirm-dialog" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}>
+    <div
+      className="confirm-dialog"
+      role="presentation"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}
+    >
       <div
         ref={dialogRef}
         className={joinClasses('surface surface-default confirm-dialog-card', className)}
@@ -312,13 +507,26 @@ export function Dialog({ title, description, children, actions, onClose, labelle
   );
 }
 
-export function DataTable({ columns = [], rows = [], empty = 'No rows available.', className }) {
+interface DataTableRow {
+  id: string;
+  tone?: Tone;
+  cells: ReactNode[];
+}
+
+interface DataTableProps {
+  columns?: ReactNode[];
+  rows?: DataTableRow[];
+  empty?: ReactNode;
+  className?: string;
+}
+
+export function DataTable({ columns = [], rows = [], empty = 'No rows available.', className }: DataTableProps) {
   return (
     <div className={joinClasses('data-panel', className)} role="table">
       {columns.length > 0 && (
         <div className="data-panel-row data-panel-head" role="row">
-          {columns.map((column) => (
-            <span key={column} role="columnheader">{column}</span>
+          {columns.map((column, index) => (
+            <span key={index} role="columnheader">{column}</span>
           ))}
         </div>
       )}
@@ -337,7 +545,16 @@ export function DataTable({ columns = [], rows = [], empty = 'No rows available.
   );
 }
 
-export function QuestionStage({ badge, question, objective, children, footer, status = 'active' }) {
+interface QuestionStageProps {
+  badge?: ReactNode;
+  question?: ReactNode;
+  objective?: ReactNode;
+  children?: ReactNode;
+  footer?: ReactNode;
+  status?: Status;
+}
+
+export function QuestionStage({ badge, question, objective, children, footer, status = 'active' }: QuestionStageProps) {
   return (
     <Surface tone="study" status={status} className="question-stage">
       <div className="question-stage-head">
@@ -351,7 +568,19 @@ export function QuestionStage({ badge, question, objective, children, footer, st
   );
 }
 
-export function CaseViewer({ title = 'Case Facts', children, exhibits = [] }) {
+interface CaseExhibit {
+  id: string;
+  title?: ReactNode;
+  content?: ReactNode;
+}
+
+interface CaseViewerProps {
+  title?: ReactNode;
+  children?: ReactNode;
+  exhibits?: CaseExhibit[];
+}
+
+export function CaseViewer({ title = 'Case Facts', children, exhibits = [] }: CaseViewerProps) {
   return (
     <Surface tone="case" className="case-viewer">
       <div className="case-viewer-copy">
@@ -372,7 +601,22 @@ export function CaseViewer({ title = 'Case Facts', children, exhibits = [] }) {
   );
 }
 
-export function RubricPanel({ criteria = [], scores = {}, onScore, maxPoints, title = 'Rubric' }) {
+interface RubricCriterion {
+  id: string;
+  label?: ReactNode;
+  description?: ReactNode;
+  points: number;
+}
+
+interface RubricPanelProps {
+  criteria?: RubricCriterion[];
+  scores?: Record<string, number>;
+  onScore?: (id: string, value: number) => void;
+  maxPoints?: number;
+  title?: ReactNode;
+}
+
+export function RubricPanel({ criteria = [], scores = {}, onScore, maxPoints, title = 'Rubric' }: RubricPanelProps) {
   return (
     <Surface tone="ops" className="rubric-panel">
       <div className="rubric-panel-head">
@@ -401,7 +645,23 @@ export function RubricPanel({ criteria = [], scores = {}, onScore, maxPoints, ti
   );
 }
 
-export function ReviewItemCard({ item }) {
+interface ReviewItemCardItem {
+  id: string;
+  path: string;
+  type: string;
+  title?: ReactNode;
+  subtitle?: ReactNode;
+  reason?: string;
+  retentionPct?: number;
+  reasonDetails?: string[];
+  weaknessSignals?: Array<{ label: string; impact: ReactNode }>;
+}
+
+interface ReviewItemCardProps {
+  item: ReviewItemCardItem;
+}
+
+export function ReviewItemCard({ item }: ReviewItemCardProps) {
   return (
     <Surface as={Link} to={item.path} tone="vault" interactive className="review-item-card">
       <div>
@@ -414,14 +674,14 @@ export function ReviewItemCard({ item }) {
             {typeof item.retentionPct === 'number' ? ` · retention ${item.retentionPct}%` : ''}
           </small>
         )}
-        {item.reasonDetails?.length > 0 && (
+        {item.reasonDetails?.length ? (
           <small className="muted-copy">{item.reasonDetails.slice(0, 2).join(' ')}</small>
-        )}
-        {item.weaknessSignals?.length > 0 && (
+        ) : null}
+        {item.weaknessSignals?.length ? (
           <small className="command-hint">
             Signals: {item.weaknessSignals.slice(0, 2).map((signal) => `${signal.label} (${signal.impact})`).join(' · ')}
           </small>
-        )}
+        ) : null}
       </div>
       <ChevronRight size={18} color="var(--text-muted)" aria-hidden="true" />
     </Surface>

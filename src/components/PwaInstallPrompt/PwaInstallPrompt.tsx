@@ -3,18 +3,26 @@ import { getStorage } from '../../lib/storage';
 
 const DISMISS_KEY = 'pwa-install-dismissed';
 
+// PWA `beforeinstallprompt` is not in the standard lib DOM typings — declare
+// the minimum shape we actually use so we can avoid `any`.
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: string[];
+  readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+  prompt(): Promise<void>;
+}
+
 export function PwaInstallPrompt() {
   const [visible, setVisible] = useState(false);
-  const eventRef = useRef(null);
+  const eventRef = useRef<BeforeInstallPromptEvent | null>(null);
   // Keep a stable ref to the handler so we can remove the exact same function.
-  const handlerRef = useRef(null);
+  const handlerRef = useRef<((event: Event) => void) | null>(null);
 
   useEffect(() => {
     let alive = true;
 
-    function handleBeforeInstallPrompt(e) {
+    function handleBeforeInstallPrompt(e: Event) {
       e.preventDefault();
-      eventRef.current = e;
+      eventRef.current = e as BeforeInstallPromptEvent;
       if (alive) setVisible(true);
     }
 

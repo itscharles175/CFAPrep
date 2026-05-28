@@ -12,30 +12,55 @@ import { getStorage } from './storage';
 
 const BOOTSTRAP_MARKER_KEY = 'ai-content-bootstrap-marker';
 
-function answerCacheKeyForAi(level, topic) {
+interface GeneratedTopicEntry {
+  questions?: unknown[];
+  flashcards?: unknown[];
+  generatedAt?: string;
+}
+
+interface GeneratedBundle {
+  kind: 'cfa-generated-content';
+  generatedAt: string;
+  byTopic: Record<string, Record<string, GeneratedTopicEntry>>;
+}
+
+export interface BootstrapAiContentResult {
+  seeded: number;
+  skipped: number;
+  source: 'missing' | 'already-imported' | 'bundle';
+  generatedAt?: string;
+}
+
+function answerCacheKeyForAi(level: string, topic: string): string {
   // Mirror localLlm.js's `ai-questions:${level}:${topic}` shape.
   return `ai-questions:${level}:${topic}`;
 }
 
-function flashCacheKeyForAi(level, topic) {
+function flashCacheKeyForAi(level: string, topic: string): string {
   // Mirror localLlm.js's `flash-cards:${level}:${topic}` shape.
   return `flash-cards:${level}:${topic}`;
 }
 
-async function fetchGeneratedBundle() {
+async function fetchGeneratedBundle(): Promise<GeneratedBundle | null> {
   try {
     const response = await fetch('/cfa-generated.json', { credentials: 'omit' });
     if (!response.ok) return null;
-    const payload = await response.json();
-    if (payload?.kind !== 'cfa-generated-content') return null;
-    return payload;
+    const payload = (await response.json()) as unknown;
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      (payload as { kind?: unknown }).kind !== 'cfa-generated-content'
+    ) {
+      return null;
+    }
+    return payload as GeneratedBundle;
   } catch {
     // No bundle present (development; or first run before `npm run content:expand`).
     return null;
   }
 }
 
-export async function bootstrapAiContent() {
+export async function bootstrapAiContent(): Promise<BootstrapAiContentResult> {
   const payload = await fetchGeneratedBundle();
   if (!payload?.byTopic) return { seeded: 0, skipped: 0, source: 'missing' };
 
@@ -58,7 +83,8 @@ export async function bootstrapAiContent() {
         const qKey = answerCacheKeyForAi(level, topic);
         try {
           const existing = await getStorage().settings.get(qKey);
-          if (!existing?.value?.questions?.length) {
+          const existingValue = existing?.value as { questions?: unknown[] } | undefined;
+          if (!existingValue?.questions?.length) {
             await getStorage().settings.put({
               key: qKey,
               value: {
@@ -81,7 +107,8 @@ export async function bootstrapAiContent() {
         const fKey = flashCacheKeyForAi(level, topic);
         try {
           const existing = await getStorage().settings.get(fKey);
-          if (!existing?.value?.flashcards?.length) {
+          const existingValue = existing?.value as { flashcards?: unknown[] } | undefined;
+          if (!existingValue?.flashcards?.length) {
             await getStorage().settings.put({
               key: fKey,
               value: {

@@ -1,15 +1,63 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { X } from 'lucide-react';
 
-const ToastContext = createContext(null);
+export type ToastType = 'info' | 'success' | 'warning' | 'error';
+
+export interface ToastAction {
+  label: string;
+  onClick?: () => void;
+}
+
+export interface ToastOptions {
+  duration?: number;
+  action?: ToastAction;
+}
+
+export interface ToastShowInput extends ToastOptions {
+  title?: ReactNode;
+  message?: ReactNode;
+  type?: ToastType;
+}
+
+interface ToastRow {
+  id: number;
+  title?: ReactNode;
+  message?: ReactNode;
+  type: ToastType;
+  action?: ToastAction;
+  exiting: boolean;
+}
+
+export interface ToastApi {
+  show: (input: ToastShowInput) => number;
+  success: (title?: ReactNode, message?: ReactNode, opts?: ToastOptions) => number;
+  warning: (title?: ReactNode, message?: ReactNode, opts?: ToastOptions) => number;
+  error: (title?: ReactNode, message?: ReactNode, opts?: ToastOptions) => number;
+  info: (title?: ReactNode, message?: ReactNode, opts?: ToastOptions) => number;
+  dismiss: (id: number) => void;
+}
+
+const ToastContext = createContext<ToastApi | null>(null);
 
 let toastId = 0;
 
-export function ToastProvider({ children }) {
-  const [toasts, setToasts] = useState([]);
-  const timers = useRef(new Map());
+interface ToastProviderProps {
+  children: ReactNode;
+}
 
-  const dismiss = useCallback((id) => {
+export function ToastProvider({ children }: ToastProviderProps) {
+  const [toasts, setToasts] = useState<ToastRow[]>([]);
+  const timers = useRef<Map<string | number, ReturnType<typeof setTimeout>>>(new Map());
+
+  const dismiss = useCallback((id: number) => {
     setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, exiting: true } : t)));
     const timer = setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -19,7 +67,7 @@ export function ToastProvider({ children }) {
   }, []);
 
   const addToast = useCallback(
-    ({ title, message, type = 'info', duration = 4000, action }) => {
+    ({ title, message, type = 'info', duration = 4000, action }: ToastShowInput): number => {
       const id = ++toastId;
       setToasts((prev) => [...prev, { id, title, message, type, action, exiting: false }]);
       if (duration > 0) {
@@ -31,7 +79,7 @@ export function ToastProvider({ children }) {
     [dismiss],
   );
 
-  const toast = useMemo(
+  const toast = useMemo<ToastApi>(
     () => ({
       show: addToast,
       success: (title, message, opts) => addToast({ title, message, type: 'success', ...opts }),
@@ -62,7 +110,7 @@ export function ToastProvider({ children }) {
                 type="button"
                 className="toast-action"
                 onClick={() => {
-                  t.action.onClick?.();
+                  t.action?.onClick?.();
                   dismiss(t.id);
                 }}
               >
@@ -85,7 +133,7 @@ export function ToastProvider({ children }) {
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function useToast() {
+export function useToast(): ToastApi {
   const context = useContext(ToastContext);
   if (!context) {
     throw new Error('useToast must be used inside ToastProvider');
