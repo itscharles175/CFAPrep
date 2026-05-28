@@ -1,17 +1,47 @@
 {
   "name": "QuantVault",
   "short_name": "QuantVault",
-  "description": "CFA, quantitative finance, and Excel training command center.",
+  "description": "Local-first CFA, quant, and Excel exam-prep platform — fully offline.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#0B1120",
   "theme_color": "#3B82F6",
+  "categories": ["education", "productivity"],
+  "lang": "en",
   "icons": [
     {
       "src": "/favicon.svg",
-      "sizes": "64x64",
+      "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Today",
+      "short_name": "Today",
+      "description": "What to study right now",
+      "url": "/today"
+    },
+    {
+      "name": "Review Inbox",
+      "short_name": "Review",
+      "description": "Due reviews and weak topics",
+      "url": "/review"
+    },
+    {
+      "name": "Mock Exam",
+      "short_name": "Mock",
+      "description": "Start a mixed Level I mock section",
+      "url": "/cfa/level1/mock"
     }
   ]
 }
