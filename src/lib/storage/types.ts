@@ -1,3 +1,5 @@
+import type { MasterySnapshot, QuestionResult, ReviewItem } from '../learningTypes';
+
 export interface StorageSettingRow {
   key: string;
   value: unknown;
@@ -65,6 +67,41 @@ export interface ChunkStore {
   search(options: ChunkSearchOptions): Promise<ChunkSearchResult[]>;
 }
 
+/**
+ * FSRS review-queue store.  Mirrors the historical `db.reviewItems` Dexie
+ * table — keyed by the string `id` of each {@link ReviewItem}.
+ */
+export interface ReviewItemStore {
+  get(id: string): Promise<ReviewItem | undefined>;
+  put(item: ReviewItem): Promise<void>;
+  bulkPut(items: ReviewItem[]): Promise<void>;
+  toArray(): Promise<ReviewItem[]>;
+  delete(id: string): Promise<void>;
+}
+
+/**
+ * Append-only attempt log.  Mirrors the historical `db.questionResults`
+ * Dexie table.  Note the row `id` is auto-assigned by the backend on `add`
+ * (auto-increment in Dexie), so {@link QuestionResult} carries no `id`.
+ */
+export interface QuestionResultStore {
+  add(result: QuestionResult): Promise<void>;
+  bulkAdd(results: QuestionResult[]): Promise<void>;
+  toArray(): Promise<QuestionResult[]>;
+  byTopic(domain: string, topic: string): Promise<QuestionResult[]>;
+  clear(): Promise<void>;
+}
+
+/**
+ * Per-objective mastery snapshots.  Mirrors the historical
+ * `db.masterySnapshots` Dexie table — keyed by the string `id`.
+ */
+export interface MasterySnapshotStore {
+  get(id: string): Promise<MasterySnapshot | undefined>;
+  put(snap: MasterySnapshot): Promise<void>;
+  toArray(): Promise<MasterySnapshot[]>;
+}
+
 export interface StorageDriver {
   name: 'dexie' | 'surrealdb';
   ready(): Promise<boolean>;
@@ -82,6 +119,16 @@ export interface StorageDriver {
    * but both shipped drivers (`dexie`, `surrealdb`) DO provide this.
    */
   chunks?: ChunkStore;
+  /**
+   * FSRS review queue.  Optional on the interface (like `chunks`) so callers
+   * that only know about `settings` still type-check; both shipped drivers
+   * (`dexie`, `surrealdb`) provide it.
+   */
+  reviewItems?: ReviewItemStore;
+  /** Append-only question-attempt log.  Optional, provided by both drivers. */
+  questionResults?: QuestionResultStore;
+  /** Per-objective mastery snapshots.  Optional, provided by both drivers. */
+  masterySnapshots?: MasterySnapshotStore;
 }
 
 export interface StorageRegistry {

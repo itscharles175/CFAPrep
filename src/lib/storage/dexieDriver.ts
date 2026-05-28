@@ -1,8 +1,12 @@
 import { db } from '../progressStore';
+import type { MasterySnapshot, QuestionResult, ReviewItem } from '../learningTypes';
 import type {
   ChunkSearchOptions,
   ChunkSearchResult,
   ChunkStore,
+  MasterySnapshotStore,
+  QuestionResultStore,
+  ReviewItemStore,
   SourceChunkInput,
   StorageDriver,
   StorageSettingRow,
@@ -211,6 +215,81 @@ const chunks: ChunkStore = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// reviewItems — FSRS queue (wraps db.reviewItems, keyed by string id)
+// ---------------------------------------------------------------------------
+const reviewItems: ReviewItemStore = {
+  async get(id: string): Promise<ReviewItem | undefined> {
+    return db.reviewItems.get(id);
+  },
+
+  async put(item: ReviewItem): Promise<void> {
+    await db.reviewItems.put(item);
+  },
+
+  async bulkPut(items: ReviewItem[]): Promise<void> {
+    if (items.length === 0) return;
+    await db.reviewItems.bulkPut(items);
+  },
+
+  async toArray(): Promise<ReviewItem[]> {
+    return db.reviewItems.toArray();
+  },
+
+  async delete(id: string): Promise<void> {
+    await db.reviewItems.delete(id);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// questionResults — append-only attempt log (wraps db.questionResults).
+// `id` is auto-increment in Dexie, so `add` lets Dexie assign it.
+// ---------------------------------------------------------------------------
+const questionResults: QuestionResultStore = {
+  async add(result: QuestionResult): Promise<void> {
+    // Cast away the auto-increment `id` (number) the Dexie row type carries —
+    // QuestionResult has no `id`, and Dexie assigns one on insert.
+    await db.questionResults.add(result as Parameters<typeof db.questionResults.add>[0]);
+  },
+
+  async bulkAdd(results: QuestionResult[]): Promise<void> {
+    if (results.length === 0) return;
+    await db.questionResults.bulkAdd(results as Parameters<typeof db.questionResults.bulkAdd>[0]);
+  },
+
+  async toArray(): Promise<QuestionResult[]> {
+    return db.questionResults.toArray();
+  },
+
+  async byTopic(domain: string, topic: string): Promise<QuestionResult[]> {
+    // `domain` and `topic` are both indexed; `topic` is the higher-cardinality
+    // filter, so we range on it and refine `domain` in JS.
+    const rows = await db.questionResults.where('topic').equals(topic).toArray();
+    return rows.filter((row) => row.domain === domain);
+  },
+
+  async clear(): Promise<void> {
+    await db.questionResults.clear();
+  },
+};
+
+// ---------------------------------------------------------------------------
+// masterySnapshots — per-objective snapshots (wraps db.masterySnapshots)
+// ---------------------------------------------------------------------------
+const masterySnapshots: MasterySnapshotStore = {
+  async get(id: string): Promise<MasterySnapshot | undefined> {
+    return db.masterySnapshots.get(id);
+  },
+
+  async put(snap: MasterySnapshot): Promise<void> {
+    await db.masterySnapshots.put(snap);
+  },
+
+  async toArray(): Promise<MasterySnapshot[]> {
+    return db.masterySnapshots.toArray();
+  },
+};
+
 export const dexieDriver: StorageDriver = {
   name: 'dexie',
 
@@ -254,4 +333,7 @@ export const dexieDriver: StorageDriver = {
   },
 
   chunks,
+  reviewItems,
+  questionResults,
+  masterySnapshots,
 };

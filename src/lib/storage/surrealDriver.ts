@@ -1,8 +1,12 @@
 import { Surreal, StringRecordId } from 'surrealdb';
+import type { MasterySnapshot, QuestionResult, ReviewItem } from '../learningTypes';
 import type {
   ChunkSearchOptions,
   ChunkSearchResult,
   ChunkStore,
+  MasterySnapshotStore,
+  QuestionResultStore,
+  ReviewItemStore,
   SourceChunkInput,
   StorageDriver,
   StorageSettingRow,
@@ -59,7 +63,7 @@ export function resetSurrealClient() {
 }
 
 // ---------------------------------------------------------------------------
-// SurrealQL schema — applied lazily on first chunks.* call
+// SurrealQL schema — applied lazily on first chunks.*/reviewItems.*/… call
 // ---------------------------------------------------------------------------
 // We define:
 //   - the `chunks` table itself
@@ -67,6 +71,9 @@ export function resetSurrealClient() {
 //   - a `quantvault_bm25` analyzer (lowercase + ascii + snowball)
 //   - a SEARCH index on `text` using that analyzer with BM25 scoring
 //   - an MTREE vector index on `embedding` (cosine dist, configured dimension)
+//   - the `review_items`, `question_results`, and `mastery_snapshots` tables
+//     (the FSRS queue, attempt log, and mastery snapshots of the unified
+//     schema) with their typed fields and filter indexes
 //
 // All statements are idempotent via `IF NOT EXISTS` so the call is safe to
 // repeat.  We only invoke it once per process (gated by `_schemaReady`).
@@ -85,6 +92,40 @@ const SCHEMA_STATEMENTS = (dim: number): string => `
   DEFINE INDEX IF NOT EXISTS chunks_domain_idx ON chunks FIELDS domain;
   DEFINE INDEX IF NOT EXISTS chunks_doc_idx ON chunks FIELDS documentId;
   DEFINE INDEX IF NOT EXISTS chunks_embedding_idx ON chunks FIELDS embedding MTREE DIMENSION ${dim} DIST COSINE;
+
+  DEFINE TABLE IF NOT EXISTS review_items SCHEMALESS;
+  DEFINE FIELD IF NOT EXISTS domain ON review_items TYPE string;
+  DEFINE FIELD IF NOT EXISTS topic ON review_items TYPE string;
+  DEFINE FIELD IF NOT EXISTS learningObjective ON review_items TYPE string;
+  DEFINE FIELD IF NOT EXISTS dueAt ON review_items TYPE string;
+  DEFINE FIELD IF NOT EXISTS ease ON review_items TYPE number;
+  DEFINE FIELD IF NOT EXISTS fsrsDifficulty ON review_items TYPE option<number>;
+  DEFINE FIELD IF NOT EXISTS intervalDays ON review_items TYPE number;
+  DEFINE FIELD IF NOT EXISTS attempts ON review_items TYPE number;
+  DEFINE FIELD IF NOT EXISTS correctStreak ON review_items TYPE number;
+  DEFINE INDEX IF NOT EXISTS review_items_due_idx ON review_items FIELDS dueAt;
+  DEFINE INDEX IF NOT EXISTS review_items_domain_idx ON review_items FIELDS domain;
+
+  DEFINE TABLE IF NOT EXISTS question_results SCHEMALESS;
+  DEFINE FIELD IF NOT EXISTS domain ON question_results TYPE string;
+  DEFINE FIELD IF NOT EXISTS topic ON question_results TYPE string;
+  DEFINE FIELD IF NOT EXISTS questionId ON question_results TYPE string;
+  DEFINE FIELD IF NOT EXISTS learningObjective ON question_results TYPE string;
+  DEFINE FIELD IF NOT EXISTS correct ON question_results TYPE bool;
+  DEFINE FIELD IF NOT EXISTS confidence ON question_results TYPE string;
+  DEFINE FIELD IF NOT EXISTS errorCategory ON question_results TYPE string;
+  DEFINE FIELD IF NOT EXISTS difficulty ON question_results TYPE string;
+  DEFINE FIELD IF NOT EXISTS createdAt ON question_results TYPE option<string>;
+  DEFINE INDEX IF NOT EXISTS question_results_topic_idx ON question_results FIELDS domain, topic;
+
+  DEFINE TABLE IF NOT EXISTS mastery_snapshots SCHEMALESS;
+  DEFINE FIELD IF NOT EXISTS domain ON mastery_snapshots TYPE string;
+  DEFINE FIELD IF NOT EXISTS topic ON mastery_snapshots TYPE string;
+  DEFINE FIELD IF NOT EXISTS learningObjective ON mastery_snapshots TYPE string;
+  DEFINE FIELD IF NOT EXISTS score ON mastery_snapshots TYPE number;
+  DEFINE FIELD IF NOT EXISTS attempts ON mastery_snapshots TYPE number;
+  DEFINE FIELD IF NOT EXISTS lastAttemptAt ON mastery_snapshots TYPE string;
+  DEFINE INDEX IF NOT EXISTS mastery_snapshots_topic_idx ON mastery_snapshots FIELDS domain, topic;
 `;
 
 async function ensureSchema(client: Surreal): Promise<void> {
@@ -241,6 +282,123 @@ const chunks: ChunkStore = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// reviewItems — FSRS queue (table `review_items`, keyed by string id)
+// ---------------------------------------------------------------------------
+const reviewItems: ReviewItemStore = {
+  async get(id: string): Promise<ReviewItem | undefined> {
+    const client = await getClient();
+    await ensureSchema(client);
+    const result = await client.select<SurrealRecord>(new StringRecordId(`review_items:${sanitiseId(id)}`));
+    const row = Array.isArray(result) ? result[0] : (result as SurrealRecord | undefined);
+    if (!row) return undefined;
+    return { ...(row as unknown as ReviewItem), id };
+  },
+
+  async put(item: ReviewItem): Promise<void> {
+    const client = await getClient();
+    await ensureSchema(client);
+    await client.upsert(new StringRecordId(`review_items:${sanitiseId(item.id)}`), { ...item } as unknown as SurrealRecord);
+  },
+
+  async bulkPut(items: ReviewItem[]): Promise<void> {
+    if (items.length === 0) return;
+    const client = await getClient();
+    await ensureSchema(client);
+    for (let i = 0; i < items.length; i += BULK_CHUNK_SIZE) {
+      const batch = items.slice(i, i + BULK_CHUNK_SIZE).map((item) => ({ ...item, _id: sanitiseId(item.id) }));
+      await client.query('FOR $r IN $rows { UPSERT type::thing(\'review_items\', $r._id) MERGE $r; };', { rows: batch });
+    }
+  },
+
+  async toArray(): Promise<ReviewItem[]> {
+    const client = await getClient();
+    await ensureSchema(client);
+    const rows = await client.select<SurrealRecord>('review_items');
+    return (Array.isArray(rows) ? rows : []) as unknown as ReviewItem[];
+  },
+
+  async delete(id: string): Promise<void> {
+    const client = await getClient();
+    await ensureSchema(client);
+    await client.delete(new StringRecordId(`review_items:${sanitiseId(id)}`));
+  },
+};
+
+// ---------------------------------------------------------------------------
+// questionResults — append-only attempt log (table `question_results`).
+// SurrealDB auto-assigns a random record id on CREATE, matching the Dexie
+// auto-increment behaviour (callers never supply an id).
+// ---------------------------------------------------------------------------
+const questionResults: QuestionResultStore = {
+  async add(result: QuestionResult): Promise<void> {
+    const client = await getClient();
+    await ensureSchema(client);
+    await client.create('question_results', { ...result } as unknown as SurrealRecord);
+  },
+
+  async bulkAdd(results: QuestionResult[]): Promise<void> {
+    if (results.length === 0) return;
+    const client = await getClient();
+    await ensureSchema(client);
+    for (let i = 0; i < results.length; i += BULK_CHUNK_SIZE) {
+      const batch = results.slice(i, i + BULK_CHUNK_SIZE);
+      await client.query('FOR $q IN $rows { CREATE question_results CONTENT $q; };', { rows: batch });
+    }
+  },
+
+  async toArray(): Promise<QuestionResult[]> {
+    const client = await getClient();
+    await ensureSchema(client);
+    const rows = await client.select<SurrealRecord>('question_results');
+    return (Array.isArray(rows) ? rows : []) as unknown as QuestionResult[];
+  },
+
+  async byTopic(domain: string, topic: string): Promise<QuestionResult[]> {
+    const client = await getClient();
+    await ensureSchema(client);
+    const result = await client.query<[SurrealRecord[]]>(
+      'SELECT * FROM question_results WHERE domain = $d AND topic = $t',
+      { d: domain, t: topic },
+    );
+    const rows = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : [];
+    return rows as unknown as QuestionResult[];
+  },
+
+  async clear(): Promise<void> {
+    const client = await getClient();
+    await ensureSchema(client);
+    await client.delete('question_results');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// masterySnapshots — per-objective snapshots (table `mastery_snapshots`)
+// ---------------------------------------------------------------------------
+const masterySnapshots: MasterySnapshotStore = {
+  async get(id: string): Promise<MasterySnapshot | undefined> {
+    const client = await getClient();
+    await ensureSchema(client);
+    const result = await client.select<SurrealRecord>(new StringRecordId(`mastery_snapshots:${sanitiseId(id)}`));
+    const row = Array.isArray(result) ? result[0] : (result as SurrealRecord | undefined);
+    if (!row) return undefined;
+    return { ...(row as unknown as MasterySnapshot), id };
+  },
+
+  async put(snap: MasterySnapshot): Promise<void> {
+    const client = await getClient();
+    await ensureSchema(client);
+    await client.upsert(new StringRecordId(`mastery_snapshots:${sanitiseId(snap.id)}`), { ...snap } as unknown as SurrealRecord);
+  },
+
+  async toArray(): Promise<MasterySnapshot[]> {
+    const client = await getClient();
+    await ensureSchema(client);
+    const rows = await client.select<SurrealRecord>('mastery_snapshots');
+    return (Array.isArray(rows) ? rows : []) as unknown as MasterySnapshot[];
+  },
+};
+
 export const surrealDriver: StorageDriver = {
   name: 'surrealdb',
 
@@ -295,4 +453,7 @@ export const surrealDriver: StorageDriver = {
   },
 
   chunks,
+  reviewItems,
+  questionResults,
+  masterySnapshots,
 };
