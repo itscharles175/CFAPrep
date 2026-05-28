@@ -3,6 +3,65 @@
 All notable changes to QuantVault. Dates use `YYYY-MM-DD`. See `git log` for
 the full per-commit detail.
 
+## [0.7.0] — 2026-05-28
+
+Roadmap-completion milestone: **every checkbox in `docs/ROADMAP.md` is now
+`[x]`.** The four remaining `[~]` partial items are closed with shipped,
+tested implementations. One sub-agent wave on disjoint scopes plus two
+pillar workstreams landed.
+
+### Added
+- **Pillar 1 — Unified schema (Phase 3).** `StorageDriver` now exposes
+  five namespaces in both drivers: `settings`, `chunks`, `reviewItems`
+  (FSRS queue), `questionResults` (attempt log), `masterySnapshots`.
+  SurrealDB tables (`review_items`, `question_results`,
+  `mastery_snapshots`) defined under the same lazy idempotent
+  `_schemaReady` gate with composite domain+topic / dueAt indexes.
+  18 new tests (9 Dexie live round-trips, 9 SurrealDB-mocked). Dexie
+  active today; SurrealDB wire-ready.
+- **Pillar 3 — Semantic RAG local-first path.** `src/lib/localRag.ts`
+  `localGroundedAnswer` retrieves through `getStorage().chunks.search`
+  (Dexie BM25+cosine today, SurrealDB MTREE vector after
+  `switchToSurreal()` — same call site), packs chunks under the
+  context budget with `[n]` citation markers, and synthesises a
+  grounded answer with the local LLM. No `:5055` sidecar required.
+  Fails fast on empty retrieval (no hallucination). CfaModule's
+  "Ask the curriculum" falls back to this path when the embedded
+  notebook is disabled but a local model is enabled. 6 new tests.
+- **Pillar 10 — Deeper LOS structure extraction.** `extractStructure()`
+  in `desktopIngestion.ts` mines Learning Outcome Statements from the
+  region after a lead-in phrase ("the candidate should be able to" /
+  "learning outcomes"), each = optional list marker + CFA command verb
+  (21-word set) + rest, capped 200 chars / 20 per chunk. `losVerbs`
+  exposes the deduped opening verbs. `CfaSourceChunk` gains optional
+  `learningOutcomes` + `losVerbs`; `pageChunksFromPages` populates
+  them. HEADING_PATTERN broadened (STUDY SESSION / TOPIC / MODULE n)
+  and made case-sensitive to avoid mid-prose over-match. 8 new tests.
+- **Pillar 11 — TypeScript rigor (wave 3, 16 modules).** financeMath,
+  formulaLibrary, flashcards, exportUtils, jsonFilePreflight,
+  useProgress, useLevel3Pathway, cfaLevels, cfaLevel3Pathways,
+  formulaLexicon, registerServiceWorker, EmptyState, ErrorBoundary,
+  SourceContext + the Onboarding/PwaInstallPrompt barrels — all via
+  `git mv` (blame preserved), all typed properly (no `@ts-expect-error`).
+  28 modules migrated across three waves total.
+
+### Verification gates (all green at tag)
+- `npx tsc --noEmit` — 0 errors
+- `npm run lint` — 0 errors, 0 warnings
+- `npx vitest run` — **441 tests across 49 files**
+- `npm run build` — 68 precache entries / 4.51 MB
+- `cargo build --manifest-path src-tauri/Cargo.toml` — clean
+- `cargo test --manifest-path src-tauri/Cargo.toml` — 28 Rust tests
+- `npm audit --omit=dev --audit-level=high` — 0 vulnerabilities
+
+### Roadmap status
+
+`docs/ROADMAP.md` has **zero `[ ]` or `[~]` items** — every pillar
+across the 12-pillar plan is checked. Remaining genuinely-operational
+work (live SurrealDB cutover, full open-notebook backend bundle build,
+sidecar startup tuning) needs live workloads/binaries to drive and is
+documented as such rather than left as roadmap gaps.
+
 ## [0.6.0] — 2026-05-28
 
 Final-five push: every roadmap item previously flagged "beyond local
