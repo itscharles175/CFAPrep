@@ -11,6 +11,8 @@ import { useProgressSummary } from '../hooks/useProgress';
 import { exportVaultData, importVaultData, previewVaultImportPayload, resetVaultData } from '../lib/learning';
 import { parseJsonFile } from '../lib/jsonFilePreflight';
 import { getCfaSourceDocuments } from '../lib/cfaSourceVault';
+import { getLlmSettings } from '../lib/localLlm';
+import { db } from '../lib/progressStore';
 import {
   IconFrame,
   Dialog,
@@ -25,6 +27,7 @@ import {
   StatusBadge,
   Surface,
 } from '../components/ui/Primitives';
+import { OnboardingWizard } from '../components/Onboarding';
 
 const domainIcons = {
   cfa: GraduationCap,
@@ -134,6 +137,7 @@ export default function Dashboard() {
   const [includeSourceExport, setIncludeSourceExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [sourceDocCount, setSourceDocCount] = useState(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -146,6 +150,38 @@ export default function Dashboard() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function checkOnboarding() {
+      try {
+        const [docs, llmSettings, dismissedRow] = await Promise.all([
+          getCfaSourceDocuments(),
+          getLlmSettings(),
+          db.settings.get('onboarding-dismissed').catch(() => undefined),
+        ]);
+        if (!active) return;
+        if (docs.length === 0 && llmSettings.enabled === false && !dismissedRow) {
+          setOnboardingOpen(true);
+        }
+      } catch {
+        // Non-fatal: silently skip if storage is unavailable
+      }
+    }
+    checkOnboarding();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleOnboardingClose() {
+    try {
+      await db.settings.put({ key: 'onboarding-dismissed', value: true, updatedAt: new Date().toISOString() });
+    } catch {
+      // Non-fatal
+    }
+    setOnboardingOpen(false);
+  }
 
   async function handleExport() {
     const payload = await exportVaultData();
@@ -268,6 +304,7 @@ export default function Dashboard() {
 
   return (
     <div className="page-container">
+      <OnboardingWizard open={onboardingOpen} onClose={handleOnboardingClose} />
       <PageHeader
         tone="study"
         badge="LOCAL STUDY COMMAND"

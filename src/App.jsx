@@ -29,6 +29,7 @@ const Analytics = lazy(() => import('./pages/Analytics'));
 const ContentOps = lazy(() => import('./pages/ContentOps'));
 const SystemHealth = lazy(() => import('./pages/SystemHealth'));
 const Today = lazy(() => import('./pages/Today'));
+const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
 
 /* C5: Skeleton loading state instead of text-only fallback */
 function RouteFallback() {
@@ -83,6 +84,7 @@ export default function App() {
     'content-ops': <ContentOps />,
     system: <SystemHealth />,
     today: <Today />,
+    'knowledge-graph': <KnowledgeGraph />,
   };
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ClipboardCheck, PenLine, Trophy } from 'lucide-react';
 import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
@@ -6,6 +6,7 @@ import { useLevel3Pathway } from './useLevel3Pathway';
 import { CommandHint, EmptyPanel, MetricCard, PageHeader, ProgressRail, RubricPanel, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
 import { recordConstructedResponseAttempt } from '../../lib/learning';
 import { SourceRail } from '../../components/SourceContext';
+import { critiqueConstructedResponse, getLlmSettings } from '../../lib/localLlm';
 
 function nowMs() {
   return Date.now();
@@ -33,6 +34,8 @@ export default function CfaConstructedResponse() {
   const [scores, setScores] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [startTime] = useState(nowMs);
+  const [critique, setCritique] = useState({ state: 'idle' });
+  const abortRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,10 +84,47 @@ export default function CfaConstructedResponse() {
   const pct = Math.round((earnedPoints / item.rubric.maxPoints) * 100);
 
   function resetForNextItem(nextIndex) {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
     setItemIndex(nextIndex);
     setResponse('');
     setScores({});
     setSubmitted(false);
+    setCritique({ state: 'idle' });
+  }
+
+  async function handleAiCritique() {
+    if (!response.trim()) return;
+    const settings = await getLlmSettings();
+    if (!settings.enabled) {
+      setCritique({ state: 'error', error: 'Enable a local model in System Health → Local AI to use AI critique.' });
+      return;
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setCritique({ state: 'loading' });
+    try {
+      const text = await critiqueConstructedResponse({
+        settings,
+        prompt: item.prompt,
+        response,
+        rubric: item.rubric.criteria,
+        signal: controller.signal,
+      });
+      if (!controller.signal.aborted) {
+        setCritique({ state: 'done', text });
+      }
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        setCritique({ state: 'idle' });
+      } else {
+        setCritique({ state: 'error', error: error?.message || 'AI critique failed.' });
+      }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+    }
   }
 
   async function submit() {
@@ -170,6 +210,88 @@ export default function CfaConstructedResponse() {
         <div style={{ marginTop: 'var(--space-4)' }}>
           <ProgressRail value={earnedPoints} max={item.rubric.maxPoints} label="Rubric points" detail={`${earnedPoints}/${item.rubric.maxPoints}`} tone="exam" />
         </div>
+
+        <div style={{ marginTop: 'var(--space-4)', display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!response.trim() || critique.state === 'loading'}
+            onClick={handleAiCritique}
+          >
+            🤖 AI rubric critique
+          </button>
+          {critique.state === 'loading' && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                if (abortRef.current) {
+                  abortRef.current.abort();
+                  abortRef.current = null;
+                }
+                setCritique({ state: 'idle' });
+              }}
+            >
+              Cancel
+            </button>
+          )}
+          {critique.state === 'loading' && (
+            <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Grading your response…</span>
+          )}
+        </div>
+
+        {critique.state === 'done' && (
+          <div
+            role="region"
+            aria-label="AI rubric critique"
+            style={{
+              marginTop: 'var(--space-4)',
+              borderLeft: '3px solid var(--color-accent, #6366f1)',
+              paddingLeft: 'var(--space-4)',
+              paddingTop: 'var(--space-3)',
+              paddingBottom: 'var(--space-3)',
+              paddingRight: 'var(--space-3)',
+              background: 'var(--surface-raised, var(--surface))',
+              borderRadius: '0 var(--radius-md) var(--radius-md) 0',
+            }}
+          >
+            <p style={{ margin: '0 0 var(--space-2)', fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+              🤖 AI Rubric Critique
+            </p>
+            <pre
+              style={{
+                margin: 0,
+                whiteSpace: 'pre-wrap',
+                fontFamily: 'inherit',
+                fontSize: '0.9rem',
+                lineHeight: 1.65,
+                color: 'var(--text-primary)',
+              }}
+            >
+              {critique.text}
+            </pre>
+          </div>
+        )}
+
+        {critique.state === 'error' && (
+          <div
+            role="alert"
+            style={{
+              marginTop: 'var(--space-4)',
+              borderLeft: '3px solid var(--color-error, #ef4444)',
+              paddingLeft: 'var(--space-4)',
+              paddingTop: 'var(--space-3)',
+              paddingBottom: 'var(--space-3)',
+              paddingRight: 'var(--space-3)',
+              background: 'var(--surface-raised, var(--surface))',
+              borderRadius: '0 var(--radius-md) var(--radius-md) 0',
+              color: 'var(--color-error, #ef4444)',
+              fontSize: '0.9rem',
+            }}
+          >
+            {critique.error}
+          </div>
+        )}
       </div>
 
       {submitted && (

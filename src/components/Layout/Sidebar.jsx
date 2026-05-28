@@ -8,7 +8,7 @@ import {
   LineChart, Building2, Gem, PieChart, Layers,
   Binary, Sigma, Flame, GitBranch, Target, Cpu, BrainCircuit,
   FileSpreadsheet, Code, Gauge,
-  Inbox, NotebookTabs, BadgeCheck, ClipboardList, FileSearch, HardDrive, Sun,
+  Inbox, NotebookTabs, BadgeCheck, ClipboardList, FileSearch, HardDrive, Sun, Network,
 } from 'lucide-react';
 import { cfaTopics, excelModules, quantModules } from '../../data/catalog';
 import { appRoutes } from '../../routes/routeManifest';
@@ -54,9 +54,10 @@ const routeIconMap = {
   'file-search': FileSearch,
   'hard-drive': HardDrive,
   sun: Sun,
+  network: Network,
 };
 
-const sidebarToolRouteIds = ['today', 'review', 'flashcards', 'vault', 'mock', 'analytics', 'calculators', 'formulas', 'content-ops', 'system'];
+const sidebarToolRouteIds = ['today', 'review', 'flashcards', 'vault', 'mock', 'analytics', 'knowledge-graph', 'calculators', 'formulas', 'content-ops', 'system'];
 const sidebarToolRoutes = appRoutes
   .filter((route) => sidebarToolRouteIds.includes(route.id))
   .sort((a, b) => sidebarToolRouteIds.indexOf(a.id) - sidebarToolRouteIds.indexOf(b.id));

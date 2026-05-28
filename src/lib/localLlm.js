@@ -169,6 +169,66 @@ export async function explainWrongAnswer({ settings, question, options, correctI
   return content.trim();
 }
 
+/**
+ * AI rubric critique for a CFA Level III constructed-response answer.
+ * Calls the local model to assess each rubric criterion against the candidate's
+ * actual response text and returns the model's prose critique directly.
+ *
+ * @param {object} params
+ * @param {object} params.settings  - LLM settings (baseUrl, model)
+ * @param {string} params.prompt    - The question / prompt shown to the candidate
+ * @param {string} params.response  - The candidate's written response
+ * @param {Array<{ id: string, label: string, maxPoints: number, description?: string }>} params.rubric
+ * @param {AbortSignal} [params.signal]
+ * @returns {Promise<string>} The model's free-form critique text (trimmed).
+ */
+export async function critiqueConstructedResponse({ settings, prompt, response, rubric, signal }) {
+  const base = normalizeBaseUrl(settings?.baseUrl);
+  const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
+
+  const system =
+    'You are a CFA Level III rubric grader. Score the candidate\'s response against EACH rubric criterion. ' +
+    'For every criterion output: a short verdict (Met / Partial / Missed), 1-2 sentences of evidence-based feedback grounded in the candidate\'s actual words, ' +
+    'and 1 concrete improvement suggestion. Do NOT inflate scores — be exam-realistic.';
+
+  const criteriaBlock = (rubric || [])
+    .map((criterion) => `Criterion [${criterion.id}] "${criterion.label}" — max ${criterion.maxPoints} pt${criterion.maxPoints !== 1 ? 's' : ''}${criterion.description ? `: ${criterion.description}` : ''}`)
+    .join('\n');
+
+  const user =
+    `Prompt:\n${prompt}\n\nRubric criteria:\n${criteriaBlock}\n\nCandidate response:\n${response}`;
+
+  let fetchResponse;
+  try {
+    fetchResponse = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new Error(
+      `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+      { cause: error },
+    );
+  }
+  if (!fetchResponse.ok) throw new Error(`Local model server responded ${fetchResponse.status}.`);
+  const data = await fetchResponse.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('The model returned an empty critique. Try a more capable local model.');
+  }
+  return content.trim();
+}
+
 export async function getCachedGeneratedQuestions(level, topic) {
   try {
     const row = await db.settings.get(`ai-questions:${level}:${topic}`);

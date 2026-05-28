@@ -3,6 +3,7 @@ import {
   DEFAULT_LLM_SETTINGS,
   LLM_PRESETS,
   checkLlmConnection,
+  critiqueConstructedResponse,
   explainWrongAnswer,
   generateQuestionsFromCurriculum,
   getLlmSettings,
@@ -193,5 +194,76 @@ describe('explainWrongAnswer', () => {
         question: 'q', options: ['a', 'b', 'c'], correctIndex: 0, userIndex: 1,
       }),
     ).rejects.toThrow(/empty explanation/);
+  });
+});
+
+describe('critiqueConstructedResponse', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const rubric = [
+    { id: 'c1', label: 'Asset allocation rationale', maxPoints: 3 },
+    { id: 'c2', label: 'Risk factor identification', maxPoints: 2, description: 'Name at least two risk factors.' },
+  ];
+
+  it('posts a chat completion with model, low temperature, system + user messages containing the prompt, response, and a Criterion block per rubric entry with maxPoints', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ choices: [{ message: { content: 'c1: Partial — candidate mentions equities but omits fixed income.\nc2: Missed — no risk factors named.' } }] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await critiqueConstructedResponse({
+      settings: { enabled: true, baseUrl: 'http://localhost:1234/v1', model: 'gemma-4-e4b-it' },
+      prompt: 'Recommend an asset allocation for a 60-year-old retiree.',
+      response: 'I would allocate 70% equities for growth.',
+      rubric,
+    });
+
+    expect(result).toContain('c1');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:1234/v1/chat/completions');
+    const body = JSON.parse(init.body);
+    expect(body.model).toBe('gemma-4-e4b-it');
+    expect(body.temperature).toBeLessThanOrEqual(0.2);
+
+    const systemMessage = body.messages.find((m) => m.role === 'system').content;
+    expect(systemMessage).toContain('rubric grader');
+
+    const userMessage = body.messages.find((m) => m.role === 'user').content;
+    expect(userMessage).toContain('Recommend an asset allocation');
+    expect(userMessage).toContain('70% equities');
+    // One block per rubric entry with the label and maxPoints
+    expect(userMessage).toContain('Asset allocation rationale');
+    expect(userMessage).toContain('3 pt');
+    expect(userMessage).toContain('Risk factor identification');
+    expect(userMessage).toContain('2 pt');
+  });
+
+  it('returns the model content string trimmed', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ choices: [{ message: { content: '  c1: Met — candidate clearly outlines the rationale.  \n' } }] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await critiqueConstructedResponse({
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+      prompt: 'Describe IPS construction.',
+      response: 'An IPS defines objectives and constraints.',
+      rubric,
+    });
+
+    expect(result).toBe('c1: Met — candidate clearly outlines the rationale.');
+  });
+
+  it('network failure rejects with the CORS-actionable wrapped error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await expect(
+      critiqueConstructedResponse({
+        settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+        prompt: 'p',
+        response: 'r',
+        rubric,
+      }),
+    ).rejects.toThrow(/CORS|OLLAMA_ORIGINS/);
   });
 });
