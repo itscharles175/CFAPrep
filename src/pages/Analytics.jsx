@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Activity, BarChart3, Clock, Gauge, Layers, Target } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader, MetricCard, Panel } from '../components/ui/Primitives';
 import { getAnalyticsSummary } from '../lib/learning';
+import { forecastReviewLoad } from '../lib/progressStore';
 import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 
@@ -18,16 +20,28 @@ function seconds(value) {
 export default function Analytics() {
   const [activePathway] = useLevel3Pathway();
   const [summary, setSummary] = useState(null);
+  const [forecast, setForecast] = useState([]);
 
   useEffect(() => {
     let active = true;
     getAnalyticsSummary({ level3Pathway: activePathway }).then((nextSummary) => {
       if (active) setSummary(nextSummary);
     });
+    forecastReviewLoad(14, new Date(), { level3Pathway: activePathway })
+      .then((rows) => {
+        if (active) setForecast(rows || []);
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
   }, [activePathway]);
+
+  const forecastChartData = forecast.map((row) => ({
+    day: row.date.slice(5), // MM-DD for compactness
+    due: row.count,
+    atRisk: row.atRiskCount,
+  }));
 
   const topWeakTopics = [...(summary?.byTopic || [])].sort((a, b) => a.accuracy - b.accuracy).slice(0, 8);
 
@@ -72,6 +86,32 @@ export default function Analytics() {
           </div>
         </Panel>
       </div>
+
+      <Panel
+        tone="analytics"
+        title="14-Day Review Load Forecast"
+        subtitle="Items the FSRS scheduler projects as due over the next two weeks, with at-risk reviews (low projected retention) called out."
+      >
+        {forecastChartData.length === 0 ? (
+          <p className="muted-copy">No upcoming reviews yet — record some quiz attempts to populate the scheduler.</p>
+        ) : (
+          <div style={{ width: '100%', height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={forecastChartData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="day" stroke="var(--text-muted)" fontSize={12} />
+                <YAxis stroke="var(--text-muted)" allowDecimals={false} fontSize={12} />
+                <Tooltip
+                  contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
+                  labelStyle={{ color: 'var(--text-secondary)' }}
+                />
+                <Bar dataKey="due" name="Due" fill="var(--accent, #60a5fa)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="atRisk" name="At risk" fill="var(--warning, #f59e0b)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </Panel>
 
       {topWeakTopics[0] && (
         <SourceRail
