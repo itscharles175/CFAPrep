@@ -4,6 +4,11 @@ import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/P
 import { exportVaultData, getVaultHealthReport, previewVaultRepair } from '../lib/learning';
 import { cacheCriticalOfflineRoutes, getOfflineReadinessReport } from '../lib/offlineContentCache';
 import { checkLlmConnection, getLlmSettings, LLM_PRESETS, saveLlmSettings } from '../lib/localLlm';
+import {
+  checkOpenNotebookConnection,
+  getOpenNotebookSettings,
+  saveOpenNotebookSettings,
+} from '../lib/openNotebook';
 
 function downloadJson(payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -26,6 +31,9 @@ export default function SystemHealth() {
   const [llm, setLlm] = useState(null);
   const [llmStatus, setLlmStatus] = useState(null);
   const [llmTesting, setLlmTesting] = useState(false);
+  const [onb, setOnb] = useState(null);
+  const [onbStatus, setOnbStatus] = useState(null);
+  const [onbTesting, setOnbTesting] = useState(false);
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -68,6 +76,9 @@ export default function SystemHealth() {
     getLlmSettings().then((settings) => {
       if (active) setLlm(settings);
     });
+    getOpenNotebookSettings().then((settings) => {
+      if (active) setOnb(settings);
+    });
     return () => {
       active = false;
     };
@@ -84,6 +95,19 @@ export default function SystemHealth() {
     const result = await checkLlmConnection(llm);
     setLlmStatus(result);
     setLlmTesting(false);
+  }
+
+  async function handleSaveOnb() {
+    const saved = await saveOpenNotebookSettings(onb);
+    setOnb(saved);
+    setMessage('Embedded notebook settings saved.');
+  }
+
+  async function handleTestOnb() {
+    setOnbTesting(true);
+    const result = await checkOpenNotebookConnection(onb);
+    setOnbStatus(result);
+    setOnbTesting(false);
   }
 
   async function handleEncryptedBackup() {
@@ -227,6 +251,46 @@ export default function SystemHealth() {
             {llmStatus?.ok && llmStatus.models.length > 0 && (
               <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', marginTop: 'var(--space-2)' }}>
                 Available models: {llmStatus.models.slice(0, 8).join(', ')}
+              </p>
+            )}
+          </>
+        )}
+      </Surface>
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+          <div>
+            <StatusBadge tone="accent">Embedded Notebook</StatusBadge>
+            <h3 style={{ margin: 'var(--space-2) 0 0' }}>Grounded RAG over your curriculum (open-notebook)</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+              QuantVault embeds open-notebook as a local sidecar (FastAPI + SurrealDB + job worker). It builds per-topic notebooks from your ingested CFA volumes and answers questions with cited, source-grounded synthesis. Fully offline.
+            </p>
+          </div>
+        </div>
+        {onb && (
+          <>
+            <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Backend URL</span>
+                <input className="input" value={onb.baseUrl} onChange={(event) => setOnb({ ...onb, baseUrl: event.target.value })} placeholder="http://localhost:5055" aria-label="Open-notebook backend URL" />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
+                <input type="checkbox" checked={onb.enabled} onChange={(event) => setOnb({ ...onb, enabled: event.target.checked })} />
+                <span>Enable grounded RAG</span>
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button className="btn btn-primary" onClick={handleSaveOnb}>Save</button>
+              <button className="btn btn-secondary" onClick={handleTestOnb} disabled={onbTesting}>{onbTesting ? 'Testing…' : 'Test Connection'}</button>
+              {onbStatus && (
+                <StatusBadge tone={onbStatus.ok ? 'success' : 'danger'}>
+                  {onbStatus.ok ? `Connected · ${onbStatus.models?.length ?? 0} model(s)` : `Offline · ${onbStatus.error}`}
+                </StatusBadge>
+              )}
+            </div>
+            {onbStatus?.ok && (
+              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', marginTop: 'var(--space-2)' }}>
+                Language: {onbStatus.languageModel || '—'} · Embedding: {onbStatus.embeddingModel || '—'}
               </p>
             )}
           </>

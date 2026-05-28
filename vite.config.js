@@ -46,6 +46,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/setupTests.js',
     globals: true,
+    // `spike/` holds the gitignored open-notebook clone with its own test
+    // suite (and an `@/` alias that collides with ours) — never run it here.
+    exclude: ['**/node_modules/**', '**/dist/**', 'spike/**', '.claude/**', 'src-tauri/**'],
   },
   resolve: {
     alias: {
