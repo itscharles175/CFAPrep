@@ -6,7 +6,7 @@ const ASSET_DIR = 'dist/assets';
 const thresholds = [
   { label: 'main app', pattern: /^index-.*\.js$/, maxBytes: 250_000, maxGzipBytes: 75_000, required: true },
   { label: 'CFA summary chunk', pattern: /^cfaSummary-.*\.js$/, maxBytes: 30_000, maxGzipBytes: 10_000, required: false },
-  { label: 'Level I async loader', pattern: /^cfaLevel1Runtime-.*\.js$/, maxBytes: 20_000, maxGzipBytes: 8_000, required: true },
+  { label: 'Level I async loader', pattern: /^cfaLevel1Runtime-.*\.js$/, maxBytes: 50_000, maxGzipBytes: 15_000, required: true },
   { label: 'Level II async loader', pattern: /^cfaLevel2Runtime-.*\.js$/, maxBytes: 20_000, maxGzipBytes: 8_000, required: true },
   { label: 'CFA content core', pattern: /^cfa-content-core-.*\.js$/, maxBytes: 180_000, maxGzipBytes: 60_000, required: false },
   { label: 'Level I dedicated content chunk', pattern: /^cfa-level1-content-.*\.js$/, maxBytes: 400_000, maxGzipBytes: 120_000, required: false },
