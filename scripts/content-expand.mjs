@@ -33,6 +33,10 @@
 //   --concurrency <n>   Parallel topic-LLM calls (default: 1)
 //   --skip-existing     Skip topics already present in the output file
 //   --dry-run           Walk + summarize but don't call the LLM or write
+//   --from-los <level>  Generate from published LOS rather than the .qvsource
+//                       bundle. Use for L2/L3 where curriculum chunks aren't
+//                       yet ingested. Reads scripts/cfa-l2-los-bank.mjs or
+//                       scripts/cfa-l3-los-bank.mjs depending on level.
 //
 // Environment:
 //   QV_LLM_BASE_URL     Overrides --base-url
@@ -40,6 +44,7 @@
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const DEFAULTS = {
   bundle: 'public/cfa-source.qvsource',
@@ -53,6 +58,7 @@ const DEFAULTS = {
   concurrency: 1,
   skipExisting: false,
   dryRun: false,
+  fromLos: null, // 'level2' | 'level3' when --from-los is supplied
 };
 
 function parseArgs(argv) {
@@ -71,7 +77,13 @@ function parseArgs(argv) {
     else if (arg === '--concurrency') opts.concurrency = Number(next());
     else if (arg === '--skip-existing') opts.skipExisting = true;
     else if (arg === '--dry-run') opts.dryRun = true;
-    else if (arg === '--help' || arg === '-h') {
+    else if (arg === '--from-los') {
+      const value = String(next() || '').trim();
+      if (!/^level[23]$/.test(value)) {
+        throw new Error(`--from-los expects level2 or level3, got: ${value || '(missing)'}`);
+      }
+      opts.fromLos = value;
+    } else if (arg === '--help' || arg === '-h') {
       console.log('npm run content:expand -- [options] (see header of script for full list)');
       process.exit(0);
     } else if (arg.startsWith('--')) {
@@ -194,6 +206,215 @@ async function generateFlashcards({ baseUrl, model, temperature, topicTitle, chu
     }));
 }
 
+// LOS-driven generation: derive questions + flashcards from a single learning
+// outcome statement rather than a curriculum chunk. The LOS becomes the
+// "locator" so chips render meaningfully (e.g. "LOS: Calculate the value of
+// a forward contract").
+function losLocator(losText) {
+  const words = String(losText || '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 6)
+    .join(' ');
+  return words ? `LOS: ${words}` : 'LOS';
+}
+
+async function generateQuestionsFromLos({
+  baseUrl,
+  model,
+  temperature,
+  level,
+  topicTitle,
+  los,
+  count,
+  generate = callLlmChat,
+}) {
+  const levelLabel = level === 'level2' ? 'II' : level === 'level3' ? 'III' : String(level);
+  const system =
+    `You are a CFA Level ${levelLabel} exam writer. For the learning outcome statement (LOS) you are given, write exam-realistic ` +
+    'multiple-choice questions that exercise the skill the LOS describes. ' +
+    'Respond with a JSON array and nothing else. Each element must be an object: ' +
+    '{"question": string, "options": [string, string, string], "correct": integer (0-based index of the correct option), "explanation": string}.';
+  const user =
+    `Topic: ${topicTitle}\nLOS: ${los}\n\nWrite ${count} questions that an L${levelLabel} candidate ` +
+    'would expect to see on this LOS. Anchor each question in the action verb and scope of the LOS.';
+  const content = await generate({ baseUrl, model, temperature, system, user });
+  const parsed = extractJsonArray(content);
+  if (!parsed) return [];
+  return parsed
+    .filter(
+      (item) =>
+        item &&
+        typeof item.question === 'string' &&
+        Array.isArray(item.options) &&
+        item.options.length >= 2,
+    )
+    .map((item, index) => ({
+      id: `ai-${index + 1}`,
+      question: item.question,
+      options: item.options.map((option) => String(option)),
+      correct:
+        Number.isInteger(item.correct) && item.correct >= 0 && item.correct < item.options.length
+          ? item.correct
+          : 0,
+      explanation: typeof item.explanation === 'string' ? item.explanation : '',
+      locator: losLocator(los),
+    }));
+}
+
+async function generateFlashcardsFromLos({
+  baseUrl,
+  model,
+  temperature,
+  level,
+  topicTitle,
+  los,
+  count,
+  generate = callLlmChat,
+}) {
+  const levelLabel = level === 'level2' ? 'II' : level === 'level3' ? 'III' : String(level);
+  const system =
+    `You are a CFA Level ${levelLabel} tutor. For the learning outcome statement (LOS) you are given, write concise flashcards. ` +
+    'Front = a focused prompt (definition / formula / scenario) drawn from the LOS. ' +
+    'Back = a precise 1-3 sentence answer. ' +
+    'Respond with a JSON array — no prose.';
+  const user =
+    `Topic: ${topicTitle}\nLOS: ${los}\n\nWrite ${count} flashcards that drill the LOS.`;
+  const content = await generate({ baseUrl, model, temperature, system, user });
+  const parsed = extractJsonArray(content);
+  if (!parsed) return [];
+  function pick(item, ...keys) {
+    for (const k of keys) {
+      if (typeof item?.[k] === 'string' && item[k].trim()) return item[k];
+    }
+    return null;
+  }
+  const locator = losLocator(los);
+  return parsed
+    .map((item) => ({
+      front: pick(item, 'front', 'Front', 'FRONT', 'question', 'Question'),
+      back: pick(item, 'back', 'Back', 'BACK', 'answer', 'Answer'),
+    }))
+    .filter((item) => item.front && item.back)
+    .map((item, index) => ({
+      id: `flash-${index + 1}`,
+      front: item.front,
+      back: item.back,
+      locator,
+    }));
+}
+
+// Build a per-topic { questions, flashcards } entry for an LOS bank entry.
+// Falls back to a 1-question / 1-flashcard stub if the local LLM is
+// unreachable so the resulting JSON is still well-formed and the bootstrap
+// always seeds something.
+function stubQuestionFromLos(los) {
+  return {
+    id: 'ai-1',
+    question: `Which of the following best describes how a candidate should "${los.toLowerCase()}"?`,
+    options: [
+      'Apply the framework directly as described in the LOS',
+      'Ignore the LOS — it is informational only',
+      'Substitute a different framework that is easier to compute',
+    ],
+    correct: 0,
+    explanation:
+      'STUB content — generated without a local model. A real --from-los run with LM Studio reachable will replace this with exam-realistic items grounded in the LOS.',
+    locator: losLocator(los),
+  };
+}
+
+function stubFlashcardFromLos(los) {
+  return {
+    id: 'flash-1',
+    front: los,
+    back: 'Apply this LOS in practice. STUB content — a real --from-los run will replace this with concise drill cards.',
+    locator: losLocator(los),
+  };
+}
+
+async function buildEntryFromLosTopic({
+  topicEntry,
+  level,
+  questionsPerLos,
+  flashcardsPerLos,
+  maxQuestions,
+  maxFlashcards,
+  baseUrl,
+  model,
+  temperature,
+  generate,
+  log,
+}) {
+  const questions = [];
+  const flashcards = [];
+  let llmFailed = false;
+  for (const los of topicEntry.learningOutcomes) {
+    if (questions.length >= maxQuestions && flashcards.length >= maxFlashcards) break;
+    let qs;
+    let fs;
+    try {
+      [qs, fs] = await Promise.all([
+        questions.length < maxQuestions
+          ? generateQuestionsFromLos({
+              baseUrl,
+              model,
+              temperature,
+              level,
+              topicTitle: topicEntry.title,
+              los,
+              count: questionsPerLos,
+              generate,
+            })
+          : Promise.resolve([]),
+        flashcards.length < maxFlashcards
+          ? generateFlashcardsFromLos({
+              baseUrl,
+              model,
+              temperature,
+              level,
+              topicTitle: topicEntry.title,
+              los,
+              count: flashcardsPerLos,
+              generate,
+            })
+          : Promise.resolve([]),
+      ]);
+    } catch (error) {
+      llmFailed = true;
+      if (log) log(`    ! LOS call failed: ${error.message}`);
+      break;
+    }
+    for (const item of qs) {
+      if (questions.length >= maxQuestions) break;
+      questions.push({ ...item, id: `ai-${questions.length + 1}` });
+    }
+    for (const item of fs) {
+      if (flashcards.length >= maxFlashcards) break;
+      flashcards.push({ ...item, id: `flash-${flashcards.length + 1}` });
+    }
+  }
+  // Stub fallback if the LLM produced nothing for this topic.
+  let stub = false;
+  if (!questions.length) {
+    stub = true;
+    for (const los of topicEntry.learningOutcomes.slice(0, 1)) {
+      questions.push(stubQuestionFromLos(los));
+    }
+  }
+  if (!flashcards.length) {
+    stub = true;
+    for (const los of topicEntry.learningOutcomes.slice(0, 1)) {
+      flashcards.push(stubFlashcardFromLos(los));
+    }
+  }
+  return {
+    questions,
+    flashcards,
+    source: stub ? (llmFailed ? 'los-stub' : 'los-empty-stub') : 'los',
+  };
+}
+
 function indexChunksByLevelAndTopic(bundle) {
   // Build { level: { topicId: chunk[] } } from a .qvsource bundle.
   const docLevelById = new Map();
@@ -243,8 +464,131 @@ function titleFor(topicId) {
   return TOPIC_TITLES[topicId] || topicId;
 }
 
+async function loadLosBank(level) {
+  const fileName = level === 'level2' ? 'cfa-l2-los-bank.mjs' : 'cfa-l3-los-bank.mjs';
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const target = path.join(here, fileName);
+  const mod = await import(/* @vite-ignore */ `file://${target.replace(/\\/g, '/')}`);
+  if (!Array.isArray(mod.default)) {
+    throw new Error(`LOS bank ${fileName} did not export a default array`);
+  }
+  return mod.default;
+}
+
+async function runFromLos(opts) {
+  const level = opts.fromLos;
+  const bank = await loadLosBank(level);
+
+  // Load existing output if any so we can merge into the same file.
+  let prior;
+  try {
+    const raw = await readFile(opts.out, 'utf-8');
+    prior = JSON.parse(raw);
+  } catch {
+    prior = { generatedAt: null, byTopic: {} };
+  }
+
+  const work = [];
+  for (const entry of bank) {
+    const existing = opts.skipExisting && prior.byTopic?.[level]?.[entry.topic];
+    if (existing?.questions?.length || existing?.flashcards?.length) continue;
+    work.push(entry);
+  }
+
+  console.log(
+    `LOS plan: ${work.length} topic(s) for ${level} (max ${opts.questions} q + ${opts.flashcards} f per topic).`,
+  );
+  if (opts.dryRun) {
+    for (const w of work) {
+      console.log(`  ${level}/${w.topic}: ${w.learningOutcomes.length} LOS`);
+    }
+    return;
+  }
+  if (!work.length) {
+    console.log('Nothing to do (--skip-existing matches everything). Exiting.');
+    return;
+  }
+
+  // Probe the LLM with a lightweight noop generator if --base-url is
+  // unreachable so we can quickly flip into stub mode for every topic without
+  // burning the per-LOS retry budget.
+  let generate = callLlmChat;
+  try {
+    await fetch(`${normalizeBaseUrl(opts.baseUrl)}/models`, { method: 'GET' });
+  } catch (error) {
+    console.log(`  (local LLM at ${opts.baseUrl} unreachable: ${error.message} — using stubs)`);
+    generate = async () => '';
+  }
+
+  // Pick LOS-level fan-outs so that across ~6–10 LOS per topic we land near
+  // the per-topic cap (`opts.questions`, `opts.flashcards`).
+  const questionsPerLos = 2;
+  const flashcardsPerLos = 2;
+
+  const byTopic = { ...(prior.byTopic || {}) };
+  for (const entry of work) {
+    console.log(
+      `\n[${level}/${entry.topic}] generating from ${entry.learningOutcomes.length} LOS …`,
+    );
+    const t0 = Date.now();
+    const built = await buildEntryFromLosTopic({
+      topicEntry: entry,
+      level,
+      questionsPerLos,
+      flashcardsPerLos,
+      maxQuestions: opts.questions,
+      maxFlashcards: opts.flashcards,
+      baseUrl: opts.baseUrl,
+      model: opts.model,
+      temperature: opts.temperature,
+      generate,
+      log: (msg) => console.log(msg),
+    });
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    console.log(
+      `  → ${built.questions.length} questions, ${built.flashcards.length} flashcards in ${elapsed}s (${built.source})`,
+    );
+    byTopic[level] = byTopic[level] || {};
+    byTopic[level][entry.topic] = {
+      title: entry.title,
+      questions: built.questions,
+      flashcards: built.flashcards,
+      losCount: entry.learningOutcomes.length,
+      source: built.source,
+      generatedAt: new Date().toISOString(),
+    };
+    await mkdir(path.dirname(opts.out), { recursive: true });
+    await writeFile(
+      opts.out,
+      JSON.stringify(
+        {
+          app: 'QuantVault',
+          kind: 'cfa-generated-content',
+          bundleVersion: 1,
+          generatedAt: new Date().toISOString(),
+          model: opts.model,
+          baseUrl: opts.baseUrl,
+          byTopic,
+        },
+        null,
+        2,
+      ),
+    );
+  }
+  const topicCount = Object.values(byTopic).reduce(
+    (sum, lvl) => sum + Object.keys(lvl).length,
+    0,
+  );
+  console.log(`\nDone. Wrote ${opts.out} (${topicCount} topic(s) total in bundle).`);
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+
+  if (opts.fromLos) {
+    await runFromLos(opts);
+    return;
+  }
 
   let bundle;
   try {
@@ -360,7 +704,25 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+// Only run main() when invoked as a CLI (not when imported by tests).
+const isDirectInvocation =
+  import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}` ||
+  fileURLToPath(import.meta.url) === path.resolve(process.argv[1] || '');
+if (isDirectInvocation) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+export {
+  parseArgs,
+  losLocator,
+  buildEntryFromLosTopic,
+  generateQuestionsFromLos,
+  generateFlashcardsFromLos,
+  stubQuestionFromLos,
+  stubFlashcardFromLos,
+  loadLosBank,
+  runFromLos,
+};
