@@ -155,6 +155,13 @@ export async function listNotebooks(settings?: Pick<OpenNotebookSettings, 'baseU
   return Array.isArray(list) ? list : [];
 }
 
+export async function deleteNotebook(baseUrl: string, notebookId: string): Promise<void> {
+  await request(normalizeBaseUrl(baseUrl), `/api/notebooks/${encodeURIComponent(notebookId)}`, {
+    method: 'DELETE',
+    timeoutMs: 15_000,
+  });
+}
+
 export async function listSources(settings?: Pick<OpenNotebookSettings, 'baseUrl'>): Promise<OnbSource[]> {
   const list = await request<OnbSource[]>(normalizeBaseUrl(settings?.baseUrl), '/api/sources', { timeoutMs: 15_000 });
   return Array.isArray(list) ? list : [];

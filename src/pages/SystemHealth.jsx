@@ -6,7 +6,9 @@ import { cacheCriticalOfflineRoutes, getOfflineReadinessReport } from '../lib/of
 import { checkLlmConnection, getLlmSettings, LLM_PRESETS, saveLlmSettings } from '../lib/localLlm';
 import {
   checkOpenNotebookConnection,
+  deleteNotebook as deleteOnbNotebook,
   getOpenNotebookSettings,
+  listNotebooks as listOnbNotebooks,
   saveOpenNotebookSettings,
 } from '../lib/openNotebook';
 import { ingestFolder, isTauri, pickCfaFolder } from '../lib/desktopIngestion';
@@ -43,6 +45,8 @@ export default function SystemHealth() {
   const [ingestError, setIngestError] = useState('');
   const [sourceDocs, setSourceDocs] = useState([]);
   const [sourceDocsBusy, setSourceDocsBusy] = useState(false);
+  const [onbNotebooks, setOnbNotebooks] = useState([]);
+  const [onbNotebooksBusy, setOnbNotebooksBusy] = useState(false);
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -94,6 +98,12 @@ export default function SystemHealth() {
     };
   }, []);
 
+  // Auto-load embedded-notebook list once we know the backend is enabled.
+  useEffect(() => {
+    if (onb?.enabled) refreshOnbNotebooks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onb?.enabled, onb?.baseUrl]);
+
   async function refreshSourceDocs() {
     setSourceDocsBusy(true);
     try {
@@ -114,6 +124,35 @@ export default function SystemHealth() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not delete the source document.');
       setSourceDocsBusy(false);
+    }
+  }
+
+  async function refreshOnbNotebooks() {
+    if (!onb?.enabled) {
+      setOnbNotebooks([]);
+      return;
+    }
+    setOnbNotebooksBusy(true);
+    try {
+      const notebooks = await listOnbNotebooks({ baseUrl: onb.baseUrl });
+      setOnbNotebooks(notebooks);
+    } catch {
+      setOnbNotebooks([]);
+    } finally {
+      setOnbNotebooksBusy(false);
+    }
+  }
+
+  async function handleDeleteOnbNotebook(notebookId) {
+    if (!notebookId || !onb?.baseUrl) return;
+    setOnbNotebooksBusy(true);
+    try {
+      await deleteOnbNotebook(onb.baseUrl, notebookId);
+      await refreshOnbNotebooks();
+      setMessage('Notebook removed from the embedded backend.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not delete the notebook.');
+      setOnbNotebooksBusy(false);
     }
   }
 
@@ -355,6 +394,65 @@ export default function SystemHealth() {
           </>
         )}
       </Surface>
+
+      {onb?.enabled && (
+        <Surface tone="ops" className="ops-report-panel">
+          <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+            <div>
+              <StatusBadge tone="accent">Notebook Backend</StatusBadge>
+              <h3 style={{ margin: 'var(--space-2) 0 0' }}>Embedded open-notebook notebooks ({onbNotebooks.length})</h3>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+                Notebooks the backend currently holds. Deleting one removes its sources, insights, and chat sessions from the embedded SurrealDB; QuantVault re-creates per-topic notebooks on demand when asks resume.
+              </p>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={refreshOnbNotebooks} disabled={onbNotebooksBusy}>
+              {onbNotebooksBusy ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+          {onbNotebooks.length === 0 ? (
+            <p className="muted-copy" style={{ margin: 0 }}>
+              {onbNotebooksBusy ? 'Loading…' : 'No notebooks yet on the backend. Ask a question on any CFA topic to create one.'}
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              {onbNotebooks.slice(0, 20).map((notebook) => (
+                <div
+                  key={notebook.id}
+                  className="flex-between"
+                  style={{
+                    gap: 'var(--space-3)',
+                    alignItems: 'center',
+                    padding: 'var(--space-2) var(--space-3)',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{notebook.name || notebook.id}</strong>
+                    <small className="muted-copy">
+                      {notebook.source_count ?? 0} source(s) · {notebook.note_count ?? 0} note(s)
+                      {notebook.description ? ` · ${notebook.description}` : ''}
+                    </small>
+                  </div>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleDeleteOnbNotebook(notebook.id)}
+                    disabled={onbNotebooksBusy}
+                    title="Delete this notebook from the embedded backend"
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+              {onbNotebooks.length > 20 && (
+                <p className="muted-copy" style={{ margin: 0 }}>
+                  Showing 20 of {onbNotebooks.length} notebooks.
+                </p>
+              )}
+            </div>
+          )}
+        </Surface>
+      )}
 
       {desktopAvailable && (
         <Surface tone="ops" className="ops-report-panel">

@@ -5,6 +5,7 @@ import {
   askGrounded,
   chatWithSource,
   checkOpenNotebookConnection,
+  deleteNotebook,
   ensureSourceInsights,
   ensureTopicNotebook,
   getCachedGroundedAnswer,
@@ -328,6 +329,17 @@ describe('open-notebook client', () => {
     expect(ok).toBe(false);
     // never POSTed (no transformation to apply)
     expect(fetchMock.mock.calls.filter((c) => (c[1] as RequestInit)?.method === 'POST')).toHaveLength(0);
+  });
+
+  it('deleteNotebook DELETEs the notebook by id', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      expect(init?.method).toBe('DELETE');
+      expect(url).toBe('http://localhost:5055/api/notebooks/notebook%3Aabc');
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await deleteNotebook('http://localhost:5055', 'notebook:abc');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('chatWithSource creates a session for the source, posts the message, returns the parsed answer', async () => {
