@@ -262,6 +262,165 @@ export async function critiqueConstructedResponse({ settings, prompt, response, 
 }
 
 /**
+ * Structured Level III rubric grade: each criterion gets a verdict, a numeric
+ * score, evidence, and an improvement suggestion. Plus an overall PASS /
+ * BORDERLINE / FAIL synthesis with a percentage.
+ *
+ * Returns { overall: { verdict, percent, total, max }, criteria: [...] }.
+ * Throws on parse failure with a helpful message naming the offending JSON.
+ *
+ * @param {Object} params
+ * @param {Object} params.settings — LLM settings (baseUrl, model, contextWindow)
+ * @param {string} params.prompt
+ * @param {string} params.response
+ * @param {Array<{ id: string, label: string, maxPoints: number, description?: string }>} params.rubric
+ * @param {AbortSignal} [params.signal]
+ * @returns {Promise<{
+ *   overall: { verdict: 'PASS'|'BORDERLINE'|'FAIL', percent: number, total: number, max: number, summary: string },
+ *   criteria: Array<{
+ *     id: string,
+ *     label: string,
+ *     verdict: 'Met'|'Partial'|'Missed',
+ *     score: number,
+ *     maxPoints: number,
+ *     evidence: string,
+ *     improvement: string,
+ *   }>,
+ * }>}
+ */
+export async function gradeConstructedResponseStructured({ settings, prompt, response, rubric, signal }) {
+  const base = normalizeBaseUrl(settings?.baseUrl);
+  const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
+  const safeRubric = Array.isArray(rubric) ? rubric : [];
+  if (safeRubric.length === 0) {
+    throw new Error('No rubric criteria provided.');
+  }
+
+  const criteriaBlock = safeRubric
+    .map((c) => `  - id: "${c.id}", label: "${c.label}", max ${c.maxPoints} pt${c.maxPoints !== 1 ? 's' : ''}${c.description ? `, guidance: ${c.description}` : ''}`)
+    .join('\n');
+
+  const system =
+    'You are a CFA Level III rubric grader. Return ONLY a JSON object — no prose, no markdown fences. Shape:\n' +
+    '{\n' +
+    '  "criteria": [\n' +
+    '    { "id": "<rubric id>", "verdict": "Met"|"Partial"|"Missed", "score": <number ≤ maxPoints>, "evidence": "<1-2 sentences grounded in the candidate text>", "improvement": "<one concrete suggestion>" }\n' +
+    '  ],\n' +
+    '  "summary": "<2-3 sentences on the overall response — what was strong, what was the biggest weakness>"\n' +
+    '}\n' +
+    'Score conservatively — Level III graders do not inflate. Met = full credit, Partial = at most 60% of maxPoints, Missed = 0.';
+
+  const user =
+    `Prompt:\n${prompt}\n\nRubric criteria:\n${criteriaBlock}\n\nCandidate response:\n${response}\n\nReturn the JSON now.`;
+
+  let fetchResponse;
+  try {
+    fetchResponse = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.15,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new Error(
+      `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+      { cause: error },
+    );
+  }
+  if (!fetchResponse.ok) throw new Error(`Local model server responded ${fetchResponse.status}.`);
+  const data = await fetchResponse.json();
+  const content = data?.choices?.[0]?.message?.content || '';
+
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error('The model did not return a JSON grade. Try a more capable local model.');
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch (err) {
+    throw new Error(`Could not parse rubric grade JSON: ${err.message}`, { cause: err });
+  }
+
+  const rubricById = new Map(safeRubric.map((c) => [c.id, c]));
+  const rawCriteria = Array.isArray(parsed?.criteria) ? parsed.criteria : [];
+  const seen = new Set();
+  const criteria = [];
+  for (const entry of rawCriteria) {
+    const id = typeof entry?.id === 'string' ? entry.id : null;
+    if (!id) continue;
+    const meta = rubricById.get(id);
+    if (!meta) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const verdictRaw = typeof entry.verdict === 'string' ? entry.verdict.toLowerCase() : '';
+    let verdict = 'Missed';
+    if (verdictRaw.startsWith('met')) verdict = 'Met';
+    else if (verdictRaw.startsWith('partial')) verdict = 'Partial';
+    const proposed = Number(entry.score);
+    const score = Number.isFinite(proposed)
+      ? Math.max(0, Math.min(meta.maxPoints, proposed))
+      : verdict === 'Met'
+        ? meta.maxPoints
+        : verdict === 'Partial'
+          ? Math.round(meta.maxPoints * 0.6 * 10) / 10
+          : 0;
+    criteria.push({
+      id,
+      label: meta.label,
+      verdict,
+      score,
+      maxPoints: meta.maxPoints,
+      evidence: typeof entry.evidence === 'string' ? entry.evidence.trim() : '',
+      improvement: typeof entry.improvement === 'string' ? entry.improvement.trim() : '',
+    });
+  }
+  // If the model skipped any criteria, fill them in as Missed so totals stay honest.
+  for (const meta of safeRubric) {
+    if (seen.has(meta.id)) continue;
+    criteria.push({
+      id: meta.id,
+      label: meta.label,
+      verdict: 'Missed',
+      score: 0,
+      maxPoints: meta.maxPoints,
+      evidence: 'Model did not cover this criterion.',
+      improvement: 'Reconsider this criterion explicitly in your next attempt.',
+    });
+  }
+
+  const total = criteria.reduce((acc, c) => acc + c.score, 0);
+  const max = criteria.reduce((acc, c) => acc + c.maxPoints, 0);
+  const percent = max > 0 ? Math.round((total / max) * 100) : 0;
+  // Exam-realistic cutoffs:
+  //   < 50% → FAIL, 50–69% → BORDERLINE, ≥ 70% → PASS
+  let verdict = 'FAIL';
+  if (percent >= 70) verdict = 'PASS';
+  else if (percent >= 50) verdict = 'BORDERLINE';
+
+  const summary = typeof parsed?.summary === 'string' && parsed.summary.trim()
+    ? parsed.summary.trim()
+    : verdict === 'PASS'
+      ? 'Solid Level-III answer overall — minor gaps remain.'
+      : verdict === 'BORDERLINE'
+        ? 'On the edge — the response addresses most criteria but has notable gaps.'
+        : 'Substantial gaps against the rubric — revisit the underlying concept and try again.';
+
+  return {
+    overall: { verdict, percent, total, max, summary },
+    criteria,
+  };
+}
+
+/**
  * Personalized 2-paragraph narrative for a Study Director plan.
  * Given the structured plan from buildStudyPlan, asks the local model to
  * explain WHY today's prioritization makes sense in plain language — useful

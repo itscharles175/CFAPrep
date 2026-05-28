@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Activity, BarChart3, Clock, Gauge, Layers, Target } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts';
+import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader, MetricCard, Panel } from '../components/ui/Primitives';
 import { getAnalyticsSummary } from '../lib/learning';
 import { db, forecastReviewLoad } from '../lib/progressStore';
 import { predictRetention } from '../lib/scheduler';
 import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
+import { projectExamReadiness } from '../lib/examReadiness';
+import { getStorage } from '../lib/storage';
 
 function pct(value) {
   return Number.isFinite(value) ? `${value}%` : '-';
@@ -175,6 +177,7 @@ export default function Analytics() {
   const [forecast, setForecast] = useState([]);
   const [masteryTrend, setMasteryTrend] = useState([]);
   const [retentionDecay, setRetentionDecay] = useState([]);
+  const [readiness, setReadiness] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -231,6 +234,22 @@ export default function Analytics() {
         setRetentionDecay(points);
       })
       .catch(() => undefined);
+
+    // Exam-readiness cockpit: projected mastery curve with confidence band,
+    // anchored on the user's target exam date (System Health → Exam Date).
+    Promise.all([
+      db.masterySnapshots.toArray(),
+      db.questionResults.toArray(),
+      getStorage().settings.get('exam-date'),
+    ])
+      .then(([snapshots, results, examRow]) => {
+        if (!active) return;
+        const examDate = typeof examRow?.value === 'string' ? examRow.value : null;
+        const projection = projectExamReadiness({ snapshots, results, examDate });
+        setReadiness(projection);
+      })
+      .catch(() => undefined);
+
     return () => {
       active = false;
     };
@@ -285,6 +304,54 @@ export default function Analytics() {
           </div>
         </Panel>
       </div>
+
+      <Panel
+        tone="analytics"
+        title="Exam-Readiness Cockpit"
+        subtitle={
+          readiness?.examDate
+            ? `Projected mastery from today (${readiness.startDate}) to your exam on ${readiness.examDate} (${readiness.daysUntilExam} days) — 95% confidence band based on your trailing-14-day attempt rate.`
+            : 'Projected mastery for the next 90 days. Set an exam date in System Health → Exam Date to anchor the projection.'
+        }
+      >
+        {!readiness || readiness.points.length === 0 ? (
+          <p className="muted-copy">No mastery snapshots yet — answer a few quiz questions to populate the projection.</p>
+        ) : (
+          <>
+            <div className="qv-row-2 qv-mb-3" style={{ flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+              <span className="qv-chip qv-text-secondary">Current {readiness.currentMastery}%</span>
+              {readiness.projectedOnExamDate !== null && (
+                <span className="qv-chip qv-text-success">
+                  Projected{readiness.examDate ? ' on exam' : ' in 90d'} {readiness.projectedOnExamDate}%
+                  {readiness.projectedBand && ` (±${Math.round((readiness.projectedBand.upper - readiness.projectedBand.lower) / 2)}%)`}
+                </span>
+              )}
+              <span className="qv-chip qv-text-muted">~{readiness.averageDailyAttempts} attempts/day</span>
+              <span className="qv-chip qv-text-muted">Accuracy {Math.round(readiness.averageAccuracy * 100)}%</span>
+              <span className="qv-chip qv-text-muted">Per-attempt lift +{readiness.perAttemptLift} pts</span>
+            </div>
+            <div style={{ width: '100%', height: 280 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={readiness.points} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="date" stroke="var(--text-muted)" fontSize={11} interval={Math.max(1, Math.floor(readiness.points.length / 8))} />
+                  <YAxis stroke="var(--text-muted)" domain={[0, 100]} fontSize={12} />
+                  <Tooltip
+                    contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
+                    labelStyle={{ color: 'var(--text-secondary)' }}
+                  />
+                  <Area type="monotone" dataKey="upper" stroke="none" fill="var(--accent-soft, rgba(96,165,250,0.18))" fillOpacity={0.6} />
+                  <Area type="monotone" dataKey="lower" stroke="none" fill="var(--surface, #0f172a)" fillOpacity={1} />
+                  <Line type="monotone" dataKey="projected" name="Projected mastery" stroke="var(--accent, #60a5fa)" strokeWidth={2.5} dot={false} />
+                  {readiness.examDate && (
+                    <ReferenceLine x={readiness.examDate} stroke="var(--danger, #f87171)" strokeDasharray="4 4" label={{ value: 'Exam', position: 'top', fill: 'var(--danger)' }} />
+                  )}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </>
+        )}
+      </Panel>
 
       <Panel
         tone="analytics"
