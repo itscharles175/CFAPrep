@@ -16,6 +16,7 @@ import {
   ClipboardList,
 } from 'lucide-react';
 import { recordQuizAttempt, toggleBookmark } from '../../lib/learning';
+import { explainWrongAnswer, getLlmSettings } from '../../lib/localLlm';
 import { useProgressSummary } from '../../hooks/useProgress';
 import { CommandHint, EmptyPanel, ProgressRail, QuestionStage, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
 import { SourceRail } from '../../components/SourceContext';
@@ -123,6 +124,8 @@ export default function CfaQuiz() {
   const [finished, setFinished] = useState(false);
   const [confidence, setConfidence] = useState('medium');
   const [errorCategory, setErrorCategory] = useState('none');
+  // Map of question.id -> { state: 'loading'|'done'|'error', text?: string, error?: string }
+  const [aiExplain, setAiExplain] = useState({});
 
   const safeCurrent = Math.min(current, Math.max(questions.length - 1, 0));
   const q = questions[safeCurrent];
@@ -242,6 +245,35 @@ export default function CfaQuiz() {
         answers: nextAnswers,
       });
       setFinished(true);
+    }
+  }
+
+  async function handleExplainWithAi(question, answer) {
+    const id = question.id;
+    setAiExplain((map) => ({ ...map, [id]: { state: 'loading' } }));
+    try {
+      const settings = await getLlmSettings();
+      if (!settings.enabled) {
+        setAiExplain((map) => ({
+          ...map,
+          [id]: { state: 'error', error: 'Enable a local model in System Health → Local AI first.' },
+        }));
+        return;
+      }
+      const text = await explainWrongAnswer({
+        settings,
+        question: question.question,
+        options: question.options,
+        correctIndex: question.correct,
+        userIndex: answer.selected,
+        baseExplanation: question.explanation,
+      });
+      setAiExplain((map) => ({ ...map, [id]: { state: 'done', text } }));
+    } catch (error) {
+      setAiExplain((map) => ({
+        ...map,
+        [id]: { state: 'error', error: error instanceof Error ? error.message : 'Explanation failed.' },
+      }));
     }
   }
 
@@ -391,7 +423,27 @@ export default function CfaQuiz() {
                           >
                             Bookmark
                           </button>
+                          {!answer.correct && (
+                            <button
+                              className="btn btn-secondary"
+                              style={{ padding: 'var(--space-2) var(--space-3)' }}
+                              onClick={() => handleExplainWithAi(question, answer)}
+                              disabled={aiExplain[question.id]?.state === 'loading'}
+                            >
+                              {aiExplain[question.id]?.state === 'loading' ? 'Thinking…' : '🤖 Explain with AI'}
+                            </button>
+                          )}
                         </div>
+                        {aiExplain[question.id]?.state === 'done' && (
+                          <p style={{ borderLeft: '3px solid var(--accent)', padding: 'var(--space-2) var(--space-3)', margin: 'var(--space-2) 0 0', background: 'var(--surface-2, rgba(120,180,255,0.06))', borderRadius: 'var(--radius-md, 8px)', whiteSpace: 'pre-line' }}>
+                            {aiExplain[question.id].text}
+                          </p>
+                        )}
+                        {aiExplain[question.id]?.state === 'error' && (
+                          <p style={{ color: 'var(--danger)', margin: 'var(--space-2) 0 0', fontSize: 'var(--fs-sm)' }}>
+                            {aiExplain[question.id].error}
+                          </p>
+                        )}
                         <SourceRail
                           compact
                           limit={2}

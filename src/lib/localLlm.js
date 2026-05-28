@@ -121,6 +121,54 @@ export async function generateQuestionsFromCurriculum({ settings, topicTitle, ch
     }));
 }
 
+/**
+ * Personalized explanation for a missed multiple-choice question.
+ * Uses the local model to explain why the correct answer is right and the
+ * user's choice is wrong — grounded by the question's existing explanation
+ * (when present) so the model has something to anchor on.
+ */
+export async function explainWrongAnswer({ settings, question, options, correctIndex, userIndex, baseExplanation, signal }) {
+  const base = normalizeBaseUrl(settings?.baseUrl);
+  const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
+  const letters = ['A', 'B', 'C', 'D', 'E'];
+  const lines = options.map((option, index) => `${letters[index] || index + 1}. ${option}`).join('\n');
+  const system =
+    'You are a patient CFA tutor. The student picked the wrong option on a multiple-choice question. ' +
+    'Explain in 3-5 sentences why the correct option is right, then briefly why the student\'s choice is a common trap. ' +
+    'Be concrete and quantitative where it helps. Do not restate the question text.';
+  const user = `Question: ${question}\n\nOptions:\n${lines}\n\nCorrect answer: ${letters[correctIndex] || correctIndex + 1}\nStudent picked: ${letters[userIndex] || userIndex + 1}${baseExplanation ? `\n\nProvided explanation context:\n${baseExplanation}` : ''}`;
+
+  let response;
+  try {
+    response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new Error(
+      `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+      { cause: error },
+    );
+  }
+  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('The model returned an empty explanation. Try a more capable local model.');
+  }
+  return content.trim();
+}
+
 export async function getCachedGeneratedQuestions(level, topic) {
   try {
     const row = await db.settings.get(`ai-questions:${level}:${topic}`);
