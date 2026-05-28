@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   GraduationCap, BrainCircuit, Table2, Calculator,
@@ -10,6 +10,7 @@ import { domains } from '../data/catalog';
 import { useProgressSummary } from '../hooks/useProgress';
 import { exportVaultData, importVaultData, previewVaultImportPayload, resetVaultData } from '../lib/learning';
 import { parseJsonFile } from '../lib/jsonFilePreflight';
+import { getCfaSourceDocuments } from '../lib/cfaSourceVault';
 import {
   IconFrame,
   Dialog,
@@ -131,6 +132,19 @@ export default function Dashboard() {
   const [exportPassphraseConfirm, setExportPassphraseConfirm] = useState('');
   const [includeSourceExport, setIncludeSourceExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
+  const [sourceDocCount, setSourceDocCount] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    getCfaSourceDocuments()
+      .then((docs) => {
+        if (active) setSourceDocCount(docs.length);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function handleExport() {
     const payload = await exportVaultData();
@@ -279,6 +293,21 @@ export default function Dashboard() {
         <MetricTile label="Study Time" value={formatStudyTime(summary.studyTimeSeconds)} detail="Recorded sessions" icon={Clock} tone="success" />
         <MetricTile label="Mastery" value={summary.masteryScore === null ? '-' : `${summary.masteryScore}%`} detail="Readiness snapshot" icon={Trophy} tone="exam" />
       </div>
+
+      {sourceDocCount === 0 && (
+        <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+          <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
+            <div>
+              <StatusBadge tone="accent">Get started</StatusBadge>
+              <h3 style={{ margin: 'var(--space-1) 0 0' }}>Bring your own curriculum into the vault</h3>
+              <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+                QuantVault's grounded answers and curriculum reader light up once you have source documents in the local vault. Import a <code>.qvsource</code> bundle, paste raw text, or — in the desktop shell — pick a folder of CFA PDFs directly.
+              </p>
+            </div>
+            <Link to="/system" className="btn btn-primary">Open System Health</Link>
+          </div>
+        </Surface>
+      )}
 
       {(pendingImport || pendingReset) && (
         <Dialog
