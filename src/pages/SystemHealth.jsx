@@ -612,7 +612,25 @@ export default function SystemHealth() {
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
                 <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Model</span>
-                <input className="input" value={llm.model} onChange={(event) => setLlm({ ...llm, model: event.target.value })} placeholder="llama3.1" aria-label="Local model name" />
+                {llmStatus?.ok && llmStatus.models.length > 0 ? (
+                  <select
+                    className="input"
+                    value={llm.model}
+                    onChange={(event) => setLlm({ ...llm, model: event.target.value })}
+                    aria-label="Local model name"
+                  >
+                    {!llmStatus.models.includes(llm.model) && llm.model && (
+                      <option value={llm.model}>{llm.model} (unloaded)</option>
+                    )}
+                    {llmStatus.models.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input className="input" value={llm.model} onChange={(event) => setLlm({ ...llm, model: event.target.value })} placeholder="llama3.1" aria-label="Local model name" />
+                )}
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
                 <input type="checkbox" checked={llm.enabled} onChange={(event) => setLlm({ ...llm, enabled: event.target.checked })} />
