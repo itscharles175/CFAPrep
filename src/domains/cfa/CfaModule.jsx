@@ -27,6 +27,7 @@ import {
 import { parseCitations } from '../../lib/citations';
 import { hasSpeechRecognition, hasSpeechSynthesis, recognizeOnce, recognizeOnceOffline, recordAudioForOfflineStt, sanitizeForSpeech, speak, stopSpeaking } from '../../lib/voice';
 import PodcastPanel from '../../components/PodcastPanel/PodcastPanel';
+import { CitationChip, SourceLegend } from '../../components/OpenNotebook/OpenNotebookPrimitives';
 import VirtualizedList from '../../components/VirtualizedList/VirtualizedList';
 
 // Virtualization-threshold: only virtualize once the deck/list crosses this
@@ -973,28 +974,14 @@ export default function CfaModule() {
                           token.kind === 'text' ? (
                             <span key={ti}>{token.text}</span>
                           ) : (
-                            <sup key={ti} style={{ marginLeft: 2 }}>
+                            <sup key={ti} className="qv-ml-1">
                               {token.refs.map((n, ri) => (
-                                <span
+                                <CitationChip
                                   key={n}
-                                  title={`${sourceTitleMap?.get(sourceIds[n - 1]) || sourceIds[n - 1] || `Citation ${n}`}`}
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    minWidth: 18,
-                                    padding: '0 4px',
-                                    marginLeft: ri === 0 ? 0 : 2,
-                                    fontSize: 'var(--fs-xs)',
-                                    fontWeight: 600,
-                                    borderRadius: 8,
-                                    background: 'var(--accent-soft, rgba(120,180,255,0.18))',
-                                    color: 'var(--accent, currentColor)',
-                                    border: '1px solid var(--accent, transparent)',
-                                  }}
-                                >
-                                  {n}
-                                </span>
+                                  number={n}
+                                  title={sourceTitleMap?.get(sourceIds[n - 1]) || sourceIds[n - 1] || undefined}
+                                  spaced={ri > 0}
+                                />
                               ))}
                             </sup>
                           ),
@@ -1021,16 +1008,10 @@ export default function CfaModule() {
                           📌 Save Q&A to notes
                         </button>
                       </div>
-                      {sourceIds.length > 0 && (
-                        <ol style={{ marginTop: 'var(--space-3)', paddingLeft: 'var(--space-5)', color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>
-                          {sourceIds.map((id) => (
-                            <li key={id} style={{ marginBottom: 'var(--space-1)' }}>
-                              <strong className="qv-text-secondary">{sourceTitleMap?.get(id) || 'Curriculum source'}</strong>
-                              <span style={{ marginLeft: 'var(--space-2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 'var(--fs-xs)' }}>{id}</span>
-                            </li>
-                          ))}
-                        </ol>
-                      )}
+                      <SourceLegend
+                        entries={sourceIds.map((id) => ({ id, title: sourceTitleMap?.get(id) }))}
+                      />
+
                     </div>
                   );
                 })()}

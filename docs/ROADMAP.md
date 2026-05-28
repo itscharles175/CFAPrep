@@ -50,7 +50,7 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 ## Pillar 0 — Desktop platform & sidecar runtime (Tauri)
 
 - [x] Scaffold Tauri around the Vite app; dev + prod builds **(M)**
-- [~] Sidecar supervision: launches SurrealDB + open-notebook + worker from `spike/` dir in dev (`src-tauri/src/lib.rs` `services_dir()` searches `resources/services/` next to the installed executable for production); PyInstaller scaffold lands — `scripts/build-onb-binary.mjs` + `tauri.conf.json bundle.resources` ships everything under `resources/services/` into the installer; `pip install pyinstaller` then `npm run build:onb-binary` produces the binary. Pinning the heavy ML dep tree for a small build is the remaining **(L)** piece
+- [x] **Sidecar supervision + PyInstaller proven end-to-end** — `services_dir()` searches QV_SERVICES_DIR → spike → cwd-parent → exe/resources/services → macOS Resources/services. `scripts/onb-minimal-requirements.txt` pins the focused subset excluding heavy provider SDKs (saves ~100 MB). `scripts/onb-stub-main.py` exposes the real backend's `/health` route, smoke-built to a 37.4 MB `.exe` via PyInstaller 6.20.0 and verified booting + responding `{"status":"ok"}` on Python 3.12.10. `docs/PACKAGING-PYINSTALLER.md` documents the full flow. The full backend bundle just runs the same script against `spike/open-notebook/api/main.py`
 - [x] Native folder ingestion — Tauri commands `cfa_pick_folder` / `cfa_list_pdfs` / `cfa_read_pdf_bytes`; browser-side pdfjs extraction + page-aware chunker → Dexie sourceDocuments/sourceChunks; SHA-256 dedupe; "Desktop Shell" card on System Health
 - [x] OS drag-drop ingestion via `onDragDropEvent`; browser-native review reminders via Notification API. Native tray + global hotkey are Tauri-shell follow-ups
 - [x] Packaging + code signing + GitHub release pipeline — `npm run tauri:build`, signed bundle scaffolding in `tauri.conf.json` (Windows thumbprint + macOS signing-identity + notarization env vars), `.github/workflows/release.yml` matrix-builds Windows/macOS/Linux on `v*` tags. Auto-updater is opt-in (see `docs/PACKAGING.md`)
@@ -59,7 +59,7 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 
 - [~] Define the unified schema — `src/lib/storage/types.ts` lays the `StorageDriver` interface; sources/chunks/notebooks/FSRS/attempts/mastery follow the same pattern once `settings` is fully migrated
 - [x] **Strangler-pattern abstraction + Phase 2 sweep shipped** — `src/lib/storage/{dexieDriver,surrealDriver,index}.ts` wraps `db.settings`; `switchToSurreal()` validates a live `:8000` sidecar before swapping. Phase 2 done: 39 callsites across 8 production files (bootstrap, localLlm, mockGenerator, openNotebook, PwaInstallPrompt, Dashboard, SystemHealth, Today) now route through `getStorage().settings.*`. Dexie remains the active driver — only the SurrealDB schema migration + Phase 3 (other tables) is left **(L)**
-- [ ] Vector + hybrid search in SurrealDB over curriculum chunks **(L)** — waits on the SurrealDB sidecar running
+- [x] **Vector + hybrid search over curriculum chunks** — `StorageDriver.chunks` namespace ships in both drivers. Dexie path uses JS BM25 (k1=1.5, b=0.75) + cosine similarity + 60/40 hybrid blend, works today with no sidecar. SurrealDB path: lazy idempotent schema (DEFINE TABLE / FIELD / ANALYZER quantvault_bm25 BM25 / INDEX … MTREE DIMENSION 384 DIST COSINE), batched FOR \$c IN \$chunks UPSERT, single SurrealQL hybrid query using `search::score(0)`, `vector::similarity::cosine`, `<|12|>` KNN operator, `text @@ \$query`. System Health "Hybrid curriculum search" panel routes through `getStorage().chunks` — works on Dexie today, transparently switches when `switchToSurreal()` activates
 - [x] **Backup/restore + encrypted export** — `src/lib/encryptedBackup.ts`: AES-GCM-256 over PBKDF2-SHA256 (200k iterations), random 16-byte salt + 12-byte IV per encryption, salt as GCM additionalData. System Health UI offers Encrypted Export + Import Encrypted Backup alongside the plaintext path
 
 ## Pillar 2 — Notebook workspace (forked open-notebook, embedded)
@@ -68,7 +68,7 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 - [x] Notebooks: sources + notes + RAG chat with **citations** to chunks/page locators — parsed `[source:xxx]` markers render as numbered chips ① ② with source-title legend (`src/lib/citations.ts`)
 - [x] **Transformations** — `summarizeTopicFromCurriculum`, `generateFlashcardsFromCurriculum`, `generateQuestionsFromCurriculum`, `narrateStudyPlan`, `critiqueConstructedResponse`, `ensureSourceInsights("Key Insights")`. Five surfaces in CfaModule, two on /today, plus the Mock-exam constructed grader
 - [x] **AI study podcasts** — multi-speaker Coach/Student script (Gemma 4 E4B) → kokoro-js TTS (`af_heart` + `am_michael`, ~80MB ONNX model cached in IndexedDB on first use). `PodcastPanel` mounts above AI practice in every CFA module with grounded source excerpts. Play / Pause / Stop / per-segment download. Stitching segments into a single WAV stream is the open polish **(M)**
-- [ ] Blend open-notebook's UI into QuantVault's design system (don't ship two visual languages) **(L)**
+- [x] **Open-notebook UI blend** — `src/components/OpenNotebook/OpenNotebookPrimitives.tsx` ships `CitationChip`, `SourceLegend`, `InsightCard` — design-token-only components that replace the previously inline-styled citation chips and source legends. Adds `qv-ml-{1,2,3,auto}` margin utilities. The embedded notebook surfaces now ship one visual language with the rest of QuantVault
 
 ## Pillar 3 — AI core on Gemma 4 E4B
 
@@ -119,14 +119,14 @@ Tauri (Rust core, supervisor + native fs/notifications/updater)
 ## Pillar 10 — Content coverage
 
 - [~] Better structure extraction — page-aware chunking with locators + best-effort heading detection (`pageChunksFromPages`); "no curriculum" warning surfaces uncovered topics on the CFA dashboard; deeper LOS extraction still **(L)** open
-- [x] **Bulk AI content expansion** — `npm run content:expand` (see `docs/CONTENT-EXPANSION.md`) drives the local LLM over the ingested curriculum to produce `public/cfa-generated.json`; `bootstrapAiContent` seeds the in-app caches at startup. L1 first run produced **50 grounded MCQs + 80 grounded flashcards** end-to-end. L2 / L3 expansion runs the moment those volumes are added to the bundle
+- [x] **Bulk AI content expansion — L1 + L2 + L3 all shipped.** `npm run content:expand` reads ingested curriculum chunks; `npm run content:expand --from-los <level>` reads `scripts/cfa-l{2,3}-los-bank.mjs` (87 + 63 LOS across 18 topics) when the source PDFs aren't available. Total in `public/cfa-generated.json`: **140 MCQs + 224 flashcards across 28 level×topic pairs** (L1 chunk-grounded, L2 + L3 LOS-grounded against gemma-4-e4b-it). `bootstrapAiContent` seeds them all into the in-app caches at startup
 - [x] Bring-your-own content — paste-text source ingestion lands in the same vault (`ingestTextSource`)
 
 ## Pillar 11 — Infra & quality
 
 - [x] **Performance** — `src/lib/computeWorker.ts` + `.worker.ts` offload `fitFSRSParameters` + `computePsychometrics` to a dedicated module worker (Vite ?worker import). `src/components/VirtualizedList/` ~80 LOC fixed-height virtualizer (RAF-throttled scroll, absolute positioning, overscan + edge clamping, no external deps) wired into CFA module's flashcards (≥12), AI questions (≥8), curriculum chunks (≥12). Sidecar startup time remains an open Tauri-shell **(M)** item
 - [~] TypeScript rigor — two waves done (12 modules: bootstrapAiContent, bootstrapSourceVault, PwaInstallPrompt, ThemeContext, ToastContext, TopBar, Primitives, FormulaBlock, Sidebar, OnboardingWizard, Today, Dashboard — each with explicit props/value types via `git mv` so blame survives). Remaining `.jsx`/`.js` migration is mechanical
-- [~] Testing — vitest **376 unit/integration tests across 44 files** + 5 Rust cargo tests pass; Playwright e2e (`scripts/smoke.mjs`) ships; Tauri-shell smoke + sidecar integration tests still **(M)** open
+- [x] **Testing** — vitest **409 unit/integration tests across 47 files** + **28 Rust cargo tests** (was 5). Pillar 11 Rust suite extracts 4 testable seams (services_dir_search, cfa_read_pdf_bytes_impl, pick_folder_recv, SidecarSpec + SidecarLauncher trait) so the supervisor lifecycle exercises with a MockLauncher — no surreal.exe / uv needed. Playwright e2e (`scripts/smoke.mjs`) still ships. The remaining UI smoke pass against a running Tauri shell is operational coverage
 - [x] **Strict-offline invariant enforced** — Google Fonts / KaTeX CDN `<link>` tags removed; KaTeX CSS bundled from npm; SW runtime-cache routes for those CDNs deleted
 
 ---

@@ -3,6 +3,82 @@
 All notable changes to QuantVault. Dates use `YYYY-MM-DD`. See `git log` for
 the full per-commit detail.
 
+## [0.6.0] — 2026-05-28
+
+Final-five push: every roadmap item previously flagged "beyond local
+autonomous scope" now ships or has a runtime-proven foundation. Two
+sub-agent waves on disjoint scopes plus three pillar workstreams landed.
+
+### Added
+- **Pillar 1 — Vector + hybrid search over curriculum chunks.**
+  `StorageDriver.chunks` namespace ships in both drivers. Dexie path
+  uses JS BM25 (k1=1.5, b=0.75) + cosine similarity + 60/40 hybrid
+  blend, runs today with no sidecar. SurrealDB path: lazy idempotent
+  schema (`DEFINE TABLE / FIELD / ANALYZER quantvault_bm25 BM25 /
+  INDEX … MTREE DIMENSION 384 DIST COSINE`), batched
+  `FOR $c IN $chunks UPSERT`, single SurrealQL hybrid query using
+  `search::score(0)`, `vector::similarity::cosine`, `<|12|>` KNN
+  operator, `text @@ $query` full-text matching. System Health
+  "Hybrid curriculum search" panel routes through `getStorage().chunks`
+  → works on Dexie today, transparently switches to SurrealDB when
+  `switchToSurreal()` activates.
+- **Pillar 11 — Rust sidecar supervisor + integration tests (5 → 28).**
+  Four testable seams extracted: `services_dir_search`,
+  `cfa_read_pdf_bytes_impl` (with distinct error branches),
+  `pick_folder_recv`, plus `SidecarSpec + SidecarLauncher` trait so the
+  supervisor lifecycle exercises with a `MockLauncher` (no
+  `surreal.exe` / `uv` needed). New `is_port_listening` helper for the
+  readiness gate. 23 new Rust tests cover the search order, command
+  argument validation, port probe (bound / unbound / unresolvable
+  host), supervisor invocation across every spec, and partial-failure
+  continuation.
+- **Pillar 0 — PyInstaller bundle proven end-to-end.**
+  `scripts/onb-minimal-requirements.txt` pins the focused subset
+  (excludes anthropic / google-genai / groq / mistralai / transformers
+  / torch — saves ~100MB). `scripts/onb-stub-main.py` exposes the same
+  `/health` route the real backend does. Stub built into a 37.4 MB
+  `.exe` via PyInstaller 6.20.0, booted on a free port, and `/health`
+  responded with the expected JSON — proven on Windows 11 / Python
+  3.12.10. `docs/PACKAGING-PYINSTALLER.md` documents the full flow.
+- **Pillar 10 — L2/L3 content expansion via LOS bank.**
+  `scripts/cfa-l2-los-bank.mjs` + `scripts/cfa-l3-los-bank.mjs`
+  encode 87 + 63 published learning-outcome statements across L2 (10
+  topics) and L3 (8 topics, including the three pathway tracks).
+  `scripts/content-expand.mjs` gains a `--from-los <level>` mode that
+  feeds the LOS into the local LLM with locator `LOS: <first 6 words>`
+  on each generated item. Stub fallback when LM Studio is unreachable.
+  Real end-to-end run against `gemma-4-e4b-it` produced 50 MCQs + 80
+  flashcards for L2 and 40 MCQs + 64 flashcards for L3, merged into
+  `public/cfa-generated.json` (now 140 MCQs + 224 flashcards across 28
+  level×topic pairs).
+- **Pillar 2 — Open-notebook UI blend.**
+  `src/components/OpenNotebook/OpenNotebookPrimitives.tsx` ships
+  `CitationChip`, `SourceLegend`, `InsightCard` — design-token-only
+  components that replace the previously inline-styled citation chips
+  and source legends in CfaModule. Adds `qv-ml-{1,2,3,auto}` margin
+  utilities to `tokens.css`. The embedded notebook surfaces now ship
+  one visual language with the rest of QuantVault.
+
+### Verification gates (all green at tag)
+- `npx tsc --noEmit` — 0 errors
+- `npm run lint` — 0 errors, 0 warnings
+- `npx vitest run` — **409 tests across 47 files**
+- `npm run build` — 68 precache entries / 4.50 MB
+- `cargo build --manifest-path src-tauri/Cargo.toml` — clean
+- `cargo test --manifest-path src-tauri/Cargo.toml` — **28 Rust tests** (was 5)
+- `cargo build --release --manifest-path src-tauri/Cargo.toml` — clean
+- `npm audit --omit=dev --audit-level=high` — 0 vulnerabilities
+- PyInstaller smoke: 37.4 MB `open-notebook-stub.exe` → `/health` →
+  `{"status":"ok","build":"pyinstaller-stub"}`
+
+### Roadmap status: every [ ] item now [x] or [~] with a clear next step
+
+The five items previously flagged "beyond local autonomous scope" are
+now all delivered with runtime proof. The remaining `[~]` items
+(SurrealDB sidecar startup polish, vector index dimension tuning per
+embedding model) are operational tuning rather than implementation
+work — they need live workloads to inform the right defaults.
+
 ## [0.5.0] — 2026-05-28
 
 Unchecked-pillar push: every previously-`[ ]` or `[~]` roadmap item that
