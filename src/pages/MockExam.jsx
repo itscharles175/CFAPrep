@@ -13,7 +13,7 @@ import {
   saveMockSectionState,
 } from '../lib/learning';
 import { SourceRail } from '../components/SourceContext';
-import { explainWrongAnswer, getLlmSettings } from '../lib/localLlm';
+import { critiqueConstructedResponse, explainWrongAnswer, getLlmSettings } from '../lib/localLlm';
 import { generateMockExam, getCachedGeneratedMock, saveCachedGeneratedMock, toSyntheticMockContent } from '../lib/mockGenerator';
 
 function nowMs() {
@@ -109,6 +109,50 @@ function MockQuestion({ question, selected, submitted = false, onSelect }) {
 }
 
 function ConstructedItem({ item, response, scores, onResponse, onScore }) {
+  const [critique, setCritique] = useState({ state: 'idle', text: '', error: '' });
+  const abortRef = useRef(null);
+
+  async function handleCritique() {
+    setCritique({ state: 'loading', text: '', error: '' });
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const settings = await getLlmSettings();
+      if (!settings.enabled) {
+        setCritique({ state: 'error', text: '', error: 'Enable a local model in System Health → Local AI to use AI critique.' });
+        return;
+      }
+      const text = await critiqueConstructedResponse({
+        settings,
+        prompt: item.prompt,
+        response: response || '',
+        rubric: item.rubric.criteria.map((c) => ({ id: c.id, label: c.label, maxPoints: c.maxPoints, description: c.description })),
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) {
+        setCritique({ state: 'idle', text: '', error: '' });
+        return;
+      }
+      setCritique({ state: 'done', text, error: '' });
+    } catch (error) {
+      if (controller.signal.aborted || error?.name === 'AbortError') {
+        setCritique({ state: 'idle', text: '', error: '' });
+        return;
+      }
+      setCritique({
+        state: 'error',
+        text: '',
+        error: error instanceof Error ? error.message : 'AI critique failed.',
+      });
+    } finally {
+      abortRef.current = null;
+    }
+  }
+
+  function handleCancelCritique() {
+    abortRef.current?.abort();
+  }
+
   return (
     <Surface tone="study" status="exam">
       <StatusBadge tone="exam">Constructed Response</StatusBadge>
@@ -121,6 +165,36 @@ function ConstructedItem({ item, response, scores, onResponse, onScore }) {
         placeholder="Write a concise bullet response..."
         style={{ width: '100%', minHeight: 180, resize: 'vertical', marginTop: 'var(--space-4)' }}
       />
+      <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+        <button
+          className="btn btn-secondary"
+          onClick={handleCritique}
+          disabled={critique.state === 'loading' || !(response || '').trim()}
+        >
+          {critique.state === 'loading' ? 'Grading…' : '🤖 AI rubric critique'}
+        </button>
+        {critique.state === 'loading' && (
+          <button className="btn btn-secondary" onClick={handleCancelCritique}>Cancel</button>
+        )}
+      </div>
+      {critique.state === 'done' && critique.text && (
+        <pre
+          style={{
+            marginTop: 'var(--space-3)',
+            padding: 'var(--space-3)',
+            borderLeft: '3px solid var(--accent)',
+            background: 'var(--surface-2, rgba(120,180,255,0.06))',
+            borderRadius: 'var(--radius-md, 8px)',
+            whiteSpace: 'pre-wrap',
+            fontFamily: 'inherit',
+          }}
+        >
+          {critique.text}
+        </pre>
+      )}
+      {critique.state === 'error' && (
+        <p style={{ color: 'var(--danger)', marginTop: 'var(--space-2)', fontSize: 'var(--fs-sm)' }}>{critique.error}</p>
+      )}
       <div style={{ marginTop: 'var(--space-5)' }}>
         <RubricPanel
           title={item.rubric.title}

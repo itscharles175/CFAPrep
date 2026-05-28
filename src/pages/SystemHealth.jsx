@@ -14,6 +14,16 @@ import {
 import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop, pickCfaFolder } from '../lib/desktopIngestion';
 import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
+import { db } from '../lib/progressStore';
+
+// Cache-management constants — used by refreshCacheBuckets / handleClearBucket.
+const CACHE_PREFIXES = {
+  'ai-questions': 'ai-questions:',
+  'generated-mock': 'generated-mock:',
+  'open-notebook:answer': 'open-notebook:answer:',
+  'open-notebook:topic-notebooks': 'open-notebook:topic-notebooks',
+};
+const SKIP_KEYS = new Set(['local-llm', 'open-notebook', 'onboarding-dismissed']);
 
 function downloadJson(payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -50,6 +60,8 @@ export default function SystemHealth() {
   const [sourceDocsBusy, setSourceDocsBusy] = useState(false);
   const [onbNotebooks, setOnbNotebooks] = useState([]);
   const [onbNotebooksBusy, setOnbNotebooksBusy] = useState(false);
+  const [cacheBuckets, setCacheBuckets] = useState(null);
+  const [cacheBusy, setCacheBusy] = useState(false);
   const [pasteTitle, setPasteTitle] = useState('');
   const [pasteTopic, setPasteTopic] = useState('');
   const [pasteText, setPasteText] = useState('');
@@ -227,6 +239,91 @@ export default function SystemHealth() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not delete the notebook.');
       setOnbNotebooksBusy(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cache-bucket helpers
+  // ---------------------------------------------------------------------------
+  async function refreshCacheBuckets() {
+    const rows = await db.settings.toArray();
+    const counts = {
+      'ai-questions': 0,
+      'generated-mock': 0,
+      'open-notebook:answer': 0,
+      'open-notebook:topic-notebooks': 0,
+      other: 0,
+    };
+    for (const row of rows) {
+      const { key } = row;
+      if (SKIP_KEYS.has(key)) continue;
+      if (key.startsWith(CACHE_PREFIXES['ai-questions'])) {
+        counts['ai-questions'] += 1;
+      } else if (key.startsWith(CACHE_PREFIXES['generated-mock'])) {
+        counts['generated-mock'] += 1;
+      } else if (key.startsWith(CACHE_PREFIXES['open-notebook:answer'])) {
+        counts['open-notebook:answer'] += 1;
+      } else if (key === CACHE_PREFIXES['open-notebook:topic-notebooks']) {
+        counts['open-notebook:topic-notebooks'] += 1;
+      } else {
+        counts.other += 1;
+      }
+    }
+    setCacheBuckets(counts);
+  }
+
+  async function handleClearBucket(bucket) {
+    setCacheBusy(true);
+    try {
+      const rows = await db.settings.toArray();
+      const keysToDelete = [];
+      for (const row of rows) {
+        const { key } = row;
+        if (SKIP_KEYS.has(key)) continue;
+        if (bucket === 'other') {
+          const isCacheBucket = Object.values(CACHE_PREFIXES).some((prefix) =>
+            key === prefix || key.startsWith(prefix),
+          );
+          if (!isCacheBucket) keysToDelete.push(key);
+        } else if (bucket === 'open-notebook:topic-notebooks') {
+          if (key === CACHE_PREFIXES['open-notebook:topic-notebooks']) keysToDelete.push(key);
+        } else {
+          const prefix = CACHE_PREFIXES[bucket];
+          if (prefix && key.startsWith(prefix)) keysToDelete.push(key);
+        }
+      }
+      await db.settings.bulkDelete(keysToDelete);
+      await refreshCacheBuckets();
+      const msg = `Cleared ${keysToDelete.length} row(s) from the "${bucket}" bucket.`;
+      setMessage(msg);
+      toast.success('Caches cleared', msg);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Could not clear cache bucket.';
+      setMessage(detail);
+      toast.error('Clear failed', detail);
+    } finally {
+      setCacheBusy(false);
+    }
+  }
+
+  async function handleClearAllCaches() {
+    setCacheBusy(true);
+    try {
+      const rows = await db.settings.toArray();
+      const keysToDelete = rows
+        .map((row) => row.key)
+        .filter((key) => !SKIP_KEYS.has(key));
+      await db.settings.bulkDelete(keysToDelete);
+      await refreshCacheBuckets();
+      const msg = `Cleared ${keysToDelete.length} cached row(s) from app caches.`;
+      setMessage(msg);
+      toast.success('Caches cleared', msg);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Could not clear app caches.';
+      setMessage(detail);
+      toast.error('Clear failed', detail);
+    } finally {
+      setCacheBusy(false);
     }
   }
 
@@ -647,6 +744,65 @@ export default function SystemHealth() {
           )}
         </Surface>
       )}
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+          <div>
+            <StatusBadge tone="accent">App Caches</StatusBadge>
+            <h3 style={{ margin: 'var(--space-2) 0 0' }}>App caches</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
+              Rows written to the settings store by AI-practice, generative mocks, and grounded Q&amp;A. Clearing a bucket removes generated content but not persistent settings (LLM config, open-notebook config, onboarding).
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+            <button className="btn btn-secondary btn-sm" onClick={refreshCacheBuckets} disabled={cacheBusy}>
+              Refresh
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={handleClearAllCaches} disabled={cacheBusy}>
+              Clear all caches
+            </button>
+          </div>
+        </div>
+        {cacheBuckets === null ? (
+          <p className="muted-copy" style={{ margin: 0 }}>Loading…</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {[
+              { id: 'ai-questions', label: 'AI-practice generated questions', prefix: 'ai-questions:*' },
+              { id: 'generated-mock', label: 'Saved generative mock exams', prefix: 'generated-mock:*' },
+              { id: 'open-notebook:answer', label: 'Grounded Q&A per topic', prefix: 'open-notebook:answer:*' },
+              { id: 'open-notebook:topic-notebooks', label: 'Topic-notebook map', prefix: 'open-notebook:topic-notebooks' },
+              { id: 'other', label: 'Other (cfa-* and unknown keys)', prefix: '' },
+            ].map(({ id, label, prefix }) => (
+              <div
+                key={id}
+                className="flex-between"
+                style={{
+                  gap: 'var(--space-3)',
+                  alignItems: 'center',
+                  padding: 'var(--space-2) var(--space-3)',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <strong>{label}</strong>
+                  {prefix && <small className="muted-copy" style={{ marginLeft: 'var(--space-2)' }}>{prefix}</small>}
+                  <small className="muted-copy" style={{ display: 'block' }}>{cacheBuckets[id] ?? 0} row(s)</small>
+                </div>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleClearBucket(id)}
+                  disabled={cacheBusy || (cacheBuckets[id] ?? 0) === 0}
+                  title={`Clear the "${id}" cache bucket`}
+                >
+                  Clear
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Surface>
 
       <Surface tone="ops" className="ops-report-panel">
         <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
