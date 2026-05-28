@@ -12,6 +12,7 @@ import {
   saveOpenNotebookSettings,
 } from '../lib/openNotebook';
 import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop, pickCfaFolder } from '../lib/desktopIngestion';
+import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 
 function downloadJson(payload) {
@@ -25,6 +26,7 @@ function downloadJson(payload) {
 }
 
 export default function SystemHealth() {
+  const toast = useToast();
   const [storage, setStorage] = useState(null);
   const [cacheNames, setCacheNames] = useState([]);
   const [message, setMessage] = useState('');
@@ -128,9 +130,13 @@ export default function SystemHealth() {
       const payload = JSON.parse(text);
       const result = await importCfaSourceBundle(payload, { mode: 'merge' });
       await refreshSourceDocs();
-      setMessage(`Imported ${result.documents ?? 0} document(s) and ${result.chunks ?? 0} chunk(s) from ${file.name}.`);
+      const summary = `Imported ${result.documents ?? 0} document(s) and ${result.chunks ?? 0} chunk(s) from ${file.name}.`;
+      setMessage(summary);
+      toast.success('Source bundle imported', summary);
     } catch (error) {
-      setMessage(error instanceof Error ? `Bundle import failed: ${error.message}` : 'Bundle import failed.');
+      const detail = error instanceof Error ? `Bundle import failed: ${error.message}` : 'Bundle import failed.';
+      setMessage(detail);
+      toast.error('Bundle import failed', detail);
     } finally {
       setSourceDocsBusy(false);
     }
@@ -147,9 +153,13 @@ export default function SystemHealth() {
       anchor.download = `quantvault-source-${new Date().toISOString().slice(0, 10)}.qvsource`;
       anchor.click();
       URL.revokeObjectURL(url);
-      setMessage(`Exported ${bundle.documents?.length ?? 0} source document(s) as a .qvsource bundle.`);
+      const summary = `Exported ${bundle.documents?.length ?? 0} source document(s) as a .qvsource bundle.`;
+      setMessage(summary);
+      toast.success('Source vault exported', summary);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not export source bundle.');
+      const detail = error instanceof Error ? error.message : 'Could not export source bundle.';
+      setMessage(detail);
+      toast.error('Export failed', detail);
     } finally {
       setSourceDocsBusy(false);
     }
@@ -192,11 +202,11 @@ export default function SystemHealth() {
       const topicIds = pasteTopic.trim() ? [pasteTopic.trim()] : [];
       const result = await ingestTextSource({ title, text: pasteText, topicIds });
       await refreshSourceDocs();
-      setMessage(
-        result.deduped
-          ? `Same text was already ingested as ${result.documentId}.`
-          : `Pasted "${title}" ingested (${result.chunkCount} chunks).`,
-      );
+      const summary = result.deduped
+        ? `Same text was already ingested as ${result.documentId}.`
+        : `Pasted "${title}" ingested (${result.chunkCount} chunks).`;
+      setMessage(summary);
+      toast[result.deduped ? 'info' : 'success']('Text source', summary);
       setPasteText('');
       setPasteTitle('');
       setPasteTopic('');
@@ -254,14 +264,20 @@ export default function SystemHealth() {
       });
       setIngestResult(result);
       setIngestState(controller.signal.aborted ? 'cancelled' : 'done');
-      setMessage(`Ingested ${result.ingested} new document(s) (${result.chunkCount} chunks). Skipped ${result.skipped} duplicate(s).`);
+      const summary = `Ingested ${result.ingested} new document(s) (${result.chunkCount} chunks). Skipped ${result.skipped} duplicate(s).`;
+      setMessage(summary);
+      if (!controller.signal.aborted) {
+        toast.success('Folder ingested', summary);
+      }
       await refreshSourceDocs();
     } catch (error) {
       if (controller.signal.aborted) {
         setIngestState('cancelled');
       } else {
         setIngestState('error');
-        setIngestError(error instanceof Error ? error.message : 'Folder ingestion failed.');
+        const detail = error instanceof Error ? error.message : 'Folder ingestion failed.';
+        setIngestError(detail);
+        toast.error('Folder ingestion failed', detail);
       }
     } finally {
       ingestAbortRef.current = null;
