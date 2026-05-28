@@ -119,13 +119,9 @@ export default function CfaVignette() {
         <ArrowLeft size={16} /> Back to {data.title}
       </Link>
       <PageHeader
-        badge={data.runtimeMode === 'exam-ready' ? 'EXAM-READY' : level?.replace('level', 'LEVEL ')}
+        badge={level?.replace('level', 'LEVEL ')}
         title={vignette.title}
-        subtitle={
-          data.runtimeMode === 'exam-ready'
-            ? 'Editorial item-set content is available locally with reviewed exhibits, rationales, and provenance.'
-            : 'A local item-set vignette. Read the case once, answer all questions, then review the explanation trail.'
-        }
+        subtitle="A local item-set vignette. Read the case once, answer all questions, then review the explanation trail."
       />
 
       <div className="grid-3" style={{ marginBottom: 'var(--space-6)' }}>

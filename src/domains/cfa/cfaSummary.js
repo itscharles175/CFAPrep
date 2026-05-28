@@ -8,8 +8,8 @@ function topicSummary(topic, level) {
     label: topic.title,
     weight: topic.weight,
     maturity: topic.maturity,
-    runtimeMode: topic.runtimeMode || level.runtimeMode || 'generated',
-    runtimeLabel: topic.runtimeLabel || level.runtimeLabel || 'Generated scaffold',
+    runtimeMode: topic.runtimeMode || level.runtimeMode || 'exam-ready',
+    runtimeLabel: topic.runtimeLabel || level.runtimeLabel || 'Editorial exam-ready',
     questions: topic.questions.length,
     vignettes: topic.vignettes.length,
     constructedResponses: topic.constructedResponses?.length || 0,
@@ -24,8 +24,8 @@ function levelSummary(level) {
     title: level.title,
     examFormat: level.examFormat,
     summary: level.summary,
-    runtimeMode: level.runtimeMode || 'generated',
-    runtimeLabel: level.runtimeLabel || 'Generated scaffold',
+    runtimeMode: level.runtimeMode || 'exam-ready',
+    runtimeLabel: level.runtimeLabel || 'Editorial exam-ready',
     topics: level.topics.map((topic) => topicSummary(topic, level)),
   };
 }

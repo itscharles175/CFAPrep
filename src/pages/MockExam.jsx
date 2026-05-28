@@ -447,13 +447,9 @@ export default function MockExam() {
   return (
     <div className="page-container">
       <PageHeader
-        badge={levelContent.runtimeMode === 'exam-ready' ? 'MOCK SECTION · EXAM-READY' : 'MOCK SECTION'}
+        badge="MOCK SECTION"
         title={mock.title}
-        subtitle={
-          levelContent.runtimeMode === 'exam-ready'
-            ? 'Editorial exam-ready items are loaded locally with resume, flags, review state, and no network dependency.'
-            : 'A level-aware mixed section with standalone items, vignettes, constructed responses, flags, review state, and local persistence.'
-        }
+        subtitle="A level-aware mixed section with standalone items, vignettes, constructed responses, flags, review state, and local persistence."
         actions={
           <>
             <button className="btn btn-secondary" onClick={togglePause}>{paused ? 'Resume' : 'Pause'}</button>

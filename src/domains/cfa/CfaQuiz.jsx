@@ -320,11 +320,6 @@ export default function CfaQuiz() {
             <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-8)' }}>
               {topicData?.title || topic} - {modeLabel}
             </p>
-            {topicData?.runtimeMode === 'exam-ready' && (
-              <div className="badge badge-green" style={{ marginBottom: 'var(--space-6)' }}>
-                Editorial exam-ready content
-              </div>
-            )}
 
             <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-8)', marginBottom: 'var(--space-8)', flexWrap: 'wrap' }}>
               <div>
@@ -419,11 +414,6 @@ export default function CfaQuiz() {
       <Link to={`/cfa/${level}/${topic}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-6)' }}>
         <ArrowLeft size={16} /> Back to {topicData?.title || topic}
       </Link>
-      {topicData?.runtimeMode === 'exam-ready' && (
-        <div className="badge badge-green" style={{ marginBottom: 'var(--space-4)' }}>
-          Editorial exam-ready
-        </div>
-      )}
 
       <div className="quiz-container">
         <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-5)' }}>

@@ -125,7 +125,6 @@ export default function CfaModule() {
           badge={`${level?.replace('level', 'Level ')} · ${data.weight}`}
           title={data.title}
           subtitle={`${data.learningObjectives.length} objectives · ${data.questions.length} questions · ${data.vignettes.length} vignettes · ${data.flashcards.length} cards`}
-          meta={data.runtimeMode === 'exam-ready' && <StatusBadge tone="success">Editorial exam-ready</StatusBadge>}
           actions={
             <>
             <button className={`btn ${completed ? 'btn-success' : 'btn-secondary'} btn-lg`} onClick={toggleComplete}>

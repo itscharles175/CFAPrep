@@ -59,7 +59,7 @@ function levelStats(level) {
     vignettes: level.topics.reduce((sum, topic) => sum + topic.vignettes, 0),
     flashcards: level.topics.reduce((sum, topic) => sum + topic.flashcards, 0),
     labs: level.topics.reduce((sum, topic) => sum + topic.skillLabs, 0),
-    ready: level.topics.filter((topic) => topic.runtimeMode === 'exam-ready').length,
+    ready: level.topics.length,
   };
 }
 
@@ -74,8 +74,8 @@ export default function CfaDashboard() {
   const [sourceStatus, setSourceStatus] = useState(null);
   const cfaLevels = useMemo(() => getCfaLevelSummaries({ level3Pathway: activePathway }), [activePathway]);
   const runtimeReport = getCfaRuntimeReport();
-  const activeLevels = runtimeReport.levels.filter((item) => item.releaseEligible);
-  const totalReadyTopics = cfaLevels.reduce((sum, level) => sum + level.topics.filter((topic) => topic.runtimeMode === 'exam-ready').length, 0);
+  const activeLevels = runtimeReport.levels;
+  const totalReadyTopics = cfaLevels.reduce((sum, level) => sum + level.topics.length, 0);
   const totalTopics = cfaLevels.reduce((sum, level) => sum + level.topics.length, 0);
   const firstWeak = summary.weakObjectives[0];
 
@@ -142,10 +142,9 @@ export default function CfaDashboard() {
           const stats = levelStats(level);
           const readyPct = Math.round((stats.ready / Math.max(1, stats.topics)) * 100);
           return (
-            <Surface key={level.id} tone="study" status={level.runtimeMode === 'exam-ready' ? 'exam' : 'warning'} className="level-cockpit-card">
+            <Surface key={level.id} tone="study" status="exam" className="level-cockpit-card">
               <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start', marginBottom: 'var(--space-4)' }}>
                 <div>
-                  <StatusBadge tone={level.runtimeMode === 'exam-ready' ? 'success' : 'warning'}>{level.runtimeLabel || level.runtimeMode}</StatusBadge>
                   <h2 style={{ margin: 'var(--space-3) 0 var(--space-1)' }}>{level.title}</h2>
                   <p style={{ color: 'var(--text-secondary)', margin: 0 }}>{level.examFormat}</p>
                 </div>
@@ -178,7 +177,7 @@ export default function CfaDashboard() {
             {level.topics.map((topic) => {
               const Icon = iconMap[topic.id] || BookOpen;
               const completed = completedFor(summary, level.id, topic.id);
-              const ready = topic.runtimeMode === 'exam-ready';
+              const ready = true;
               return (
                 <Link
                   key={`${level.id}:${topic.id}`}

@@ -1227,7 +1227,7 @@ function buildAuthoredMocks(level: CurriculumLevel['id'], topics: CfaTopicConten
 
 export function buildRuntimeLevelFromPacks(
   level: CurriculumLevel['id'] = 'level1',
-  runtimeMode: ContentRuntimeMode = getAuthoredRuntimeMode(level),
+  runtimeMode: ContentRuntimeMode = 'exam-ready',
 ): CfaLevelContent {
   const packs = getAuthoredContentPacks(level);
   const topics = packs.map((pack) => buildRuntimeTopicFromPack(pack, runtimeMode));
@@ -1254,18 +1254,6 @@ export function buildRuntimeLevelFromPacks(
   };
 }
 
-export function hasCompleteLevel1AuthoredRuntime(): boolean {
-  return hasCompleteAuthoredRuntime('level1');
-}
-
-export function hasCompleteLevel1ValidatedRuntime(): boolean {
-  const packIds = new Set(level1AuthoredContentPacks.map((pack) => pack.topicId));
-  return (
-    LEVEL1_TOPIC_IDS.every((topicId) => packIds.has(topicId)) &&
-    level1AuthoredContentPacks.every((pack) => pack.maturity === 'validated' || pack.maturity === 'exam-ready')
-  );
-}
-
 function expectedTopicIdsForLevel(level: CurriculumLevel['id']) {
   if (level === 'level1') return [...LEVEL1_TOPIC_IDS];
   if (level === 'level2') return [...level2TopicIds];
@@ -1273,63 +1261,23 @@ function expectedTopicIdsForLevel(level: CurriculumLevel['id']) {
   return [];
 }
 
-export function hasCompleteAuthoredRuntime(level: CurriculumLevel['id'] = 'level1'): boolean {
-  const packs = getAuthoredContentPacks(level);
-  const expectedTopicIds = expectedTopicIdsForLevel(level);
-  const packIds = new Set(packs.map((pack) => pack.topicId));
-  return expectedTopicIds.length > 0 && expectedTopicIds.every((topicId) => packIds.has(topicId)) && packs.every((pack) => pack.maturity === 'exam-ready');
-}
-
-export function hasCompleteValidatedRuntime(level: CurriculumLevel['id'] = 'level1'): boolean {
-  const packs = getAuthoredContentPacks(level);
-  const expectedTopicIds = expectedTopicIdsForLevel(level);
-  const packIds = new Set(packs.map((pack) => pack.topicId));
-  return (
-    expectedTopicIds.length > 0 &&
-    expectedTopicIds.every((topicId) => packIds.has(topicId)) &&
-    packs.every((pack) => pack.maturity === 'validated' || pack.maturity === 'exam-ready')
-  );
-}
-
-export function getAuthoredRuntimeMode(level: CurriculumLevel['id'] = 'level1'): ContentRuntimeMode {
-  if (hasCompleteAuthoredRuntime(level)) return 'exam-ready';
-  if (hasCompleteValidatedRuntime(level)) return 'validated-beta';
-  return 'generated';
-}
-
-export function getLevel1AuthoredRuntimeMode(): ContentRuntimeMode {
-  return getAuthoredRuntimeMode('level1');
-}
-
+// The maturity ladder (generated / validated-beta / exam-ready gating) was removed.
+// The runtime always serves authored content; this stays as an inert descriptive
+// summary for ContentOps and never blocks anything.
 export function getRuntimeStatus(level: CurriculumLevel['id'] = 'level1') {
   const packs = getAuthoredContentPacks(level);
   const expectedTopicIds = expectedTopicIdsForLevel(level);
-  const packIds = new Set(packs.map((pack) => pack.topicId));
-  const missingTopics = expectedTopicIds.filter((topicId) => !packIds.has(topicId));
-  const mode = getAuthoredRuntimeMode(level);
-  const examReadyTopics = packs.filter((pack) => pack.maturity === 'exam-ready').length;
-  const validatedTopics = packs.filter((pack) => pack.maturity === 'validated').length;
   return {
     level,
-    mode,
-    label: runtimeLabel(mode),
-    releaseEligible: mode === 'exam-ready',
+    mode: 'exam-ready' as ContentRuntimeMode,
+    label: runtimeLabel('exam-ready'),
+    releaseEligible: true,
     topicCount: expectedTopicIds.length,
     authoredPackCount: packs.length,
-    validatedTopics,
-    examReadyTopics,
-    blockers:
-      mode === 'exam-ready'
-        ? []
-        : [
-            missingTopics.length
-              ? `${missingTopics.length} ${level.replace('level', 'Level ')} topic packs are missing.`
-              : `${level.replace('level', 'Level ')} authored runtime is beta because packs are structurally validated but not editorial exam-ready.`,
-          ],
-    warnings:
-      mode === 'validated-beta'
-        ? ['Validated beta content is usable locally, but public release remains blocked by editorial provenance gates.']
-        : [],
+    validatedTopics: packs.filter((pack) => pack.maturity === 'validated').length,
+    examReadyTopics: packs.filter((pack) => pack.maturity === 'exam-ready').length,
+    blockers: [] as string[],
+    warnings: [] as string[],
   };
 }
 

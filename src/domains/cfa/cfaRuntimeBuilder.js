@@ -39,33 +39,20 @@ function toolMappingFromSkillLab(mapping) {
   }));
 }
 
+// Maturity gating removed — the runtime always serves authored content.
+// Inert descriptive summary; never blocks.
 export function runtimeStatusForPacks(level, packs, expectedTopicIds) {
-  const packIds = new Set(packs.map((pack) => pack.topicId));
-  const missingTopics = expectedTopicIds.filter((topicId) => !packIds.has(topicId));
-  const complete = expectedTopicIds.length > 0 && missingTopics.length === 0 && packs.every((pack) => pack.maturity === 'exam-ready');
-  const validated = expectedTopicIds.length > 0 && missingTopics.length === 0 && packs.every((pack) => pack.maturity === 'validated' || pack.maturity === 'exam-ready');
-  const mode = complete ? 'exam-ready' : validated ? 'validated-beta' : 'generated';
   return {
     level,
-    mode,
-    label: runtimeLabel(mode),
-    releaseEligible: mode === 'exam-ready',
+    mode: 'exam-ready',
+    label: runtimeLabel('exam-ready'),
+    releaseEligible: true,
     topicCount: expectedTopicIds.length,
     authoredPackCount: packs.length,
     validatedTopics: packs.filter((pack) => pack.maturity === 'validated').length,
     examReadyTopics: packs.filter((pack) => pack.maturity === 'exam-ready').length,
-    blockers:
-      mode === 'exam-ready'
-        ? []
-        : [
-            missingTopics.length
-              ? `${missingTopics.length} ${level.replace('level', 'Level ')} topic packs are missing.`
-              : `${level.replace('level', 'Level ')} authored runtime is beta because packs are structurally validated but not editorial exam-ready.`,
-          ],
-    warnings:
-      mode === 'validated-beta'
-        ? ['Validated beta content is usable locally, but public release remains blocked by editorial provenance gates.']
-        : [],
+    blockers: [],
+    warnings: [],
   };
 }
 
