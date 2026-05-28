@@ -23,6 +23,12 @@ import {
 } from '../lib/fsrsOptimizer';
 import { setSchedulerParameters } from '../lib/scheduler';
 import { db } from '../lib/progressStore';
+import {
+  clearPsychometricsCache,
+  computePsychometrics,
+  persistPsychometricsReport,
+  readCachedPsychometricsReport,
+} from '../lib/itemPsychometrics';
 
 // Cache-management constants — used by refreshCacheBuckets / handleClearBucket.
 const CACHE_PREFIXES = {
@@ -80,6 +86,9 @@ export default function SystemHealth() {
   const [fsrsFit, setFsrsFit] = useState(null); // last fit report
   const [fsrsBusy, setFsrsBusy] = useState(false);
   const [fsrsError, setFsrsError] = useState('');
+  const [psychReport, setPsychReport] = useState(null);
+  const [psychBusy, setPsychBusy] = useState(false);
+  const [psychError, setPsychError] = useState('');
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -147,10 +156,35 @@ export default function SystemHealth() {
     readPersistedParameters().then((row) => {
       if (active) setFsrsCustom(row);
     });
+    readCachedPsychometricsReport().then((row) => {
+      if (active) setPsychReport(row);
+    });
     return () => {
       active = false;
     };
   }, []);
+
+  async function handlePsychCompute() {
+    setPsychBusy(true);
+    setPsychError('');
+    try {
+      const rows = await db.questionResults.toArray();
+      const report = computePsychometrics(rows);
+      await persistPsychometricsReport(report);
+      setPsychReport(report);
+      toast.success('Psychometrics updated', `${report.totalItems} items scored across ${report.totalAttempts} attempts.`);
+    } catch (error) {
+      setPsychError(error?.message || String(error));
+    } finally {
+      setPsychBusy(false);
+    }
+  }
+
+  async function handlePsychReset() {
+    await clearPsychometricsCache();
+    setPsychReport(null);
+    toast.info('Psychometrics cleared', 'Cache emptied — recompute any time.');
+  }
 
   async function handleFsrsFit() {
     setFsrsBusy(true);
@@ -670,6 +704,75 @@ export default function SystemHealth() {
             {fsrsCustom && (
               <button className="btn btn-secondary btn-sm" onClick={handleFsrsReset} disabled={fsrsBusy}>
                 Reset to FSRS-4.5
+              </button>
+            )}
+          </div>
+        </div>
+      </Surface>
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <StatusBadge tone="exam">Item Psychometrics</StatusBadge>
+            <h3 className="qv-m-0 qv-mt-2">IRT-lite item calibration</h3>
+            <p className="qv-text-secondary qv-m-0">
+              Per-item difficulty + point-biserial discrimination across your history. Surfaces too-easy, too-hard, and low-discrimination items so you can retire or revise them. All compute is local.
+            </p>
+            {psychReport && (
+              <>
+                <div className="qv-row-2 qv-mt-2" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                  <span className="qv-chip" title="Total attempts">{psychReport.totalAttempts} attempts</span>
+                  <span className="qv-chip" title="Total items">{psychReport.totalItems} items</span>
+                  <span className="qv-chip qv-text-danger" title="Items flagged too hard">⚠️ too-hard: {psychReport.itemsByFlag['too-hard']}</span>
+                  <span className="qv-chip qv-text-warning" title="Items flagged too easy">↑ too-easy: {psychReport.itemsByFlag['too-easy']}</span>
+                  <span className="qv-chip qv-text-secondary" title="Items with low discrimination">↧ low-disc: {psychReport.itemsByFlag['low-discrimination']}</span>
+                  <span className="qv-chip qv-text-success" title="Items passing all checks">✓ ok: {psychReport.itemsByFlag['ok']}</span>
+                </div>
+                {psychReport.items.length > 0 && (
+                  <details className="qv-mt-2 qv-fs-sm">
+                    <summary className="qv-text-secondary" style={{ cursor: 'pointer' }}>Show top 10 flagged items</summary>
+                    <table className="qv-mt-2 qv-fs-xs" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr className="qv-text-muted">
+                          <th style={{ textAlign: 'left', padding: 'var(--space-1)' }}>Item</th>
+                          <th style={{ textAlign: 'left', padding: 'var(--space-1)' }}>Topic</th>
+                          <th style={{ textAlign: 'right', padding: 'var(--space-1)' }}>n</th>
+                          <th style={{ textAlign: 'right', padding: 'var(--space-1)' }}>Acc</th>
+                          <th style={{ textAlign: 'right', padding: 'var(--space-1)' }}>Discr</th>
+                          <th style={{ textAlign: 'left', padding: 'var(--space-1)' }}>Flag</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {psychReport.items.filter((it) => it.flag !== 'ok' && it.flag !== 'insufficient-data').slice(0, 10).map((it) => (
+                          <tr key={`${it.domain}-${it.questionId}`}>
+                            <td className="qv-mono" style={{ padding: 'var(--space-1)' }}>{it.questionId}</td>
+                            <td style={{ padding: 'var(--space-1)' }}>{it.topic}</td>
+                            <td className="qv-mono" style={{ padding: 'var(--space-1)', textAlign: 'right' }}>{it.attempts}</td>
+                            <td className="qv-mono" style={{ padding: 'var(--space-1)', textAlign: 'right' }}>{(it.accuracy * 100).toFixed(0)}%</td>
+                            <td className="qv-mono" style={{ padding: 'var(--space-1)', textAlign: 'right' }}>{it.discrimination.toFixed(2)}</td>
+                            <td style={{ padding: 'var(--space-1)' }}>{it.flag}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </details>
+                )}
+                <p className="qv-text-muted qv-m-0 qv-mt-2 qv-fs-xs">
+                  Last computed {new Date(psychReport.generatedAt).toLocaleString()}.
+                </p>
+              </>
+            )}
+            {psychError && (
+              <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{psychError}</p>
+            )}
+          </div>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary btn-sm" onClick={handlePsychCompute} disabled={psychBusy}>
+              {psychBusy ? 'Computing…' : 'Compute now'}
+            </button>
+            {psychReport && (
+              <button className="btn btn-secondary btn-sm" onClick={handlePsychReset} disabled={psychBusy}>
+                Clear cache
               </button>
             )}
           </div>
