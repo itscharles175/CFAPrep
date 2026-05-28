@@ -385,6 +385,7 @@ export async function chatWithSource(params: {
       method: 'POST',
       body: { source_id: params.sourceId, title: 'QuantVault ask', ...(params.model ? { model_override: params.model } : {}) },
       timeoutMs: 15_000,
+      signal: params.signal,
     },
   );
 
