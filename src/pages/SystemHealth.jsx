@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Database, Download, HardDrive, KeyRound, ShieldCheck, WifiOff, Wrench, XCircle } from 'lucide-react';
+import { Database, Download, HardDrive, KeyRound, ShieldCheck, WifiOff, Wrench } from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
 import { exportVaultData, getVaultHealthReport, previewVaultRepair } from '../lib/learning';
 import { cacheCriticalOfflineRoutes, getOfflineReadinessReport } from '../lib/offlineContentCache';
-import { buildReleaseGateReport } from '../lib/releaseHealth';
 
 function downloadJson(payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -15,26 +14,11 @@ function downloadJson(payload) {
   URL.revokeObjectURL(url);
 }
 
-function gateTone(status) {
-  if (status === 'ok') return 'success';
-  if (status === 'blocked') return 'danger';
-  if (status === 'warning') return 'warning';
-  return 'accent';
-}
-
-function GateIcon({ status }) {
-  if (status === 'ok') return <CheckCircle2 size={18} color="var(--success)" aria-hidden="true" />;
-  if (status === 'blocked') return <XCircle size={18} color="var(--danger)" aria-hidden="true" />;
-  if (status === 'warning') return <AlertTriangle size={18} color="var(--warning)" aria-hidden="true" />;
-  return <Clock size={18} color="var(--accent)" aria-hidden="true" />;
-}
-
 export default function SystemHealth() {
   const [storage, setStorage] = useState(null);
   const [cacheNames, setCacheNames] = useState([]);
   const [message, setMessage] = useState('');
   const [backupPassphrase, setBackupPassphrase] = useState('');
-  const [releaseReport, setReleaseReport] = useState(() => buildReleaseGateReport());
   const [vaultHealth, setVaultHealth] = useState(null);
   const [offlineReadiness, setOfflineReadiness] = useState(null);
   const [persisted, setPersisted] = useState(null);
@@ -70,21 +54,6 @@ export default function SystemHealth() {
         if (active) setOfflineReadiness(report);
       })
       .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    fetch('/reports/release-manifest.json', { cache: 'no-store' })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((report) => {
-        if (active && report?.gates) setReleaseReport(report);
-      })
-      .catch(() => {
-        // Dev servers may not have generated release artifacts yet; the runtime report remains useful.
-      });
     return () => {
       active = false;
     };
@@ -157,64 +126,6 @@ export default function SystemHealth() {
         <MetricCard label="Offline Routes" value={`${offlineReadiness?.cachedCount ?? 0}/${offlineReadiness?.totalCriticalRoutes ?? 0}`} detail="Critical local routes cached" icon={WifiOff} tone={offlineReadiness?.cachedCount === offlineReadiness?.totalCriticalRoutes ? 'success' : 'warning'} />
         <MetricCard label="Vault Safety" value={vaultHealth?.status || 'Checking'} detail={`${vaultHealth?.totalRows ?? 0} local rows`} icon={Database} tone={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} />
       </div>
-
-      <Surface tone="ops" status={releaseReport.status === 'ok' ? 'success' : releaseReport.status === 'blocked' ? 'danger' : releaseReport.status} className="ops-report-panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)', flexWrap: 'wrap', marginBottom: 'var(--space-4)' }}>
-          <div>
-            <h3 style={{ margin: 0 }}>Release Health</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
-              Generated {new Date(releaseReport.generatedAt).toLocaleString()} · {releaseReport.summary.level1ExamReadyTopics}/{releaseReport.summary.level1TopicCount} Level I, {releaseReport.summary.level2ExamReadyTopics}/{releaseReport.summary.level2TopicCount} Level II, and {releaseReport.summary.level3ExamReadyTopics}/{releaseReport.summary.level3TopicCount} Level III topics exam-ready
-            </p>
-            <p style={{ color: 'var(--text-muted)', margin: 'var(--space-1) 0 0', fontSize: 'var(--fs-sm)' }}>
-              Run {releaseReport.runId || 'runtime-preview'} · Git {releaseReport.git?.shortSha || 'unknown'}{releaseReport.git?.branch ? ` on ${releaseReport.git.branch}` : ''} · {releaseReport.staleGateCount || 0} stale gate(s)
-            </p>
-          </div>
-          <StatusBadge tone={releaseReport.status === 'ok' ? 'success' : releaseReport.status === 'blocked' ? 'danger' : 'warning'}>
-            {releaseReport.status}
-          </StatusBadge>
-        </div>
-
-        <div className="coverage-grid">
-          {releaseReport.gates.map((gate) => (
-            <div key={gate.id}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                <GateIcon status={gate.status} />
-                <strong>{gate.label}</strong>
-              </div>
-              <small style={{ color: `var(--${gateTone(gate.status)})`, textTransform: 'uppercase', fontWeight: 800 }}>
-                {gate.status} · {gate.category}
-                {typeof gate.ageHours === 'number' ? ` · ${gate.ageHours}h old` : ''}
-                {gate.stale ? ' · stale' : ''}
-              </small>
-              <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', margin: 'var(--space-2) 0 0' }}>{gate.detail}</p>
-              {gate.command && <code style={{ display: 'inline-block', marginTop: 'var(--space-2)' }}>{gate.command}</code>}
-              {(gate.parallelGroup || gate.dependencies?.length || gate.artifactSchema?.id) && (
-                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: 'var(--space-2)' }}>
-                  {gate.parallelGroup ? `Group: ${gate.parallelGroup}` : ''}
-                  {gate.dependencies?.length ? `${gate.parallelGroup ? ' · ' : ''}Depends: ${gate.dependencies.join(', ')}` : ''}
-                  {gate.artifactSchema?.id ? `${gate.parallelGroup || gate.dependencies?.length ? ' · ' : ''}Schema: ${gate.artifactSchema.id}` : ''}
-                </small>
-              )}
-              {gate.artifactPaths?.length > 0 && (
-                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: 'var(--space-2)' }}>
-                  Artifacts: {gate.artifactPaths.join(', ')}
-                </small>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {releaseReport.blockers.length > 0 && (
-          <div style={{ marginTop: 'var(--space-4)' }}>
-            <strong>Public release blockers</strong>
-            <ul style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
-              {releaseReport.blockers.map((blocker) => (
-                <li key={blocker}>{blocker}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </Surface>
 
       <Surface tone="vault" status={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} className="ops-report-panel">
         <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
