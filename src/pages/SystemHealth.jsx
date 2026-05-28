@@ -108,6 +108,11 @@ export default function SystemHealth() {
   const [targetedBusy, setTargetedBusy] = useState(false);
   const [targetedError, setTargetedError] = useState('');
   const [targetedRunningId, setTargetedRunningId] = useState(null);
+  // Hybrid curriculum search (vector + BM25 via the active StorageDriver).
+  const [chunkQuery, setChunkQuery] = useState('');
+  const [chunkHits, setChunkHits] = useState([]);
+  const [chunkBusy, setChunkBusy] = useState(false);
+  const [chunkError, setChunkError] = useState('');
   const serviceWorkerReady = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
   const cacheReady = typeof caches !== 'undefined';
 
@@ -750,6 +755,35 @@ export default function SystemHealth() {
     setMessage(`Offline cache refreshed: ${result.cached} critical route(s) cached, ${result.failed} failed.`);
   }
 
+  // Hybrid curriculum search — routes through the active StorageDriver, so
+  // it transparently picks up the SurrealDB backend after a successful
+  // switchToSurreal() without any UI change.
+  async function handleChunkSearch() {
+    const q = chunkQuery.trim();
+    if (!q) {
+      setChunkHits([]);
+      setChunkError('');
+      return;
+    }
+    setChunkBusy(true);
+    setChunkError('');
+    try {
+      const driver = getStorage();
+      if (!driver.chunks?.search) {
+        setChunkError('Active storage driver does not support chunk search.');
+        setChunkHits([]);
+        return;
+      }
+      const hits = await driver.chunks.search({ query: q, limit: 6 });
+      setChunkHits(hits);
+    } catch (err) {
+      setChunkError(err?.message || 'Search failed.');
+      setChunkHits([]);
+    } finally {
+      setChunkBusy(false);
+    }
+  }
+
   const usageMb = storage?.usage ? Math.round(storage.usage / 1024 / 1024) : 0;
   const quotaMb = storage?.quota ? Math.round(storage.quota / 1024 / 1024) : 0;
   const usagePct = quotaMb ? Math.round((usageMb / quotaMb) * 100) : 0;
@@ -1227,6 +1261,73 @@ export default function SystemHealth() {
           </p>
         </div>
         <FigureExplainer topicTitle="Curriculum figure" />
+      </Surface>
+
+      <Surface tone="ops" className="ops-report-panel">
+        <div className="qv-mb-3">
+          <StatusBadge tone="accent">Hybrid Search</StatusBadge>
+          <h3 style={{ margin: 'var(--space-2) 0 0' }}>Hybrid curriculum search</h3>
+          <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
+            Search every imported curriculum chunk with a BM25-style lexical scorer
+            (and cosine vector similarity, when embeddings are present). Routes through
+            the active storage driver — Dexie today, SurrealDB when the sidecar is up.
+          </p>
+        </div>
+        <div className="qv-row-2" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          <input
+            className="input"
+            type="search"
+            value={chunkQuery}
+            onChange={(event) => setChunkQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') handleChunkSearch();
+            }}
+            placeholder="e.g. effective duration, XLOOKUP, confidence interval"
+            aria-label="Hybrid curriculum search query"
+            style={{ minWidth: 260, flex: 1 }}
+          />
+          <button className="btn btn-primary" onClick={handleChunkSearch} disabled={chunkBusy || !chunkQuery.trim()}>
+            {chunkBusy ? 'Searching…' : 'Search'}
+          </button>
+          {chunkHits.length > 0 && (
+            <StatusBadge tone="accent">{chunkHits.length} hit{chunkHits.length === 1 ? '' : 's'}</StatusBadge>
+          )}
+        </div>
+        {chunkError && (
+          <p className="qv-mt-2" style={{ color: 'var(--danger)' }}>{chunkError}</p>
+        )}
+        {chunkHits.length > 0 && (
+          <ol className="qv-stack-2 qv-mt-3" style={{ listStyle: 'decimal inside', padding: 0 }}>
+            {chunkHits.map((hit) => (
+              <li
+                key={hit.id}
+                style={{
+                  padding: 'var(--space-2) var(--space-3)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md, 8px)',
+                }}
+              >
+                <div className="flex-between qv-row-2" style={{ alignItems: 'baseline', gap: 'var(--space-2)' }}>
+                  <strong style={{ fontSize: 'var(--fs-sm)' }}>{hit.locator || hit.id}</strong>
+                  <small className="qv-text-muted">
+                    score {hit.score.toFixed(3)}
+                    {typeof hit.bm25Score === 'number' ? ` · bm25 ${hit.bm25Score.toFixed(2)}` : ''}
+                    {typeof hit.vectorScore === 'number' ? ` · vec ${hit.vectorScore.toFixed(2)}` : ''}
+                  </small>
+                </div>
+                <p className="qv-text-secondary qv-fs-sm qv-m-0" style={{ marginTop: 'var(--space-1)' }}>
+                  {hit.text.length > 220 ? `${hit.text.slice(0, 220)}…` : hit.text}
+                </p>
+                <small className="qv-text-muted">
+                  {hit.domain}
+                  {hit.level ? ` · ${hit.level}` : ''}
+                  {hit.topic ? ` · ${hit.topic}` : ''}
+                  {typeof hit.page === 'number' ? ` · p.${hit.page}` : ''}
+                </small>
+              </li>
+            ))}
+          </ol>
+        )}
       </Surface>
 
       <Surface tone="ops" className="ops-report-panel">
