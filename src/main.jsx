@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
 import { registerServiceWorker } from './registerServiceWorker';
+import { bootstrapSourceVault } from './lib/bootstrapSourceVault';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -14,3 +15,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 );
 
 registerServiceWorker();
+
+// Load the ingested CFA curriculum into the local source vault on first run.
+bootstrapSourceVault();

@@ -24,6 +24,7 @@
     "cfa:source:bundle": "node scripts/cfa-source-vault.mjs bundle",
     "cfa:source:coverage": "node scripts/cfa-source-vault.mjs coverage",
     "cfa:source:audit": "node scripts/cfa-source-vault.mjs audit",
+    "cfa:source:install": "node scripts/install-source-bundle.mjs",
     "bundle:report": "node scripts/bundle-report.mjs",
     "smoke": "node --import ./scripts/register-ts-loader.mjs scripts/smoke.mjs",
     "browser:regression": "node --import ./scripts/register-ts-loader.mjs scripts/browser-regression.mjs",
