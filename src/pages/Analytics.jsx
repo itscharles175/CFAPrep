@@ -4,6 +4,7 @@ import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Sca
 import { PageHeader, MetricCard, Panel } from '../components/ui/Primitives';
 import { getAnalyticsSummary } from '../lib/learning';
 import { db, forecastReviewLoad } from '../lib/progressStore';
+import { predictRetention } from '../lib/scheduler';
 import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 
@@ -173,6 +174,7 @@ export default function Analytics() {
   const [summary, setSummary] = useState(null);
   const [forecast, setForecast] = useState([]);
   const [masteryTrend, setMasteryTrend] = useState([]);
+  const [retentionDecay, setRetentionDecay] = useState([]);
 
   useEffect(() => {
     let active = true;
@@ -206,6 +208,27 @@ export default function Analytics() {
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([day, { sum, count }]) => ({ day: day.slice(5), score: Math.round(sum / count) }));
         setMasteryTrend(trend);
+      })
+      .catch(() => undefined);
+
+    // 30-day retention decay: average projected retrievability across all
+    // FSRS review items at today + d days (d in 0..30). Visualizes how the
+    // current memory state decays under the FSRS model if nothing is reviewed.
+    db.reviewItems
+      .toArray()
+      .then((items) => {
+        if (!active || !items.length) {
+          setRetentionDecay([]);
+          return;
+        }
+        const today = new Date();
+        const points = [];
+        for (let d = 0; d <= 30; d += 1) {
+          const target = new Date(today.getTime() + d * 86400000);
+          const sum = items.reduce((acc, item) => acc + predictRetention(item, target), 0);
+          points.push({ day: d === 0 ? 'Today' : `+${d}d`, retention: Math.round((sum / items.length) * 100) });
+        }
+        setRetentionDecay(points);
       })
       .catch(() => undefined);
     return () => {
@@ -282,6 +305,31 @@ export default function Analytics() {
                   labelStyle={{ color: 'var(--text-secondary)' }}
                 />
                 <Line type="monotone" dataKey="score" name="Mastery %" stroke="var(--success, #34d399)" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </Panel>
+
+      <Panel
+        tone="analytics"
+        title="30-Day Retention Decay"
+        subtitle="If you reviewed nothing more, the FSRS model projects this average retention curve across your active items."
+      >
+        {retentionDecay.length === 0 ? (
+          <p className="muted-copy">No active review items yet — answer some quiz questions to populate the FSRS state.</p>
+        ) : (
+          <div style={{ width: '100%', height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={retentionDecay} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="day" stroke="var(--text-muted)" fontSize={12} interval={4} />
+                <YAxis stroke="var(--text-muted)" domain={[0, 100]} fontSize={12} />
+                <Tooltip
+                  contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
+                  labelStyle={{ color: 'var(--text-secondary)' }}
+                />
+                <Line type="monotone" dataKey="retention" name="Avg retention %" stroke="var(--warning, #f59e0b)" strokeWidth={2} dot={{ r: 2 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>

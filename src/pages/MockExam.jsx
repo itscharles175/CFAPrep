@@ -13,7 +13,7 @@ import {
   saveMockSectionState,
 } from '../lib/learning';
 import { SourceRail } from '../components/SourceContext';
-import { getLlmSettings } from '../lib/localLlm';
+import { explainWrongAnswer, getLlmSettings } from '../lib/localLlm';
 import { generateMockExam, getCachedGeneratedMock, saveCachedGeneratedMock, toSyntheticMockContent } from '../lib/mockGenerator';
 
 function nowMs() {
@@ -149,6 +149,9 @@ export default function MockExam() {
   const genAbortRef = useRef(null);
   const [genError, setGenError] = useState('');
   const [genProgress, setGenProgress] = useState(null);
+  // Map of question.id -> { state: 'loading'|'done'|'error', text?: string, error?: string }
+  const [mockAiExplain, setMockAiExplain] = useState({});
+  const mockAiAbortRef = useRef(null);
   const contentMatches = contentState.level === level && (level !== 'level3' || contentState.pathway === activePathway);
   // A generated mock is shaped into the same { levelContent, mock, items } the
   // runner understands, so scoring/timing/persistence work unchanged.
@@ -264,6 +267,44 @@ export default function MockExam() {
 
   function handleCancelGenerateMock() {
     genAbortRef.current?.abort();
+  }
+
+  async function handleMockExplainWithAi(question, picked, correctIndex) {
+    const id = question.id;
+    setMockAiExplain((map) => ({ ...map, [id]: { state: 'loading' } }));
+    const controller = new AbortController();
+    mockAiAbortRef.current = controller;
+    try {
+      const settings = await getLlmSettings();
+      if (!settings.enabled) {
+        setMockAiExplain((map) => ({
+          ...map,
+          [id]: { state: 'error', error: 'Enable a local model in System Health → Local AI first.' },
+        }));
+        return;
+      }
+      const text = await explainWrongAnswer({
+        settings,
+        question: question.question,
+        options: question.options,
+        correctIndex,
+        userIndex: picked,
+        baseExplanation: question.explanation,
+        signal: controller.signal,
+      });
+      setMockAiExplain((map) => ({ ...map, [id]: { state: 'done', text } }));
+    } catch (error) {
+      if (controller.signal.aborted || error?.name === 'AbortError') {
+        setMockAiExplain((map) => ({ ...map, [id]: { state: 'error', error: 'Explanation cancelled.' } }));
+      } else {
+        setMockAiExplain((map) => ({
+          ...map,
+          [id]: { state: 'error', error: error instanceof Error ? error.message : 'Explanation failed.' },
+        }));
+      }
+    } finally {
+      mockAiAbortRef.current = null;
+    }
   }
 
   useEffect(() => {
@@ -509,6 +550,69 @@ export default function MockExam() {
           }}
           compact
         />
+        {questionRows.filter((q) => selected[q.id] !== q.correct).length > 0 && (
+          <Surface tone="exam" status="warning" style={{ marginBottom: 'var(--space-6)' }}>
+            <h3 style={{ marginTop: 0 }}>Missed questions</h3>
+            {questionRows
+              .filter((q) => selected[q.id] !== q.correct)
+              .map((question, index) => {
+                const letters = ['A', 'B', 'C', 'D'];
+                const pickedIndex = selected[question.id];
+                const correctIndex = question.correct;
+                const aiEntry = mockAiExplain[question.id];
+                return (
+                  <div
+                    key={question.id}
+                    style={{
+                      borderTop: index ? '1px solid var(--border)' : 0,
+                      paddingTop: index ? 'var(--space-4)' : 0,
+                      marginTop: index ? 'var(--space-4)' : 0,
+                    }}
+                  >
+                    <p style={{ fontWeight: 700, margin: '0 0 var(--space-2)' }}>{question.question}</p>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', margin: '0 0 var(--space-2)' }}>
+                      Your answer: {pickedIndex !== undefined ? letters[pickedIndex] ?? pickedIndex : '—'} ·{' '}
+                      Correct: {letters[correctIndex] ?? correctIndex}
+                    </p>
+                    {question.explanation && (
+                      <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', margin: '0 0 var(--space-3)', lineHeight: 1.6 }}>
+                        {question.explanation}
+                      </p>
+                    )}
+                    <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: 'var(--space-2) var(--space-3)' }}
+                        onClick={() => handleMockExplainWithAi(question, pickedIndex, correctIndex)}
+                        disabled={aiEntry?.state === 'loading'}
+                      >
+                        {aiEntry?.state === 'loading' ? 'Thinking…' : '🤖 Explain with AI'}
+                      </button>
+                      {aiEntry?.state === 'loading' && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: 'var(--space-2) var(--space-3)' }}
+                          onClick={() => mockAiAbortRef.current?.abort()}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                    {aiEntry?.state === 'done' && (
+                      <p style={{ borderLeft: '3px solid var(--accent)', padding: 'var(--space-2) var(--space-3)', margin: 'var(--space-2) 0 0', background: 'var(--surface-2, rgba(120,180,255,0.06))', borderRadius: 'var(--radius-md, 8px)', whiteSpace: 'pre-line' }}>
+                        {aiEntry.text}
+                      </p>
+                    )}
+                    {aiEntry?.state === 'error' && (
+                      <p style={{ color: 'var(--danger)', margin: 'var(--space-2) 0 0', fontSize: 'var(--fs-sm)' }}>
+                        {aiEntry.error}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+          </Surface>
+        )}
         <InlineCluster className="mock-report-actions">
           <button className="btn btn-secondary" onClick={restart}>Restart</button>
           <Link to="/review" className="btn btn-primary">Open Review Inbox</Link>
