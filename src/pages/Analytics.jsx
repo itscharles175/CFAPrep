@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Activity, BarChart3, Clock, Gauge, Layers, Target } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader, MetricCard, Panel } from '../components/ui/Primitives';
 import { getAnalyticsSummary } from '../lib/learning';
 import { db, forecastReviewLoad } from '../lib/progressStore';
@@ -162,6 +162,134 @@ export default function Analytics() {
           </div>
         )}
       </Panel>
+
+      {/* Confidence vs Accuracy Calibration scatter */}
+      {(() => {
+        const CONFIDENCE_X = { low: 25, medium: 50, high: 75 };
+        const calibrationData = (summary?.confidenceCalibration || []).map((row) => ({
+          label: row.confidence,
+          x: CONFIDENCE_X[row.confidence] ?? 50,
+          y: row.accuracy ?? 0,
+          attempts: row.attempts ?? 0,
+        }));
+        const diagonalData = [{ x: 0, y: 0 }, { x: 100, y: 100 }];
+        return (
+          <Panel
+            tone="analytics"
+            title="Confidence vs Accuracy Calibration"
+            subtitle="Each marker is a confidence bucket; perfect calibration is a 1:1 diagonal."
+          >
+            {calibrationData.length === 0 ? (
+              <p className="muted-copy">No confidence-labeled attempts yet — answer questions with a confidence rating to populate this chart.</p>
+            ) : (
+              <div style={{ width: '100%', height: 240 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ top: 16, right: 24, bottom: 8, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis
+                      type="number"
+                      dataKey="x"
+                      name="Confidence"
+                      domain={[0, 100]}
+                      stroke="var(--text-muted)"
+                      fontSize={12}
+                      label={{ value: 'Confidence %', position: 'insideBottomRight', offset: -4, fontSize: 11, fill: 'var(--text-muted)' }}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="y"
+                      name="Accuracy"
+                      domain={[0, 100]}
+                      stroke="var(--text-muted)"
+                      fontSize={12}
+                      label={{ value: 'Accuracy %', angle: -90, position: 'insideLeft', offset: 8, fontSize: 11, fill: 'var(--text-muted)' }}
+                    />
+                    <Tooltip
+                      cursor={{ strokeDasharray: '3 3' }}
+                      contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
+                      labelStyle={{ color: 'var(--text-secondary)' }}
+                      formatter={(value, name, props) => {
+                        const { payload } = props;
+                        if (name === 'Accuracy') return [`${value}% (${payload.attempts} attempts)`, payload.label];
+                        return [value, name];
+                      }}
+                    />
+                    {/* Perfect-calibration diagonal rendered as a Line series on a separate dataset */}
+                    <Line
+                      data={diagonalData}
+                      type="linear"
+                      dataKey="y"
+                      stroke="var(--text-muted)"
+                      strokeDasharray="6 3"
+                      strokeWidth={1}
+                      dot={false}
+                      legendType="none"
+                      name="Perfect calibration"
+                      isAnimationActive={false}
+                    />
+                    <Scatter
+                      data={calibrationData}
+                      fill="var(--accent, #60a5fa)"
+                      name="Confidence bucket"
+                    />
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Panel>
+        );
+      })()}
+
+      {/* Accuracy by Item Type horizontal bar */}
+      {(() => {
+        const itemTypeData = (summary?.byItemType || []).map((row) => ({
+          name: row.itemType,
+          accuracy: row.accuracy ?? 0,
+        }));
+        return (
+          <Panel
+            tone="analytics"
+            title="Accuracy by Item Type"
+            subtitle="Where your accuracy is strongest vs weakest across question/vignette/mock/skill-lab attempts."
+          >
+            {itemTypeData.length === 0 ? (
+              <p className="muted-copy">No item-type data yet — quiz, vignette, mock, and skill-lab attempts will appear here.</p>
+            ) : (
+              <div style={{ width: '100%', height: 240 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    layout="vertical"
+                    data={itemTypeData}
+                    margin={{ top: 8, right: 24, bottom: 0, left: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                    <XAxis
+                      type="number"
+                      domain={[0, 100]}
+                      stroke="var(--text-muted)"
+                      fontSize={12}
+                      tickFormatter={(v) => `${v}%`}
+                    />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      stroke="var(--text-muted)"
+                      fontSize={12}
+                      width={90}
+                    />
+                    <Tooltip
+                      contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
+                      labelStyle={{ color: 'var(--text-secondary)' }}
+                      formatter={(value) => [`${value}%`, 'Accuracy']}
+                    />
+                    <Bar dataKey="accuracy" name="Accuracy %" fill="var(--success, #34d399)" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Panel>
+        );
+      })()}
 
       {topWeakTopics[0] && (
         <SourceRail

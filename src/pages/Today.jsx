@@ -1,9 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, Inbox, RefreshCw, Target, TrendingUp } from 'lucide-react';
+import { ChevronRight, Inbox, RefreshCw, Sparkles, Target, TrendingUp } from 'lucide-react';
 import { PageHeader, StatusBadge, Surface } from '../components/ui/Primitives';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { buildStudyPlan } from '../lib/studyDirector';
+import { generateQuestionsFromCurriculum, getLlmSettings } from '../lib/localLlm';
+import { getCfaSourceReadingForTopic } from '../lib/cfaSourceVault';
+
+// Parse a /cfa/<level>/<topic> path produced by buildStudyPlan into its
+// level + topic ids. Returns null for paths that don't fit the shape.
+function parseTopicPath(path) {
+  const match = /^\/cfa\/(level[1-3])\/([^/?#]+)/.exec(path || '');
+  return match ? { level: match[1], topic: match[2] } : null;
+}
 
 // Focused-mode landing: one screen, one decision — "do this next."
 // Pulls from the same buildStudyPlan() that powers the Study Director panel
@@ -31,6 +40,8 @@ export default function Today() {
   const [activePathway] = useLevel3Pathway();
   const [plan, setPlan] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Targeted drill state — generates AI MCQs for the weakest topic on demand.
+  const [drill, setDrill] = useState({ state: 'idle', questions: [], error: '' });
 
   async function refresh() {
     setRefreshing(true);
@@ -53,6 +64,44 @@ export default function Today() {
       active = false;
     };
   }, [activePathway]);
+
+  // First weak-topic action, used by the targeted-drill panel.
+  const weakAction = plan?.actions?.find((a) => a.kind === 'weak-topic');
+  const weakTopic = weakAction ? parseTopicPath(weakAction.path) : null;
+
+  async function generateDrill() {
+    if (!weakTopic) return;
+    setDrill({ state: 'loading', questions: [], error: '' });
+    try {
+      const settings = await getLlmSettings();
+      if (!settings.enabled) {
+        setDrill({ state: 'error', questions: [], error: 'Enable a local model in System Health → Local AI first.' });
+        return;
+      }
+      const reading = await getCfaSourceReadingForTopic(weakTopic.level, weakTopic.topic);
+      if (!reading.chunks?.length) {
+        setDrill({
+          state: 'error',
+          questions: [],
+          error: 'No ingested curriculum for this topic yet — import a .qvsource bundle or pick a folder of PDFs in System Health to ground the drill.',
+        });
+        return;
+      }
+      const questions = await generateQuestionsFromCurriculum({
+        settings,
+        topicTitle: weakAction.title,
+        chunks: reading.chunks.slice(0, 14),
+        count: 3,
+      });
+      setDrill({ state: 'done', questions, error: '' });
+    } catch (error) {
+      setDrill({
+        state: 'error',
+        questions: [],
+        error: error instanceof Error ? error.message : 'Drill generation failed.',
+      });
+    }
+  }
 
   const top = plan?.actions?.[0];
   const rest = (plan?.actions || []).slice(1, 5);
@@ -148,6 +197,68 @@ export default function Today() {
                   </li>
                 ))}
               </ul>
+            </Surface>
+          )}
+
+          {weakAction && (
+            <Surface tone="study" status="warning" style={{ marginBottom: 'var(--space-6)' }}>
+              <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+                <div>
+                  <StatusBadge tone="warning"><Sparkles size={14} /> Drill your weakest topic</StatusBadge>
+                  <h3 style={{ margin: 'var(--space-2) 0 0' }}>{weakAction.title}</h3>
+                  <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>{weakAction.reason}</p>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={generateDrill}
+                  disabled={drill.state === 'loading' || !weakTopic}
+                  title={weakTopic ? 'Generate 3 grounded MCQs via the local LLM' : 'Topic path could not be parsed'}
+                >
+                  {drill.state === 'loading' ? 'Generating…' : drill.questions.length ? 'Regenerate drill' : 'Generate drill'}
+                </button>
+              </div>
+
+              {drill.state === 'error' && (
+                <p style={{ color: 'var(--danger)', margin: 'var(--space-2) 0 0' }}>{drill.error}</p>
+              )}
+
+              {drill.questions.length > 0 && (
+                <div style={{ marginTop: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                  {drill.questions.map((question, qi) => (
+                    <div
+                      key={question.id}
+                      style={{
+                        padding: 'var(--space-3)',
+                        borderRadius: 'var(--radius-md, 8px)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <strong>
+                        {qi + 1}. {question.question}
+                      </strong>
+                      <ul style={{ margin: 'var(--space-2) 0', paddingLeft: 'var(--space-5)' }}>
+                        {question.options.map((option, oi) => (
+                          <li
+                            key={oi}
+                            style={{
+                              color: oi === question.correct ? 'var(--success)' : 'var(--text-secondary)',
+                              fontWeight: oi === question.correct ? 700 : 400,
+                            }}
+                          >
+                            {option}
+                            {oi === question.correct ? ' ✓' : ''}
+                          </li>
+                        ))}
+                      </ul>
+                      {question.explanation && (
+                        <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>
+                          {question.explanation}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </Surface>
           )}
         </>

@@ -41,7 +41,9 @@ describe('Today focus-mode landing', () => {
 
     expect(await screen.findByText('2 reviews due, 1 weak topic to shore up')).toBeInTheDocument();
     expect(screen.getByText('Modified duration')).toBeInTheDocument();
-    expect(screen.getByText(/Topic readiness is only 58%/)).toBeInTheDocument();
+    // "Equity Investments" appears in the actions list AND the targeted-drill
+    // header (since it's the first weak-topic action) — assert >= 1.
+    expect(screen.getAllByText(/Topic readiness is only 58%/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Upcoming review spike')).toBeInTheDocument();
     expect(screen.getByText(/Peak 2026-05-30/)).toBeInTheDocument();
 
