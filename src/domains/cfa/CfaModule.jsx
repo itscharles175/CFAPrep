@@ -12,6 +12,7 @@ import { SourceRail } from '../../components/SourceContext';
 import { getCfaSourceReadingForTopic } from '../../lib/cfaSourceVault';
 import { bootstrapSourceVault } from '../../lib/bootstrapSourceVault';
 import { generateQuestionsFromCurriculum, getCachedGeneratedQuestions, getLlmSettings, saveCachedGeneratedQuestions } from '../../lib/localLlm';
+import { askGrounded, ensureTopicNotebook, getOpenNotebookSettings } from '../../lib/openNotebook';
 
 export default function CfaModule() {
   const { level, topic } = useParams();
@@ -38,6 +39,10 @@ export default function CfaModule() {
   const [aiQuestions, setAiQuestions] = useState([]);
   const [aiState, setAiState] = useState('idle');
   const [aiError, setAiError] = useState('');
+  const [askQuestion, setAskQuestion] = useState('');
+  const [askAnswer, setAskAnswer] = useState('');
+  const [askState, setAskState] = useState('idle');
+  const [askError, setAskError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -136,6 +141,37 @@ export default function CfaModule() {
     } catch (error) {
       setAiState('error');
       setAiError(error instanceof Error ? error.message : 'Generation failed.');
+    }
+  }
+
+  // Grounded RAG: ask the embedded open-notebook backend a question answered
+  // strictly from this topic's ingested curriculum (cited synthesis).
+  async function handleAskCurriculum() {
+    const question = askQuestion.trim();
+    if (!question) return;
+    setAskState('loading');
+    setAskError('');
+    setAskAnswer('');
+    try {
+      const settings = await getOpenNotebookSettings();
+      if (!settings.enabled) {
+        setAskState('error');
+        setAskError('Enable the embedded notebook in System Health → Embedded Notebook first.');
+        return;
+      }
+      const notebookId = await ensureTopicNotebook({
+        baseUrl: settings.baseUrl,
+        topicKey: `${level}:${topic}`,
+        topicTitle: data.title,
+        seedChunks: reading.chunks.slice(0, 40),
+      });
+      void notebookId; // the notebook scopes which sources the ask flow draws from
+      const result = await askGrounded({ baseUrl: settings.baseUrl, question });
+      setAskAnswer(result.answer || 'No answer was returned.');
+      setAskState('done');
+    } catch (error) {
+      setAskState('error');
+      setAskError(error instanceof Error ? error.message : 'Grounded answer failed.');
     }
   }
 
@@ -305,6 +341,40 @@ export default function CfaModule() {
                     {question.explanation && <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 0 }}>{question.explanation}</p>}
                   </div>
                 ))}
+              </Surface>
+
+              <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+                <div style={{ marginBottom: 'var(--space-2)' }}>
+                  <StatusBadge tone="accent">Ask the curriculum</StatusBadge>
+                  <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
+                    Grounded RAG over this topic's ingested volume via the embedded notebook — cited, source-only answers.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                  <input
+                    className="input"
+                    style={{ flex: '1 1 320px' }}
+                    value={askQuestion}
+                    onChange={(event) => setAskQuestion(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter' && askState !== 'loading') handleAskCurriculum(); }}
+                    placeholder={`e.g. How does ${data.title} relate to exam vignettes?`}
+                    aria-label="Ask a question grounded in this topic's curriculum"
+                  />
+                  <button className="btn btn-primary" onClick={handleAskCurriculum} disabled={askState === 'loading' || !askQuestion.trim()}>
+                    {askState === 'loading' ? 'Thinking…' : 'Ask'}
+                  </button>
+                </div>
+                {askState === 'loading' && (
+                  <p className="muted-copy" style={{ marginTop: 'var(--space-2)' }}>
+                    Embedding curriculum and synthesizing a grounded answer — the first ask for a topic takes longer while sources index.
+                  </p>
+                )}
+                {askState === 'error' && <p style={{ color: 'var(--danger)', marginTop: 'var(--space-2)' }}>{askError}</p>}
+                {askState === 'done' && askAnswer && (
+                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)', whiteSpace: 'pre-line' }}>
+                    {askAnswer}
+                  </div>
+                )}
               </Surface>
             </>
           ) : (
