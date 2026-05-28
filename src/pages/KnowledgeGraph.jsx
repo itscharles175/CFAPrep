@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Network } from 'lucide-react';
-import { PageHeader, StatusBadge, Surface } from '../components/ui/Primitives';
+import { PageHeader, SegmentedControl, StatusBadge, Surface } from '../components/ui/Primitives';
 import { getCfaLevelSummaries } from '../domains/cfa/cfaSummary';
 import { getCfaSourceCoverageMap } from '../lib/cfaSourceVault';
+import { db } from '../lib/progressStore';
 
 // Interactive curriculum knowledge-graph canvas.
 //
@@ -36,16 +37,67 @@ function nodeColor(hasCurriculum) {
   return hasCurriculum ? 'var(--accent, #60a5fa)' : 'var(--text-muted, #94a3b8)';
 }
 
+// Interpolate red→yellow→green for a mastery score 0..100.
+function masteryColor(score) {
+  if (score == null) return 'var(--text-muted, #94a3b8)';
+  const clamped = Math.max(0, Math.min(100, score));
+  // 0 = #ef4444 (danger), 50 = #f59e0b (warning), 100 = #34d399 (success)
+  if (clamped < 50) {
+    const t = clamped / 50;
+    return blendHex('#ef4444', '#f59e0b', t);
+  }
+  const t = (clamped - 50) / 50;
+  return blendHex('#f59e0b', '#34d399', t);
+}
+
+function blendHex(a, b, t) {
+  const pa = parseHex(a);
+  const pb = parseHex(b);
+  const r = Math.round(pa[0] + (pb[0] - pa[0]) * t);
+  const g = Math.round(pa[1] + (pb[1] - pa[1]) * t);
+  const bl = Math.round(pa[2] + (pb[2] - pa[2]) * t);
+  return `rgb(${r},${g},${bl})`;
+}
+
+function parseHex(hex) {
+  const m = hex.replace('#', '');
+  return [parseInt(m.slice(0, 2), 16), parseInt(m.slice(2, 4), 16), parseInt(m.slice(4, 6), 16)];
+}
+
 export default function KnowledgeGraph() {
   const levels = useMemo(() => getCfaLevelSummaries(), []);
   const [coverageMap, setCoverageMap] = useState(null);
   const [hoverId, setHoverId] = useState(null);
+  const [colorMode, setColorMode] = useState('coverage'); // 'coverage' | 'mastery'
+  const [masteryByTopic, setMasteryByTopic] = useState(null);
 
   useEffect(() => {
     let active = true;
     getCfaSourceCoverageMap()
       .then((map) => {
         if (active) setCoverageMap(map);
+      })
+      .catch(() => undefined);
+
+    // Per-topic mastery: aggregate masterySnapshots by `topic` (which is
+    // either bare 'fixed-income' for level1 or 'level2:fixed-income' for
+    // level2+; we key by the bare id at the end).
+    db.masterySnapshots
+      .toArray()
+      .then((snaps) => {
+        if (!active) return;
+        const bucket = new Map();
+        for (const snap of snaps) {
+          if (!snap?.topic) continue;
+          const bare = snap.topic.includes(':') ? snap.topic.split(':').at(-1) : snap.topic;
+          const row = bucket.get(bare) || { sum: 0, count: 0 };
+          row.sum += snap.score;
+          row.count += 1;
+          bucket.set(bare, row);
+        }
+        const result = {};
+        for (const [topicId, { sum, count }] of bucket) result[topicId] = Math.round(sum / count);
+        setMasteryByTopic(result);
       })
       .catch(() => undefined);
     return () => {
@@ -70,13 +122,14 @@ export default function KnowledgeGraph() {
         weight: topic.weight,
         flashcards: topic.flashcards,
         hasCurriculum: Boolean(coverageMap?.topicCounts?.[topic.id]),
+        mastery: masteryByTopic?.[topic.id] ?? null,
         x,
         y: FIRST_ROW_Y + index * ROW_HEIGHT,
         radius: radiusFor(topic.questions, maxQs),
       }));
     }
     return out;
-  }, [levels, coverageMap]);
+  }, [levels, coverageMap, masteryByTopic]);
 
   const allNodes = useMemo(
     () => LEVEL_COLUMNS.flatMap((id) => nodesByLevel[id] || []),
@@ -112,7 +165,7 @@ export default function KnowledgeGraph() {
         tone="analytics"
         badge="KNOWLEDGE GRAPH"
         title="Curriculum Knowledge Graph"
-        subtitle="Every CFA topic across Levels I, II, and III. Edges link topics that recur across levels; size reflects authored question volume; color indicates ingested curriculum."
+        subtitle="Every CFA topic across Levels I, II, and III. Edges link topics that recur across levels; size reflects authored question volume; color reflects the selected overlay."
         meta={
           <>
             <StatusBadge tone="analytics">
@@ -125,6 +178,18 @@ export default function KnowledgeGraph() {
               </StatusBadge>
             )}
           </>
+        }
+        actions={
+          <SegmentedControl
+            label="Color overlay"
+            density="compact"
+            options={[
+              { value: 'coverage', label: 'Curriculum' },
+              { value: 'mastery', label: 'Mastery' },
+            ]}
+            value={colorMode}
+            onChange={setColorMode}
+          />
         }
       />
 
@@ -189,7 +254,7 @@ export default function KnowledgeGraph() {
                       cx={node.x}
                       cy={node.y}
                       r={node.radius}
-                      fill={nodeColor(node.hasCurriculum)}
+                      fill={colorMode === 'mastery' ? masteryColor(node.mastery) : nodeColor(node.hasCurriculum)}
                       stroke={isActive ? 'var(--text-primary, #f8fafc)' : 'transparent'}
                       strokeWidth={2}
                       opacity={isActive ? 1 : 0.85}
@@ -222,15 +287,38 @@ export default function KnowledgeGraph() {
       <div className="grid-2" style={{ gap: 'var(--space-4)' }}>
         <Surface tone="analytics" density="compact">
           <StatusBadge tone="accent">Legend</StatusBadge>
+          {colorMode === 'coverage' ? (
+            <ul style={{ listStyle: 'none', padding: 0, marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--accent)' }} />
+                <span>Topic has ingested curriculum (Ask the curriculum will return grounded answers)</span>
+              </li>
+              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--text-muted)', opacity: 0.65 }} />
+                <span>No curriculum yet — only authored questions available; ingest from System Health</span>
+              </li>
+            </ul>
+          ) : (
+            <ul style={{ listStyle: 'none', padding: 0, marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: masteryColor(0) }} />
+                <span>0–25% mastery — schedule focused review</span>
+              </li>
+              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: masteryColor(50) }} />
+                <span>~50% — exam-edge; keep drilling</span>
+              </li>
+              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: masteryColor(85) }} />
+                <span>85%+ — exam-ready; maintain with spaced reviews</span>
+              </li>
+              <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--text-muted)', opacity: 0.65 }} />
+                <span>No mastery snapshots yet — answer a few quiz questions</span>
+              </li>
+            </ul>
+          )}
           <ul style={{ listStyle: 'none', padding: 0, marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-            <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--accent)' }} />
-              <span>Topic has ingested curriculum (Ask the curriculum will return grounded answers)</span>
-            </li>
-            <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--text-muted)', opacity: 0.65 }} />
-              <span>No curriculum yet — only authored questions available; ingest from System Health</span>
-            </li>
             <li style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
               <svg width="40" height="14" viewBox="0 0 40 14"><line x1="0" y1="7" x2="40" y2="7" stroke="var(--border)" strokeDasharray="4 4" /></svg>
               <span>Dashed edge: same topic across consecutive levels (the curriculum spiral)</span>
@@ -251,6 +339,8 @@ export default function KnowledgeGraph() {
               </p>
               <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
                 Curriculum: {selected.hasCurriculum ? 'ingested' : 'not yet ingested'}
+                {' · Mastery: '}
+                {selected.mastery == null ? 'no snapshots' : `${selected.mastery}%`}
               </p>
               <Link
                 to={`/cfa/${selected.levelId}/${selected.topicId}`}
