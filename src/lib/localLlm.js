@@ -101,6 +101,7 @@ export async function generateQuestionsFromCurriculum({ settings, topicTitle, ch
     if (error?.name === 'AbortError') throw error;
     throw new Error(
       `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
+      { cause: error },
     );
   }
   if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);

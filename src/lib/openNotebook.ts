@@ -227,25 +227,41 @@ export async function askGrounded(params: AskParams): Promise<OnbAskAnswer> {
 
 const NOTEBOOK_MAP_KEY = 'open-notebook:topic-notebooks';
 
-type TopicNotebookMap = Record<string, string>;
+export interface TopicNotebookEntry {
+  notebookId: string;
+  sourceId?: string;
+}
 
-async function loadTopicNotebookMap(): Promise<TopicNotebookMap> {
+// Old shape was Record<string, string> (just the notebook id). New shape pairs
+// it with the seeded source id so chatWithSource can scope grounding properly.
+// Migration: any string value is interpreted as a notebookId with no sourceId
+// (we'll re-seed on next ensureTopicNotebook call).
+type TopicNotebookMap = Record<string, TopicNotebookEntry | string>;
+
+async function loadTopicNotebookMap(): Promise<Record<string, TopicNotebookEntry>> {
   try {
     const row = await db.settings.get(NOTEBOOK_MAP_KEY);
-    return (row?.value as TopicNotebookMap) || {};
+    const raw = (row?.value as TopicNotebookMap) || {};
+    const normalized: Record<string, TopicNotebookEntry> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      normalized[key] = typeof value === 'string' ? { notebookId: value } : value;
+    }
+    return normalized;
   } catch {
     return {};
   }
 }
 
-async function saveTopicNotebookMap(map: TopicNotebookMap): Promise<void> {
+async function saveTopicNotebookMap(map: Record<string, TopicNotebookEntry>): Promise<void> {
   await db.settings.put({ key: NOTEBOOK_MAP_KEY, value: map, updatedAt: new Date().toISOString() });
 }
 
 /**
- * Ensure a per-topic notebook exists (reusing one across sessions via a local
- * id map), seed it with the supplied curriculum text the first time, and return
- * the notebook id. Idempotent: a topic maps to a single stable notebook.
+ * Ensure a per-topic notebook + source exist (reusing them across sessions via
+ * a local id map), seeding the source with the supplied curriculum text the
+ * first time. Idempotent: a topic maps to a single stable notebook+source.
+ * Returns both ids — pass the sourceId to chatWithSource for properly scoped
+ * grounded answers.
  */
 export async function ensureTopicNotebook(params: {
   baseUrl: string;
@@ -253,38 +269,143 @@ export async function ensureTopicNotebook(params: {
   topicTitle: string;
   seedChunks?: { locator?: string; text: string }[];
   signal?: AbortSignal;
-}): Promise<string> {
+}): Promise<TopicNotebookEntry> {
   const base = normalizeBaseUrl(params.baseUrl);
   const map = await loadTopicNotebookMap();
-  const existingId = map[params.topicKey];
+  const existing = map[params.topicKey];
 
-  if (existingId) {
-    // Verify it still exists on the backend (e.g. DB reset would orphan the id).
-    const notebooks = await listNotebooks({ baseUrl: base });
-    if (notebooks.some((n) => n.id === existingId)) return existingId;
+  const existingNotebooks = await listNotebooks({ baseUrl: base });
+  const existingNotebook =
+    existing?.notebookId && existingNotebooks.some((n) => n.id === existing.notebookId);
+
+  if (existing?.notebookId && existingNotebook) {
+    if (existing.sourceId) return existing;
+    // Migrated from the legacy string-only map: notebook exists but we don't
+    // yet know its source id. Adopt the notebook's first existing source
+    // rather than seeding a duplicate.
+    const existingSources = await request<OnbSource[]>(
+      base,
+      `/api/sources?notebook_id=${encodeURIComponent(existing.notebookId)}`,
+      { timeoutMs: 10_000 },
+    );
+    const adopted = Array.isArray(existingSources) ? existingSources[0] : null;
+    if (adopted?.id) {
+      const entry: TopicNotebookEntry = { notebookId: existing.notebookId, sourceId: adopted.id };
+      map[params.topicKey] = entry;
+      await saveTopicNotebookMap(map);
+      return entry;
+    }
+    // No existing sources to adopt — fall through to seed a fresh one.
   }
 
-  const notebook = await createNotebook(base, `CFA: ${params.topicTitle}`, `QuantVault topic ${params.topicKey}`);
-  map[params.topicKey] = notebook.id;
-  await saveTopicNotebookMap(map);
+  const notebook = existingNotebook
+    ? { id: existing!.notebookId, name: params.topicTitle }
+    : await createNotebook(base, `CFA: ${params.topicTitle}`, `QuantVault topic ${params.topicKey}`);
 
+  let sourceId: string | undefined;
   if (params.seedChunks && params.seedChunks.length > 0) {
+    // Seed the WHOLE topic. open-notebook re-chunks + embeds internally and
+    // retrieves the most relevant section per question, so a too-small seed
+    // gives the model only the topic's front-matter and forces "not enough
+    // info" replies on questions about deeper sections.
     const content = params.seedChunks
       .map((c) => (c.locator ? `[${c.locator}] ${c.text}` : c.text))
       .join('\n\n')
-      .slice(0, 20_000);
+      .slice(0, 400_000);
     if (content.trim()) {
-      await addTextSource(base, {
+      const source = await addTextSource(base, {
         notebookId: notebook.id,
         title: params.topicTitle,
         content,
         embed: true,
         signal: params.signal,
       });
+      sourceId = source.id;
     }
   }
 
-  return notebook.id;
+  const entry: TopicNotebookEntry = { notebookId: notebook.id, sourceId };
+  map[params.topicKey] = entry;
+  await saveTopicNotebookMap(map);
+  return entry;
+}
+
+export interface SourceChatAnswer {
+  answer: string;
+  citationSources: string[];
+}
+
+interface CreateSourceChatSessionResponse {
+  id: string;
+}
+
+/**
+ * Send a question against a single source and return the grounded answer.
+ *
+ * Uses open-notebook's per-source chat: it creates an ephemeral chat session
+ * for the source, posts the message, and parses the streaming response (a
+ * sequence of `data: {json}` lines carrying typed events). Grounding is
+ * naturally scoped to this source's embeddings — unlike `/api/search/ask/simple`
+ * which searches every source globally.
+ */
+export async function chatWithSource(params: {
+  baseUrl: string;
+  sourceId: string;
+  message: string;
+  model?: string;
+  signal?: AbortSignal;
+}): Promise<SourceChatAnswer> {
+  const base = normalizeBaseUrl(params.baseUrl);
+  const session = await request<CreateSourceChatSessionResponse>(
+    base,
+    `/api/sources/${encodeURIComponent(params.sourceId)}/chat/sessions`,
+    {
+      method: 'POST',
+      body: { source_id: params.sourceId, title: 'QuantVault ask', ...(params.model ? { model_override: params.model } : {}) },
+      timeoutMs: 15_000,
+    },
+  );
+
+  // The messages endpoint streams Server-Sent-Events-like `data: {json}` lines.
+  // Read as text (waits for `complete`) and pull out the assistant turn.
+  const url = `${base}/api/sources/${encodeURIComponent(params.sourceId)}/chat/sessions/${encodeURIComponent(session.id)}/messages`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: params.message, ...(params.model ? { model_override: params.model } : {}) }),
+    signal: params.signal,
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`open-notebook chat POST -> ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+  }
+  const text = await response.text();
+  return parseSourceChatStream(text);
+}
+
+/** Exported for tests. Parses the `data: {json}` stream from the chat endpoint. */
+export function parseSourceChatStream(text: string): SourceChatAnswer {
+  let answer = '';
+  let citationSources: string[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line.startsWith('data:')) continue;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') continue;
+    let event: { type?: string; content?: string; data?: { sources?: string[] } } | null = null;
+    try {
+      event = JSON.parse(payload);
+    } catch {
+      continue;
+    }
+    if (!event) continue;
+    if (event.type === 'ai_message' && typeof event.content === 'string') {
+      answer = event.content; // last ai_message wins (typically there's one)
+    } else if (event.type === 'context_indicators' && event.data?.sources) {
+      citationSources = event.data.sources;
+    }
+  }
+  return { answer, citationSources };
 }
 
 export interface CachedGroundedAnswer {

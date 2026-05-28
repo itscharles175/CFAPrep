@@ -3,10 +3,12 @@ import {
   DEFAULT_OPEN_NOTEBOOK_SETTINGS,
   addTextSource,
   askGrounded,
+  chatWithSource,
   checkOpenNotebookConnection,
   ensureTopicNotebook,
   getCachedGroundedAnswer,
   getOpenNotebookSettings,
+  parseSourceChatStream,
   saveCachedGroundedAnswer,
   saveOpenNotebookSettings,
 } from './openNotebook';
@@ -114,7 +116,7 @@ describe('open-notebook client', () => {
     expect(body).toMatchObject({ notebook_id: 'notebook:1', type: 'text', embed: true });
   });
 
-  it('maps a topic to one stable notebook and seeds it only on first use', async () => {
+  it('maps a topic to one stable notebook+source and seeds only on first use', async () => {
     const created: string[] = [];
     const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       if (url.endsWith('/api/notebooks') && init?.method === 'POST') {
@@ -126,7 +128,7 @@ describe('open-notebook client', () => {
         return Promise.resolve(jsonResponse(created.map((id) => ({ id, name: 'CFA' }))));
       }
       if (url.endsWith('/api/sources/json')) {
-        return Promise.resolve(jsonResponse({ id: 'source:1' }));
+        return Promise.resolve(jsonResponse({ id: 'source:abc' }));
       }
       return Promise.resolve(jsonResponse({}));
     });
@@ -145,11 +147,109 @@ describe('open-notebook client', () => {
       seedChunks: [{ locator: 'p.263', text: 'duration' }],
     });
 
-    expect(first).toBe(second);
+    expect(first.notebookId).toBe(second.notebookId);
+    expect(first.sourceId).toBe('source:abc');
+    expect(second.sourceId).toBe('source:abc'); // reused, no new seed
     expect(created).toHaveLength(1);
-    // exactly one source POST (seeded on first creation, not on reuse)
     const sourcePosts = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/sources/json'));
     expect(sourcePosts).toHaveLength(1);
+  });
+
+  it('adopts an existing source when migrating a legacy notebook that already has one', async () => {
+    await db.settings.put({
+      key: 'open-notebook:topic-notebooks',
+      value: { 'l1:fixed-income': 'notebook:legacy' },
+      updatedAt: new Date().toISOString(),
+    });
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('/api/notebooks')) return Promise.resolve(jsonResponse([{ id: 'notebook:legacy', name: 'CFA' }]));
+      if (url.includes('/api/sources?notebook_id=')) return Promise.resolve(jsonResponse([{ id: 'source:existing', title: 'Fixed Income' }]));
+      if (url.endsWith('/api/sources/json')) return Promise.resolve(jsonResponse({ id: 'source:should_not_be_created' }));
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const entry = await ensureTopicNotebook({
+      baseUrl: 'http://localhost:5055',
+      topicKey: 'l1:fixed-income',
+      topicTitle: 'Fixed Income',
+      seedChunks: [{ text: 'duration' }],
+    });
+    expect(entry).toEqual({ notebookId: 'notebook:legacy', sourceId: 'source:existing' });
+    const seeded = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/sources/json'));
+    expect(seeded).toHaveLength(0); // adopted, did NOT seed a duplicate
+  });
+
+  it('migrates legacy string-valued topic map entries to {notebookId} and re-seeds the source', async () => {
+    // Pre-seed the map in legacy shape (notebookId only, no sourceId).
+    await db.settings.put({
+      key: 'open-notebook:topic-notebooks',
+      value: { 'l1:equity': 'notebook:legacy' },
+      updatedAt: new Date().toISOString(),
+    });
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('/api/notebooks')) return Promise.resolve(jsonResponse([{ id: 'notebook:legacy', name: 'CFA' }]));
+      if (url.endsWith('/api/sources/json')) return Promise.resolve(jsonResponse({ id: 'source:new' }));
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const entry = await ensureTopicNotebook({
+      baseUrl: 'http://localhost:5055',
+      topicKey: 'l1:equity',
+      topicTitle: 'Equity',
+      seedChunks: [{ text: 'equity text' }],
+    });
+    expect(entry.notebookId).toBe('notebook:legacy');
+    expect(entry.sourceId).toBe('source:new');
+    // No new POST /api/notebooks happened — we reused the legacy id.
+    const created = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/notebooks') && (c[1] as RequestInit)?.method === 'POST');
+    expect(created).toHaveLength(0);
+  });
+
+  it('parses the per-source chat SSE-style stream into answer + citation sources', () => {
+    const stream = [
+      'data: {"type": "user_message", "content": "What is duration?"}',
+      '',
+      'data: {"type": "ai_message", "content": "Duration measures price sensitivity to yield."}',
+      '',
+      'data: {"type": "context_indicators", "data": {"sources": ["source:ur6v8hj8biai1tw8fmwg"], "insights": [], "notes": []}}',
+      '',
+      'data: {"type": "complete"}',
+    ].join('\n');
+    const parsed = parseSourceChatStream(stream);
+    expect(parsed.answer).toBe('Duration measures price sensitivity to yield.');
+    expect(parsed.citationSources).toEqual(['source:ur6v8hj8biai1tw8fmwg']);
+  });
+
+  it('chatWithSource creates a session for the source, posts the message, returns the parsed answer', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/chat/sessions') && !url.includes('/messages')) {
+        // session create
+        const body = JSON.parse((init as RequestInit).body as string);
+        expect(body.source_id).toBe('source:abc');
+        return Promise.resolve(jsonResponse({ id: 'chat_session:1', title: 'QuantVault ask', source_id: 'source:abc' }));
+      }
+      if (url.endsWith('/messages')) {
+        const stream =
+          'data: {"type":"ai_message","content":"Scoped answer."}\n\n' +
+          'data: {"type":"context_indicators","data":{"sources":["source:abc"]}}\n\n' +
+          'data: {"type":"complete"}\n';
+        return Promise.resolve(new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await chatWithSource({
+      baseUrl: 'http://localhost:5055',
+      sourceId: 'source:abc',
+      message: 'Define duration.',
+    });
+    expect(result.answer).toBe('Scoped answer.');
+    expect(result.citationSources).toEqual(['source:abc']);
+    // exactly two calls: session create + message post
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('caches the last grounded answer per topic so it survives navigation', async () => {
