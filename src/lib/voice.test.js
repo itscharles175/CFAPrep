@@ -5,6 +5,8 @@ import {
   sanitizeForSpeech,
   recognizeOnce,
   speak,
+  recognizeOnceOffline,
+  recordAudioForOfflineStt,
 } from './voice.js';
 
 // jsdom does not provide SpeechRecognition or speechSynthesis by default.
@@ -106,6 +108,58 @@ describe('recognizeOnce', () => {
       await expect(recognizeOnce({ signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('recognizeOnceOffline', () => {
+  it('rejects when audio is not a Float32Array', async () => {
+    // In jsdom, window is defined, so we only need to check the audio type guard.
+    await expect(
+      recognizeOnceOffline({ audio: [0.1, 0.2, 0.3] }),
+    ).rejects.toThrow('Offline STT requires a Float32Array audio buffer.');
+  });
+
+  it('rejects with AbortError when given an already-aborted signal', async () => {
+    // We need to get past the Float32Array check, so provide valid audio.
+    // The lazy import of @huggingface/transformers will fail in jsdom (no
+    // module bundler), but the aborted signal check runs before the pipeline
+    // call, so we need to intercept the dynamic import instead.
+    const controller = new AbortController();
+    controller.abort();
+
+    // Stub the import so it resolves before the aborted-signal guard fires.
+    // The guard runs after the import resolves, so we mock a minimal pipeline.
+    const mockPipeline = vi.fn();
+    vi.doMock('@huggingface/transformers', () => ({ pipeline: mockPipeline }));
+
+    // Use a real Float32Array so the first guard passes.
+    const audio = new Float32Array([0.1, 0.2]);
+
+    // Even with the mock, the aborted-signal check fires after import resolves.
+    // Re-import voice.js dynamically so it picks up the mock.
+    const { recognizeOnceOffline: fn } = await import('./voice.js?aborttest');
+    await expect(fn({ audio, signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+
+    vi.doUnmock('@huggingface/transformers');
+  });
+});
+
+describe('recordAudioForOfflineStt', () => {
+  it('rejects with "Microphone access is not available" when navigator.mediaDevices is absent', async () => {
+    // jsdom does not expose navigator.mediaDevices.getUserMedia by default.
+    const origMD = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+    Object.defineProperty(navigator, 'mediaDevices', { value: undefined, writable: true, configurable: true });
+    try {
+      await expect(recordAudioForOfflineStt()).rejects.toThrow(
+        'Microphone access is not available in this environment.',
+      );
+    } finally {
+      if (origMD) {
+        Object.defineProperty(navigator, 'mediaDevices', origMD);
+      } else {
+        delete navigator.mediaDevices;
+      }
     }
   });
 });

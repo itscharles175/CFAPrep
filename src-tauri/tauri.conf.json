@@ -18,16 +18,24 @@
         "minWidth": 1024,
         "minHeight": 700,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' http://localhost:1234 http://localhost:5055 http://localhost:8000 http://localhost:11434 ipc: http://ipc.localhost; worker-src 'self' blob:"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "QuantVault",
+    "copyright": "© QuantVault contributors. Personal use only.",
+    "category": "Education",
+    "shortDescription": "Local-first CFA exam-prep desktop app.",
+    "longDescription": "QuantVault turns your own CFA curriculum PDFs into a fully-offline study OS: spaced repetition, generative mock exams, grounded-RAG Q&A, an agentic Study Director, multimodal AI coaching, and analytics. Everything runs on your machine — no cloud, no API keys, no telemetry.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,6 +43,39 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": [],
+    "externalBin": [],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "tsp": false,
+      "wix": {
+        "language": "en-US"
+      },
+      "nsis": {
+        "displayLanguageSelector": false,
+        "languages": ["English"],
+        "installMode": "perMachine",
+        "compression": "lzma"
+      }
+    },
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "10.15",
+      "exceptionDomain": "",
+      "signingIdentity": null,
+      "providerShortName": null,
+      "entitlements": null
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

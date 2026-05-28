@@ -1,0 +1,1155 @@
+{
+  "app": "QuantVault",
+  "kind": "cfa-generated-content",
+  "bundleVersion": 1,
+  "generatedAt": "2026-05-28T14:12:39.097Z",
+  "model": "gemma-4-e4b-it",
+  "baseUrl": "http://localhost:1234/v1",
+  "byTopic": {
+    "level1": {
+      "ethics": {
+        "title": "Ethics & Professional Standards",
+        "questions": [
+          {
+            "id": "ai-1",
+            "question": "Which document outlines the ethical principles that investment professionals are expected to follow?",
+            "options": [
+              "The CFA Institute Learning Ecosystem (LES)",
+              "The Standards of Practice Handbook",
+              "The Code of Ethics and Standards of Professional Conduct",
+              "The Guidance for Standards"
+            ],
+            "correct": 2,
+            "explanation": "Learning Module 2 indicates that the 'CFA Institute Code of Ethics and Standards of Professional Conduct' is the primary document detailing these standards."
+          },
+          {
+            "id": "ai-2",
+            "question": "According to the curriculum excerpts, what must an investment professional do regarding knowledge of the law under Standard I(A)?",
+            "options": [
+              "Only adhere to laws that are explicitly written.",
+              "Seek legal counsel only when a violation is suspected.",
+              "Maintain knowledge of the law and be aware of distribution area laws.",
+              "Follow the highest requirements among all applicable standards."
+            ],
+            "correct": 2,
+            "explanation": "Standard I(A) guidance mentions 'Distribution Area Laws' and Example 8 references 'Failure to Maintain Knowledge of the Law,' indicating ongoing knowledge is required."
+          },
+          {
+            "id": "ai-3",
+            "question": "When dealing with client transactions, which standard governs the requirement for fair allocation of trades among clients?",
+            "options": [
+              "Standard I(B): Independence and Objectivity",
+              "Standard II(A): Material Nonpublic Information",
+              "Standard III(B): Fair Dealing",
+              "Standard III(C): Suitability"
+            ],
+            "correct": 2,
+            "explanation": "The section on Standard III(B) explicitly discusses 'Fair Dealing' and provides guidance on developing firm policies to disclose trade allocation procedures."
+          },
+          {
+            "id": "ai-4",
+            "question": "If an investment professional is considering using information gained from an expert network, which standard addresses the potential misuse of this information?",
+            "options": [
+              "Standard I(C): Misrepresentation",
+              "Standard II(A): Material Nonpublic Information",
+              "Standard III(D): Performance Presentation",
+              "Standard I(B): Independence and Objectivity"
+            ],
+            "correct": 1,
+            "explanation": "Standard II(A) covers 'Material Nonpublic Information,' and Example 12 under this standard specifically addresses using an expert network in the context of nonpublic information."
+          },
+          {
+            "id": "ai-5",
+            "question": "What is a key element required for adhering to Standard III(C): Suitability?",
+            "options": [
+              "Providing performance reports quarterly.",
+              "Ensuring all trades are executed at the best available price.",
+              "Establishing and regularly updating an Investment Policy Statement (IPS).",
+              "Obtaining written consent from the client for every investment decision."
+            ],
+            "correct": 2,
+            "explanation": "Standard III(C) guidance states that recommended procedures include establishing an 'Investment Policy Statement' and requiring 'Regular Updates.'"
+          }
+        ],
+        "flashcards": [
+          {
+            "id": "flash-1",
+            "front": "What is the primary purpose of ethical standards in the investment profession?",
+            "back": "To establish trust. Professions rely on ethics to maintain public confidence. (p. 7)",
+            "locator": "p. 7"
+          },
+          {
+            "id": "flash-2",
+            "front": "Which standard addresses a member's duty regarding confidential information obtained during professional activities?",
+            "back": "Standard II(A): Material Nonpublic Information. Members must ensure the public dissemination of material nonpublic information and adopt compliance procedures. (p. 94)",
+            "locator": "p. 94"
+          },
+          {
+            "id": "flash-3",
+            "front": "What is required under Standard III(B) regarding the allocation of trades among clients?",
+            "back": "Fair Dealing requires developing firm policies and disclosing trade allocation procedures to ensure fair treatment among clients. (p. 124)",
+            "locator": "p. 124"
+          },
+          {
+            "id": "flash-4",
+            "front": "When advising a client, what must be established or updated according to Standard III(C)?",
+            "back": "A documented Investment Policy Statement (IPS) is required, and this statement must undergo regular updates. (p. 134)",
+            "locator": "p. 134"
+          },
+          {
+            "id": "flash-5",
+            "front": "What standard governs the presentation of investment performance figures?",
+            "back": "Standard III(D): Performance Presentation requires applying the GIPS Standards when presenting performance. (p. 139)",
+            "locator": "p. 139"
+          },
+          {
+            "id": "flash-6",
+            "front": "If a member discovers that another professional has violated the law, what is their ethical obligation?",
+            "back": "The curriculum details examples of reporting potential unethical actions under Standard I(A) (Knowledge of the Law). (p. 61)",
+            "locator": "p. 61"
+          },
+          {
+            "id": "flash-7",
+            "front": "What key concept must be considered when determining if information is 'material' for Standard II(A)?",
+            "back": "The standard requires determining materiality, which relates to whether the information would influence an investment decision. (p. 103)",
+            "locator": "p. 103"
+          },
+          {
+            "id": "flash-8",
+            "front": "Which standard addresses a member's responsibility concerning their own professional conduct and competence?",
+            "back": "Standard I(E): Competence requires members to maintain and improve their knowledge and skills throughout their careers. (p. 90)",
+            "locator": "p. 90"
+          }
+        ],
+        "sourceChunkCount": 14,
+        "generatedAt": "2026-05-28T14:09:10.644Z"
+      },
+      "equity": {
+        "title": "Equity Investments",
+        "questions": [
+          {
+            "id": "ai-1",
+            "question": "Which of the following topics is covered in Learning Module 1 regarding market structure?",
+            "options": [
+              "Security Market Indexes",
+              "Market Efficiency",
+              "The Functions of the Financial System",
+              "Company Analysis: Forecasting"
+            ],
+            "correct": 2,
+            "explanation": "Learning Module 1 covers 'The Functions of the Financial System' among other topics like 'Capital Allocation Efficiency' and 'Assets and Contracts'."
+          },
+          {
+            "id": "ai-2",
+            "question": "According to the curriculum excerpts, what is a primary use of market indexes?",
+            "options": [
+              "Determining legal accounting standards for corporations.",
+              "Serving as gauges of market sentiment or proxies for measuring returns.",
+              "Replacing the need for fundamental analysis in valuation.",
+              "Setting the fixed interest rates for all corporate bonds."
+            ],
+            "correct": 1,
+            "explanation": "Learning Module 2 states that uses of market indexes include 'Gauges of Market Sentiment' and 'Proxies for Measuring and Modeling Returns...'"
+          },
+          {
+            "id": "ai-3",
+            "question": "The Efficient Market Hypothesis (EMH) discusses various forms. Which form suggests that current prices reflect all publicly available information?",
+            "options": [
+              "Weak Form",
+              "Semi-Strong Form",
+              "Strong Form",
+              "Behavioral Form"
+            ],
+            "correct": 1,
+            "explanation": "Learning Module 3 discusses the forms of market efficiency, and the Semi-Strong Form relates to prices reflecting all publicly available information."
+          },
+          {
+            "id": "ai-4",
+            "question": "When analyzing equity securities, what is a key consideration mentioned regarding return characteristics?",
+            "options": [
+              "They are solely dependent on commodity price movements.",
+              "The risk and return characteristics must be assessed relative to company value.",
+              "Accounting Return on Equity is the only measure of true investment performance.",
+              "Dividend payments are entirely uncorrelated with the firm's operating profitability."
+            ],
+            "correct": 1,
+            "explanation": "Learning Module 4 discusses 'Risk and Return Characteristics' and 'Equity and Company Value,' indicating that risk/return must be assessed relative to company value."
+          },
+          {
+            "id": "ai-5",
+            "question": "In equity valuation, which model is specifically mentioned as being used for valuing preferred stock?",
+            "options": [
+              "The Free Cash-Flow-to-Equity Model (FCFE)",
+              "The Dividend Discount Model (DDM) applied to common shares only.",
+              "A direct comparison using the Cost of Equity formula.",
+              "Preferred Stock Valuation, which is a distinct valuation method."
+            ],
+            "correct": 3,
+            "explanation": "Learning Module 8 explicitly lists 'Preferred Stock Valuation' as a separate topic following the DDM and FCFE Model sections."
+          }
+        ],
+        "flashcards": [
+          {
+            "id": "flash-1",
+            "front": "What are the primary sources of information regarding CFA Program success?",
+            "back": "The key to success is studying and understanding the Candidate Body of Knowledge (CBOK™). LOSs advise on specific knowledge, skills, and abilities required from the curriculum content. (p. 7-10)",
+            "locator": "p. 7-10"
+          },
+          {
+            "id": "flash-2",
+            "front": "What are the two main categories of equity securities discussed?",
+            "back": "Common Shares and Preference Shares. (p. 6-9)",
+            "locator": "p. 6-9"
+          },
+          {
+            "id": "flash-3",
+            "front": "What is a key consideration when analyzing the risk and return characteristics of equity securities?",
+            "back": "Understanding the relationship between Equity and Company Value, as well as the Cost of Equity and Investors’ Required Rates of Return. (p. 6-9)",
+            "locator": "p. 6-9"
+          },
+          {
+            "id": "flash-4",
+            "front": "What are two approaches to forecasting revenues for company analysis?",
+            "back": "Top-Down Revenue Analysis and analyzing specific revenue drivers like Pricing Power. (p. 6-9)",
+            "locator": "p. 6-9"
+          },
+          {
+            "id": "flash-5",
+            "front": "Which valuation model relies on the expected future dividends of a stock? What is its primary formula concept?",
+            "back": "The Dividend Discount Model (DDM). It values an asset based on the present value of its expected future dividend payments. (p. 7-10)",
+            "locator": "p. 7-10"
+          },
+          {
+            "id": "flash-6",
+            "front": "What are two methods used for equity valuation besides the DDM?",
+            "back": "Multipler Models (using price multiples) and Asset-Based Valuation. (p. 7-10)",
+            "locator": "p. 7-10"
+          },
+          {
+            "id": "flash-7",
+            "front": "What is the purpose of analyzing an industry in company analysis?",
+            "back": "To improve forecasts, identify investment opportunities, and understand external influences on growth. (p. 6-9)",
+            "locator": "p. 6-9"
+          },
+          {
+            "id": "flash-8",
+            "front": "What are the three forms of market efficiency described in relation to asset pricing?",
+            "back": "Weak Form, Semi-Strong Form, and Strong Form. (p. 7-10)",
+            "locator": "p. 7-10"
+          }
+        ],
+        "sourceChunkCount": 14,
+        "generatedAt": "2026-05-28T14:09:22.374Z"
+      },
+      "fixed-income": {
+        "title": "Fixed Income",
+        "questions": [
+          {
+            "id": "ai-1",
+            "question": "Which of the following is NOT listed as a feature of fixed-income securities in the curriculum excerpts?",
+            "options": [
+              "Coupon Rate and Frequency",
+              "Maturity",
+              "Issuer Credit Rating"
+            ],
+            "correct": 2,
+            "explanation": "The curriculum lists Issuer, Maturity, Principal (Par or Face Value), Coupon Rate and Frequency, Seniority, and Contingency Provisions as features of fixed-income securities. While credit ratings are relevant to analysis, they are not listed among the core 'Features of Fixed-Income Securities' in Learning Module 1."
+          },
+          {
+            "id": "ai-2",
+            "question": "What is the primary focus when discussing the relationship between bond prices and bond features?",
+            "options": [
+              "The constant-yield price trajectory",
+              "The inverse relationship, coupon effect, and maturity effect",
+              "Matrix pricing process only"
+            ],
+            "correct": 1,
+            "explanation": "Learning Module 6 discusses the relationships between bond prices and bond features, specifically mentioning the Inverse Relationship, Coupon Effect, and Maturity Effect."
+          },
+          {
+            "id": "ai-3",
+            "question": "In the context of corporate debt financing, what is a key short-term funding alternative mentioned for financial institutions?",
+            "options": [
+              "External Loan Financing",
+              "Repurchase Agreements (Repos)",
+              "Issuing Convertible Bonds"
+            ],
+            "correct": 1,
+            "explanation": "Learning Module 4 discusses 'Short-Term Funding Alternatives for Financial Institutions' and specifically mentions 'Repurchase Agreements' as a key topic."
+          },
+          {
+            "id": "ai-4",
+            "question": "When analyzing credit risk, which factor is categorized under 'Issuer-Specific Factors' impacting yield spreads?",
+            "options": [
+              "Macroeconomic Factors",
+              "Market Factors",
+              "The issuer's specific financial health and management quality"
+            ],
+            "correct": 2,
+            "explanation": "Learning Module 14 discusses sources of credit risk, categorizing factors into Macroeconomic, Market, and Issuer-Specific Factors. The description implies that the issuer's internal characteristics fall under 'Issuer-Specific Factors'."
+          },
+          {
+            "id": "ai-5",
+            "question": "What is a key characteristic or benefit associated with Asset-Backed Securities (ABS) structures mentioned in the curriculum?",
+            "options": [
+              "They are exclusively tied to government debt.",
+              "They utilize credit enhancement and credit tranching to address risk.",
+              "They only apply to mortgage loans."
+            ],
+            "correct": 1,
+            "explanation": "Learning Module 18 discusses ABS structures, noting that they use 'Credit Enhancement' and 'Credit Tranching' as mechanisms to address credit risk."
+          }
+        ],
+        "flashcards": [
+          {
+            "id": "flash-1",
+            "front": "What are the primary components of the CFA Program's Candidate Body of Knowledge (CBOK™)?",
+            "back": "The CBOK consists of a broad outline listing major topic areas, topic area weights indicating relative exam weightings, and Learning Outcome Statements (LOS) detailing specific knowledge required. (p. 7-9)"
+          },
+          {
+            "id": "flash-2",
+            "front": "Name three types of fixed-income cash flow structures discussed in the curriculum.",
+            "back": "The curriculum covers Amortizing Debt, Variable Interest Debt, and Zero-Coupon Structures. (p. 23)"
+          },
+          {
+            "id": "flash-3",
+            "front": "What is the relationship between bond prices and bond features like coupon rate and maturity? (Mention two effects)",
+            "back": "Bond prices have an inverse relationship with yields, exhibit a Coupon Effect, and a Maturity Effect. (p. 142)"
+          },
+          {
+            "id": "flash-4",
+            "front": "What is the purpose of using Key Rate Duration in fixed-income risk measures?",
+            "back": "Key Rate Duration is used as a measure of yield curve risk. (p. 326)"
+          },
+          {
+            "id": "flash-5",
+            "front": "In corporate credit analysis, what do 'Seniority Rankings' and 'Recovery Rates' help determine? ",
+            "back": "These factors are crucial for assessing the potential loss in debt repayment and are used alongside credit ratings. (p. 425)"
+          },
+          {
+            "id": "flash-6",
+            "front": "What is a Repurchase Agreement (Repo) primarily used for, especially by financial institutions?",
+            "back": "Repos are a short-term funding alternative that involves selling securities with an agreement to repurchase them later. (p. 86)"
+          },
+          {
+            "id": "flash-7",
+            "front": "Differentiate between the primary and secondary fixed-income markets.",
+            "back": "The primary market is where new issues are created, while the secondary market is where existing securities are traded among investors. (p. 70)"
+          },
+          {
+            "id": "flash-8",
+            "front": "What does 'Credit Tranching' relate to in structured finance like ABS or CDOs?",
+            "back": "Credit tranching involves dividing a pool of assets into different risk layers (tranches) to address and manage credit risk. (p. 470)"
+          }
+        ],
+        "sourceChunkCount": 14,
+        "generatedAt": "2026-05-28T14:09:34.788Z"
+      },
+      "derivatives": {
+        "title": "Derivatives",
+        "questions": [
+          {
+            "id": "ai-1",
+            "question": "Which statement accurately describes a derivative instrument?",
+            "options": [
+              "It is an asset traded in the cash market at its current price.",
+              "It is a financial contract whose value is derived from or based on an underlying value.",
+              "It represents a firm commitment that has no connection to any underlying asset.",
+              "It is exclusively traded through organized exchanges."
+            ],
+            "correct": 1,
+            "explanation": "The curriculum states that 'A derivative is a financial contract that derives its value from the performance of an underlying asset.' This contrasts with assets in cash markets which are exchanged at current prices."
+          },
+          {
+            "id": "ai-2",
+            "question": "What is a key characteristic distinguishing Over-the-Counter (OTC) derivative markets?",
+            "options": [
+              "They involve only standardized contracts traded on organized exchanges.",
+              "They require collateral deposit to protect against counterparty default.",
+              "They involve the initiation of customized, flexible contracts between derivatives end users and financial intermediaries.",
+              "They are limited exclusively to equities as underlying assets."
+            ],
+            "correct": 2,
+            "explanation": "The curriculum notes that 'Over-the-counter (OTC) derivative markets involve the initiation of customized, flexible contracts between derivatives end users and financial intermediaries.'"
+          },
+          {
+            "id": "ai-3",
+            "question": "What is the primary function of a central counterparty (CCP) for centrally cleared derivatives?",
+            "options": [
+              "To set the initial cash price for the underlying asset.",
+              "To assume the counterparty credit risk of the derivative counterparties and provide clearing and settlement services.",
+              "To prohibit any form of customization in derivative contracts.",
+              "To exclusively facilitate trades involving commodities."
+            ],
+            "correct": 1,
+            "explanation": "The curriculum states: 'For derivatives that are centrally cleared, a central counterparty (CCP) assumes the counterparty credit risk of the derivative counterparties and provides clearing and settlement services.'"
+          },
+          {
+            "id": "ai-4",
+            "question": "Which of the following is listed as one of the most common underlying assets for derivatives?",
+            "options": [
+              "Only government bonds.",
+              "Equities, fixed income and interest rates, currencies, commodities, and credit.",
+              "Only physical goods traded in commodity exchanges.",
+              "Legal claims that have no measurable market value."
+            ],
+            "correct": 1,
+            "explanation": "The curriculum lists: 'The most common derivative underlyings include equities, fixed income and interest rates, currencies, commodities, and credit.'"
+          },
+          {
+            "id": "ai-5",
+            "question": "How do Exchange-Traded Derivatives (ETDs) differ from OTC derivatives regarding risk protection?",
+            "options": [
+              "ETDs are always customized while OTC contracts are standardized.",
+              "ETDs require collateral on deposit to protect against counterparty default, whereas OTC markets do not.",
+              "OTC markets mandate central clearing, which ETDs do not use.",
+              "There is no difference; both methods guarantee protection against all forms of risk."
+            ],
+            "correct": 1,
+            "explanation": "The curriculum specifies that 'Exchange-traded derivatives (ETDs) are standardized contracts traded on an organized exchange, which requires collateral on deposit to protect against counterparty default.'"
+          }
+        ],
+        "flashcards": [
+          {
+            "id": "flash-1",
+            "front": "What is a derivative instrument?",
+            "back": "A financial contract that derives its value from the performance of an underlying asset, which may represent a firm commitment or a contingent claim. (p. 8-12)",
+            "locator": "p. 8-12"
+          },
+          {
+            "id": "flash-2",
+            "front": "Name some common derivative underlyings.",
+            "back": "Equities, fixed income and interest rates, currencies, commodities, and credit are the most common derivative underlyings. (p. 8-12)",
+            "locator": "p. 8-12"
+          },
+          {
+            "id": "flash-3",
+            "front": "How are Over-the-Counter (OTC) derivative markets characterized?",
+            "back": "They involve the initiation of customized, flexible contracts between derivatives end users and financial intermediaries. (p. 8-12)",
+            "locator": "p. 8-12"
+          },
+          {
+            "id": "flash-4",
+            "front": "What are Exchange-Traded Derivatives (ETDs)?",
+            "back": "They are standardized contracts traded on an organized exchange, which requires collateral on deposit to protect against counterparty default. (p. 8-12)",
+            "locator": "p. 8-12"
+          },
+          {
+            "id": "flash-5",
+            "front": "What is the role of a central counterparty (CCP) for centrally cleared derivatives?",
+            "back": "A CCP assumes the counterparty credit risk of the derivative counterparties and provides clearing and settlement services. (p. 8-12)",
+            "locator": "p. 8-12"
+          },
+          {
+            "id": "flash-6",
+            "front": "How do derivatives differ from cash markets?",
+            "back": "Cash markets involve the exchange of specific assets at current prices, whereas derivatives involve the future exchange of cash flows whose value is derived from or based on an underlying value. (p. 8-12)",
+            "locator": "p. 8-12"
+          },
+          {
+            "id": "flash-7",
+            "front": "What are the primary components that determine a derivative's value?",
+            "back": "The value is derived from or based on an underlying asset, which can be represented as either a firm commitment or a contingent claim. (p. 8-12)",
+            "locator": "p. 8-12"
+          },
+          {
+            "id": "flash-8",
+            "front": "What does the term 'contingent claim' refer to in the context of derivatives?",
+            "back": "It is one of the two ways an underlying asset can represent a derivative instrument, alongside a firm commitment. (p. 8-12)",
+            "locator": "p. 8-12"
+          }
+        ],
+        "sourceChunkCount": 14,
+        "generatedAt": "2026-05-28T14:09:52.956Z"
+      },
+      "alternatives": {
+        "title": "Alternative Investments",
+        "questions": [
+          {
+            "id": "ai-1",
+            "question": "What is the primary reason alternative investments are grouped together according to the curriculum excerpts?",
+            "options": [
+              "Because they share similar investment features.",
+              "Because they have characteristics distinct from traditional investments.",
+              "Because they all involve commodity trading.",
+              "Because they are primarily structured as hedge funds."
+            ],
+            "correct": 1,
+            "explanation": "The curriculum states that Alternative Investments are grouped together not because they have similar features but instead because they have characteristics distinct from traditional investments."
+          },
+          {
+            "id": "ai-2",
+            "question": "Which of the following methods can be used to invest in alternative investments?",
+            "options": [
+              "Fund investing, co-investing, or direct investing.",
+              "Only through publicly traded securities.",
+              "Directly purchasing natural resources only.",
+              "Through mandatory institutional funds."
+            ],
+            "correct": 0,
+            "explanation": "The curriculum mentions that investing in alternatives can be done through fund investing, co-investing, or direct investing."
+          },
+          {
+            "id": "ai-3",
+            "question": "According to the provided materials, what is a key benefit often associated with alternative investments?",
+            "options": [
+              "Guaranteed high returns.",
+              "Lower regulatory oversight across all asset classes.",
+              "Greater diversification.",
+              "Elimination of market risk."
+            ],
+            "correct": 2,
+            "explanation": "The curriculum notes that Alternative investments typically offer investors greater diversification."
+          },
+          {
+            "id": "ai-4",
+            "question": "Which learning module covers information on Private Equity Investment Characteristics and Exit Strategies?",
+            "options": [
+              "Learning Module 4: Real Estate and Infrastructure",
+              "Learning Module 3: Investments in Private Capital: Equity and Debt",
+              "Learning Module 6: Hedge Funds",
+              "Learning Module 5: Natural Resources"
+            ],
+            "correct": 1,
+            "explanation": "The contents list shows that 'Private Equity Exit Strategies' is found within the context of Learning Module 3 (Investments in Private Capital: Equity and Debt)."
+          },
+          {
+            "id": "ai-5",
+            "question": "What topic area discusses distinguishing characteristics of commodity investments?",
+            "options": [
+              "Hedge Funds",
+              "Real Estate",
+              "Natural Resources",
+              "Digital Assets"
+            ],
+            "correct": 2,
+            "explanation": "Learning Module 5 (Natural Resources) includes a section on 'Commodity Investment Features' and 'Distinguishing Characteristics of Commodity Investments'."
+          }
+        ],
+        "flashcards": [
+          {
+            "id": "flash-1",
+            "front": "What is the primary reason alternative investments are grouped together?",
+            "back": "They are grouped because they have characteristics distinct from traditional investments, not because they share similar features. (p. 8-12)",
+            "locator": "p. 8-12"
+          },
+          {
+            "id": "flash-2",
+            "front": "Name the three ways investing in alternatives can be done.",
+            "back": "Investing in alternatives can be done through fund investing, co-investing, or direct investing. (p. 8-12)",
+            "locator": "p. 8-12"
+          },
+          {
+            "id": "flash-3",
+            "front": "What is a key benefit of alternative investments for investors?",
+            "back": "Alternative investments typically offer investors greater diversification. (p. 8-12)",
+            "locator": "p. 8-12"
+          },
+          {
+            "id": "flash-4",
+            "front": "Which learning module covers Private Equity Investment Characteristics and Exit Strategies?",
+            "back": "Learning Module 3, which discusses investments in private capital: equity and debt. (p. 3-7)",
+            "locator": "p. 3-7"
+          },
+          {
+            "id": "flash-5",
+            "front": "What topics are covered in Learning Module 4?",
+            "back": "This module covers Real Estate and Infrastructure, including their features, investments, structures, and diversification benefits. (p. 3-7)",
+            "locator": "p. 3-7"
+          },
+          {
+            "id": "flash-6",
+            "front": "What are the key components of the CFA Program's Candidate Body of Knowledge (CBOK™)?",
+            "back": "The CBOK consists of a broad outline of major topic areas, topic area weights indicating relative exam weightings, and Learning outcome statements (LOS). (p. 7-8)",
+            "locator": "p. 7-8"
+          },
+          {
+            "id": "flash-7",
+            "front": "What does the CFA Institute Learning Ecosystem (LES) provide?",
+            "back": "The LES is a digital learning platform providing access to all curriculum content and practice questions, including mock exams. (p. 7-8)",
+            "locator": "p. 7-8"
+          },
+          {
+            "id": "flash-8",
+            "front": "What are two distinct investment forms discussed for Natural Resources?",
+            "back": "The excerpts mention Farmland and Timberland Investment, as well as Commodity Investment Forms. (p. 3-7)",
+            "locator": "p. 3-7"
+          }
+        ],
+        "sourceChunkCount": 14,
+        "generatedAt": "2026-05-28T14:10:14.447Z"
+      },
+      "portfolio": {
+        "title": "Portfolio Management",
+        "questions": [
+          {
+            "id": "ai-1",
+            "question": "Which of the following concepts describes the set of possible portfolios that can be constructed from a given set of assets?",
+            "options": [
+              "Minimum-Variance Portfolios",
+              "Efficient Frontier: Investment Opportunity Set",
+              "Capital Allocation Line",
+              "Security Characteristic Line"
+            ],
+            "correct": 1,
+            "explanation": "The 'Investment Opportunity Set' describes the set of all possible portfolios that can be constructed from a given set of assets."
+          },
+          {
+            "id": "ai-2",
+            "question": "According to the curriculum excerpts, what is the primary purpose of an Investment Policy Statement (IPS)?",
+            "options": [
+              "To determine the optimal risk-free asset allocation.",
+              "To outline the major components and guide portfolio construction principles.",
+              "To calculate the Sharpe Ratio for performance appraisal.",
+              "To manage non-financial risks like ESG considerations."
+            ],
+            "correct": 1,
+            "explanation": "The IPS is detailed as having major components and guiding portfolio construction principles, including risk and return objectives."
+          },
+          {
+            "id": "ai-3",
+            "question": "In the context of portfolio management, what does the Two-Fund Separation Theorem relate to?",
+            "options": [
+              "The relationship between systematic and unsystematic risk.",
+              "The optimal combination of a risk-free asset and a risky portfolio.",
+              "The determination of the efficient frontier for many assets.",
+              "The process of transferring financial risks."
+            ],
+            "correct": 1,
+            "explanation": "The curriculum mentions 'The Two-Fund Separation Theorem' in proximity to discussions on the Efficient Frontier with a risk-free asset and optimal risky portfolio."
+          },
+          {
+            "id": "ai-4",
+            "question": "Which of the following is listed as one of the key components that must be addressed when developing an Investment Policy Statement (IPS)?",
+            "options": [
+              "Tax Concerns",
+              "Market Anomalies Identification",
+              "Beta Calculation",
+              "Hedge Fund Performance Metrics"
+            ],
+            "correct": 0,
+            "explanation": "The excerpts list 'Major Components of an IPS' and specifically mention 'Tax Concerns' as one such component."
+          },
+          {
+            "id": "ai-5",
+            "question": "When considering risk modification strategies, which action involves moving risk to another party?",
+            "options": [
+              "Avoidance",
+              "Acceptance (Self-Insurance)",
+              "Transferring",
+              "Shifting"
+            ],
+            "correct": 2,
+            "explanation": "The curriculum groups 'Transferring' under Risk Modification: Transferring, Shifting, and How to Choose, indicating it is the method of moving risk to another party."
+          }
+        ],
+        "flashcards": [
+          {
+            "id": "flash-1",
+            "front": "What are the major components of an Investment Policy Statement (IPS)?",
+            "back": "Major components include risk and return objectives, IPS constraints (such as liquidity requirements, time horizon, tax concerns, legal/regulatory factors), and unique circumstances/ESG considerations. (p. 5-9)",
+            "locator": "p. 5-9"
+          },
+          {
+            "id": "flash-2",
+            "front": "What is the purpose of the Efficient Frontier in portfolio theory?",
+            "back": "It represents the set of optimal portfolios that offer the highest expected return for a given level of risk, or the lowest risk for a given expected return. (p. 3-5)",
+            "locator": "p. 3-5"
+          },
+          {
+            "id": "flash-3",
+            "front": "How does diversification help reduce portfolio risk?",
+            "back": "Diversification reduces risk by combining assets whose returns are not perfectly positively correlated, leveraging the concept of correlation and risk diversification. (p. 3-5)",
+            "locator": "p. 3-5"
+          },
+          {
+            "id": "flash-4",
+            "front": "What is the primary goal when using Utility Theory in portfolio selection?",
+            "back": "It helps determine optimal portfolios by mapping investor preferences using indifference curves, which relate risk and return. (p. 1-3)",
+            "locator": "p. 1-3"
+          },
+          {
+            "id": "flash-5",
+            "front": "Name three types of pooled investment products mentioned in the curriculum.",
+            "back": "Examples include Mutual Funds, Exchange-Traded Funds (ETFs), and Hedge Funds. (p. 5-9)",
+            "locator": "p. 5-9"
+          },
+          {
+            "id": "flash-6",
+            "front": "What is the relationship between systematic risk and nonsystematic risk?",
+            "back": "Systematic risk affects the entire market, while nonsystematic risk is specific to an individual asset or industry; diversification can eliminate nonsystematic risk. (p. 3-5)",
+            "locator": "p. 3-5"
+          },
+          {
+            "id": "flash-7",
+            "front": "What are 'Cognitive Errors' in the context of behavioral biases?",
+            "back": "These include specific biases such as Belief Perseverance and Processing Errors, which relate to how individuals process information. (p. 5-9)",
+            "locator": "p. 5-9"
+          },
+          {
+            "id": "flash-8",
+            "front": "What is the role of the Capital Allocation Line (CAL) in portfolio construction?",
+            "back": "The CAL illustrates the risk-return trade-off when combining a risk-free asset with a portfolio of risky assets, leading to the optimal risky portfolio. (p. 3-5)",
+            "locator": "p. 3-5"
+          }
+        ],
+        "sourceChunkCount": 14,
+        "generatedAt": "2026-05-28T14:11:39.976Z"
+      },
+      "quant-methods": {
+        "title": "Quantitative Methods",
+        "questions": [
+          {
+            "id": "ai-1",
+            "question": "Which measure of return calculates the average rate of return over multiple periods, accounting for compounding?",
+            "options": [
+              "Arithmetic Mean Return",
+              "Geometric Mean Return",
+              "Harmonic Mean",
+              "Money-Weighted Return"
+            ],
+            "correct": 1,
+            "explanation": "The curriculum excerpts list Geometric Mean Return as a measure of return that accounts for compounding over multiple periods."
+          },
+          {
+            "id": "ai-2",
+            "question": "If an investment's returns are analyzed using the 'Money-Weighted Return,' what is this calculation designed to account for?",
+            "options": [
+              "The time value of money only.",
+              "The timing and size of cash flows.",
+              "Only pre-tax versus after-tax considerations.",
+              "The correlation between different assets."
+            ],
+            "correct": 1,
+            "explanation": "Learning Module 1 mentions 'Money-Weighted Return' in the context of calculating returns, implying it accounts for the timing and size of cash flows."
+          },
+          {
+            "id": "ai-3",
+            "question": "In the context of statistical measures, what does the curriculum identify as a measure used to assess the spread or dispersion of data?",
+            "options": [
+              "Mean Absolute Deviations",
+              "Coefficient of Variation",
+              "Range",
+              "All of the above"
+            ],
+            "correct": 2,
+            "explanation": "Learning Module 3 lists 'The Range,' 'Mean Absolute Deviations,' and 'Sample Variance and Sample Standard Deviation' under Measures of Dispersion."
+          },
+          {
+            "id": "ai-4",
+            "question": "What is the primary purpose of using Bayes' Formula in quantitative analysis, according to the curriculum structure?",
+            "options": [
+              "To calculate continuously compounded returns.",
+              "To test for linear relationships between variables.",
+              "For updating probability estimates given new evidence.",
+              "To determine the best functional form for regression."
+            ],
+            "correct": 2,
+            "explanation": "Learning Module 4 explicitly mentions 'Bayes' Formula and Updating Probability Estimates,' indicating its use in revising probabilities."
+          },
+          {
+            "id": "ai-5",
+            "question": "When analyzing the relationship between two variables using a scatter plot, which statistical measure is used to quantify the strength and direction of the linear association?",
+            "options": [
+              "Covariance",
+              "Standard Error of the Sample Mean",
+              "Correlation",
+              "Coefficient of Variation"
+            ],
+            "correct": 2,
+            "explanation": "Learning Module 3 discusses 'Scatter Plot,' and immediately following this, it covers 'Covariance and Correlation,' establishing correlation as the measure for linear association."
+          }
+        ],
+        "flashcards": [
+          {
+            "id": "flash-1",
+            "front": "What are the primary components that make up the Candidate Body of Knowledge (CBOK™)?",
+            "back": "The CBOK consists of a broad outline listing major topic areas, topic area weights indicating relative exam weightings, and Learning Outcome Statements (LOS) detailing required knowledge, skills, and abilities. (p. 7-10)"
+          },
+          {
+            "id": "flash-2",
+            "front": "Which return measure is calculated using the geometric mean? What does it represent?",
+            "back": "The Geometric Mean Return measures average returns over multiple periods. It reflects the actual compounded rate of return. (Learning Module 1: Rates and Returns, p. 9-10)"
+          },
+          {
+            "id": "flash-3",
+            "front": "When calculating the Money-Weighted Return, what is required?",
+            "back": "It requires using cash flows to determine the return, as detailed in the curriculum section on calculating this measure. (Learning Module 1: Rates and Returns, p. 19)"
+          },
+          {
+            "id": "flash-4",
+            "front": "What mathematical concept allows for determining implied forward rates or option pricing? ",
+            "back": "Cash Flow Additivity is a key concept used in deriving implied forward rates and for option pricing calculations. (Learning Module 2: Time Value of Money in Finance, p. 69)"
+          },
+          {
+            "id": "flash-5",
+            "front": "What statistical measure describes the spread or dispersion of asset returns?",
+            "back": "Measures of Dispersion include The Range, Mean Absolute Deviations, Sample Variance, and Sample Standard Deviation. (Learning Module 3: Statistical Measures of Asset Returns, p. 100-102)"
+          },
+          {
+            "id": "flash-6",
+            "front": "What is the purpose of Bayes' Formula in quantitative analysis?",
+            "back": "It is used for updating probability estimates based on new evidence or information. (Learning Module 4: Probability Trees and Conditional Expectations, p. 137-142)"
+          },
+          {
+            "id": "flash-7",
+            "front": "In portfolio theory, what measures are calculated using covariance and correlation?",
+            "back": "Portfolio Expected Return and Variance of Return are calculated using these measures. (Learning Module 5: Portfolio Mathematics, p. 153-158)"
+          },
+          {
+            "id": "flash-8",
+            "front": "What is the primary purpose of Monte Carlo Simulation in quantitative methods?",
+            "back": "It is a simulation method used for modeling outcomes by running numerous random trials to estimate potential results. (Learning Module 6: Simulation Methods, p. 184)"
+          }
+        ],
+        "sourceChunkCount": 14,
+        "generatedAt": "2026-05-28T14:11:53.917Z"
+      },
+      "economics": {
+        "title": "Economics",
+        "questions": [
+          {
+            "id": "ai-1",
+            "question": "Which learning module covers topics such as 'The Firm and Market Structures' and 'Profit Maximization'?",
+            "options": [
+              "Learning Module 2: Understanding Business Cycles",
+              "Learning Module 1: The Firm and Market Structures",
+              "Learning Module 3: Fiscal Policy",
+              "Learning Module 4: Monetary Policy"
+            ],
+            "correct": 1,
+            "explanation": "The contents list indicates that Learning Module 1 covers 'The Firm and Market Structures' and includes sections on 'Profit Maximization'."
+          },
+          {
+            "id": "ai-2",
+            "question": "According to the curriculum excerpts, what is a key component of the CFA Program Curriculum used for exam preparation?",
+            "options": [
+              "The Glossary",
+              "Learning Outcome Statements (LOS)",
+              "Practice Problems only",
+              "Exam Registration Fee details"
+            ],
+            "correct": 1,
+            "explanation": "The text states that LOS are provided at the beginning of each block of related content and advise candidates about specific knowledge, skills, and abilities they should acquire."
+          },
+          {
+            "id": "ai-3",
+            "question": "Which module discusses 'Economic Indicators over the Business Cycle' and 'Leading Indicators'?",
+            "options": [
+              "Learning Module 1: The Firm and Market Structures",
+              "Learning Module 2: Understanding Business Cycles",
+              "Learning Module 3: Fiscal Policy",
+              "Learning Module 5: Introduction to Geopolitics"
+            ],
+            "correct": 1,
+            "explanation": "The contents listing for Learning Module 2 includes 'Economic Indicators over the Business Cycle' and mentions 'Leading Indicators'."
+          },
+          {
+            "id": "ai-4",
+            "question": "What is the primary focus of Learning Module 7?",
+            "options": [
+              "Analyzing international trade restrictions like tariffs and quotas.",
+              "Examining the roles and objectives of central banks regarding monetary policy.",
+              "Covering the foreign exchange market, exchange rates, and currency regimes.",
+              "Assessing geopolitical risk and the investment process."
+            ],
+            "correct": 2,
+            "explanation": "Learning Module 7 is titled 'Capital Flows and the FX Market' and its contents cover 'The Foreign Exchange Market and Exchange Rates' and 'Exchange Rate Regimes'."
+          },
+          {
+            "id": "ai-5",
+            "question": "If a candidate needs to review information on the relationship between monetary and fiscal policy, which modules should they consult?",
+            "options": [
+              "Learning Module 1 and Learning Module 6",
+              "Learning Module 2 and Learning Module 5",
+              "Learning Module 3 and Learning Module 4",
+              "Learning Module 7 and Learning Module 8"
+            ],
+            "correct": 2,
+            "explanation": "The excerpts show that Learning Module 3 covers Fiscal Policy and Learning Module 4 covers Monetary Policy, and both modules contain sections discussing the interaction between them (e.g., 'Interaction of Monetary and Fiscal Policy' in Module 4)."
+          }
+        ],
+        "flashcards": [
+          {
+            "id": "flash-1",
+            "front": "What are leading indicators in economic analysis?",
+            "back": "Leading indicators are types of economic indicators that change before the overall economy changes, helping to predict future trends. (p. 65)",
+            "locator": "(p. 65)"
+          },
+          {
+            "id": "flash-2",
+            "front": "What is the primary purpose of a central bank's monetary policy?",
+            "back": "The objectives of monetary policy are detailed in the curriculum, focusing on roles and goals for central banks. (p. 107)",
+            "locator": "(p. 107)"
+          },
+          {
+            "id": "flash-3",
+            "front": "What is the role of the World Trade Organization (WTO) according to the excerpts?",
+            "back": "The WTO deals with global trade, and its role is covered alongside other international bodies like the IMF and World Bank Group. (p. 164)",
+            "locator": "(p. 164)"
+          },
+          {
+            "id": "flash-4",
+            "front": "How does the CFA Institute recommend using Learning Outcome Statements (LOS)?",
+            "back": "Candidates should review LOS both before and after studying curriculum content to ensure they can demonstrate the required knowledge, skills, and abilities. (p. 7-8)",
+            "locator": "(p. 7-8)"
+          },
+          {
+            "id": "flash-5",
+            "front": "What are the key components of the CFA Program's Candidate Body of Knowledge (CBOK™)?",
+            "back": "The CBOK consists of a broad outline listing major topic areas, topic area weights indicating relative exam weightings, and Learning Outcome Statements (LOS). (p. 7-8)",
+            "locator": "(p. 7-8)"
+          },
+          {
+            "id": "flash-6",
+            "front": "What are the main types of trade restrictions mentioned? ",
+            "back": "The primary types of trade restrictions discussed are tariffs, quotas, and export subsidies. (p. 199)",
+            "locator": "(p. 199)"
+          },
+          {
+            "id": "flash-7",
+            "front": "What is the concept of 'Nowcasting' in economic indicators?",
+            "back": "Nowcasting refers to using methods like GDPNow to estimate current economic conditions based on available data. (p. 70)",
+            "locator": "(p. 70)"
+          },
+          {
+            "id": "flash-8",
+            "front": "What are the two main policy areas covered in relation to government intervention? ",
+            "back": "The curriculum covers both Fiscal Policy, which involves government spending and taxation, and Monetary Policy, managed by central banks. (p. 83, p. 106)",
+            "locator": "(p. 83, p. 106)"
+          }
+        ],
+        "sourceChunkCount": 14,
+        "generatedAt": "2026-05-28T14:12:07.431Z"
+      },
+      "corporate": {
+        "title": "Corporate Issuers",
+        "questions": [
+          {
+            "id": "ai-1",
+            "question": "Which of the following is NOT listed as a key feature of corporate issuers in the provided curriculum excerpts?",
+            "options": [
+              "Legal Identity",
+              "Owner-Manager Separation",
+              "Market Liquidity Requirement",
+              "Owner/Shareholder Liability"
+            ],
+            "correct": 2,
+            "explanation": "The key features listed for corporate issuers include Legal Identity, Owner–Manager Separation, and Owner/Shareholder Liability. Market Liquidity Requirement is not explicitly listed as one of the core key features."
+          },
+          {
+            "id": "ai-2",
+            "question": "According to the curriculum structure, which module covers topics related to 'Corporate ESG Considerations'?",
+            "options": [
+              "Learning Module 1: Organizational Forms, Corporate Issuer Features, and Ownership",
+              "Learning Module 2: Investors and Other Stakeholders",
+              "Learning Module 3: Corporate Governance: Conflicts, Mechanisms, Risks, and Benefits"
+            ],
+            "correct": 1,
+            "explanation": "The table of contents indicates that 'Corporate ESG Considerations' is covered within Learning Module 2: Investors and Other Stakeholders."
+          },
+          {
+            "id": "ai-3",
+            "question": "What does the CFA Institute recommend candidates do regarding the Learning Outcome Statements (LOS) when studying?",
+            "options": [
+              "Only review them before starting any reading material.",
+              "Use them as a self-check both before and after studying curriculum content.",
+              "Ignore them until they are needed for practice questions in the LES.",
+              "Review them only if the topic is related to financial risk."
+            ],
+            "correct": 1,
+            "explanation": "The text advises: 'Review the LOS both before and after you study curriculum content to ensure you can demonstrate...'. It also suggests using them as a self-check to track progress."
+          },
+          {
+            "id": "ai-4",
+            "question": "Which of the following relationships is specifically mentioned in Learning Module 3 concerning conflicts?",
+            "options": [
+              "Customer versus Supplier Interests",
+              "Shareholder versus Creditor Interests",
+              "Employee versus Government Interests",
+              "Board Director versus Market Regulator Interests"
+            ],
+            "correct": 1,
+            "explanation": "Learning Module 3 explicitly lists 'Shareholder versus Creditor Interests' as a topic area concerning conflicts."
+          },
+          {
+            "id": "ai-5",
+            "question": "The curriculum suggests that the CFA Program exam questions are based on what primary resource?",
+            "options": [
+              "Industry expert opinions and case studies.",
+              "The Candidate Body of Knowledge (CBOK™).",
+              "Historical market performance data.",
+              "Legal advice provided by external counsel."
+            ],
+            "correct": 1,
+            "explanation": "The text states: 'The curriculum... is the basis for all exam questions.' and that the CBOK lists major topic areas and LOSs which are covered by the curriculum."
+          }
+        ],
+        "flashcards": [
+          {
+            "id": "flash-1",
+            "front": "What are the key features of corporate issuers?",
+            "back": "Key features include legal identity, owner–manager separation, and owner/shareholder liability. (p. 1-4)",
+            "locator": "p. 1-4"
+          },
+          {
+            "id": "flash-2",
+            "front": "What is the difference between publicly and privately owned corporate issuers regarding market aspects?",
+            "back": "Publicly owned issuers have exchange listing, liquidity, and price transparency requirements that differ from private ones. (p. 1-4)",
+            "locator": "p. 1-4"
+          },
+          {
+            "id": "flash-3",
+            "front": "Name three types of organizational forms of businesses discussed.",
+            "back": "The excerpts mention Sole Trader or Proprietorship, Partnerships, and Limited Companies. (p. 1-4)",
+            "locator": "p. 1-4"
+          },
+          {
+            "id": "flash-4",
+            "front": "What is the purpose of reviewing Learning Outcome Statements (LOS) when studying for CFA exams?",
+            "back": "LOS advise candidates on specific knowledge, skills, and abilities they should acquire from curriculum content; using them helps track progress. (p. 7-11)",
+            "locator": "p. 7-11"
+          },
+          {
+            "id": "flash-5",
+            "front": "In the context of business models, what does 'The Value Proposition' encompass?",
+            "back": "It is defined by Who + What + Where + How Much. (p. 5-7)",
+            "locator": "p. 5-7"
+          },
+          {
+            "id": "flash-6",
+            "front": "What are the three main areas of corporate governance mechanisms listed in Learning Module 3?",
+            "back": "These include Shareholder Mechanisms, Creditor Mechanisms, and Board and Management Mechanisms. (p. 67)",
+            "locator": "p. 67"
+          },
+          {
+            "id": "flash-7",
+            "front": "What is the primary source for all study materials, including practice questions, according to the CFA Institute Learning Ecosystem (LES)?",
+            "back": "The LES is the primary method by which CFA Institute delivers the curriculum experience and contains additional practice questions. (p. 7-11)",
+            "locator": "p. 7-11"
+          },
+          {
+            "id": "flash-8",
+            "front": "What does 'ESG' in corporate considerations refer to?",
+            "back": "It refers to Environmental Factors, Social Factors, and Governance Factors when evaluating related risks and opportunities. (p. 52)",
+            "locator": "p. 52"
+          }
+        ],
+        "sourceChunkCount": 14,
+        "generatedAt": "2026-05-28T14:12:20.925Z"
+      },
+      "fsa": {
+        "title": "Financial Statement Analysis",
+        "questions": [
+          {
+            "id": "ai-1",
+            "question": "Which of the following is listed as a regulated source of information for financial statement analysis?",
+            "options": [
+              "Management Commentary or Management’s Discussion and Analysis",
+              "Auditor's Reports",
+              "International Organization of Securities Commissions"
+            ],
+            "correct": 2,
+            "explanation": "The curriculum lists the International Organization of Securities Commissions (IOSCO) as a regulated source of information. While Auditor's Reports are mentioned, and Management Commentary is listed, IOSCO is explicitly named among the 'Regulated Sources of Information'."
+          },
+          {
+            "id": "ai-2",
+            "question": "When analyzing income statements, what topic is discussed in relation to non-recurring items?",
+            "options": [
+              "Changes in Accounting Policy",
+              "Unusual or Infrequent Items",
+              "Discontinued Operations"
+            ],
+            "correct": 1,
+            "explanation": "The curriculum excerpts list 'Non-Recurring Items' and immediately following it lists 'Unusual or Infrequent Items,' indicating this is a specific area of focus when analyzing income statements."
+          },
+          {
+            "id": "ai-3",
+            "question": "What technique involves expressing each line item on the income statement as a percentage of a base figure, such as total revenue?",
+            "options": [
+              "Trend Analysis",
+              "Common-Size Analysis",
+              "DuPont Analysis"
+            ],
+            "correct": 1,
+            "explanation": "The curriculum mentions 'Common-Size Analysis of the Income Statement' in Learning Module 3, which describes this process."
+          },
+          {
+            "id": "ai-4",
+            "question": "According to the provided material on financial reporting quality, what warning sign should analysts pay attention to regarding cash flow and net income?",
+            "options": [
+              "Pay Attention to Revenue",
+              "Pay Attention to Capitalization Policies and Deferred Costs",
+              "Pay Attention to the Relationship between Cash Flow and Net Income"
+            ],
+            "correct": 2,
+            "explanation": "Learning Module 10 lists 'Pay Attention to the Relationship between Cash Flow and Net Income' as one of the warning signs analysts should look for."
+          },
+          {
+            "id": "ai-5",
+            "question": "Which analysis technique is used to decompose Return on Equity (ROE) into its component parts?",
+            "options": [
+              "Common-Size Analysis",
+              "Trend Analysis",
+              "DuPont Analysis"
+            ],
+            "correct": 2,
+            "explanation": "The curriculum specifically mentions 'DuPont Analysis—The Decomposition of ROE' under Learning Module 11 as a technique for analyzing financial ratios."
+          }
+        ],
+        "flashcards": [
+          {
+            "id": "flash-1",
+            "front": "What is the first step in the financial statement analysis process?",
+            "back": "Articulate the Purpose and Context of the Analysis (p. 6).",
+            "locator": "p. 6"
+          },
+          {
+            "id": "flash-2",
+            "front": "Name two regulated sources of information for financial statement analysis.",
+            "back": "The International Organization of Securities Commissions and the US Securities and Exchange Commission are two regulated sources (p. 13, p. 14).",
+            "locator": "p. 13, p. 14"
+          },
+          {
+            "id": "flash-3",
+            "front": "What is a key warning sign to look for when analyzing financial statements?",
+            "back": "Pay attention to the relationship between cash flow and net income (p. 374).",
+            "locator": "p. 374"
+          },
+          {
+            "id": "flash-4",
+            "front": "What is the purpose of Common-Size Analysis for the Income Statement?",
+            "back": "It involves analyzing line items as a percentage of revenue, which helps in understanding the structure and composition of the income statement (p. 78).",
+            "locator": "p. 78"
+          },
+          {
+            "id": "flash-5",
+            "front": "How are cash flows from operating activities reported using the indirect method?",
+            "back": "The indirect method starts with net income and adjusts for non-cash items and changes in working capital accounts (p. 137).",
+            "locator": "p. 137"
+          },
+          {
+            "id": "flash-6",
+            "front": "What is the primary concern when analyzing intangible assets developed internally?",
+            "back": "The curriculum covers accounting for these assets, noting that they are treated differently from purchased intangibles (p. 213).",
+            "locator": "p. 213"
+          },
+          {
+            "id": "flash-7",
+            "front": "What is the purpose of DuPont Analysis?",
+            "back": "It is a tool used for decomposing Return on Equity (ROE) to provide a more detailed understanding of profitability drivers (p. 432).",
+            "locator": "p. 432"
+          },
+          {
+            "id": "flash-8",
+            "front": "What are 'Permanent Differences' when analyzing income taxes?",
+            "back": "These are differences between accounting profit and taxable income that will never reverse (p. 286).",
+            "locator": "p. 286"
+          }
+        ],
+        "sourceChunkCount": 14,
+        "generatedAt": "2026-05-28T14:12:39.093Z"
+      }
+    }
+  }
+}

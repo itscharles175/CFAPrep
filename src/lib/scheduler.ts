@@ -1,87 +1,36 @@
 /**
  * E7: FSRS (Free Spaced Repetition Scheduler) — Empirically superior to SM-2.
  *
- * Implements the FSRS-4.5 algorithm with four parameters:
- * - Stability (S): Estimated time for retention to drop to 90%
- * - Difficulty (D): Intrinsic difficulty of the card (1–10 scale)
- * - Retrievability (R): Probability of recall at time t
+ * Implements the FSRS-4.5 algorithm via the `ts-fsrs` reference library.
+ *
+ * Key field mappings (unchanged from the hand-rolled version):
+ * - ReviewItem.ease          → FSRS stability
+ * - ReviewItem.fsrsDifficulty → FSRS difficulty
+ *
+ * QuantVault Confidence → ts-fsrs Rating mapping:
+ * - not-correct             → Again (1)
+ * - correct + low           → Hard  (2)
+ * - correct + medium        → Good  (3)
+ * - correct + high          → Easy  (4)
  *
  * Reference: https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
  */
 
+import { createEmptyCard, fsrs, Rating, State } from 'ts-fsrs';
+import type { Card, Grade } from 'ts-fsrs';
 import type { Confidence, ErrorCategory, QuestionResult, ReviewItem } from './learningTypes';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** FSRS-4.5 default weights (w0–w12) */
-const W = [
-  0.4,    // w0: initial stability for "again"
-  0.6,    // w1: initial stability for "hard"
-  2.4,    // w2: initial stability for "good"
-  5.8,    // w3: initial stability for "easy"
-  4.93,   // w4: difficulty mean reversion
-  0.94,   // w5: difficulty mean reversion weight
-  0.86,   // w6: stability increase base
-  0.01,   // w7: stability penalty for fail
-  1.49,   // w8: stability modifier for difficulty
-  0.14,   // w9: stability modifier for stability
-  0.94,   // w10: stability modifier for retrievability
-  2.18,   // w11: stability modifier for success
-  0.05,   // w12: stability decrease factor
-];
+/** Singleton FSRS instance with default FSRS-4.5 parameters */
+const f = fsrs();
 
-/** Map QuantVault confidence + correctness to FSRS rating (1–4) */
-function toRating(correct: boolean, confidence: Confidence): number {
-  if (!correct) return 1; // again
-  if (confidence === 'low') return 2; // hard
-  if (confidence === 'medium') return 3; // good
-  return 4; // easy
-}
-
-/** Calculate retrievability at elapsed days since last review */
-function retrievability(stability: number, elapsedDays: number): number {
-  return Math.pow(1 + elapsedDays / (9 * stability), -1);
-}
-
-/** Initial stability based on first rating */
-function initialStability(rating: number): number {
-  return Math.max(0.1, W[rating - 1]);
-}
-
-/** Initial difficulty based on first rating */
-function initialDifficulty(rating: number): number {
-  return Math.min(10, Math.max(1, W[4] - (rating - 3) * W[5]));
-}
-
-/** Update difficulty after a review */
-function nextDifficulty(d: number, rating: number): number {
-  const newD = d - W[5] * (rating - 3);
-  // Mean reversion toward initial difficulty
-  const meanReverted = W[4] * (1 - W[5]) + newD * W[5];
-  return Math.min(10, Math.max(1, meanReverted));
-}
-
-/** Calculate next stability after a successful recall */
-function nextStabilitySuccess(d: number, s: number, r: number, rating: number): number {
-  const hardPenalty = rating === 2 ? W[11] : 1;
-  const easyBonus = rating === 4 ? W[12] : 1;
-  return s * (
-    1 +
-    Math.exp(W[6]) *
-    (11 - d) *
-    Math.pow(s, -W[7]) *
-    (Math.exp((1 - r) * W[8]) - 1) *
-    hardPenalty *
-    easyBonus
-  );
-}
-
-/** Calculate next stability after a failed recall */
-function nextStabilityFail(d: number, s: number, r: number): number {
-  return Math.max(
-    0.1,
-    W[9] * Math.pow(d, -W[10]) * (Math.pow(s + 1, W[11]) - 1) * Math.exp((1 - r) * W[12]),
-  );
+/** Map QuantVault confidence + correctness to ts-fsrs Grade (1–4, excludes Manual=0) */
+function toRating(correct: boolean, confidence: Confidence): Grade {
+  if (!correct) return Rating.Again as Grade; // 1
+  if (confidence === 'low') return Rating.Hard as Grade;   // 2
+  if (confidence === 'medium') return Rating.Good as Grade; // 3
+  return Rating.Easy as Grade;                              // 4
 }
 
 /** Apply an error-category penalty to the calculated interval */
@@ -93,6 +42,35 @@ function errorPenalty(errorCategory: ErrorCategory): number {
   return 0.76; // concept, formula, ethics-judgment
 }
 
+/**
+ * Build a ts-fsrs Card from a previous ReviewItem.
+ * When the ReviewItem exists and has a non-trivial stability (ease > 0.1),
+ * we reconstruct it as a Review-state card so ts-fsrs runs its repeat formulas.
+ * Otherwise we return a fresh empty card (first review).
+ */
+function cardFromReviewItem(previous: ReviewItem | undefined, now: Date): Card {
+  if (!previous || previous.ease < 0.1) {
+    return createEmptyCard(now);
+  }
+
+  const dueDate = new Date(previous.dueAt);
+  // Estimate last_review as the day the previous interval started
+  const lastReview = new Date(dueDate.getTime() - previous.intervalDays * DAY_MS);
+
+  return {
+    due: dueDate,
+    stability: previous.ease,
+    difficulty: previous.fsrsDifficulty ?? 5,
+    elapsed_days: previous.intervalDays,
+    scheduled_days: previous.intervalDays,
+    reps: previous.attempts,
+    lapses: previous.correctStreak === 0 && previous.attempts > 0 ? 1 : 0,
+    learning_steps: 0,
+    state: State.Review,
+    last_review: lastReview,
+  };
+}
+
 export function addDays(date: Date, days: number): string {
   const next = new Date(date.getTime() + days * DAY_MS);
   next.setHours(9, 0, 0, 0);
@@ -100,9 +78,8 @@ export function addDays(date: Date, days: number): string {
 }
 
 /**
- * E7: FSRS-based review scheduling.
- * Replaces the previous SM-2 variant with an empirically superior algorithm.
- * The `ease` field now stores FSRS stability, and we track difficulty internally.
+ * E7: FSRS-based review scheduling, powered by ts-fsrs.
+ * The `ease` field stores FSRS stability; `fsrsDifficulty` stores FSRS difficulty.
  */
 export function scheduleReview(
   result: QuestionResult,
@@ -113,36 +90,27 @@ export function scheduleReview(
   const attempts = (previous?.attempts ?? 0) + 1;
   const correctStreak = result.correct ? (previous?.correctStreak ?? 0) + 1 : 0;
 
-  let stability: number;
-  let difficulty: number;
+  const card = cardFromReviewItem(previous, now);
+  const { card: next } = f.next(card, now, rating);
 
-  if (!previous || previous.ease < 0.1) {
-    // First review — use initial parameters
-    stability = initialStability(rating);
-    difficulty = initialDifficulty(rating);
+  const stability = next.stability;
+  const difficulty = next.difficulty;
+
+  // Derive intervalDays from scheduled_days when in Review state (reliable interval),
+  // falling back to the FSRS formula: interval = stability at 90% retention target
+  // (derivation: R = (1 + t/(9*S))^-1; solve R=0.9 → t = S).
+  let intervalDays: number;
+  if (next.state === State.Review && next.scheduled_days > 0) {
+    intervalDays = next.scheduled_days;
   } else {
-    // Subsequent reviews
-    const priorStability = previous.ease; // We store stability in the ease field
-    const priorDifficulty = previous.fsrsDifficulty ?? 5;
-    const elapsedDays = Math.max(0.01, (now.getTime() - new Date(previous.dueAt).getTime()) / DAY_MS + previous.intervalDays);
-    const r = retrievability(priorStability, elapsedDays);
-
-    difficulty = nextDifficulty(priorDifficulty, rating);
-
-    if (result.correct) {
-      stability = nextStabilitySuccess(difficulty, priorStability, r, rating);
-    } else {
-      stability = nextStabilityFail(difficulty, priorStability, r);
-    }
+    // Learning / Relearning — ts-fsrs schedules in minutes; derive from stability
+    intervalDays = Math.max(1, Math.round(stability));
   }
 
-  // Calculate interval from stability (target 90% retention)
-  const desiredRetention = 0.9;
-  let intervalDays = Math.round(
-    9 * stability * (1 / Math.pow(desiredRetention, 1) - 1) * errorPenalty(result.errorCategory),
-  );
+  // Apply exam-tuning error-category penalty (preserved from hand-rolled version)
+  intervalDays = Math.round(intervalDays * errorPenalty(result.errorCategory));
 
-  // Clamp: 1 day min, 365 days max (FSRS allows much longer intervals than SM-2's 60-day cap)
+  // Clamp: 1 day min, 365 days max
   intervalDays = Math.min(365, Math.max(1, intervalDays));
 
   // For failed cards, cap at 3 days regardless
@@ -152,12 +120,17 @@ export function scheduleReview(
 
   return {
     intervalDays,
-    ease: stability, // Store FSRS stability in the existing ease field
+    ease: stability,           // Store FSRS stability in the existing ease field
     fsrsDifficulty: difficulty,
     dueAt: addDays(now, intervalDays),
     attempts,
     correctStreak,
   };
+}
+
+/** FSRS retrievability formula used for mastery weighting (not ts-fsrs state-dependent) */
+function retrievability(stability: number, elapsedDays: number): number {
+  return Math.pow(1 + elapsedDays / (9 * stability), -1);
 }
 
 export function masteryScoreForResults(results: QuestionResult[], now = new Date()): number {
@@ -194,16 +167,21 @@ export function rankReviewItems(items: ReviewItem[], at = new Date()): ReviewIte
   });
 }
 
-/** Calculate current retrievability for a review item */
+/** Calculate current retrievability for a review item using ts-fsrs */
 export function currentRetrievability(item: ReviewItem, at = new Date()): number {
-  const elapsedDays = Math.max(0, (at.getTime() - new Date(item.dueAt).getTime()) / DAY_MS + item.intervalDays);
-  return retrievability(item.ease, elapsedDays);
+  if (item.ease < 0.1) return 0;
+  const card = cardFromReviewItem(item, new Date(item.dueAt));
+  // format=false returns a raw number in [0,1]
+  const raw = f.get_retrievability(card, at, false);
+  return typeof raw === 'number' ? raw : parseFloat(raw as string) / 100;
 }
 
-/** Predict retention at a future date */
+/** Predict retention at a future date using ts-fsrs */
 export function predictRetention(item: ReviewItem, targetDate: Date): number {
-  const elapsedDays = Math.max(0, (targetDate.getTime() - new Date(item.dueAt).getTime()) / DAY_MS + item.intervalDays);
-  return retrievability(item.ease, elapsedDays);
+  if (item.ease < 0.1) return 0;
+  const card = cardFromReviewItem(item, new Date(item.dueAt));
+  const raw = f.get_retrievability(card, targetDate, false);
+  return typeof raw === 'number' ? raw : parseFloat(raw as string) / 100;
 }
 
 export interface LearningRecommendation {

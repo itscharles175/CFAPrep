@@ -25,7 +25,7 @@ import {
   saveCachedGroundedAnswer,
 } from '../../lib/openNotebook';
 import { parseCitations } from '../../lib/citations';
-import { hasSpeechRecognition, hasSpeechSynthesis, recognizeOnce, sanitizeForSpeech, speak, stopSpeaking } from '../../lib/voice';
+import { hasSpeechRecognition, hasSpeechSynthesis, recognizeOnce, recognizeOnceOffline, recordAudioForOfflineStt, sanitizeForSpeech, speak, stopSpeaking } from '../../lib/voice';
 
 // Interactive deck for AI-generated flashcards: front visible by default,
 // click reveals the back; small Show all / Hide all controls.
@@ -141,8 +141,11 @@ export default function CfaModule() {
   const [sourceTitleMap, setSourceTitleMap] = useState(null);
   const askAbortRef = useRef(null);
   const [askHistory, setAskHistory] = useState([]);
-  const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'speaking'
+  const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'recording' | 'transcribing' | 'speaking'
+  const [voiceMode, setVoiceMode] = useState('browser'); // 'browser' | 'offline'
+  const [voiceProgress, setVoiceProgress] = useState(null); // progress_callback payload from Whisper download
   const voiceAbortRef = useRef(null);
+  const hasMediaDevices = typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
 
   useEffect(() => {
     let cancelled = false;
@@ -469,6 +472,38 @@ export default function CfaModule() {
     }
   }
 
+  async function handleOfflineMicClick() {
+    if (voiceState === 'recording' || voiceState === 'transcribing') {
+      voiceAbortRef.current?.abort();
+      setVoiceState('idle');
+      return;
+    }
+    const controller = new AbortController();
+    voiceAbortRef.current = controller;
+    setVoiceProgress(null);
+    setVoiceState('recording');
+    try {
+      const audio = await recordAudioForOfflineStt({ durationMs: 8000, signal: controller.signal });
+      if (controller.signal.aborted) { setVoiceState('idle'); return; }
+      setVoiceState('transcribing');
+      const { transcript } = await recognizeOnceOffline({
+        audio,
+        lang: 'en',
+        signal: controller.signal,
+        onProgress: (p) => setVoiceProgress(p),
+      });
+      setVoiceProgress(null);
+      if (transcript) {
+        setAskQuestion(transcript);
+        handleAskCurriculum(transcript);
+      }
+    } catch (_error) {
+      setVoiceProgress(null);
+    } finally {
+      setVoiceState('idle');
+    }
+  }
+
   async function handleSpeakClick() {
     if (!askAnswer) return;
     if (voiceState === 'speaking') {
@@ -754,7 +789,32 @@ export default function CfaModule() {
                   <button className="btn btn-primary" onClick={handleAskCurriculum} disabled={askState === 'loading' || !askQuestion.trim()}>
                     {askState === 'loading' ? 'Thinking…' : 'Ask'}
                   </button>
-                  {hasSpeechRecognition() && (
+                  {(hasSpeechRecognition() || hasMediaDevices) && (
+                    <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
+                      {/* Mode toggle */}
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${voiceMode === 'browser' ? 'btn-secondary' : 'btn-ghost'}`}
+                        onClick={() => setVoiceMode('browser')}
+                        aria-pressed={voiceMode === 'browser'}
+                        title="Browser (cloud) STT"
+                        style={{ fontSize: 'var(--fs-xs)', padding: '2px 8px' }}
+                      >
+                        Cloud
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${voiceMode === 'offline' ? 'btn-secondary' : 'btn-ghost'}`}
+                        onClick={() => setVoiceMode('offline')}
+                        aria-pressed={voiceMode === 'offline'}
+                        title="Offline Whisper STT (on-device)"
+                        style={{ fontSize: 'var(--fs-xs)', padding: '2px 8px' }}
+                      >
+                        Offline
+                      </button>
+                    </div>
+                  )}
+                  {voiceMode === 'browser' && hasSpeechRecognition() && (
                     <button
                       type="button"
                       className="btn btn-secondary"
@@ -766,13 +826,43 @@ export default function CfaModule() {
                       {voiceState === 'listening' ? 'Listening…' : '🎤'}
                     </button>
                   )}
+                  {voiceMode === 'offline' && hasMediaDevices && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleOfflineMicClick}
+                      disabled={askState === 'loading'}
+                      aria-label={
+                        voiceState === 'recording'
+                          ? 'Stop recording'
+                          : voiceState === 'transcribing'
+                          ? 'Transcribing…'
+                          : 'Dictate question (offline Whisper)'
+                      }
+                      title="Offline Whisper STT — first use downloads ~40 MB model"
+                    >
+                      {voiceState === 'recording'
+                        ? 'Recording…'
+                        : voiceState === 'transcribing'
+                        ? 'Transcribing…'
+                        : '🎤 Offline (Whisper)'}
+                    </button>
+                  )}
                   {askState === 'loading' && (
                     <button className="btn btn-secondary" onClick={handleCancelAsk}>Cancel</button>
                   )}
                 </div>
-                {hasSpeechRecognition() && (
+                {voiceMode === 'browser' && hasSpeechRecognition() && (
                   <p style={{ margin: 'var(--space-1) 0 0', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
                     Voice input may use the browser's network STT on Chrome — type to stay strictly offline.
+                  </p>
+                )}
+                {voiceMode === 'offline' && hasMediaDevices && (
+                  <p style={{ margin: 'var(--space-1) 0 0', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+                    First use downloads ~40 MB Whisper model; cached locally after.
+                    {voiceProgress && voiceProgress.status === 'progress' && voiceProgress.progress != null && (
+                      <> Downloading Whisper model… {Math.round(voiceProgress.progress)}%</>
+                    )}
                   </p>
                 )}
                 {askState === 'loading' && (

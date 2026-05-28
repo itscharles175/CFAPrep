@@ -171,8 +171,21 @@ async function generateFlashcards({ baseUrl, model, temperature, topicTitle, chu
   const content = await callLlmChat({ baseUrl, model, temperature, system, user });
   const parsed = extractJsonArray(content);
   if (!parsed) return [];
+  // Normalize key-case — Gemma frequently emits `Front` / `Back` (title-case)
+  // rather than the lowercase the prompt asks for. Accept any combination.
+  function pick(item, ...keys) {
+    for (const k of keys) {
+      if (typeof item?.[k] === 'string' && item[k].trim()) return item[k];
+    }
+    return null;
+  }
   return parsed
-    .filter((item) => item && typeof item.front === 'string' && typeof item.back === 'string' && item.front.trim() && item.back.trim())
+    .map((item) => ({
+      front: pick(item, 'front', 'Front', 'FRONT', 'question', 'Question'),
+      back: pick(item, 'back', 'Back', 'BACK', 'answer', 'Answer'),
+      locator: pick(item, 'locator', 'Locator', 'citation', 'Citation', 'page', 'Page'),
+    }))
+    .filter((item) => item.front && item.back)
     .map((item, index) => ({
       id: `flash-${index + 1}`,
       front: item.front,
@@ -339,7 +352,12 @@ async function main() {
     }
   }
 
-  console.log(`\nDone. Wrote ${opts.out}.`);
+  const topicCount = Object.values(byTopic).reduce((sum, level) => sum + Object.keys(level).length, 0);
+  if (topicCount > 0) {
+    console.log(`\nDone. Wrote ${opts.out} (${topicCount} topic(s) generated).`);
+  } else {
+    console.log(`\nDone. No topics succeeded — check that the local model server is up and the model id is correct.`);
+  }
 }
 
 main().catch((error) => {

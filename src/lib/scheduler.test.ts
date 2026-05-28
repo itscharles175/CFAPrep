@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { masteryScoreForResults, scheduleReview } from './scheduler';
-import type { QuestionResult } from './learningTypes';
+import type { QuestionResult, ReviewItem } from './learningTypes';
 
 const baseResult: QuestionResult = {
   domain: 'cfa',
@@ -57,6 +57,28 @@ describe('spaced repetition scheduler', () => {
     expect(second.intervalDays).toBeGreaterThan(first.intervalDays);
     expect(second.correctStreak).toBe(2);
     expect(second.fsrsDifficulty).toBeLessThanOrEqual(first.fsrsDifficulty ?? 10);
+  });
+
+  it('ts-fsrs swap: intervals grow monotonically across a streak of correct/high answers', () => {
+    // Start a fresh review; run 5 consecutive correct+high results; each
+    // resulting intervalDays must be >= the previous one. (The exact numbers
+    // changed from the old hand-rolled weights — that's OK — but the ranking
+    // behavior the rest of the app relies on must hold.)
+    let prev: ReviewItem | undefined;
+    let lastInterval = 0;
+    for (let i = 0; i < 5; i += 1) {
+      const result: QuestionResult = {
+        domain: 'cfa', topic: 'fixed-income', questionId: `q-${i}`,
+        learningObjective: 'fi-lo1', correct: true, confidence: 'high',
+        errorCategory: 'none', difficulty: 'foundation',
+        createdAt: new Date(2026, 0, 1 + i * 30).toISOString(),
+      };
+      const next = scheduleReview(result, prev, new Date(2026, 0, 1 + i * 30));
+      expect(next.intervalDays).toBeGreaterThanOrEqual(lastInterval);
+      lastInterval = next.intervalDays;
+      prev = { id: 't', domain: 'cfa', topic: 'fixed-income', learningObjective: 'fi-lo1', title: 'x', path: '/x', intervalDays: next.intervalDays, ease: next.ease, fsrsDifficulty: next.fsrsDifficulty, dueAt: next.dueAt, lastResultAt: result.createdAt!, attempts: next.attempts, correctStreak: next.correctStreak, lastCorrect: true, lastConfidence: 'high', lastErrorCategory: 'none' };
+    }
+    expect(lastInterval).toBeGreaterThan(10);  // ts-fsrs default retention 0.9 + 5 successive high-confidence corrects → far past 10 days
   });
 
   it('computes mastery from correctness, confidence, errors, and recency', () => {

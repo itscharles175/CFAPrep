@@ -119,17 +119,33 @@ fn cfa_read_pdf_bytes(path: String) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| format!("read failed: {e}"))
 }
 
-/// Locate the local services directory. Override with QV_SERVICES_DIR; otherwise
-/// look for a `spike/` dir near the working directory (dev) — later this points
-/// at bundled resources.
+/// Locate the local services directory. Search order:
+///   1. `QV_SERVICES_DIR` env var (explicit override; used in tests + CI).
+///   2. `spike/` next to the working directory (dev arrangement).
+///   3. `spike/` one level up from cwd (running from `src-tauri/`).
+///   4. `resources/services/` next to the running executable (production
+///      install path — populated by the Tauri bundler's `bundle.resources`
+///      list once the PyInstaller-bundled backend is wired in Pillar 0).
+///   5. Fall back to `spike/` under cwd so log output reads coherently
+///      even when nothing exists.
 fn services_dir() -> PathBuf {
     if let Ok(p) = std::env::var("QV_SERVICES_DIR") {
         return PathBuf::from(p);
     }
     let cwd = std::env::current_dir().unwrap_or_default();
-    for cand in [cwd.join("spike"), cwd.join("..").join("spike")] {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(PathBuf::from))
+        .unwrap_or_default();
+    let candidates = [
+        cwd.join("spike"),
+        cwd.join("..").join("spike"),
+        exe_dir.join("resources").join("services"),
+        exe_dir.join("..").join("Resources").join("services"),
+    ];
+    for cand in &candidates {
         if cand.join("bin").exists() || cand.join("open-notebook").exists() {
-            return cand;
+            return cand.clone();
         }
     }
     cwd.join("spike")
