@@ -26,7 +26,8 @@ export type AppRouteId =
   | 'level-mock'
   | 'analytics'
   | 'content-ops'
-  | 'system';
+  | 'system'
+  | 'today';
 
 export interface AppRoute {
   id: AppRouteId;
@@ -109,6 +110,7 @@ const baseAppRoutes: BaseAppRoute[] = [
   { id: 'analytics', path: '/analytics', expectedText: 'Analytics', domain: 'analytics', navGroup: 'tools', iconKey: 'bar-chart-3', accentRole: 'analytics', preferredLayout: 'dashboard', smokeRoute: '/analytics', screenshotRoute: '/analytics' },
   { id: 'content-ops', path: '/content-ops', expectedText: 'Content Operations', domain: 'ops', navGroup: 'ops', iconKey: 'file-search', accentRole: 'ops', preferredLayout: 'ops', smokeRoute: '/content-ops', screenshotRoute: '/content-ops' },
   { id: 'system', path: '/system', expectedText: 'System', domain: 'ops', navGroup: 'ops', iconKey: 'hard-drive', accentRole: 'ops', preferredLayout: 'ops', smokeRoute: '/system', screenshotRoute: '/system' },
+  { id: 'today', path: '/today', expectedText: 'Today', domain: 'home', navGroup: 'home', iconKey: 'sun', accentRole: 'study', preferredLayout: 'dashboard', smokeRoute: '/today', screenshotRoute: '/today' },
 ];
 
 const routeLabels: Partial<Record<AppRouteId, string>> = {
@@ -132,6 +134,7 @@ const routeLabels: Partial<Record<AppRouteId, string>> = {
   analytics: 'Analytics',
   'content-ops': 'Content QA',
   system: 'System Health',
+  today: 'Today',
 };
 
 const offlineCriticalRouteIds = new Set<AppRouteId>([
@@ -347,6 +350,7 @@ export const commandRoutes: CommandRoute[] = [
   { id: 'command:mock-level2', title: 'Start Level II Mock', subtitle: 'Timed item-set section', path: '/cfa/level2/mock', keywords: ['start level ii mock item set vignette'] },
   { id: 'command:mock-level3', title: 'Start Level III Mock', subtitle: 'Constructed response and item-set section', path: '/cfa/level3/mock', keywords: ['start level iii mock constructed response essay'] },
   { id: 'command:system', title: 'Open System Health', subtitle: 'Offline cache, storage, and backup status', path: '/system', keywords: ['system health pwa offline storage backup'] },
+  { id: 'command:today', title: 'Today — Focused Plan', subtitle: 'One-screen "what to do next" driven by the Study Director', path: '/today', keywords: ['today focused next action study director plan'] },
   { id: 'action:backup', title: 'Export Vault Backup', subtitle: 'Download all local data as JSON', path: '/vault', keywords: ['export backup vault json local data'], action: 'backup' },
   { id: 'action:repair', title: 'Repair Local Vault', subtitle: 'Rebuild indexes and clean corrupted rows', path: '/review', keywords: ['repair vault rebuild indexes corrupted rows'], action: 'repair' },
   { id: 'action:theme', title: 'Toggle Theme', subtitle: 'Switch light or dark mode', path: '/', keywords: ['toggle theme light dark'], action: 'theme' },
