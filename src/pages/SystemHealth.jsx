@@ -12,7 +12,7 @@ import {
   saveOpenNotebookSettings,
 } from '../lib/openNotebook';
 import { ingestFolder, ingestTextSource, isTauri, pickCfaFolder } from '../lib/desktopIngestion';
-import { deleteCfaSourceDocument, getCfaSourceDocuments } from '../lib/cfaSourceVault';
+import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments } from '../lib/cfaSourceVault';
 
 function downloadJson(payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -114,6 +114,25 @@ export default function SystemHealth() {
     try {
       const docs = await getCfaSourceDocuments();
       setSourceDocs(docs);
+    } finally {
+      setSourceDocsBusy(false);
+    }
+  }
+
+  async function handleExportSourceBundle() {
+    setSourceDocsBusy(true);
+    try {
+      const bundle = await exportCfaSourceBundle();
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `quantvault-source-${new Date().toISOString().slice(0, 10)}.qvsource`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setMessage(`Exported ${bundle.documents?.length ?? 0} source document(s) as a .qvsource bundle.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not export source bundle.');
     } finally {
       setSourceDocsBusy(false);
     }
@@ -533,9 +552,14 @@ export default function SystemHealth() {
               Everything in your local vault — bundled `.qvsource` imports plus desktop folder ingestion. Deletes are scoped (the document and its chunks only) and irreversible.
             </p>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={refreshSourceDocs} disabled={sourceDocsBusy}>
-            {sourceDocsBusy ? 'Refreshing…' : 'Refresh'}
-          </button>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+            <button className="btn btn-secondary btn-sm" onClick={handleExportSourceBundle} disabled={sourceDocsBusy || sourceDocs.length === 0}>
+              Export .qvsource
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={refreshSourceDocs} disabled={sourceDocsBusy}>
+              {sourceDocsBusy ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
         </div>
         {sourceDocs.length === 0 ? (
           <p className="muted-copy" style={{ margin: 0 }}>
