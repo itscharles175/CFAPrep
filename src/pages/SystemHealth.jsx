@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Database, Download, HardDrive, KeyRound, ShieldCheck, Upload, WifiOff, Wrench } from 'lucide-react';
+import { Database, Download, HardDrive, KeyRound, ServerCog, ShieldCheck, Upload, WifiOff, Wrench } from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
 import { exportVaultData, getVaultHealthReport, importVaultData, previewVaultRepair } from '../lib/learning';
 import { decryptVaultBackup, encryptVaultBackup } from '../lib/encryptedBackup';
@@ -15,7 +15,7 @@ import {
 import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop, pickCfaFolder } from '../lib/desktopIngestion';
 import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
-import { getStorage } from '../lib/storage';
+import { getStorage, getActiveDriverName, cutoverTo, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
 import {
   clearPersistedParameters,
   persistOptimizedParameters,
@@ -103,6 +103,11 @@ export default function SystemHealth() {
   const [psychReport, setPsychReport] = useState(null);
   const [psychBusy, setPsychBusy] = useState(false);
   const [psychError, setPsychError] = useState('');
+  const [activeDriver, setActiveDriver] = useState(getActiveDriverName());
+  const [driverPref, setDriverPref] = useState(getStoredStoragePreference());
+  const [cutoverBusy, setCutoverBusy] = useState(false);
+  const [cutoverError, setCutoverError] = useState('');
+  const [cutoverReport, setCutoverReport] = useState(null);
   // Auto-generated targeted material queue
   const [targetedQueue, setTargetedQueue] = useState([]);
   const [targetedBusy, setTargetedBusy] = useState(false);
@@ -211,6 +216,56 @@ export default function SystemHealth() {
     await clearPsychometricsCache();
     setPsychReport(null);
     toast.info('Psychometrics cleared', 'Cache emptied — recompute any time.');
+  }
+
+  async function handleCutoverToSurreal() {
+    setCutoverBusy(true);
+    setCutoverError('');
+    setCutoverReport(null);
+    try {
+      const result = await cutoverTo('surrealdb');
+      if (!result.ok) {
+        setCutoverError(result.error || 'Could not reach the SurrealDB sidecar at localhost:8000.');
+        toast.warning('SurrealDB unavailable', 'Staying on the local Dexie store.');
+        return;
+      }
+      setActiveDriver(getActiveDriverName());
+      setDriverPref(getStoredStoragePreference());
+      if (result.report) {
+        setCutoverReport(result.report);
+        const copied = result.report.settings + result.report.reviewItems + result.report.questionResults + result.report.masterySnapshots;
+        toast.success('Switched to SurrealDB', `Migrated ${copied} rows. Re-ingest curriculum to rebuild the vector index.`);
+      } else if (result.alreadyActive) {
+        toast.info('Already on SurrealDB', 'No migration needed.');
+      }
+    } catch (error) {
+      setCutoverError(error?.message || String(error));
+    } finally {
+      setCutoverBusy(false);
+    }
+  }
+
+  async function handleRollbackToDexie() {
+    setCutoverBusy(true);
+    setCutoverError('');
+    setCutoverReport(null);
+    try {
+      const result = await switchToDexie();
+      if (!result.ok) {
+        setCutoverError(result.error || 'Could not switch back to Dexie.');
+        return;
+      }
+      // switchToDexie doesn't touch the preference — clear it explicitly so the
+      // next reload boots on Dexie rather than re-probing SurrealDB.
+      setStoredStoragePreference('dexie');
+      setActiveDriver(getActiveDriverName());
+      setDriverPref(getStoredStoragePreference());
+      toast.info('Rolled back to Dexie', 'Local IndexedDB is the active store again.');
+    } catch (error) {
+      setCutoverError(error?.message || String(error));
+    } finally {
+      setCutoverBusy(false);
+    }
   }
 
   async function handleTargetedGenerate() {
@@ -817,6 +872,46 @@ export default function SystemHealth() {
         <MetricCard label="Offline Routes" value={`${offlineReadiness?.cachedCount ?? 0}/${offlineReadiness?.totalCriticalRoutes ?? 0}`} detail="Critical local routes cached" icon={WifiOff} tone={offlineReadiness?.cachedCount === offlineReadiness?.totalCriticalRoutes ? 'success' : 'warning'} />
         <MetricCard label="Vault Safety" value={vaultHealth?.status || 'Checking'} detail={`${vaultHealth?.totalRows ?? 0} local rows`} icon={Database} tone={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} />
       </div>
+
+      <Surface tone="vault" status={activeDriver === 'surrealdb' ? 'success' : undefined} className="ops-report-panel">
+        <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <StatusBadge tone="vault">Storage Backend</StatusBadge>
+            <h3 className="qv-m-0 qv-mt-2">
+              <ServerCog size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
+              Active store: <span className="qv-mono">{activeDriver === 'surrealdb' ? 'SurrealDB (:8000)' : 'Dexie (IndexedDB)'}</span>
+            </h3>
+            <p className="qv-text-secondary qv-m-0">
+              QuantVault runs on the local Dexie/IndexedDB store by default. If the SurrealDB sidecar is running (Tauri shell, port 8000) you can cut over to it — settings, the FSRS review queue, attempt log, and mastery snapshots migrate automatically. Curriculum chunks rebuild on the next ingest. Roll back to Dexie any time; your IndexedDB data is never cleared.
+            </p>
+            {driverPref === 'surrealdb' && activeDriver === 'dexie' && (
+              <p className="qv-text-warning qv-m-0 qv-mt-2 qv-fs-sm">
+                Preference is SurrealDB but the sidecar was unreachable at startup — currently serving from local Dexie.
+              </p>
+            )}
+            {cutoverReport && (
+              <div className="qv-mt-2 qv-fs-sm qv-text-secondary">
+                Migrated: <span className="qv-mono">{cutoverReport.settings}</span> settings ·{' '}
+                <span className="qv-mono">{cutoverReport.reviewItems}</span> review items ·{' '}
+                <span className="qv-mono">{cutoverReport.questionResults}</span> attempts ·{' '}
+                <span className="qv-mono">{cutoverReport.masterySnapshots}</span> mastery snapshots.
+              </div>
+            )}
+            {cutoverError && <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{cutoverError}</p>}
+          </div>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+            {activeDriver !== 'surrealdb' ? (
+              <button className="btn btn-primary btn-sm" onClick={handleCutoverToSurreal} disabled={cutoverBusy}>
+                {cutoverBusy ? 'Switching…' : 'Switch to SurrealDB'}
+              </button>
+            ) : (
+              <button className="btn btn-secondary btn-sm" onClick={handleRollbackToDexie} disabled={cutoverBusy}>
+                {cutoverBusy ? 'Switching…' : 'Roll back to Dexie'}
+              </button>
+            )}
+          </div>
+        </div>
+      </Surface>
 
       <Surface tone="vault" status={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} className="ops-report-panel">
         <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>

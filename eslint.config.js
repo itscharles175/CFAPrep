@@ -6,7 +6,24 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 export default [
   // `spike/` holds the gitignored open-notebook clone (its own nested eslint
   // config); `.claude/` and `src-tauri/target` are tooling/build artifacts.
-  { ignores: ['dist', 'node_modules', 'coverage', 'spike', '.claude', 'src-tauri/target'] },
+  // `.venv-onb/` + `.pyinstaller-*` are the open-notebook PyInstaller sidecar
+  // build dirs (Python venv site-packages ship bundled legacy JS that ESLint
+  // would otherwise try — and fail — to lint). `data/` is the sidecar's
+  // runtime working dir.
+  {
+    ignores: [
+      'dist',
+      'node_modules',
+      'coverage',
+      'spike',
+      '.claude',
+      'src-tauri/target',
+      '.venv-onb',
+      '.pyinstaller-build',
+      '.pyinstaller-dist',
+      'data',
+    ],
+  },
   js.configs.recommended,
   {
     files: ['**/*.{js,jsx}'],

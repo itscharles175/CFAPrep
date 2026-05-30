@@ -3,6 +3,61 @@
 All notable changes to QuantVault. Dates use `YYYY-MM-DD`. See `git log` for
 the full per-commit detail.
 
+## [0.8.0] — 2026-05-30
+
+Operationalisation milestone: the two roadmap items previously marked
+"needs a live machine/binaries" are now driven to working state — the
+SurrealDB cutover ships as a UI feature, and the PyInstaller backend bundle
+is validated end-to-end (booted until only a running sidecar remained).
+
+### Added
+- **Pillar 1 — Live SurrealDB cutover.** System Health → Storage Backend
+  panel switches the active driver at runtime. `cutoverTo()` probes the
+  `:8000` sidecar, migrates settings + FSRS review queue + attempt log +
+  mastery snapshots via the new `migrateData()` helper (rolls back on any
+  failure so the user is never stranded), and persists the choice in
+  `localStorage`. `bootstrapStorage()` re-applies it at boot, silently
+  falling back to Dexie if the sidecar is down. Roll-back never clears the
+  IndexedDB data. New `getActiveDriverName` / `getStoredStoragePreference`
+  / `setStoredStoragePreference` helpers. `migrate.test.ts` (4 tests) +
+  cutover/preference tests in `storage.test.ts`.
+- **Pillar 0 — PyInstaller backend bundle, validated end-to-end.**
+  `scripts/build-onb-binary.mjs` now builds in an **isolated `.venv-onb`**
+  provisioned from open-notebook's own `pyproject.toml` (authoritative deps,
+  no drift; never mutates global site-packages). The spec was hardened
+  against the full real dependency chain — each fix verified by booting the
+  bundled binary until the next failure surfaced:
+  - `collect_all` for the langchain ecosystem + open-notebook namespace
+    packages (dynamic plugin discovery; was crashing on
+    `langchain_text_splitters`).
+  - `collect_all` for `surrealdb` + `websockets` (`.sync` submodules).
+  - root-level glob for mypyc-compiled `*__mypyc*` extensions that
+    `packaging`/`chardet` drop at the site-packages root.
+  - `copy_metadata` for `imageio`/`moviepy`/`podcast_creator`/`numpy`
+    (runtime self-version lookups).
+  - `collect_all` for `content_core`/`esperanto`/`ai_prompter`/
+    `surreal_commands` data files (`pkgutil.get_data` YAML/templates).
+  The resulting binary boots its **entire** application graph — every
+  import, compiled/mypyc extension, package data file, and dist-metadata
+  entry resolves and all open-notebook commands register — stopping only at
+  the runtime SurrealDB-connection boundary (operational, not packaging).
+  `docs/PACKAGING.md` documents the build + every gotcha. The stale
+  hand-maintained `onb-minimal-requirements.txt` pin list was retired (it
+  pinned langchain 0.3.x while the checkout needs 1.x).
+
+### Changed
+- `eslint.config.js` ignores the PyInstaller build dirs (`.venv-onb`,
+  `.pyinstaller-*`) + the sidecar runtime `data/` dir so `eslint .` doesn't
+  lint JS bundled inside the Python venv's site-packages.
+- `.gitignore` covers the venv / PyInstaller / sidecar-runtime artifacts.
+
+### Verification gates (all green)
+- `npx tsc --noEmit` — 0 errors
+- `npm run lint` — 0 errors, 0 warnings
+- `npx vitest run` — **449 tests across 50 files**
+- `npm run build` — 68 precache entries / 4.51 MB
+- `npm run build:onb-binary` — produces a structurally-complete backend binary
+
 ## [0.7.0] — 2026-05-28
 
 Roadmap-completion milestone: **every checkbox in `docs/ROADMAP.md` is now

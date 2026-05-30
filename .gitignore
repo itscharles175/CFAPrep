@@ -20,6 +20,16 @@ qa-screenshots/
 spike/
 .claude/worktrees/
 
+# open-notebook PyInstaller sidecar build artifacts (scripts/build-onb-binary.mjs)
+.venv-onb/
+.pyinstaller-build/
+.pyinstaller-dist/
+/open-notebook.spec
+# open-notebook runtime working dir (sqlite checkpoints, tiktoken cache,
+# uploads) — created in cwd when the sidecar binary boots. Root-anchored so it
+# never shadows the tracked src/data/ source.
+/data/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

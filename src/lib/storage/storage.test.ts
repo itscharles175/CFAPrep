@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../progressStore';
-import { getStorage, storageRegistry, switchToDexie, switchToSurreal } from './index';
+import {
+  cutoverTo,
+  getActiveDriverName,
+  getStorage,
+  getStoredStoragePreference,
+  setStoredStoragePreference,
+  STORAGE_PREF_KEY,
+  storageRegistry,
+  switchToDexie,
+  switchToSurreal,
+} from './index';
 
 // Mock surrealdb so test 5 works without a running sidecar.
 vi.mock('surrealdb', () => ({
@@ -115,5 +125,59 @@ describe('driver state after failed switch', () => {
     const result = await switchToDexie();
     expect(result.ok).toBe(true);
     expect(getStorage().name).toBe('dexie');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 7: active-driver name + persisted preference helpers
+// ---------------------------------------------------------------------------
+describe('preference helpers', () => {
+  beforeEach(() => {
+    try {
+      localStorage.removeItem(STORAGE_PREF_KEY);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it('getActiveDriverName reflects the active driver', () => {
+    expect(getActiveDriverName()).toBe('dexie');
+  });
+
+  it('preference defaults to dexie and round-trips through localStorage', () => {
+    expect(getStoredStoragePreference()).toBe('dexie');
+    setStoredStoragePreference('surrealdb');
+    expect(getStoredStoragePreference()).toBe('surrealdb');
+    setStoredStoragePreference('dexie');
+    expect(getStoredStoragePreference()).toBe('dexie');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 8: cutoverTo orchestration
+// ---------------------------------------------------------------------------
+describe('cutoverTo', () => {
+  beforeEach(() => {
+    try {
+      localStorage.removeItem(STORAGE_PREF_KEY);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it('is a no-op (alreadyActive) when target equals the active driver', async () => {
+    const result = await cutoverTo('dexie');
+    expect(result.ok).toBe(true);
+    expect(result.alreadyActive).toBe(true);
+    expect(getStoredStoragePreference()).toBe('dexie');
+  });
+
+  it('fails without migrating when the SurrealDB switch fails (sidecar down)', async () => {
+    const result = await cutoverTo('surrealdb');
+    expect(result.ok).toBe(false);
+    expect(typeof result.error).toBe('string');
+    // Active driver untouched; preference NOT persisted on a failed switch.
+    expect(getActiveDriverName()).toBe('dexie');
+    expect(getStoredStoragePreference()).toBe('dexie');
   });
 });

@@ -118,20 +118,83 @@ Releases page — see "Check for updates" in System Health (when wired).
 
 ## Sidecar bundling
 
-The Tauri Rust supervisor (`src-tauri/src/lib.rs`) currently looks for the
-sidecar binaries under `spike/`, a dev-time arrangement that's gitignored.
-For a packaged distribution the SurrealDB binary + the open-notebook Python
-backend (PyInstaller-bundled) need to live in `resources/` next to the
-installed app, and `services_dir()` needs to read from Tauri's
-`app.path().resource_dir()` instead of `cwd`.
+The Tauri Rust supervisor (`src-tauri/src/lib.rs`) looks for sidecar binaries
+under `spike/` in dev, and under `resources/services/` next to the installed
+executable in production (`services_dir()` searches both). The packaged
+distribution ships the open-notebook Python backend + SurrealDB binary in that
+`resources/services/` slot via `tauri.conf.json` → `bundle.resources`.
 
-This is open (Pillar 0 packaging tail). Until it's wired:
+### Building the open-notebook backend binary
+
+```bash
+npm run build:onb-binary               # isolated-venv build (recommended)
+npm run build:onb-binary -- --ambient  # build against the Python on PATH
+```
+
+`scripts/build-onb-binary.mjs` (default `--venv` mode):
+
+1. Creates an isolated `.venv-onb` from a base Python 3.11/3.12 on PATH.
+2. `pip install "spike/open-notebook"` — installs the **authoritative**
+   dependency set from open-notebook's own `pyproject.toml` (langchain ≥1.2,
+   langgraph, surrealdb, content-core, podcast-creator, numpy, …). No
+   hand-maintained pin list to drift.
+3. `pip install pyinstaller==6.20.0`.
+4. Generates a one-file PyInstaller spec and builds
+   `open-notebook(.exe)` into `src-tauri/resources/services/open-notebook/`.
+
+The isolated venv matters: a dev box's **global** Python typically carries
+cross-project version pins (e.g. an old `websockets` held back by an unrelated
+editable install) that conflict with open-notebook's requirements. The venv
+build is reproducible and never mutates global site-packages.
+
+### Packaging gotchas the spec handles (validated end-to-end)
+
+A naive PyInstaller run produces a binary that builds but crashes on first run.
+The spec in `build-onb-binary.mjs` was hardened against the full chain, each
+fix verified by booting the bundled binary until the next failure surfaced:
+
+- **`collect_all`** for the langchain ecosystem + open-notebook namespace
+  packages — a static hidden-imports list can't keep up with langchain's
+  dynamic plugin discovery (it was crashing on `langchain_text_splitters`).
+- **`collect_all`** for `surrealdb` + `websockets` (the DB client pulls
+  `websockets.sync` submodules the static pass misses).
+- **Root-level mypyc glob** — `packaging` and `chardet` ship as mypyc-compiled
+  wheels whose hashed `*__mypyc*.pyd`/`.so` extensions live at the
+  site-packages **root**, outside any package dir, so `collect_all` misses
+  them. The spec globs and bundles them at the bundle root.
+- **`copy_metadata`** for `imageio`/`moviepy`/`podcast_creator`/`numpy`/etc. —
+  these do `importlib.metadata.version(self)` at import time, which raises
+  `PackageNotFoundError` unless their `.dist-info` travels along.
+- **`collect_all`** for `content_core`/`esperanto`/`ai_prompter`/
+  `surreal_commands` — they ship YAML config + prompt-template data files
+  loaded via `pkgutil.get_data` (it was crashing on
+  `content_core/models_config.yaml`).
+
+With those in place the bundled binary boots its **entire** application graph —
+all imports, all compiled/mypyc extensions, all package data + dist metadata,
+and registers every open-notebook command — then reaches FastAPI app config.
+The only thing left at that point is runtime configuration (a SurrealDB sidecar
+at `:8000` + env), which is operational, not a packaging concern.
+
+### Until the SurrealDB binary is also staged
 
 - The packaged app launches fine and the React UI works.
-- Grounded RAG features that need open-notebook surface their connection
+- Grounded RAG falls back to the **fully-local path** (`src/lib/localRag.ts`)
+  through the storage abstraction + local LLM — no sidecar required.
+- Features that prefer the open-notebook backend surface their connection
   errors actionably (the existing CORS / no-backend message paths).
-- Users running their own LM Studio / Ollama still get the in-app AI
-  features without any sidecar setup — those are direct HTTP calls.
+- Users running their own LM Studio / Ollama get the in-app AI features with
+  no sidecar setup — those are direct HTTP calls.
+
+## Switching the storage backend (SurrealDB cutover)
+
+System Health → **Storage Backend** exposes a live cutover. "Switch to
+SurrealDB" probes the `:8000` sidecar, migrates settings + the FSRS review
+queue + the attempt log + mastery snapshots into it (curriculum chunks rebuild
+on next ingest), and persists the choice. "Roll back to Dexie" reverts; the
+IndexedDB data is never cleared, so the toggle is always safe. The preference
+is stored in `localStorage` and re-applied at boot (`bootstrapStorage`) — if
+the sidecar is down at startup the app silently stays on Dexie.
 
 ## Release checklist
 

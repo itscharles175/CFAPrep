@@ -12,6 +12,7 @@ import { bootstrapSourceVault } from './lib/bootstrapSourceVault';
 import { bootstrapAiContent } from './lib/bootstrapAiContent';
 import { applyTheme, getStoredTheme } from './lib/theme';
 import { bootstrapFsrsParameters } from './lib/bootstrapFsrsParameters';
+import { bootstrapStorage } from './lib/bootstrapStorage';
 
 // Apply the stored theme to <html> BEFORE React mounts so the first paint
 // already shows the correct palette. Without this, users with the light
@@ -28,13 +29,18 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
 registerServiceWorker();
 
-// Load the ingested CFA curriculum into the local source vault on first run.
-bootstrapSourceVault();
+// Re-activate the user's chosen storage backend (SurrealDB if they cut over
+// and the sidecar is up; otherwise Dexie) BEFORE the data bootstraps run, so
+// they read/write through the correct driver. Falls back to Dexie silently.
+bootstrapStorage().finally(() => {
+  // Load the ingested CFA curriculum into the local source vault on first run.
+  bootstrapSourceVault();
 
-// Seed the AI-questions + AI-flashcards caches from `public/cfa-generated.json`
-// if a pre-generated companion bundle is present (see scripts/content-expand.mjs).
-bootstrapAiContent();
+  // Seed the AI-questions + AI-flashcards caches from `public/cfa-generated.json`
+  // if a pre-generated companion bundle is present (see scripts/content-expand.mjs).
+  bootstrapAiContent();
 
-// Apply persisted FSRS parameters if the user has run the optimizer; otherwise
-// the scheduler keeps FSRS-4.5 library defaults.
-bootstrapFsrsParameters();
+  // Apply persisted FSRS parameters if the user has run the optimizer; otherwise
+  // the scheduler keeps FSRS-4.5 library defaults.
+  bootstrapFsrsParameters();
+});
