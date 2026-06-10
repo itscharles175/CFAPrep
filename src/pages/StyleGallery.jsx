@@ -16,6 +16,11 @@ import {
 
 /* ── helpers ─────────────────────────────────────────────── */
 
+const compactGrid = (minWidth = 160) => ({
+  display: 'grid',
+  gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${minWidth}px), 1fr))`,
+});
+
 
 function TokenLabel({ name }) {
   return (
@@ -149,8 +154,7 @@ function ColorsSection() {
           </p>
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+              ...compactGrid(120),
               gap: 'var(--space-4)',
             }}
           >
@@ -290,8 +294,7 @@ function RadiusSection() {
       <SectionDesc>Border-radius scale. The full token creates pill shapes.</SectionDesc>
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+          ...compactGrid(140),
           gap: 'var(--space-6)',
         }}
       >
@@ -332,10 +335,9 @@ function ElevationSection() {
       <SectionDesc>Box-shadow depth scale. Cards are shown against a recessed background to make shadows visible.</SectionDesc>
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+          ...compactGrid(150),
           gap: 'var(--space-6)',
-          padding: 'var(--space-8)',
+          padding: 'clamp(var(--space-4), 5vw, var(--space-8))',
           background: 'rgba(0,0,0,0.18)',
           borderRadius: 'var(--radius-lg)',
         }}
@@ -432,8 +434,7 @@ function MotionSection() {
       </label>
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+          ...compactGrid(140),
           gap: 'var(--space-8)',
         }}
       >
@@ -484,7 +485,7 @@ function ComponentsSection() {
 
       {/* Surface */}
       <ComponentsRow label="Surface — tone variants">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--space-4)' }}>
+        <div style={{ ...compactGrid(150), gap: 'var(--space-4)' }}>
           {['default', 'study', 'exam', 'vault', 'quant', 'excel', 'ops', 'metric'].map((tone) => (
             <Surface key={tone} tone={tone}>
               <code className="qv-fs-xs qv-text-muted">tone="{tone}"</code>
@@ -514,7 +515,7 @@ function ComponentsSection() {
 
       {/* MetricTile */}
       <ComponentsRow label="MetricTile — all tones">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 'var(--space-4)' }}>
+        <div style={{ ...compactGrid(180), gap: 'var(--space-4)' }}>
           {['accent', 'success', 'warning', 'danger', 'exam', 'vault', 'quant'].map((tone) => (
             <MetricTile key={tone} label="Questions answered" value="142" detail="+12 today" tone={tone} />
           ))}
@@ -523,7 +524,7 @@ function ComponentsSection() {
 
       {/* Panel */}
       <ComponentsRow label="Panel">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--space-4)' }}>
+        <div style={{ ...compactGrid(240), gap: 'var(--space-4)' }}>
           <Panel title="Study Progress" subtitle="Last 30 days" eyebrow="CFA Level I" tone="study">
             <ProgressRail value={68} max={100} label="Coverage" />
           </Panel>
@@ -708,7 +709,7 @@ export default function StyleGallery() {
         </p>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '160px minmax(0,1fr)', gap: 'var(--space-12)', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 160px) minmax(0, 1fr)', gap: 'clamp(var(--space-4), 5vw, var(--space-12))', alignItems: 'start' }}>
         <TableOfContents />
         <main>
           <ColorsSection />

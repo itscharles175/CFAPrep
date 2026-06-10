@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Download, Flag, ListChecks, PenLine, Timer, Trophy } from 'lucide-react';
 import { loadCfaLevelContent, loadCfaMockExam } from '../domains/cfa/cfaLoaders';
@@ -226,6 +226,7 @@ export default function MockExam() {
   // Map of question.id -> { state: 'loading'|'done'|'error', text?: string, error?: string }
   const [mockAiExplain, setMockAiExplain] = useState({});
   const mockAiAbortRef = useRef(null);
+  const mockStateSaveQueueRef = useRef(Promise.resolve());
   const contentMatches = contentState.level === level && (level !== 'level3' || contentState.pathway === activePathway);
   // A generated mock is shaped into the same { levelContent, mock, items } the
   // runner understands, so scoring/timing/persistence work unchanged.
@@ -271,6 +272,14 @@ export default function MockExam() {
     if (mockItem.type === 'constructed-response') return !constructedResponses[mockItem.constructed.id]?.trim();
     return questionRowsFromItem(mockItem).some((question) => selected[question.id] === undefined);
   });
+  const queueMockSectionStateSave = useCallback((state) => {
+    const queued = mockStateSaveQueueRef.current.then(
+      () => saveMockSectionState(state),
+      () => saveMockSectionState(state),
+    );
+    mockStateSaveQueueRef.current = queued.catch(() => undefined);
+    return queued;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -405,7 +414,7 @@ export default function MockExam() {
 
   useEffect(() => {
     if (!hydrated || finished || !items.length || !mock) return;
-    saveMockSectionState({
+    queueMockSectionStateSave({
       id: mockStateId,
       title: mock.title,
       questionIds: items.map(itemId),
@@ -419,7 +428,7 @@ export default function MockExam() {
       pausedAt,
       status: paused ? 'paused' : 'in-progress',
     });
-  }, [constructedResponses, current, flags, finished, hydrated, items, level, mock, mockStateId, paused, pausedAt, pausedMs, rubricScores, selected, startTime]);
+  }, [constructedResponses, current, flags, finished, hydrated, items, level, mock, mockStateId, paused, pausedAt, pausedMs, queueMockSectionStateSave, rubricScores, selected, startTime]);
 
   useEffect(() => {
     function handleKeyboard(event) {

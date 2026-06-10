@@ -39,7 +39,7 @@
   --study: var(--cyan-500);
   --vault: var(--teal-500);
   --ops: var(--amber-500);
-  --quant: var(--purple-500);
+  --quant: #C084FC;
   --excel: var(--emerald-500);
   --success: var(--emerald-500);
   --warning: var(--amber-500);
@@ -964,6 +964,7 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   gap: var(--space-1);
   width: fit-content;
+  max-width: 100%;
   min-height: 22px;
   padding: 2px var(--space-2);
   border-radius: var(--radius-sm);
@@ -971,6 +972,7 @@ input:focus, select:focus, textarea:focus {
   font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
   border: 1px solid transparent;
 }
 .status-badge-accent { color: var(--study); background: rgba(6,182,212,0.12); border-color: rgba(6,182,212,0.22); }
@@ -1391,40 +1393,57 @@ input:focus, select:focus, textarea:focus {
 .rubric-panel {
   display: grid;
   gap: var(--space-4);
+  min-width: 0;
 }
 .rubric-panel-head {
   display: flex;
   justify-content: space-between;
   gap: var(--space-3);
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 .rubric-panel-head h2 {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .rubric-criteria {
   display: grid;
   gap: var(--space-2);
+  min-width: 0;
 }
 .rubric-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 80px 44px;
   gap: var(--space-3);
   align-items: center;
+  min-width: 0;
   padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-data);
 }
+.rubric-row > span {
+  min-width: 0;
+}
 .rubric-row strong,
 .rubric-row small {
   display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .rubric-row small {
   color: var(--text-secondary);
 }
+.rubric-row input {
+  min-width: 0;
+  width: 100%;
+}
 .rubric-row em {
   color: var(--text-muted);
   font-style: normal;
+  white-space: nowrap;
 }
 
 .cockpit-grid {

@@ -224,7 +224,7 @@ export default function KnowledgeGraph() {
       <Surface tone="analytics" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
         <div style={{ overflowX: 'auto' }}>
           <svg
-            role="img"
+            role="group"
             aria-label="CFA curriculum knowledge graph"
             width={width}
             height={height}
@@ -270,14 +270,17 @@ export default function KnowledgeGraph() {
               const isActive = hoverId === node.id;
               const matches = matchesFilter(node);
               return (
-                <Link key={node.id} to={`/cfa/${node.levelId}/${node.topicId}`} role="link" aria-label={`Open ${node.title}`}>
+                <Link
+                  key={node.id}
+                  to={`/cfa/${node.levelId}/${node.topicId}`}
+                  aria-label={`Open ${node.title}`}
+                  onMouseEnter={() => setHoverId(node.id)}
+                  onMouseLeave={() => setHoverId((id) => (id === node.id ? null : id))}
+                  onFocus={() => setHoverId(node.id)}
+                  onBlur={() => setHoverId((id) => (id === node.id ? null : id))}
+                >
                   <g
-                    onMouseEnter={() => setHoverId(node.id)}
-                    onMouseLeave={() => setHoverId((id) => (id === node.id ? null : id))}
-                    onFocus={() => setHoverId(node.id)}
-                    onBlur={() => setHoverId((id) => (id === node.id ? null : id))}
                     style={{ cursor: 'pointer' }}
-                    tabIndex={0}
                   >
                     <circle
                       cx={node.x}

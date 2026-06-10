@@ -33,9 +33,12 @@ export default function CfaConstructedResponse() {
   const [response, setResponse] = useState('');
   const [scores, setScores] = useState({});
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
   const [startTime] = useState(nowMs);
   const [critique, setCritique] = useState({ state: 'idle' });
   const abortRef = useRef(null);
+  const submitTokenRef = useRef(0);
+  const submitPendingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,7 +95,10 @@ export default function CfaConstructedResponse() {
     setResponse('');
     setScores({});
     setSubmitted(false);
+    setSubmitError(null);
     setCritique({ state: 'idle' });
+    submitTokenRef.current += 1;
+    submitPendingRef.current = false;
   }
 
   async function handleAiCritique() {
@@ -128,21 +134,38 @@ export default function CfaConstructedResponse() {
   }
 
   async function submit() {
-    await recordConstructedResponseAttempt({
-      domain: 'cfa',
-      level,
-      topic: topicKey,
-      itemId: item.id,
-      title: item.title,
-      earnedPoints,
-      maxPoints: item.rubric.maxPoints,
-      rubricScores: scores,
-      response,
-      elapsedSeconds: Math.round((nowMs() - startTime) / 1000),
-      learningObjectives: item.learningObjectives,
-      path: `/cfa/${level}/${topic}/constructed-response`,
-    });
+    if (!response.trim() || submitted || submitPendingRef.current) return;
+
+    const submitToken = submitTokenRef.current + 1;
+    submitTokenRef.current = submitToken;
+    submitPendingRef.current = true;
     setSubmitted(true);
+    setSubmitError(null);
+
+    try {
+      await recordConstructedResponseAttempt({
+        domain: 'cfa',
+        level,
+        topic: topicKey,
+        itemId: item.id,
+        title: item.title,
+        earnedPoints,
+        maxPoints: item.rubric.maxPoints,
+        rubricScores: scores,
+        response,
+        elapsedSeconds: Math.round((nowMs() - startTime) / 1000),
+        learningObjectives: item.learningObjectives,
+        path: `/cfa/${level}/${topic}/constructed-response`,
+      });
+    } catch (error) {
+      if (submitTokenRef.current === submitToken) {
+        setSubmitError(error?.message || 'Progress could not be saved locally for this response.');
+      }
+    } finally {
+      if (submitTokenRef.current === submitToken) {
+        submitPendingRef.current = false;
+      }
+    }
   }
 
   return (
@@ -289,6 +312,26 @@ export default function CfaConstructedResponse() {
             }}
           >
             {critique.error}
+          </div>
+        )}
+
+        {submitError && (
+          <div
+            role="alert"
+            style={{
+              marginTop: 'var(--space-4)',
+              borderLeft: '3px solid var(--color-warning, #f59e0b)',
+              paddingLeft: 'var(--space-4)',
+              paddingTop: 'var(--space-3)',
+              paddingBottom: 'var(--space-3)',
+              paddingRight: 'var(--space-3)',
+              background: 'var(--surface-raised, var(--surface))',
+              borderRadius: '0 var(--radius-md) var(--radius-md) 0',
+              color: 'var(--text-primary)',
+              fontSize: '0.9rem',
+            }}
+          >
+            {submitError}
           </div>
         )}
       </div>

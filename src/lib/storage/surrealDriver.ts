@@ -126,6 +126,11 @@ const SCHEMA_STATEMENTS = (dim: number): string => `
   DEFINE FIELD IF NOT EXISTS attempts ON mastery_snapshots TYPE number;
   DEFINE FIELD IF NOT EXISTS lastAttemptAt ON mastery_snapshots TYPE string;
   DEFINE INDEX IF NOT EXISTS mastery_snapshots_topic_idx ON mastery_snapshots FIELDS domain, topic;
+
+  DEFINE TABLE IF NOT EXISTS setting SCHEMALESS;
+  DEFINE FIELD IF NOT EXISTS key ON setting TYPE string;
+  DEFINE FIELD IF NOT EXISTS updatedAt ON setting TYPE string;
+  DEFINE INDEX IF NOT EXISTS setting_key_idx ON setting FIELDS key;
 `;
 
 async function ensureSchema(client: Surreal): Promise<void> {
@@ -141,6 +146,15 @@ async function ensureSchema(client: Surreal): Promise<void> {
 /** Sanitise an arbitrary chunk id into a SurrealDB record-id-safe slug. */
 function sanitiseId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function encodeSettingKey(key: string): string {
+  const bytes = new TextEncoder().encode(key);
+  return `k_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function settingRecordId(key: string): StringRecordId {
+  return new StringRecordId(`setting:${encodeSettingKey(key)}`);
 }
 
 function buildSearchQuery(opts: { hasEmbedding: boolean; hasQuery: boolean; filters: string[] }): string {
@@ -416,7 +430,8 @@ export const surrealDriver: StorageDriver = {
   settings: {
     async get(key: string): Promise<StorageSettingRow | undefined> {
       const client = await getClient();
-      const result = await client.select<SurrealRecord>(new StringRecordId(`setting:${key}`));
+      await ensureSchema(client);
+      const result = await client.select<SurrealRecord>(settingRecordId(key));
       const row = Array.isArray(result) ? result[0] : (result as SurrealRecord | undefined);
       if (!row || typeof row['key'] !== 'string') return undefined;
       return { key: row['key'] as string, value: row['value'], updatedAt: row['updatedAt'] as string };
@@ -424,16 +439,19 @@ export const surrealDriver: StorageDriver = {
 
     async put(row: StorageSettingRow): Promise<void> {
       const client = await getClient();
-      await client.upsert(new StringRecordId(`setting:${row.key}`), { key: row.key, value: row.value, updatedAt: row.updatedAt });
+      await ensureSchema(client);
+      await client.upsert(settingRecordId(row.key), { key: row.key, value: row.value, updatedAt: row.updatedAt });
     },
 
     async delete(key: string): Promise<void> {
       const client = await getClient();
-      await client.delete(new StringRecordId(`setting:${key}`));
+      await ensureSchema(client);
+      await client.delete(settingRecordId(key));
     },
 
     async toArray(): Promise<StorageSettingRow[]> {
       const client = await getClient();
+      await ensureSchema(client);
       const rows = await client.select<SurrealRecord>('setting');
       const arr = Array.isArray(rows) ? rows : [];
       return arr
@@ -443,11 +461,13 @@ export const surrealDriver: StorageDriver = {
 
     async bulkDelete(keys: string[]): Promise<void> {
       const client = await getClient();
-      await Promise.all(keys.map((key) => client.delete(new StringRecordId(`setting:${key}`))));
+      await ensureSchema(client);
+      await Promise.all(keys.map((key) => client.delete(settingRecordId(key))));
     },
 
     async clear(): Promise<void> {
       const client = await getClient();
+      await ensureSchema(client);
       await client.delete('setting');
     },
   },

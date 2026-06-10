@@ -293,7 +293,8 @@
    *     - excel → green.  Dark theme uses #16a34a (5.0:1 vs #0F172A);
    *               light theme uses #15803d (5.1:1 vs #FFFFFF) because
    *               #16a34a fails AA body-text contrast on white (~3.7:1).
-   *     - quant → magenta.  Dark theme uses #c026d3 (4.5:1 vs #0F172A);
+   *     - quant → purple. Dark theme uses #C084FC for AA contrast on the
+   *               app's dark surfaces;
    *               light theme uses #a21caf (5.4:1 vs #FFFFFF) because
    *               #c026d3 dips to ~4.0:1 on white.
    *
@@ -322,9 +323,9 @@
 
   /* Quant — magenta. Same per-theme pattern as Excel. */
   [data-domain="quant"] {
-    --accent:        #C026D3;
-    --accent-hover:  #E879F9;
-    --surface-soft:  rgba(192, 38, 211, 0.12);
+    --accent:        #C084FC;
+    --accent-hover:  #E9D5FF;
+    --surface-soft:  rgba(192, 132, 252, 0.12);
     --color-accent:      var(--accent);
     --color-accent-soft: var(--surface-soft);
   }
@@ -348,23 +349,9 @@
     --surface-soft:  rgba(162, 28, 175, 0.10);
   }
 
-  @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]):not([data-theme="light"]) [data-domain="cfa"] {
-      --accent:        #1D4ED8;
-      --accent-hover:  #1E40AF;
-      --surface-soft:  rgba(37, 99, 235, 0.08);
-    }
-    :root:not([data-theme="dark"]):not([data-theme="light"]) [data-domain="excel"] {
-      --accent:        #15803D;
-      --accent-hover:  #166534;
-      --surface-soft:  rgba(21, 128, 61, 0.10);
-    }
-    :root:not([data-theme="dark"]):not([data-theme="light"]) [data-domain="quant"] {
-      --accent:        #A21CAF;
-      --accent-hover:  #86198F;
-      --surface-soft:  rgba(162, 28, 175, 0.10);
-    }
-  }
+  /* System-theme light palette routing lives in the raw palette layer.
+     Keep domain accents on their dark-surface values unless the explicit
+     `data-theme="light"` selector above has switched the whole app to light. */
 }
 
 /* ─────────────────────────────────────────────────────────────

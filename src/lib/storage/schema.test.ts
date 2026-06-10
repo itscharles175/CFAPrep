@@ -193,6 +193,7 @@ const surrealState = vi.hoisted(() => {
   return {
     schemaCalls: 0,
     queryCalls: [] as Array<{ sql: string; binds: Record<string, unknown> | undefined }>,
+    selectCalls: [] as Array<{ target: string }>,
     upsertCalls: [] as Array<{ id: string; payload: unknown }>,
     createCalls: [] as Array<{ table: unknown; payload: unknown }>,
     deleteCalls: [] as Array<{ target: string }>,
@@ -235,7 +236,10 @@ vi.mock('surrealdb', () => {
     async create(table: unknown, payload: unknown): Promise<void> {
       surrealState.createCalls.push({ table, payload });
     }
-    async select(): Promise<unknown> {
+    async select(target?: unknown): Promise<unknown> {
+      surrealState.selectCalls.push({
+        target: target instanceof StringRecordId ? target.rid : String(target),
+      });
       if (surrealState.nextSelectResult != null) {
         const out = surrealState.nextSelectResult;
         surrealState.nextSelectResult = null;
@@ -256,6 +260,7 @@ describe('surrealDriver unified-schema namespaces (mocked client)', () => {
   beforeEach(async () => {
     surrealState.schemaCalls = 0;
     surrealState.queryCalls = [];
+    surrealState.selectCalls = [];
     surrealState.upsertCalls = [];
     surrealState.createCalls = [];
     surrealState.deleteCalls = [];
@@ -341,6 +346,37 @@ describe('surrealDriver unified-schema namespaces (mocked client)', () => {
     expect(snap).toBeDefined();
     expect(snap!.id).toBe('cfa::fi::los-1');
     expect(snap!.score).toBe(88);
+  });
+
+  it('settings use encoded record ids while preserving the original key payload', async () => {
+    const { surrealDriver } = await import('./surrealDriver');
+    const row = {
+      key: 'open-notebook:settings',
+      value: { enabled: true },
+      updatedAt: '2026-06-10T00:00:00.000Z',
+    };
+
+    await surrealDriver.settings.put(row);
+    surrealState.nextSelectResult = row;
+    const fetched = await surrealDriver.settings.get(row.key);
+    await surrealDriver.settings.delete(row.key);
+
+    const encodedId = 'setting:k_6f70656e2d6e6f7465626f6f6b3a73657474696e6773';
+    expect(surrealState.upsertCalls[0].id).toBe(encodedId);
+    expect(surrealState.upsertCalls[0].payload).toEqual(row);
+    expect(surrealState.selectCalls[0].target).toBe(encodedId);
+    expect(surrealState.deleteCalls[0].target).toBe(encodedId);
+    expect(fetched).toEqual(row);
+  });
+
+  it('settings.bulkDelete encodes every requested key', async () => {
+    const { surrealDriver } = await import('./surrealDriver');
+    await surrealDriver.settings.bulkDelete(['a:b', 'a*b']);
+
+    expect(surrealState.deleteCalls.map((call) => call.target)).toEqual([
+      'setting:k_613a62',
+      'setting:k_612a62',
+    ]);
   });
 
   it('schema-creation runs exactly once across reviewItems + questionResults + masterySnapshots calls', async () => {

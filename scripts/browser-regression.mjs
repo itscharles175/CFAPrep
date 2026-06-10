@@ -4,7 +4,7 @@ import { chromium } from 'playwright-core';
 import { appRoutes } from '../src/routes/routeManifest.ts';
 import { applySourceState, browserCandidates, firstExistingPath, summarizeRouteFailures, viewports } from './qa-helpers.mjs';
 
-/* global document, window */
+/* global document, indexedDB, window */
 
 async function waitForBodyText(page, pattern, label) {
   await page.waitForFunction(
@@ -21,6 +21,79 @@ async function assertNoRuntimeErrors(page, label) {
   if (/TypeError|ReferenceError|Cannot read|Failed to fetch/i.test(body)) {
     throw new Error(`Runtime error text detected during ${label}`);
   }
+}
+
+async function readIndexedDbStoreCount(page, storeName) {
+  return page.evaluate(async (store) => {
+    const request = indexedDB.open('quantvault');
+    const db = await new Promise((resolve, reject) => {
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(store, 'readonly');
+        const read = tx.objectStore(store).count();
+        read.onerror = () => reject(read.error);
+        read.onsuccess = () => resolve(read.result);
+      });
+    } finally {
+      db.close();
+    }
+  }, storeName);
+}
+
+async function waitForIndexedDbStoreCountAbove(page, storeName, minimumCount, label) {
+  const deadline = Date.now() + 10_000;
+  let lastCount = -1;
+
+  while (Date.now() < deadline) {
+    try {
+      lastCount = await readIndexedDbStoreCount(page, storeName);
+      if (lastCount > minimumCount) return;
+    } catch (error) {
+      lastCount = error?.message || -1;
+    }
+    await page.waitForTimeout(250);
+  }
+
+  throw new Error(`Timed out waiting for ${label}; last ${storeName} count was ${lastCount}.`);
+}
+
+async function waitForMockSectionStatus(page, stateId, expectedStatus, label) {
+  const deadline = Date.now() + 10_000;
+  let lastStatus = 'not-read';
+
+  while (Date.now() < deadline) {
+    try {
+      lastStatus = await page.evaluate(async (id) => {
+        const request = indexedDB.open('quantvault');
+        const db = await new Promise((resolve, reject) => {
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result);
+        });
+
+        try {
+          const state = await new Promise((resolve, reject) => {
+            const tx = db.transaction('mockSectionState', 'readonly');
+            const read = tx.objectStore('mockSectionState').get(id);
+            read.onerror = () => reject(read.error);
+            read.onsuccess = () => resolve(read.result || null);
+          });
+          return state?.status || 'missing';
+        } finally {
+          db.close();
+        }
+      }, stateId);
+      if (lastStatus === expectedStatus) return;
+    } catch (error) {
+      lastStatus = error?.message || 'read-error';
+    }
+    await page.waitForTimeout(250);
+  }
+
+  throw new Error(`Timed out waiting for ${label}; last mock state status was ${lastStatus}.`);
 }
 
 await access('dist/index.html').catch(() => {
@@ -70,7 +143,7 @@ try {
   startBrowserStep('browser:cfa-vignette', '/cfa/level2/equity/vignette', 'Level II async vignette flow');
   await page.goto(new URL('/cfa/level2/equity/vignette', address).toString(), { waitUntil: 'networkidle' });
   await waitForBodyText(page, /Equity Valuation/, 'Level II equity vignette content');
-  await waitForBodyText(page, /EXAM-READY/, 'Level II exam-ready badge');
+  await waitForBodyText(page, /LEVEL 2|LEVEL II/, 'Level II vignette level marker');
   const options = page.locator('.quiz-option');
   const optionCount = await options.count();
   if (optionCount < 4) throw new Error('Level II vignette did not render answer choices.');
@@ -80,8 +153,13 @@ try {
     const firstOption = questionCards.nth(index).locator('.quiz-option').first();
     if ((await firstOption.count()) > 0) await firstOption.click();
   }
+  await page.waitForFunction(
+    (count) => document.querySelectorAll('.quiz-option.selected').length === count,
+    questionCardCount,
+    { timeout: 10_000 },
+  );
   await page.getByRole('button', { name: /submit vignette/i }).click();
-  await waitForBodyText(page, /Next Vignette/, 'submitted Level II vignette');
+  await waitForBodyText(page, /Correct|Review/, 'submitted Level II vignette feedback');
   await assertNoRuntimeErrors(page, 'Level II vignette flow');
   passBrowserStep();
   console.log('OK Level II async vignette flow');
@@ -90,6 +168,7 @@ try {
   await page.goto(new URL('/cfa/level3/performance/constructed-response', address).toString(), { waitUntil: 'networkidle' });
   await waitForBodyText(page, /Performance Measurement/, 'Level III constructed-response content');
   await waitForBodyText(page, /LEVEL III RESPONSE/, 'Level III constructed-response shell');
+  const constructedAttemptCount = await readIndexedDbStoreCount(page, 'constructedResponseAttempts');
   await page.getByLabel(/constructed response answer/i).fill('Recommend the monitoring action because the benchmark evidence controls the decision and the portfolio facts support a concise implementation response.');
   const scoreInputs = page.locator('.rubric-row input, .analytics-row input');
   const scoreInputCount = await scoreInputs.count();
@@ -97,8 +176,14 @@ try {
   for (let index = 0; index < scoreInputCount; index += 1) {
     await scoreInputs.nth(index).fill('1');
   }
+  await page.waitForFunction(
+    (count) => Array.from(document.querySelectorAll('.rubric-row input, .analytics-row input')).filter((input) => input.value).length === count,
+    scoreInputCount,
+    { timeout: 10_000 },
+  );
   await page.getByRole('button', { name: /submit response/i }).click();
   await waitForBodyText(page, /Model Answer/, 'submitted Level III constructed response');
+  await waitForIndexedDbStoreCountAbove(page, 'constructedResponseAttempts', constructedAttemptCount, 'persisted Level III constructed response');
   await assertNoRuntimeErrors(page, 'Level III constructed-response flow');
   passBrowserStep();
   console.log('OK Level III constructed-response flow');
@@ -106,11 +191,14 @@ try {
   startBrowserStep('browser:cfa-mock-resume', '/cfa/level2/mock', 'Level II mock resume flow');
   await page.goto(new URL('/cfa/level2/mock', address).toString(), { waitUntil: 'networkidle' });
   await waitForBodyText(page, /MOCK SECTION/, 'Level II mock section');
-  await waitForBodyText(page, /EXAM-READY/, 'Level II mock exam-ready badge');
+  await waitForBodyText(page, /Level II|LEVEL 2/, 'Level II mock level marker');
+  await waitForMockSectionStatus(page, 'cfa-level2-mixed-mock', 'in-progress', 'initial mock persistence hydration');
   const firstMockOption = page.locator('.quiz-option').first();
   if ((await firstMockOption.count()) === 0) throw new Error('Level II mock did not render a selectable item.');
   await firstMockOption.click();
   await page.getByRole('button', { name: /^pause$/i }).click();
+  await waitForBodyText(page, /Section Paused|Resume Section/, 'mock paused before reload');
+  await waitForMockSectionStatus(page, 'cfa-level2-mixed-mock', 'paused', 'persisted mock pause state');
   await page.reload({ waitUntil: 'networkidle' });
   await waitForBodyText(page, /Section Paused|Resume/, 'mock resume after reload');
   await assertNoRuntimeErrors(page, 'mock resume flow');
