@@ -1,0 +1,37 @@
+/*
+ * StudyVault — cross-domain unified design tokens (Plan S1).
+ *
+ * The host (/cfa, /quant, /excel) and the vendored LSAT domain shipped two
+ * separate token vocabularies: the host's raw hex palette in `index.css`
+ * (an UNLAYERED :root) and LSAT's HSL Tailwind tokens in
+ * `src/domains/lsat/index.css`. The theme bridge (main.jsx) synced the
+ * light/dark *name* but not the shared *vocabulary*, so the single most
+ * visible seam between domains was typography: the host's `--font-sans`
+ * named 'Inter' with NO @fontsource/inter installed, so it fell back to the
+ * OS system font (Segoe UI on Windows) — while LSAT rendered in Geist.
+ *
+ * This file unifies the shared vocabulary. It is imported LAST in the host
+ * entry (after index.css + tokens.css) and is intentionally UNLAYERED, so its
+ * :root declarations win over index.css's unlayered :root (later source order
+ * wins) and over tokens.css's `@layer tokens` (unlayered always beats layered).
+ *
+ * Scope is deliberately limited to the highest-impact, zero-regression-risk
+ * shared tokens — typography. The color palettes stay value-identical to today
+ * (recolouring a theme is the plan's top risk, S1 risk #1); only the font
+ * vocabulary is unified here so /cfa and /lsat read as one product.
+ * See docs/STUDYVAULT-POLISH-PLAN.md S1.
+ */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+:root {
+  /* Unify both domains on Geist (sans/mono) + Newsreader (serif), matching the
+     LSAT domain's stack. The variable fonts above are now bundled for the host
+     too; Newsreader stays lazy (host has no eager serif need, same as LSAT,
+     which lazy-loads it via src/lib/serifFont.ts). */
+  --font-sans: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, 'Liberation Mono', 'Courier New', monospace;
+  --font-serif: 'Newsreader Variable', ui-serif, Georgia, 'Times New Roman', serif;
+}
