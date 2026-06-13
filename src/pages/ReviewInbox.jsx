@@ -13,6 +13,7 @@ import {
 import { getTutorProvider, isTutorEnabledFromEnv } from '../lib/aiTutorContracts';
 import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
+import { fetchLsatDue, LSAT_REVIEW_PATH } from '../lib/lsatReviewBridge';
 
 const filters = [
   { value: 'all', label: 'All' },
@@ -39,6 +40,9 @@ export default function ReviewInbox() {
   const [dailyTarget, setDailyTarget] = useState('45');
   const [examDate, setExamDate] = useState('');
   const [mockCadence, setMockCadence] = useState('14');
+  // Phase 4.1 — cross-domain review: LSAT due items come from the LSAT sidecar
+  // (:8100) over HTTP, merged into this inbox. null = not yet loaded.
+  const [lsatDue, setLsatDue] = useState(null);
 
   async function refresh() {
     const [nextItems, nextReadiness, nextPlan, nextForecast] = await Promise.all([
@@ -71,6 +75,11 @@ export default function ReviewInbox() {
 
   useEffect(() => {
     let active = true;
+    // Cross-domain: pull the LSAT due queue from the sidecar (non-blocking;
+    // silently omitted when the backend is offline).
+    fetchLsatDue().then((result) => {
+      if (active) setLsatDue(result);
+    });
     Promise.all([
       getReviewInbox({ level3Pathway: activePathway }),
       getReadinessByTopic({ level3Pathway: activePathway }),
@@ -142,6 +151,38 @@ export default function ReviewInbox() {
         <MetricCard label="Weakest Topic" value={weakest ? `${weakest.readinessScore}%` : '-'} detail={weakest?.topic || 'No attempts yet'} icon={Gauge} tone="success" />
         <MetricCard label="Queue" value={items.length} detail="Total actionable items" icon={ListChecks} tone="accent" />
       </div>
+
+      {/* Phase 4.1 — cross-domain: LSAT reviews from the sidecar, merged in.
+          Rendered only when the LSAT backend is reachable; the actual review
+          happens in the LSAT app (hard nav to /lsat/srs). */}
+      {lsatDue?.ok && (
+        <Surface tone="study" status="study" style={{ marginBottom: 'var(--space-6)' }}>
+          <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+            <div>
+              <StatusBadge tone="study">LSAT</StatusBadge>
+              <h3 className="qv-mt-3 qv-mb-2">
+                LSAT reviews{lsatDue.dueCount > 0 ? ` — ${lsatDue.dueCount} due` : ' — all caught up'}
+              </h3>
+              {lsatDue.items.length > 0 ? (
+                <ul className="qv-text-secondary qv-fs-sm" style={{ margin: 0, paddingLeft: '1.1rem' }}>
+                  {lsatDue.items.map((it) => (
+                    <li key={it.id}>
+                      {it.title}
+                      {it.qType ? <span className="qv-text-muted"> · {it.qType}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="qv-text-secondary qv-m-0 qv-fs-sm">No LSAT cards are due right now.</p>
+              )}
+            </div>
+            {/* Hard nav — the LSAT SRS flow lives in the LSAT sub-app. */}
+            <a className="btn btn-primary btn-sm" href={LSAT_REVIEW_PATH}>
+              Review in LSAT Lab
+            </a>
+          </div>
+        </Surface>
+      )}
 
       {studyPlan?.nextActions?.length > 0 && (
         <Surface tone="vault" status="vault" style={{ marginBottom: 'var(--space-6)' }}>
