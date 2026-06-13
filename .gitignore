@@ -54,3 +54,8 @@ services/lsat-backend/datasets/
 *.njsproj
 *.sln
 *.sw?
+
+# Python build artifacts created in-tree by the PyInstaller build (pip build/ + egg-info)
+services/lsat-backend/build/
+services/lsat-backend/*.egg-info/
+services/lsat-backend/dist/
