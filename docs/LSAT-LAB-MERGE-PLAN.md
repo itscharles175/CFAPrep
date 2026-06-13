@@ -1,5 +1,16 @@
 # Merging LSAT Lab into QuantVault — Master Plan
 
+> **Execution status (2026-06-13):** Phases **0, 1, 2, 3, R** are DONE and
+> committed on `codex/performance-level2-content-gate` (StudyVault v0.9.0).
+> LSAT runs natively at `/lsat`; the backend sidecar builds + boots + serves on
+> 8100; rebrand to StudyVault complete. Browser-verified. **Remaining:** Phase
+> 4 (shared settings/theme bridge), Phase 4.1 (unified Review Inbox), Phase 5
+> (surface the LSAT import UI in the host — the flows already exist in-app),
+> Phase 6 CI (binaries built locally, documented in PACKAGING.md), Phase 7
+> (final sweep). Gates green throughout: tsc 0 · lint 0 · vitest 451/50 ·
+> build 190 entries · cargo 29 · build:lsat-binary boots.
+
+
 > Status: **PLAN ONLY — no implementation.** Authored 2026-06-13; decisions resolved 2026-06-13 (see §8).
 > Outcome shape: a **single monorepo**, rebranded to the umbrella product **StudyVault**, with LSAT as a ported `/lsat` domain backed by a vendored, bundled FastAPI sidecar, and a **unified cross-domain review queue**.
 > Target (host): **QuantVault / CFAPrep** — `C:\Users\charl\.gemini\antigravity\scratch\quantvault` (branch `codex/performance-level2-content-gate`, v0.8.0+; GitNexus repo **CFAPrep**).

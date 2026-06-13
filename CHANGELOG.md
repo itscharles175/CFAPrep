@@ -1,7 +1,67 @@
 # Changelog
 
-All notable changes to QuantVault. Dates use `YYYY-MM-DD`. See `git log` for
-the full per-commit detail.
+All notable changes to StudyVault (formerly QuantVault). Dates use
+`YYYY-MM-DD`. See `git log` for the full per-commit detail.
+
+## [0.9.0] — 2026-06-13
+
+**StudyVault** — merged LSAT Lab in as a fourth domain and rebranded the
+umbrella product. CFA · Quant · Excel · **LSAT**, one local-first desktop app.
+See `docs/LSAT-LAB-MERGE-PLAN.md` for the full plan; executed Phases 0–3 + R.
+
+### Added
+- **LSAT domain (`/lsat`).** The entire LSAT Lab app (32 pages, 200+
+  components: Logical Reasoning, Reading Comprehension, blind review, timed
+  sections + full exams, adaptive drills, SRS, analytics, tutor, notebook,
+  question bank, import) now runs natively inside StudyVault. Mounted as a
+  self-contained sub-app: `src/main.jsx` branches on the URL — `/lsat`
+  dynamically loads `domains/lsat/LsatRoot.tsx` (its own `BrowserRouter
+  basename="/lsat"`), everything else loads `host-entry.jsx`. One router is
+  ever live; the two style/runtime worlds stay isolated; domain switches are
+  hard navigations. Browser-verified: home shows 4 cards, `/lsat` renders
+  styled, client routing (`/lsat/analytics`) works, `/cfa` unaffected.
+- **LSAT backend sidecar.** The vendored FastAPI + SQLite backend
+  (`services/lsat-backend/`, 162 files) builds to a one-file PyInstaller
+  binary via `npm run build:lsat-binary` and is supervised by the Tauri shell
+  as a 4th `SidecarSpec` on `127.0.0.1:8100`. Validated end-to-end: the binary
+  boots, runs 19 migrations, starts the job worker, serves `/api/health`.
+  CSP `connect-src` includes `:8100`.
+- **Home dashboard** gains the 'LSAT Lab' domain card (hard-navigates to the
+  sub-app).
+
+### Changed
+- **Rebrand QuantVault → StudyVault** (product name, window title, PWA
+  manifest, sidebar brand, bundle identifier `com.quantvault.app` →
+  `com.studyvault.app`). The internal `.qv-*` CSS prefix is unchanged
+  (internal-only).
+- **Toolchain reconciliation** for the vendored LSAT frontend (React 18 → 19,
+  Vite 5 → 8, TS 5.6 → 6): rewrote 223 files' `@/` imports to `@lsat/` (added
+  the Vite alias + an ambient `@lsat/*` tsc shim so the host's strict tsc never
+  type-checks the subtree while Vite bundles it); scoped Tailwind 3 to
+  `src/domains/lsat` (utilities inject only into the branch-loaded LSAT CSS, so
+  the host's hand-written CSS is untouched); installed the LSAT dep surface
+  (Radix, visx, React Query, react-hook-form/zod, motion, sonner, cmdk, fonts)
+  via `--legacy-peer-deps` onto React 19.
+- Version 0.8.0 → 0.9.0.
+
+### Data / licensing
+- The 2.4GB LSAT SQLite bank is **never** in git (gitignored; created in
+  app-data on first run, seeded from the non-copyrighted sample bank).
+- `docs/CONTENT-LICENSING.md`: personal-use-only posture (no copyrighted
+  content in the repo; user-owned PrepTest imports; research datasets local).
+
+### Verification gates (all green)
+- `npx tsc --noEmit` — 0 errors (host; LSAT subtree excluded by design)
+- `npm run lint` — 0 errors, 0 warnings
+- `npx vitest run` — **451 tests / 50 files**
+- `npm run build` — 190 precache entries (LSAT chunks bundled)
+- `cargo test` — 29 Rust tests (incl. the 4-sidecar supervisor)
+- `npm run build:lsat-binary` — boots + serves on 8100
+
+### Still open (tracked in the merge plan)
+- Phase 4.1 — unified cross-domain Review Inbox over both FSRS engines.
+- Theme bridge (LSAT keeps its own theme provider for now).
+- A shared model-settings surface across host + LSAT sidecar.
 
 ## [0.8.0] — 2026-05-30
 

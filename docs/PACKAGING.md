@@ -147,6 +147,32 @@ cross-project version pins (e.g. an old `websockets` held back by an unrelated
 editable install) that conflict with open-notebook's requirements. The venv
 build is reproducible and never mutates global site-packages.
 
+### Building the LSAT backend binary (StudyVault)
+
+```bash
+npm run build:lsat-binary               # isolated-venv build (recommended)
+npm run build:lsat-binary -- --ambient  # build against the Python on PATH
+```
+
+`scripts/build-lsat-binary.mjs` mirrors the open-notebook build but reuses the
+vendored backend's own, purpose-built spec:
+
+1. Creates an isolated `.venv-lsat` from a base Python **3.12** on PATH.
+2. `pip install "services/lsat-backend"` — authoritative deps from the
+   backend's `pyproject.toml` (FastAPI, fsrs, sqlmodel, sqlite-vec, pymupdf,
+   mcp, textstat, …). No hand-maintained pin list.
+3. `pip install pyinstaller==6.20.0`.
+4. Runs the backend's own `lsatlab.spec` (collects uvicorn/fastapi/sqlmodel/
+   fsrs/mcp/pymupdf/sqlite_vec hidden-imports + data files) and copies
+   `lsatlab-backend.exe` into `src-tauri/resources/services/lsat-backend/`.
+
+Validated end-to-end: the produced binary boots, runs its 19 SQLite
+migrations, starts the job worker, and serves on `127.0.0.1:8100`
+(`/openapi.json` → 200, `/api/health` → `{"ok":true}`). The Rust supervisor's
+4th `SidecarSpec` ('LSAT backend') launches it with `LSATLAB_PORT=8100`; the
+SQLite bank is created under the OS app-data dir on first run (never shipped).
+`tauri.conf.json` CSP `connect-src` includes `http://localhost:8100`.
+
 ### Packaging gotchas the spec handles (validated end-to-end)
 
 A naive PyInstaller run produces a binary that builds but crashes on first run.
@@ -201,12 +227,18 @@ the sidecar is down at startup the app silently stays on Dexie.
 Before tagging a release:
 
 ```bash
-npm run verify              # lint + 200+ tests + build
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust unit tests
+npm run verify              # lint + 450+ tests + build
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust unit tests (incl. 4-sidecar supervisor)
 npm audit --omit=dev --audit-level=high           # 0 vulnerabilities
 npm run content:validate    # all CFA levels exam-ready
-npm run tauri:build:debug   # smoke: bundle builds end-to-end
+npm run build:onb-binary    # open-notebook sidecar → resources/services/open-notebook/
+npm run build:lsat-binary   # LSAT sidecar → resources/services/lsat-backend/
+npm run tauri:build:debug   # smoke: bundle builds end-to-end (ships both sidecars)
 ```
+
+The two Python backend sidecars are built locally before tagging (not in CI —
+they're large and the personal-use workflow builds on the dev box). Both land
+in `src-tauri/resources/services/` and are gitignored.
 
 Then bump the three versions to match:
 
