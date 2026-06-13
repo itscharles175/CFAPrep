@@ -1,7 +1,7 @@
 {
-  "name": "QuantVault",
-  "short_name": "QuantVault",
-  "description": "Local-first CFA, quant, and Excel exam-prep platform — fully offline.",
+  "name": "StudyVault",
+  "short_name": "StudyVault",
+  "description": "Local-first CFA, Quant, Excel & LSAT exam-prep platform — fully offline.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

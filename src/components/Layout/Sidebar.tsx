@@ -159,8 +159,8 @@ export default function Sidebar({
       inert={mobileHidden ? true : undefined}
     >
       <div className="sidebar-header">
-        <div className="sidebar-logo">Q</div>
-        {!collapsed && <span className="sidebar-title">QuantVault</span>}
+        <div className="sidebar-logo">S</div>
+        {!collapsed && <span className="sidebar-title">StudyVault</span>}
         <button
           className="btn-icon btn-ghost"
           onClick={onToggle}

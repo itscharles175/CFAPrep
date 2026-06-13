@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "QuantVault",
-  "version": "0.8.0",
-  "identifier": "com.quantvault.app",
+  "productName": "StudyVault",
+  "version": "0.9.0",
+  "identifier": "com.studyvault.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "QuantVault",
+        "title": "StudyVault",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,
@@ -31,11 +31,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "publisher": "QuantVault",
-    "copyright": "© QuantVault contributors. Personal use only.",
+    "publisher": "StudyVault",
+    "copyright": "© StudyVault contributors. Personal use only.",
     "category": "Education",
-    "shortDescription": "Local-first CFA exam-prep desktop app.",
-    "longDescription": "QuantVault turns your own CFA curriculum PDFs into a fully-offline study OS: spaced repetition, generative mock exams, grounded-RAG Q&A, an agentic Study Director, multimodal AI coaching, and analytics. Everything runs on your machine — no cloud, no API keys, no telemetry.",
+    "shortDescription": "Local-first CFA · Quant · Excel · LSAT exam-prep desktop app.",
+    "longDescription": "StudyVault turns your own curriculum into a fully-offline study OS across CFA, Quant, Excel and the LSAT: spaced repetition, generative mock exams, grounded-RAG Q&A, blind review, adaptive drills, multimodal AI coaching, and analytics. Everything runs on your machine — no cloud, no API keys, no telemetry.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
