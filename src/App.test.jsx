@@ -11,7 +11,15 @@ describe('app shell', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole('heading', { name: 'QuantVault' })).toBeInTheDocument();
+    // `hidden: true` — on first run the OnboardingWizard modal is open and
+    // aria-hides the main content, so the PageHeader <h1> isn't in the
+    // accessible tree (the 'Knowledge Domains' getByText below also matches
+    // hidden content). We're asserting the dashboard rendered, not focus order.
+    // `timeout: 5000` — Dashboard is a lazy()/Suspense route, so allow generous
+    // time for the chunk to resolve on slow/loaded CI.
+    expect(
+      await screen.findByRole('heading', { name: 'StudyVault', hidden: true }, { timeout: 5000 }),
+    ).toBeInTheDocument();
     expect(screen.getByText('Knowledge Domains')).toBeInTheDocument();
   });
 

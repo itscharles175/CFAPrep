@@ -119,7 +119,7 @@ function downloadJson(payload: unknown): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `quantvault-export-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.download = `studyvault-export-${new Date().toISOString().slice(0, 10)}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -325,7 +325,7 @@ export default function Dashboard() {
     const labels: Record<ResetScope, string> = {
       attempts: 'quiz attempts and review schedule',
       progress: 'module progress, attempts, review schedule, mastery, artifacts, and study sessions',
-      full: 'all local QuantVault data',
+      full: 'all local StudyVault data',
     };
     setPendingReset({ scope, label: labels[scope] });
   }
@@ -367,7 +367,7 @@ export default function Dashboard() {
       <PageHeader
         tone="study"
         badge="LOCAL STUDY COMMAND"
-        title="QuantVault"
+        title="StudyVault"
         subtitle="CFA, quantitative finance, and Excel practice organized around today’s next action, local vault safety, and exam readiness."
         meta={
           <>
@@ -398,7 +398,7 @@ export default function Dashboard() {
               <StatusBadge tone="accent">Get started</StatusBadge>
               <h3 style={{ margin: 'var(--space-1) 0 0' }}>Bring your own curriculum into the vault</h3>
               <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
-                QuantVault's grounded answers and curriculum reader light up once you have source documents in the local vault. Import a <code>.qvsource</code> bundle, paste raw text, or — in the desktop shell — pick a folder of CFA PDFs directly.
+                StudyVault's grounded answers and curriculum reader light up once you have source documents in the local vault. Import a <code>.qvsource</code> bundle, paste raw text, or — in the desktop shell — pick a folder of CFA PDFs directly.
               </p>
             </div>
             <Link to="/system" className="btn btn-primary">Open System Health</Link>
@@ -412,8 +412,8 @@ export default function Dashboard() {
           description={
             pendingImport
               ? pendingImport.encrypted
-                ? 'Decrypt this QuantVault export, review the contents, then choose how to write it into this browser profile.'
-                : 'Review this QuantVault export before writing it into this browser profile.'
+                ? 'Decrypt this StudyVault export, review the contents, then choose how to write it into this browser profile.'
+                : 'Review this StudyVault export before writing it into this browser profile.'
               : `Reset ${pendingReset?.label} on this device? This changes only local browser data.`
           }
           onClose={() => { setPendingImport(null); setPendingReset(null); setImportPassphrase(''); }}
@@ -525,7 +525,7 @@ export default function Dashboard() {
       {exportDialogOpen && (
         <Dialog
           title="Create Encrypted Backup"
-          description="Choose a passphrase for an AES-GCM QuantVault export. Private CFA Source Vault text stays excluded unless you explicitly include it."
+          description="Choose a passphrase for an AES-GCM StudyVault export. Private CFA Source Vault text stays excluded unless you explicitly include it."
           onClose={() => { setExportDialogOpen(false); setExportPassphrase(''); setExportPassphraseConfirm(''); setIncludeSourceExport(false); }}
           actions={
             <>

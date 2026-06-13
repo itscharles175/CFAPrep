@@ -261,7 +261,18 @@ impl SidecarLauncher for ProcessLauncher {
     }
 }
 
-/// Build the three sidecar specs the supervisor manages, parameterized by the
+/// Append the platform executable suffix to a bare binary stem (`.exe` on
+/// Windows, nothing elsewhere). Keeps the sidecar specs portable — the build
+/// scripts already emit per-platform names; this matches them at launch.
+fn exe(stem: &str) -> String {
+    if cfg!(windows) {
+        format!("{stem}.exe")
+    } else {
+        stem.to_string()
+    }
+}
+
+/// Build the sidecar specs the supervisor manages, parameterized by the
 /// resolved services directory. Pure — does no I/O — so tests can assert that
 /// the program paths, args, and env match what we expect for a given `dir`.
 fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
@@ -271,7 +282,7 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
 
     let surreal = SidecarSpec {
         name: "SurrealDB".into(),
-        program: dir.join("bin").join("surreal2.exe"),
+        program: dir.join("bin").join(exe("surreal2")),
         args: vec![
             "start".into(),
             "--user".into(),
@@ -327,7 +338,7 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
     // process's stdio safe on the Windows console.
     let lsat = SidecarSpec {
         name: "LSAT backend".into(),
-        program: dir.join("lsat-backend").join("lsatlab-backend.exe"),
+        program: dir.join("lsat-backend").join(exe("lsatlab-backend")),
         args: vec![
             "--host".into(),
             "127.0.0.1".into(),
@@ -672,15 +683,15 @@ mod tests {
         assert_eq!(specs[2].name, "open-notebook worker");
         assert_eq!(specs[3].name, "LSAT backend");
 
-        // SurrealDB binary lives under <dir>/bin/surreal2.exe.
-        assert_eq!(specs[0].program, dir.join("bin").join("surreal2.exe"));
+        // SurrealDB binary lives under <dir>/bin/surreal2(.exe).
+        assert_eq!(specs[0].program, dir.join("bin").join(exe("surreal2")));
         // The open-notebook pair shells through `uv` on PATH.
         assert_eq!(specs[1].program, PathBuf::from("uv"));
         assert_eq!(specs[2].program, PathBuf::from("uv"));
         // The LSAT backend runs its frozen binary directly from <dir>/lsat-backend.
         assert_eq!(
             specs[3].program,
-            dir.join("lsat-backend").join("lsatlab-backend.exe")
+            dir.join("lsat-backend").join(exe("lsatlab-backend"))
         );
         assert!(specs[3].args.iter().any(|a| a == "--port"));
         assert!(specs[3].args.iter().any(|a| a == "8100"));

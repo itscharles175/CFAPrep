@@ -251,7 +251,7 @@ export default function Today() {
             const marker = `qv-reminder-${today}`;
             if (typeof localStorage !== 'undefined' && localStorage.getItem(marker) !== '1') {
               localStorage.setItem(marker, '1');
-              new Notification('QuantVault — reviews due', {
+              new Notification('StudyVault — reviews due', {
                 body: `${next.dueCount} review${next.dueCount === 1 ? '' : 's'} ready in your inbox.`,
                 tag: marker,
               });

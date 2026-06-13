@@ -44,7 +44,7 @@ function Step1({ onContinue }: Step1Props) {
   return (
     <div className="onboarding-step">
       <StatusBadge tone="accent">Welcome</StatusBadge>
-      <h3 style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>QuantVault is local-first</h3>
+      <h3 style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>StudyVault is local-first</h3>
       <p className="qv-m-0">
         Everything stays on your machine — no cloud, no account, no tracking. Three quick choices
         and you are set.

@@ -16,6 +16,7 @@ import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop
 import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 import { getStorage, getActiveDriverName, cutoverTo, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
+import { checkLsatBackendHealth, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
 import {
   clearPersistedParameters,
   persistOptimizedParameters,
@@ -51,7 +52,7 @@ function downloadJson(payload) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `quantvault-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.download = `studyvault-backup-${new Date().toISOString().slice(0, 10)}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -78,6 +79,9 @@ export default function SystemHealth() {
   const [onb, setOnb] = useState(null);
   const [onbStatus, setOnbStatus] = useState(null);
   const [onbTesting, setOnbTesting] = useState(false);
+  // LSAT backend sidecar (:8100) health — probed independently so a down
+  // sidecar never blocks the page. null = not yet checked.
+  const [lsatHealth, setLsatHealth] = useState(null);
   const desktopAvailable = isTauri();
   const [ingestState, setIngestState] = useState('idle'); // idle | picking | running | done | error | cancelled
   const [ingestProgress, setIngestProgress] = useState(null);
@@ -190,6 +194,9 @@ export default function SystemHealth() {
     });
     readTargetedQueue().then((rows) => {
       if (active) setTargetedQueue(rows);
+    });
+    checkLsatBackendHealth().then((h) => {
+      if (active) setLsatHealth(h);
     });
     return () => {
       active = false;
@@ -415,7 +422,7 @@ export default function SystemHealth() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `quantvault-source-${new Date().toISOString().slice(0, 10)}.qvsource`;
+      anchor.download = `studyvault-source-${new Date().toISOString().slice(0, 10)}.qvsource`;
       anchor.click();
       URL.revokeObjectURL(url);
       const summary = `Exported ${bundle.documents?.length ?? 0} source document(s) as a .qvsource bundle.`;
@@ -591,6 +598,10 @@ export default function SystemHealth() {
     const result = await checkLlmConnection(llm);
     setLlmStatus(result);
     setLlmTesting(false);
+    // Also refresh the LSAT backend's own AI/provider health — the LSAT sidecar
+    // talks to the same local model servers, so a host pass with an LSAT
+    // failure (e.g. sidecar down, provider switched) is worth surfacing.
+    checkLsatBackendHealth().then(setLsatHealth);
   }
 
   async function handleIngestFolder() {
@@ -742,7 +753,7 @@ export default function SystemHealth() {
       const url = URL.createObjectURL(file);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `quantvault-encrypted-${new Date().toISOString().slice(0, 10)}.qvenc.json`;
+      anchor.download = `studyvault-encrypted-${new Date().toISOString().slice(0, 10)}.qvenc.json`;
       anchor.click();
       URL.revokeObjectURL(url);
       setBackupPassphrase('');
@@ -882,7 +893,7 @@ export default function SystemHealth() {
               Active store: <span className="qv-mono">{activeDriver === 'surrealdb' ? 'SurrealDB (:8000)' : 'Dexie (IndexedDB)'}</span>
             </h3>
             <p className="qv-text-secondary qv-m-0">
-              QuantVault runs on the local Dexie/IndexedDB store by default. If the SurrealDB sidecar is running (Tauri shell, port 8000) you can cut over to it — settings, the FSRS review queue, attempt log, and mastery snapshots migrate automatically. Curriculum chunks rebuild on the next ingest. Roll back to Dexie any time; your IndexedDB data is never cleared.
+              StudyVault runs on the local Dexie/IndexedDB store by default. If the SurrealDB sidecar is running (Tauri shell, port 8000) you can cut over to it — settings, the FSRS review queue, attempt log, and mastery snapshots migrate automatically. Curriculum chunks rebuild on the next ingest. Roll back to Dexie any time; your IndexedDB data is never cleared.
             </p>
             {driverPref === 'surrealdb' && activeDriver === 'dexie' && (
               <p className="qv-text-warning qv-m-0 qv-mt-2 qv-fs-sm">
@@ -909,6 +920,51 @@ export default function SystemHealth() {
                 {cutoverBusy ? 'Switching…' : 'Roll back to Dexie'}
               </button>
             )}
+          </div>
+        </div>
+      </Surface>
+
+      <Surface
+        tone="ops"
+        status={lsatHealth == null ? undefined : lsatHealth.ok ? 'success' : 'warning'}
+        className="ops-report-panel"
+      >
+        <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <StatusBadge tone="exam">LSAT Backend</StatusBadge>
+            <h3 className="qv-m-0 qv-mt-2">
+              <ServerCog size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
+              LSAT sidecar{' '}
+              <span className="qv-mono">
+                {lsatHealth == null ? '(checking…)' : lsatHealth.ok ? ':8100 · healthy' : ':8100 · offline'}
+              </span>
+            </h3>
+            <p className="qv-text-secondary qv-m-0">
+              The LSAT domain is served by a local FastAPI sidecar (SQLite question bank, spaced repetition, AI explanations). It boots with the desktop shell; in browser dev, start it manually on port 8100.
+            </p>
+            {lsatHealth && (
+              <p
+                className={`qv-m-0 qv-mt-2 qv-fs-sm ${lsatHealth.ok ? 'qv-text-success' : 'qv-text-warning'}`}
+              >
+                {lsatHealth.detail}
+                {lsatHealth.ok && lsatHealth.latencyMs != null ? ` (${lsatHealth.latencyMs}ms)` : ''}
+                {lsatHealth.ai?.provider ? ` · provider: ${lsatHealth.ai.provider}` : ''}
+              </p>
+            )}
+          </div>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                setLsatHealth(null);
+                checkLsatBackendHealth().then(setLsatHealth);
+              }}
+            >
+              Re-check
+            </button>
+            <a className="btn btn-secondary btn-sm" href={LSAT_SETTINGS_PATH}>
+              LSAT model settings
+            </a>
           </div>
         </div>
       </Surface>
@@ -1231,7 +1287,7 @@ export default function SystemHealth() {
             <StatusBadge tone="exam">Browser Reminders</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>Native review reminders</h3>
             <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-              Grant permission once and QuantVault will surface a desktop notification when you have reviews due. No network — fires from the local service worker.
+              Grant permission once and StudyVault will surface a desktop notification when you have reviews due. No network — fires from the local service worker.
             </p>
           </div>
           <button
@@ -1245,7 +1301,7 @@ export default function SystemHealth() {
               if (Notification.permission === 'granted') return;
               const perm = await Notification.requestPermission();
               if (perm === 'granted') {
-                new Notification('QuantVault', { body: 'Reminders enabled — you will be pinged when reviews are due.' });
+                new Notification('StudyVault', { body: 'Reminders enabled — you will be pinged when reviews are due.' });
                 toast.success('Reminders enabled', 'You will be notified when reviews are due.');
               } else {
                 toast.warning('Reminder declined', 'You can grant permission later from this same button.');
@@ -1285,7 +1341,7 @@ export default function SystemHealth() {
             <StatusBadge tone="accent">Local AI</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>On-device generation (Ollama / LM Studio)</h3>
             <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-              Point QuantVault at a local OpenAI-compatible model server. Fully offline — no cloud, no API key. Powers practice generated from your ingested curriculum.
+              Point StudyVault at a local OpenAI-compatible model server. Fully offline — no cloud, no API key. Powers practice generated from your ingested curriculum.
             </p>
           </div>
         </div>
@@ -1431,7 +1487,7 @@ export default function SystemHealth() {
             <StatusBadge tone="accent">Embedded Notebook</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>Grounded RAG over your curriculum (open-notebook)</h3>
             <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-              QuantVault embeds open-notebook as a local sidecar (FastAPI + SurrealDB + job worker). It builds per-topic notebooks from your ingested CFA volumes and answers questions with cited, source-grounded synthesis. Fully offline.
+              StudyVault embeds open-notebook as a local sidecar (FastAPI + SurrealDB + job worker). It builds per-topic notebooks from your ingested CFA volumes and answers questions with cited, source-grounded synthesis. Fully offline.
             </p>
           </div>
         </div>
@@ -1472,7 +1528,7 @@ export default function SystemHealth() {
               <StatusBadge tone="accent">Notebook Backend</StatusBadge>
               <h3 style={{ margin: 'var(--space-2) 0 0' }}>Embedded open-notebook notebooks ({onbNotebooks.length})</h3>
               <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-                Notebooks the backend currently holds. Deleting one removes its sources, insights, and chat sessions from the embedded SurrealDB; QuantVault re-creates per-topic notebooks on demand when asks resume.
+                Notebooks the backend currently holds. Deleting one removes its sources, insights, and chat sessions from the embedded SurrealDB; StudyVault re-creates per-topic notebooks on demand when asks resume.
               </p>
             </div>
             <button className="btn btn-secondary btn-sm" onClick={refreshOnbNotebooks} disabled={onbNotebooksBusy}>
@@ -1531,7 +1587,7 @@ export default function SystemHealth() {
               <StatusBadge tone="success">Desktop Shell</StatusBadge>
               <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingest a local CFA folder</h3>
               <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-                Point QuantVault at a folder of CFA curriculum PDFs on disk; the native shell will walk it, extract text, chunk by page, classify by topic, and store in your local source vault. Duplicates (by SHA-256) are skipped automatically. You can also drag-drop PDFs directly onto this window.
+                Point StudyVault at a folder of CFA curriculum PDFs on disk; the native shell will walk it, extract text, chunk by page, classify by topic, and store in your local source vault. Duplicates (by SHA-256) are skipped automatically. You can also drag-drop PDFs directly onto this window.
               </p>
             </div>
             <div className="qv-row-2" style={{ flexShrink: 0 }}>
@@ -1795,7 +1851,7 @@ export default function SystemHealth() {
       <Surface tone="vault">
         <h3 style={{ marginTop: 0 }}>Backup Reminder</h3>
         <p className="qv-text-secondary">
-          QuantVault is local-first. Export a backup before clearing browser data, moving devices, or starting a long mock-exam cycle.
+          StudyVault is local-first. Export a backup before clearing browser data, moving devices, or starting a long mock-exam cycle.
         </p>
         {message && <p style={{ color: 'var(--success)' }}>{message}</p>}
       </Surface>

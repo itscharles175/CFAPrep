@@ -65,7 +65,7 @@ export function PwaInstallPrompt() {
     <div
       role="dialog"
       aria-modal="false"
-      aria-label="Install QuantVault"
+      aria-label="Install StudyVault"
       style={{
         position: 'fixed',
         bottom: 'var(--space-5, 1.25rem)',
@@ -92,7 +92,7 @@ export function PwaInstallPrompt() {
         }}
       >
         <strong style={{ fontSize: 'var(--fs-sm, 0.875rem)', lineHeight: 1.4 }}>
-          Install QuantVault
+          Install StudyVault
         </strong>
         <button
           type="button"
