@@ -14,6 +14,19 @@ export default defineConfig({
       injectManifest: {
         rollupFormat: 'iife',
         globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
+        // Don't precache chunks a CFA/Quant/Excel-only user never loads: the
+        // LSAT sub-app (only fetched on /lsat) and the heavy local-ML libs
+        // (kokoro + transformers, ~2MB, only used for voice). They're still
+        // served + runtime-cached on first use; this just keeps the install
+        // footprint small. (Plan S3.)
+        globIgnores: [
+          '**/LsatRoot*',
+          '**/lsat-*',
+          '**/kokoro*',
+          '**/transformers*',
+        ],
+        // A few of these chunks exceed the default 2 MiB precache cap anyway;
+        // raising the cap is unnecessary now that they're ignored.
       },
       devOptions: {
         enabled: false,
