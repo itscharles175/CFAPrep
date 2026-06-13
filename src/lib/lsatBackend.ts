@@ -25,7 +25,15 @@ export interface LsatBackendHealth {
   /** Latency of the health probe in ms (when reachable). */
   latencyMs?: number;
   /** Provider/AI status when /api/ai/health is available. */
-  ai?: { provider?: string; ready?: boolean; detail?: string };
+  ai?: {
+    provider?: string;
+    ready?: boolean;
+    detail?: string;
+    /** S5-A: effective model routing the LSAT backend reports (read-only). */
+    models?: { explain?: string; gen?: string; diagnose?: string };
+    /** Configured model ids the active provider doesn't currently expose. */
+    missingModels?: string[];
+  };
   /** Human-readable status for the UI. */
   detail: string;
 }
@@ -80,10 +88,26 @@ export async function checkLsatBackendHealth(timeoutMs = 2500): Promise<LsatBack
   const aiRes = await fetchJson('/api/ai/health', timeoutMs);
   if ('ok' in aiRes && aiRes.ok && aiRes.data && typeof aiRes.data === 'object') {
     const d = aiRes.data as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+    // S5-A: the AI-health payload already carries the effective model routing
+    // (explain/gen/diagnose) + any configured ids the provider can't serve, so
+    // surface them read-only — no extra request. Only build the `models` object
+    // when at least one id is present.
+    const models = {
+      explain: str(d.explain_model),
+      gen: str(d.gen_model),
+      diagnose: str(d.diagnose_model),
+    };
+    const hasModels = models.explain || models.gen || models.diagnose;
+    const missingModels = Array.isArray(d.missing_models)
+      ? (d.missing_models.filter((m) => typeof m === 'string') as string[])
+      : undefined;
     ai = {
-      provider: typeof d.provider === 'string' ? d.provider : undefined,
+      provider: str(d.provider),
       ready: typeof d.ok === 'boolean' ? d.ok : typeof d.ready === 'boolean' ? d.ready : undefined,
-      detail: typeof d.detail === 'string' ? d.detail : undefined,
+      detail: str(d.detail),
+      models: hasModels ? models : undefined,
+      missingModels: missingModels && missingModels.length ? missingModels : undefined,
     };
   }
 

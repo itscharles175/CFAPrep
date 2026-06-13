@@ -52,6 +52,37 @@ describe('checkLsatBackendHealth', () => {
     expect(h.detail).toMatch(/provider not reachable/i);
   });
 
+  it('surfaces effective model routing + missing models (S5-A)', async () => {
+    stubFetch({
+      '/api/health': () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      '/api/ai/health': () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            provider: 'lmstudio',
+            explain_model: 'phi4:14b',
+            gen_model: 'qwen3:14b',
+            diagnose_model: 'qwen3:8b',
+            missing_models: ['phi4:14b'],
+          }),
+          { status: 200 },
+        ),
+    });
+    const h = await checkLsatBackendHealth();
+    expect(h.ai?.models).toEqual({ explain: 'phi4:14b', gen: 'qwen3:14b', diagnose: 'qwen3:8b' });
+    expect(h.ai?.missingModels).toEqual(['phi4:14b']);
+  });
+
+  it('omits models/missingModels when the backend reports none', async () => {
+    stubFetch({
+      '/api/health': () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      '/api/ai/health': () => new Response(JSON.stringify({ ok: true, provider: 'ollama' }), { status: 200 }),
+    });
+    const h = await checkLsatBackendHealth();
+    expect(h.ai?.models).toBeUndefined();
+    expect(h.ai?.missingModels).toBeUndefined();
+  });
+
   it('reports offline (no throw) when the sidecar is unreachable', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('ECONNREFUSED'))) as unknown as typeof fetch);
     const h = await checkLsatBackendHealth();

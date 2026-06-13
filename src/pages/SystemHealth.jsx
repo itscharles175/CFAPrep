@@ -955,6 +955,26 @@ export default function SystemHealth() {
                 {lsatHealth.ai?.provider ? ` · provider: ${lsatHealth.ai.provider}` : ''}
               </p>
             )}
+            {/* S5-A: read-only view of the LSAT backend's effective model
+                routing (edit it via the deep-link below). */}
+            {lsatHealth?.ai?.models && (
+              <p className="qv-m-0 qv-mt-1 qv-fs-sm qv-text-muted qv-mono">
+                {[
+                  lsatHealth.ai.models.explain && `explain: ${lsatHealth.ai.models.explain}`,
+                  lsatHealth.ai.models.gen && `gen: ${lsatHealth.ai.models.gen}`,
+                  lsatHealth.ai.models.diagnose && `diagnose: ${lsatHealth.ai.models.diagnose}`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+            )}
+            {lsatHealth?.ai?.missingModels && (
+              <p className="qv-m-0 qv-mt-1 qv-fs-sm qv-text-warning">
+                Configured model{lsatHealth.ai.missingModels.length > 1 ? 's' : ''} not loaded in the active provider:{' '}
+                <span className="qv-mono">{lsatHealth.ai.missingModels.join(', ')}</span> — pull/load{' '}
+                {lsatHealth.ai.missingModels.length > 1 ? 'them' : 'it'} or change the routing in LSAT model settings.
+              </p>
+            )}
           </div>
           <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
             <button
