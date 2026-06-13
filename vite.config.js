@@ -47,7 +47,17 @@ export default defineConfig({
           if (normalized.includes('level3Packs')) return 'cfa-level3-content';
           if (!id.includes('node_modules')) return undefined;
           if (id.includes('lucide-react')) return 'lucide-vendor';
-          if (id.includes('recharts')) return 'recharts-vendor';
+          // Charts (Plan P6): the host uses recharts, the LSAT domain uses
+          // @visx — and visx + the host's direct d3-scale/d3-scale-chromatic
+          // deps all pull the standalone d3-* ecosystem. Keep both chart libs
+          // (different APIs) but fold their shared d3 core into ONE chunk so it
+          // isn't scattered/duplicated across route chunks. recharts vendors
+          // its own d3 via victory-vendor, so that stays inside recharts-vendor.
+          if (id.includes('@visx')) return 'visx-vendor';
+          if (id.includes('recharts') || id.includes('victory-vendor')) return 'recharts-vendor';
+          if (/node_modules\/(d3-[\w-]+|internmap|delaunator|robust-predicates)\//.test(normalized)) {
+            return 'd3-core-vendor';
+          }
           if (id.includes('katex')) return 'katex';
           if (id.includes('react-router') || id.includes('react-dom') || id.includes('react')) return 'react-vendor';
           return undefined;
