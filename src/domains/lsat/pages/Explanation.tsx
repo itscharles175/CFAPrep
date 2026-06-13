@@ -16,48 +16,48 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Icon } from "@/components/ui/icon";
-import { Textarea } from "@/components/ui/textarea";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Icon } from "@lsat/components/ui/icon";
+import { Textarea } from "@lsat/components/ui/textarea";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { AnnotatedText } from "@/components/question/annotated-text";
-import { ReadingControls } from "@/components/question/reading-controls";
-import { TypeBadge } from "@/components/viz";
-import { PageLayout } from "@/components/page-layout";
-import { DockedCoach } from "@/components/coach/docked-coach";
-import { WidgetBoundary } from "@/components/error-boundary";
-import { EmptyState, LoadingState } from "@/components/states";
+} from "@lsat/components/ui/select";
+import { AnnotatedText } from "@lsat/components/question/annotated-text";
+import { ReadingControls } from "@lsat/components/question/reading-controls";
+import { TypeBadge } from "@lsat/components/viz";
+import { PageLayout } from "@lsat/components/page-layout";
+import { DockedCoach } from "@lsat/components/coach/docked-coach";
+import { WidgetBoundary } from "@lsat/components/error-boundary";
+import { EmptyState, LoadingState } from "@lsat/components/states";
 import {
   streamExplain,
   type NotebookContextMeta,
   type SocraticExplainMeta,
-} from "@/lib/api";
+} from "@lsat/lib/api";
 import {
   useAddErrorLog,
   useBulkSrsCards,
   useExplainFeedback,
-} from "@/lib/mutations";
-import { useAiHealth, useQuestion, useSessionResults } from "@/lib/hooks";
-import { SimilarQuestions } from "@/components/explanation/similar-questions";
-import { ChoiceBreakdown } from "@/components/explanation/choice-breakdown";
-import { TimedBrAnswers } from "@/components/explanation/timed-br-answers";
-import { getQuestionAnnotations } from "@/lib/annotationPrefs";
-import { ERROR_REASONS, difficultyStars } from "@/lib/labels";
-import { getNotes, readingClasses, useReadingPrefs } from "@/lib/prefs";
-import { cn } from "@/lib/utils";
-import type { ErrorReason } from "@/lib/types";
+} from "@lsat/lib/mutations";
+import { useAiHealth, useQuestion, useSessionResults } from "@lsat/lib/hooks";
+import { SimilarQuestions } from "@lsat/components/explanation/similar-questions";
+import { ChoiceBreakdown } from "@lsat/components/explanation/choice-breakdown";
+import { TimedBrAnswers } from "@lsat/components/explanation/timed-br-answers";
+import { getQuestionAnnotations } from "@lsat/lib/annotationPrefs";
+import { ERROR_REASONS, difficultyStars } from "@lsat/lib/labels";
+import { getNotes, readingClasses, useReadingPrefs } from "@lsat/lib/prefs";
+import { cn } from "@lsat/lib/utils";
+import type { ErrorReason } from "@lsat/lib/types";
 
 // A1.5 — the markdown renderer (react-markdown + remark-gfm, ~47KB) is lazy so
 // the explanation shell paints before this heavy body loads.
-const AiMarkdown = lazy(() => import("@/components/explanation/ai-markdown"));
+const AiMarkdown = lazy(() => import("@lsat/components/explanation/ai-markdown"));
 
 export function offlineCoachProviderHint(provider: string | undefined) {
   return provider === "lmstudio"

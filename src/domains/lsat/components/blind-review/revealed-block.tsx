@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { m, useReducedMotion } from "motion/react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ChoiceList } from "@/components/question/choice-list";
-import { LiveRegion } from "@/components/question/live-region";
-import { OutcomeActions } from "@/components/blind-review/outcome-actions";
-import { OUTCOME_META } from "@/lib/labels";
-import { cn } from "@/lib/utils";
-import { duration, easing } from "@/lib/motion";
-import type { Choice, Outcome, QType } from "@/lib/types";
+import { Badge } from "@lsat/components/ui/badge";
+import { Button } from "@lsat/components/ui/button";
+import { ChoiceList } from "@lsat/components/question/choice-list";
+import { LiveRegion } from "@lsat/components/question/live-region";
+import { OutcomeActions } from "@lsat/components/blind-review/outcome-actions";
+import { OUTCOME_META } from "@lsat/lib/labels";
+import { cn } from "@lsat/lib/utils";
+import { duration, easing } from "@lsat/lib/motion";
+import type { Choice, Outcome, QType } from "@lsat/lib/types";
 
 // 5.6 — spoken summary of the 2×2 (timed ✓/✗ × blind-review ✓/✗) on reveal.
 const OUTCOME_ANNOUNCEMENT: Record<Outcome, string> = {

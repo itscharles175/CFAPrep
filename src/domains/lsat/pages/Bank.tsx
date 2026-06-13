@@ -15,29 +15,29 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Icon } from "@/components/ui/icon";
-import { PageLayout, PageSection } from "@/components/page-layout";
-import { SystemNotice } from "@/components/system-notice";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { QuestionBrowser } from "@/components/bank/question-browser";
-import { BankAuditPanel } from "@/components/bank/audit-panel";
-import { Meter } from "@/components/bank/meter";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Checkbox } from "@lsat/components/ui/checkbox";
+import { Input } from "@lsat/components/ui/input";
+import { Label } from "@lsat/components/ui/label";
+import { Icon } from "@lsat/components/ui/icon";
+import { PageLayout, PageSection } from "@lsat/components/page-layout";
+import { SystemNotice } from "@lsat/components/system-notice";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
+import { QuestionBrowser } from "@lsat/components/bank/question-browser";
+import { BankAuditPanel } from "@lsat/components/bank/audit-panel";
+import { Meter } from "@lsat/components/bank/meter";
 import {
   ProvenanceBadge,
   ProvenanceLegend,
   sourceLabel,
-} from "@/components/bank/provenance-badge";
-import { Skeleton } from "@/components/states";
-import { api } from "@/lib/api";
-import { useBankSources, useBankStats } from "@/lib/hooks";
-import { toast } from "@/lib/toast";
-import { countLabel } from "@/lib/utils";
+} from "@lsat/components/bank/provenance-badge";
+import { Skeleton } from "@lsat/components/states";
+import { api } from "@lsat/lib/api";
+import { useBankSources, useBankStats } from "@lsat/lib/hooks";
+import { toast } from "@lsat/lib/toast";
+import { countLabel } from "@lsat/lib/utils";
 
 export default function Bank() {
   const qc = useQueryClient();

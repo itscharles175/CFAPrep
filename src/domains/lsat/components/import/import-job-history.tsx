@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, History } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { EmptyState, SkeletonList } from "@/components/states";
-import { api } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
-import type { ImportJobSummary } from "@/lib/types";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { EmptyState, SkeletonList } from "@lsat/components/states";
+import { api } from "@lsat/lib/api";
+import { formatDate } from "@lsat/lib/utils";
+import type { ImportJobSummary } from "@lsat/lib/types";
 
 /** R4-F4 — list past import parse jobs. */
 export function ImportJobHistory({

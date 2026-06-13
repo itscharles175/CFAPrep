@@ -4,14 +4,14 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { EmptyState } from "@/components/states";
+} from "@lsat/components/ui/card";
+import { Badge } from "@lsat/components/ui/badge";
+import { EmptyState } from "@lsat/components/states";
 import type {
   FeedbackCohortSummary,
   FeedbackOutcomeSummary,
   FeedbackQTypeCohort,
-} from "@/lib/types";
+} from "@lsat/lib/types";
 
 function pct(value: number | null | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "n/a";

@@ -6,16 +6,16 @@ import {
   ListChecks,
   MessageSquare,
 } from "lucide-react";
-import { Logo } from "@/components/logo";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { OutcomeFunnel } from "@/components/analytics/outcome-funnel";
-import { useSessionResults } from "@/lib/hooks";
-import { useSaveReflection } from "@/lib/mutations";
-import { setReflection } from "@/lib/prefs";
-import type { SectionSummary } from "@/lib/types";
+import { Logo } from "@lsat/components/logo";
+import { Button } from "@lsat/components/ui/button";
+import { Textarea } from "@lsat/components/ui/textarea";
+import { Label } from "@lsat/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { OutcomeFunnel } from "@lsat/components/analytics/outcome-funnel";
+import { useSessionResults } from "@lsat/lib/hooks";
+import { useSaveReflection } from "@lsat/lib/mutations";
+import { setReflection } from "@lsat/lib/prefs";
+import type { SectionSummary } from "@lsat/lib/types";
 
 type Step = "summary" | "reflect" | "next";
 

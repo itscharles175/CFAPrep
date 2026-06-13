@@ -1,15 +1,15 @@
 import { BookMarked, Clock, Map, RefreshCw, SearchCheck } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PageLayout, PageSection } from "@/components/page-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Icon } from "@/components/ui/icon";
-import { api } from "@/lib/api";
-import { useRCDashboard, useRCPassageMaps } from "@/lib/hooks";
-import { pct } from "@/lib/utils";
+import { PageLayout, PageSection } from "@lsat/components/page-layout";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Progress } from "@lsat/components/ui/progress";
+import { Icon } from "@lsat/components/ui/icon";
+import { api } from "@lsat/lib/api";
+import { useRCDashboard, useRCPassageMaps } from "@lsat/lib/hooks";
+import { pct } from "@lsat/lib/utils";
 
 export default function RcLab() {
   const qc = useQueryClient();

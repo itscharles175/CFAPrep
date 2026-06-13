@@ -1,13 +1,13 @@
 import { Clock, Eye, Flag } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@lsat/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { formatClock } from "@/lib/utils";
+} from "@lsat/components/ui/dialog";
+import { formatClock } from "@lsat/lib/utils";
 
 export type SectionPreset = "timed" | "untimed" | "br_flagged";
 

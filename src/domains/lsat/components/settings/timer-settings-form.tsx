@@ -2,14 +2,14 @@ import { useId } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@lsat/components/ui/button";
+import { Input } from "@lsat/components/ui/input";
+import { Label } from "@lsat/components/ui/label";
 import {
   getTimerDefaults,
   setTimerDefaults,
-} from "@/lib/prefs";
-import { toast } from "@/lib/toast";
+} from "@lsat/lib/prefs";
+import { toast } from "@lsat/lib/toast";
 
 const schema = z.object({
   lrMin: z.number().min(20).max(60),

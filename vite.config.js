@@ -54,6 +54,10 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // The vendored LSAT domain (src/domains/lsat) uses '@lsat/' for its own
+      // root — its original '@/' was rewritten to '@lsat/' on vendoring so it
+      // doesn't collide with the host's '@/' → /src. Most-specific first.
+      '@lsat': '/src/domains/lsat',
       '@': '/src',
     },
   },

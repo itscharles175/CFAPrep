@@ -8,8 +8,8 @@ import { GridRows } from "@visx/grid";
 import { curveMonotoneX } from "@visx/curve";
 import { ParentSize } from "@visx/responsive";
 import { useTooltip, useTooltipInPortal } from "@visx/tooltip";
-import { chartTooltipStyle } from "@/components/viz";
-import type { DifficultyRow } from "@/lib/types";
+import { chartTooltipStyle } from "@lsat/components/viz";
+import type { DifficultyRow } from "@lsat/lib/types";
 
 export interface DifficultyCurveProps {
   rows: DifficultyRow[];

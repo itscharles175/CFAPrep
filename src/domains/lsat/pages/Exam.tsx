@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Keyboard, PlayCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -10,39 +10,39 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { LoadingState, ErrorState } from "@/components/states";
-import { PostExamHub } from "@/components/exam/post-exam-hub";
-import { Ceremony } from "@/components/exam/ceremony";
-import { SectionItinerary } from "@/components/exam/section-itinerary";
-import { RestRing } from "@/components/exam/rest-ring";
-import { SealedBeat } from "@/components/exam/sealed-beat";
-import { PreSubmitReview } from "@/components/question/pre-submit-review";
-import type { NavItem } from "@/components/question/navigator-strip";
+} from "@lsat/components/ui/dialog";
+import { LoadingState, ErrorState } from "@lsat/components/states";
+import { PostExamHub } from "@lsat/components/exam/post-exam-hub";
+import { Ceremony } from "@lsat/components/exam/ceremony";
+import { SectionItinerary } from "@lsat/components/exam/section-itinerary";
+import { RestRing } from "@lsat/components/exam/rest-ring";
+import { SealedBeat } from "@lsat/components/exam/sealed-beat";
+import { PreSubmitReview } from "@lsat/components/question/pre-submit-review";
+import type { NavItem } from "@lsat/components/question/navigator-strip";
 import {
   SectionRunner,
   blankState,
   type QState,
-} from "@/components/question/section-runner";
-import { KEYBOARD_HELP_EVENT } from "@/components/keyboard-help";
-import { usePrepTest } from "@/lib/hooks";
-import { api } from "@/lib/api";
+} from "@lsat/components/question/section-runner";
+import { KEYBOARD_HELP_EVENT } from "@lsat/components/keyboard-help";
+import { usePrepTest } from "@lsat/lib/hooks";
+import { api } from "@lsat/lib/api";
 import {
   enqueueFinishSession,
   enqueueSectionAttempts,
-} from "@/lib/offlineQueue";
-import { attemptIdFor, clearAttemptIds } from "@/lib/attemptIds";
-import { sampleSection } from "@/lib/sample";
-import { clearSessionDraft, draftKeyForExamSection } from "@/lib/sessionDraft";
-import type { AttemptCreateWire } from "@/lib/apiTypes";
-import { playSectionEndBeep } from "@/lib/examSounds";
-import { formatClock } from "@/lib/utils";
-import { ExamProgressMap } from "@/components/exam/exam-progress-map";
-import { SectionInterstitial } from "@/components/exam/section-interstitial";
-import { getAccommodations, getExamKiosk } from "@/lib/prefs";
-import { setFullscreen, notify } from "@/lib/tauri";
-import { recordPtSectionComplete } from "@/lib/ptProgress";
-import type { SectionDetail, SectionSummary } from "@/lib/types";
+} from "@lsat/lib/offlineQueue";
+import { attemptIdFor, clearAttemptIds } from "@lsat/lib/attemptIds";
+import { sampleSection } from "@lsat/lib/sample";
+import { clearSessionDraft, draftKeyForExamSection } from "@lsat/lib/sessionDraft";
+import type { AttemptCreateWire } from "@lsat/lib/apiTypes";
+import { playSectionEndBeep } from "@lsat/lib/examSounds";
+import { formatClock } from "@lsat/lib/utils";
+import { ExamProgressMap } from "@lsat/components/exam/exam-progress-map";
+import { SectionInterstitial } from "@lsat/components/exam/section-interstitial";
+import { getAccommodations, getExamKiosk } from "@lsat/lib/prefs";
+import { setFullscreen, notify } from "@lsat/lib/tauri";
+import { recordPtSectionComplete } from "@lsat/lib/ptProgress";
+import type { SectionDetail, SectionSummary } from "@lsat/lib/types";
 
 type Phase =
   | { kind: "intro" }

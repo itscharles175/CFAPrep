@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CalendarClock } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { SystemNotice } from "@/components/system-notice";
-import { dismissStudyNudge, isStudyNudgeDismissed } from "@/lib/prefs";
-import type { SessionSummary } from "@/lib/types";
+import { Button } from "@lsat/components/ui/button";
+import { SystemNotice } from "@lsat/components/system-notice";
+import { dismissStudyNudge, isStudyNudgeDismissed } from "@lsat/lib/prefs";
+import type { SessionSummary } from "@lsat/lib/types";
 
 /** R4-G9 — gentle reminder when timed work has lapsed. R9: speaks through the
  * unified <SystemNotice> language instead of the deprecated bg-warning/10. */

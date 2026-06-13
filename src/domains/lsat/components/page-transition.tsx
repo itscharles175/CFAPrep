@@ -1,5 +1,5 @@
 import { m } from "motion/react";
-import { pageTransition } from "@/lib/motion";
+import { pageTransition } from "@lsat/lib/motion";
 
 /**
  * Wraps a routed page so route changes animate via <AnimatePresence>.

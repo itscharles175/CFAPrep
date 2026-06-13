@@ -12,11 +12,11 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/lib/hooks", () => ({
+vi.mock("@lsat/lib/hooks", () => ({
   useAiHealth: mocks.useAiHealth,
 }));
 
-vi.mock("@/lib/mutations", () => ({
+vi.mock("@lsat/lib/mutations", () => ({
   useSaveSettings: mocks.useSaveSettings,
 }));
 

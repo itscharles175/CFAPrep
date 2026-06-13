@@ -1,7 +1,7 @@
 import { Check } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { cn, formatClock } from "@/lib/utils";
-import type { SectionSummary } from "@/lib/types";
+import { Badge } from "@lsat/components/ui/badge";
+import { cn, formatClock } from "@lsat/lib/utils";
+import type { SectionSummary } from "@lsat/lib/types";
 
 /**
  * R9 (docs/19 "the section lineup as a designed itinerary, not list rows").

@@ -1,38 +1,38 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FilterX, Search, Trash2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Input } from "@lsat/components/ui/input";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Checkbox } from "@lsat/components/ui/checkbox";
+import { Label } from "@lsat/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { ChoiceList } from "@/components/question/choice-list";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { EmptyState, ErrorState, SkeletonList } from "@/components/states";
-import { IllustrationPrepTests } from "@/components/illustrations";
-import { VirtualList } from "@/components/ui/virtual-list";
-import { TagEditor } from "@/components/bank/tag-editor";
+} from "@lsat/components/ui/select";
+import { ChoiceList } from "@lsat/components/question/choice-list";
+import { Sheet, SheetContent } from "@lsat/components/ui/sheet";
+import { EmptyState, ErrorState, SkeletonList } from "@lsat/components/states";
+import { IllustrationPrepTests } from "@lsat/components/illustrations";
+import { VirtualList } from "@lsat/components/ui/virtual-list";
+import { TagEditor } from "@lsat/components/bank/tag-editor";
 import {
   ProvenanceBadge,
   ProvenanceLegend,
-} from "@/components/bank/provenance-badge";
-import { api } from "@/lib/api";
+} from "@lsat/components/bank/provenance-badge";
+import { api } from "@lsat/lib/api";
 import {
   loadBankQuestions,
   setBankQuestionsCache,
   type BrowseQuestion,
-} from "@/lib/bankBrowse";
-import { qTypeLabel } from "@/lib/labels";
-import { useDeleteQuestion } from "@/lib/mutations";
-import type { QType } from "@/lib/types";
+} from "@lsat/lib/bankBrowse";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { useDeleteQuestion } from "@lsat/lib/mutations";
+import type { QType } from "@lsat/lib/types";
 
 /** R4-F1/F2 — filterable bank browser with preview drawer. */
 export function QuestionBrowser({

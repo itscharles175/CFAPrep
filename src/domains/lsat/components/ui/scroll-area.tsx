@@ -1,5 +1,5 @@
 import * as React from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * R8 (docs/18 W1.9): the ScrollArea was a no-op `overflow-auto` div with raw

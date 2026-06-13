@@ -5,9 +5,9 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { ContributionHeatmap, ChartEmpty, type ContributionDay } from "@/components/viz";
-import type { SessionSummary } from "@/lib/types";
+} from "@lsat/components/ui/card";
+import { ContributionHeatmap, ChartEmpty, type ContributionDay } from "@lsat/components/viz";
+import type { SessionSummary } from "@lsat/lib/types";
 
 /**
  * R9 §9 — study-consistency diagnostic. Reuses the (previously unused in

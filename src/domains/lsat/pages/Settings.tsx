@@ -13,20 +13,20 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { api } from "@/lib/api";
-import { PageLayout, PageSection } from "@/components/page-layout";
-import { getExamKiosk, setExamKiosk } from "@/lib/prefs";
-import { GoalSettingsForm } from "@/components/settings/goal-settings-form";
-import { KeyboardSettings } from "@/components/settings/keyboard-settings";
-import { TimerSettingsForm } from "@/components/settings/timer-settings-form";
-import { AccommodationsSettings } from "@/components/settings/accommodations-settings";
-import { DiagnosticsPanel } from "@/components/settings/diagnostics-panel";
-import { ModelRoutingCard } from "@/components/settings/model-routing-card";
-import { AppearanceSettings } from "@/components/settings/appearance-settings";
-import { cn } from "@/lib/utils";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { api } from "@lsat/lib/api";
+import { PageLayout, PageSection } from "@lsat/components/page-layout";
+import { getExamKiosk, setExamKiosk } from "@lsat/lib/prefs";
+import { GoalSettingsForm } from "@lsat/components/settings/goal-settings-form";
+import { KeyboardSettings } from "@lsat/components/settings/keyboard-settings";
+import { TimerSettingsForm } from "@lsat/components/settings/timer-settings-form";
+import { AccommodationsSettings } from "@lsat/components/settings/accommodations-settings";
+import { DiagnosticsPanel } from "@lsat/components/settings/diagnostics-panel";
+import { ModelRoutingCard } from "@lsat/components/settings/model-routing-card";
+import { AppearanceSettings } from "@lsat/components/settings/appearance-settings";
+import { cn } from "@lsat/lib/utils";
 
 /** The in-page section map — drives both the anchor rail and the section order. */
 const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [

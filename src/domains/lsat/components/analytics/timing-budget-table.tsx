@@ -1,6 +1,6 @@
-import { qTypeLabel } from "@/lib/labels";
-import { pct, formatMs } from "@/lib/utils";
-import type { ByTypeRow } from "@/lib/types";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { pct, formatMs } from "@lsat/lib/utils";
+import type { ByTypeRow } from "@lsat/lib/types";
 
 /** Target seconds per question by section family (R4-E4). */
 const TARGET_SEC: Record<string, number> = {

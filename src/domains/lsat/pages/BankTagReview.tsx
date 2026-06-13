@@ -1,17 +1,17 @@
 import { useState } from "react";
 import { CheckCircle2, Tags } from "lucide-react";
-import { PageLayout } from "@/components/page-layout";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { PageLayout } from "@lsat/components/page-layout";
+import { Badge } from "@lsat/components/ui/badge";
+import { Button } from "@lsat/components/ui/button";
+import { Card, CardContent } from "@lsat/components/ui/card";
+import { Checkbox } from "@lsat/components/ui/checkbox";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@lsat/components/ui/select";
 import {
   Table,
   TableBody,
@@ -19,15 +19,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { LoadingState, ErrorState, EmptyState } from "@/components/states";
-import { IllustrationReview } from "@/components/illustrations";
-import { ProvenanceBadge } from "@/components/bank/provenance-badge";
-import { useBankTagReview } from "@/lib/hooks";
-import { useBulkTag } from "@/lib/mutations";
-import { qTypeLabel } from "@/lib/labels";
-import { pluralize } from "@/lib/utils";
-import type { QType, Question } from "@/lib/types";
+} from "@lsat/components/ui/table";
+import { LoadingState, ErrorState, EmptyState } from "@lsat/components/states";
+import { IllustrationReview } from "@lsat/components/illustrations";
+import { ProvenanceBadge } from "@lsat/components/bank/provenance-badge";
+import { useBankTagReview } from "@lsat/lib/hooks";
+import { useBulkTag } from "@lsat/lib/mutations";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { pluralize } from "@lsat/lib/utils";
+import type { QType, Question } from "@lsat/lib/types";
 
 // All concrete question types a human might assign during review.
 const Q_TYPES: QType[] = [

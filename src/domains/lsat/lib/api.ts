@@ -172,13 +172,16 @@ import type {
 } from "./types";
 import { appendDaysQuery } from "./analyticsParams";
 
-// In dev, the Vite proxy forwards /api -> VITE_API_BASE. In a packaged build we
-// hit the base directly. Using a relative /api prefix keeps the proxy working.
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+// StudyVault: the LSAT backend sidecar listens on 127.0.0.1:8100 (see the
+// Tauri supervisor's `build_sidecar_specs` + tauri.conf CSP). It accepts
+// any-origin CORS, so we hit the absolute base directly in BOTH dev (host
+// Vite on :5173) and the packaged app — no Vite proxy needed. Override with
+// VITE_API_BASE if the port ever changes.
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8100";
 
-// When running under Vite dev server we want the proxy, so use relative paths.
-// In production (Tauri) there is no proxy, so prepend the absolute base.
-const PREFIX = import.meta.env.DEV ? "" : API_BASE;
+// Always absolute: the host app's origin (:5173 in dev, tauri:// in prod) is
+// never the backend's origin, so a relative prefix would 404.
+const PREFIX = API_BASE;
 
 export class ApiError extends Error {
   status: number;

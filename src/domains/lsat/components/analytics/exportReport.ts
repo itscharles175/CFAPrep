@@ -3,7 +3,7 @@ import type {
   ByTypeRow,
   DifficultyRow,
   TrapRow,
-} from "@/lib/types";
+} from "@lsat/lib/types";
 
 export interface ReportSnapshot {
   generatedAt: string;

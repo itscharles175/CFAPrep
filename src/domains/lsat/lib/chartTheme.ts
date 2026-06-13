@@ -4,7 +4,7 @@ import {
   interpolateInferno,
   interpolatePuOr,
 } from "d3-scale-chromatic";
-import { useTheme } from "@/components/theme-provider";
+import { useTheme } from "@lsat/components/theme-provider";
 
 /**
  * R8 W1.5 — theme-aware chart scales.

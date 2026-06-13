@@ -2,15 +2,15 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { m, useReducedMotion } from "motion/react";
 import { Sparkles, RefreshCw } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Sparkline } from "@/components/viz";
-import { SkeletonCard } from "@/components/states";
-import { api } from "@/lib/api";
-import { fadeUp, stagger } from "@/lib/motion";
-import { routeForRecommendation } from "@/lib/recommendationRoutes";
-import { toast } from "@/lib/toast";
-import type { Diagnosis } from "@/lib/types";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Sparkline } from "@lsat/components/viz";
+import { SkeletonCard } from "@lsat/components/states";
+import { api } from "@lsat/lib/api";
+import { fadeUp, stagger } from "@lsat/lib/motion";
+import { routeForRecommendation } from "@lsat/lib/recommendationRoutes";
+import { toast } from "@lsat/lib/toast";
+import type { Diagnosis } from "@lsat/lib/types";
 
 export interface NarrativeCardsProps {
   /** Fallback coach text/recommendation from the dashboard payload. */

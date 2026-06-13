@@ -2,8 +2,8 @@ import { memo, useMemo } from "react";
 import { scaleLinear } from "d3-scale";
 import { Check, X } from "lucide-react";
 import { useTooltip, useTooltipInPortal } from "@visx/tooltip";
-import { cn } from "@/lib/utils";
-import { useChartScales } from "@/lib/chartTheme";
+import { cn } from "@lsat/lib/utils";
+import { useChartScales } from "@lsat/lib/chartTheme";
 import { chartTooltipStyle, ColorScaleKey } from "./chart-kit";
 
 export interface HeatCell {

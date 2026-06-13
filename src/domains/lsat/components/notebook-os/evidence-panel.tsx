@@ -1,15 +1,15 @@
 import { Check, Clock3, History, Inbox, Link2, Network } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Icon } from "@/components/ui/icon";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Icon } from "@lsat/components/ui/icon";
 import type {
   ArtifactVersion,
   BacklinkRecord,
   CitationTarget,
   KnowledgeInboxItem,
   StudyArtifact,
-} from "@/lib/types";
+} from "@lsat/lib/types";
 import { CitationChip } from "./citation-chip";
 
 function humanize(value: string) {

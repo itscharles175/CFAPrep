@@ -2,7 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestQueryClient } from "@/test/setup";
+import { createTestQueryClient } from "@lsat/test/setup";
 import ContentOps from "./ContentOps";
 
 const mocks = vi.hoisted(() => ({
@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
-vi.mock("@/lib/hooks", () => ({
+vi.mock("@lsat/lib/hooks", () => ({
   useBenchmarkRuns: mocks.useBenchmarkRuns,
   useContentHealth: mocks.useContentHealth,
   useContentRevalidation: mocks.useContentRevalidation,
@@ -48,7 +48,7 @@ vi.mock("@/lib/hooks", () => ({
   useValidatorRuns: mocks.useValidatorRuns,
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@lsat/lib/api", () => ({
   ApiError: mocks.ApiError,
   api: {
     runBenchmarkSmoke: mocks.runBenchmarkSmoke,

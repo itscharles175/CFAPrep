@@ -1,46 +1,38 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-import App from './App';
-import './index.css';
-import './styles/tokens.css';
-// KaTeX CSS bundled locally from npm — the strict-offline invariant forbids
-// the cdn.jsdelivr.net `katex.min.css` that used to be linked from index.html.
-import 'katex/dist/katex.min.css';
-import { registerServiceWorker } from './registerServiceWorker';
-import { bootstrapSourceVault } from './lib/bootstrapSourceVault';
-import { bootstrapAiContent } from './lib/bootstrapAiContent';
-import { applyTheme, getStoredTheme } from './lib/theme';
-import { bootstrapFsrsParameters } from './lib/bootstrapFsrsParameters';
-import { bootstrapStorage } from './lib/bootstrapStorage';
 
-// Apply the stored theme to <html> BEFORE React mounts so the first paint
-// already shows the correct palette. Without this, users with the light
-// theme persisted would see a one-frame dark flash while React boots.
-applyTheme(getStoredTheme());
+// StudyVault is two large apps sharing one window + bundle: the CFA/Quant/Excel
+// host and the vendored LSAT domain. They never render simultaneously — we
+// branch at the very top on the URL so only one BrowserRouter is ever live
+// (the LSAT app brings its own, with basename="/lsat"). Domain switches are
+// hard navigations (window.location), giving a clean state boundary. Each
+// branch dynamically imports its own entry, so the host's CSS/bootstraps and
+// the LSAT app's Tailwind/providers stay in separate chunks and never collide.
+const rootEl = document.getElementById('root');
+const isLsat =
+  typeof window !== 'undefined' && window.location.pathname.startsWith('/lsat');
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </React.StrictMode>
-);
+function showBootError(label, err) {
+  console.error(`StudyVault: ${label} failed to load:`, err);
+  if (rootEl) {
+    rootEl.innerHTML =
+      `<div style="padding:2rem;font-family:system-ui;line-height:1.5">` +
+      `<strong>${label} failed to load.</strong><br/>See the console for details.</div>`;
+  }
+}
 
-registerServiceWorker();
-
-// Re-activate the user's chosen storage backend (SurrealDB if they cut over
-// and the sidecar is up; otherwise Dexie) BEFORE the data bootstraps run, so
-// they read/write through the correct driver. Falls back to Dexie silently.
-bootstrapStorage().finally(() => {
-  // Load the ingested CFA curriculum into the local source vault on first run.
-  bootstrapSourceVault();
-
-  // Seed the AI-questions + AI-flashcards caches from `public/cfa-generated.json`
-  // if a pre-generated companion bundle is present (see scripts/content-expand.mjs).
-  bootstrapAiContent();
-
-  // Apply persisted FSRS parameters if the user has run the optimizer; otherwise
-  // the scheduler keeps FSRS-4.5 library defaults.
-  bootstrapFsrsParameters();
-});
+if (isLsat) {
+  import('./domains/lsat/LsatRoot.tsx')
+    .then(({ default: LsatRoot }) => {
+      ReactDOM.createRoot(rootEl).render(
+        <React.StrictMode>
+          <LsatRoot />
+        </React.StrictMode>
+      );
+    })
+    .catch((err) => showBootError('The LSAT module', err));
+} else {
+  import('./host-entry.jsx')
+    .then(({ mountHost }) => mountHost(rootEl))
+    .catch((err) => showBootError('StudyVault', err));
+}

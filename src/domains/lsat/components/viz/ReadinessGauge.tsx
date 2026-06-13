@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { m, useReducedMotion } from "motion/react";
-import { cn } from "@/lib/utils";
-import { duration, easing } from "@/lib/motion";
-import type { ReadinessRing } from "@/lib/readiness";
+import { cn } from "@lsat/lib/utils";
+import { duration, easing } from "@lsat/lib/motion";
+import type { ReadinessRing } from "@lsat/lib/readiness";
 
 export interface ReadinessGaugeProps {
   rings: ReadinessRing[];

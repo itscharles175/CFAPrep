@@ -1,29 +1,29 @@
 import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ClipboardList } from "lucide-react";
-import { PageLayout } from "@/components/page-layout";
+import { PageLayout } from "@lsat/components/page-layout";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { GapDumbbell, type GapRow } from "@/components/viz";
-import { EmptyState, ErrorState, SkeletonChart } from "@/components/states";
-import { usePrepTest, useSessions } from "@/lib/hooks";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Progress } from "@lsat/components/ui/progress";
+import { GapDumbbell, type GapRow } from "@lsat/components/viz";
+import { EmptyState, ErrorState, SkeletonChart } from "@lsat/components/states";
+import { usePrepTest, useSessions } from "@lsat/lib/hooks";
 import {
   reviewableSessions,
   useMultiSessionResults,
-} from "@/lib/hooks/useReviewSessions";
-import { getPtProgress } from "@/lib/ptProgress";
-import { computeGapForSessions } from "@/lib/gapFromSessions";
-import { qTypeLabel } from "@/lib/labels";
-import { pct, formatMs, countLabel } from "@/lib/utils";
-import type { ResultItem, SectionSummary } from "@/lib/types";
+} from "@lsat/lib/hooks/useReviewSessions";
+import { getPtProgress } from "@lsat/lib/ptProgress";
+import { computeGapForSessions } from "@lsat/lib/gapFromSessions";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { pct, formatMs, countLabel } from "@lsat/lib/utils";
+import type { ResultItem, SectionSummary } from "@lsat/lib/types";
 
 /** R4-E3 — per-PrepTest analytics from session results (client aggregate). */
 export default function PrepTestAnalytics() {

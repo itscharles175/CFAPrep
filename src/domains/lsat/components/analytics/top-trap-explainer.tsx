@@ -1,12 +1,12 @@
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowRight, Target } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { useTraps } from "@/lib/hooks";
-import { trapLabel, TRAP_DESCRIPTIONS, TRAP_COUNTERS } from "@/lib/labels";
-import { pct } from "@/lib/utils";
-import { ChartEmpty } from "@/components/viz";
-import { SkeletonCard } from "@/components/states";
+import { Card, CardContent } from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { useTraps } from "@lsat/lib/hooks";
+import { trapLabel, TRAP_DESCRIPTIONS, TRAP_COUNTERS } from "@lsat/lib/labels";
+import { pct } from "@lsat/lib/utils";
+import { ChartEmpty } from "@lsat/components/viz";
+import { SkeletonCard } from "@lsat/components/states";
 
 /**
  * A9 — per-trap explainer. Surfaces the single most frequent trap pattern from

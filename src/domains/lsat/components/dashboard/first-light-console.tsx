@@ -1,11 +1,11 @@
 import { useNavigate } from "react-router-dom";
 import { m, useReducedMotion } from "motion/react";
 import { Compass, Sparkles, Target } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Icon } from "@/components/ui/icon";
-import { Logo } from "@/components/logo";
-import { fadeUp, stagger } from "@/lib/motion";
+import { Button } from "@lsat/components/ui/button";
+import { Card, CardContent } from "@lsat/components/ui/card";
+import { Icon } from "@lsat/components/ui/icon";
+import { Logo } from "@lsat/components/logo";
+import { fadeUp, stagger } from "@lsat/lib/motion";
 
 /**
  * R9 F3.2 — the honest empty / first-run Console ("observatory before first

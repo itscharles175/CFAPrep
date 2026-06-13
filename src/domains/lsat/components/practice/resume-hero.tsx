@@ -1,12 +1,12 @@
 import { useNavigate } from "react-router-dom";
 import { PlayCircle, RotateCcw, Target } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Icon } from "@/components/ui/icon";
-import { CardTitle } from "@/components/ui/card";
-import { AccentPanel } from "@/components/accent-panel";
-import { getResume } from "@/lib/resume";
-import { useSrsDue } from "@/lib/hooks";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Icon } from "@lsat/components/ui/icon";
+import { CardTitle } from "@lsat/components/ui/card";
+import { AccentPanel } from "@lsat/components/accent-panel";
+import { getResume } from "@lsat/lib/resume";
+import { useSrsDue } from "@lsat/lib/hooks";
 
 /**
  * R7 6.4 — resume-first dashboard hero. Leads the dashboard with action:

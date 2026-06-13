@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Copy, Minus, Square, X } from "lucide-react";
-import { Logo } from "@/components/logo";
-import { Icon } from "@/components/ui/icon";
-import { routeCommandLabel } from "@/lib/commandRecents";
-import { cn } from "@/lib/utils";
+import { Logo } from "@lsat/components/logo";
+import { Icon } from "@lsat/components/ui/icon";
+import { routeCommandLabel } from "@lsat/lib/commandRecents";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * Runtime Tauri detection. Tauri v2 injects `__TAURI_INTERNALS__` onto `window`.

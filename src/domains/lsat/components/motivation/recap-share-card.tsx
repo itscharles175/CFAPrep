@@ -1,7 +1,7 @@
 import { forwardRef } from "react";
-import { TypeBadge } from "@/components/viz";
-import { pct } from "@/lib/utils";
-import type { QType } from "@/lib/types";
+import { TypeBadge } from "@lsat/components/viz";
+import { pct } from "@lsat/lib/utils";
+import type { QType } from "@lsat/lib/types";
 
 export interface RecapShareCardProps {
   score: string;

@@ -1,9 +1,9 @@
 import { memo, useMemo, useState } from "react";
 import { scaleLinear } from "d3-scale";
-import { qTypeLabel } from "@/lib/labels";
-import type { QType } from "@/lib/types";
-import { cn } from "@/lib/utils";
-import { useChartScales } from "@/lib/chartTheme";
+import { qTypeLabel } from "@lsat/lib/labels";
+import type { QType } from "@lsat/lib/types";
+import { cn } from "@lsat/lib/utils";
+import { useChartScales } from "@lsat/lib/chartTheme";
 import { ChartTooltip } from "./chart-kit";
 
 export interface GapRow {

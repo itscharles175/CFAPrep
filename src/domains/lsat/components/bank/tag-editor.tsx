@@ -1,26 +1,26 @@
 import { useMemo, useState } from "react";
 import { Tags } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { Button } from "@lsat/components/ui/button";
+import { Label } from "@lsat/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@lsat/components/ui/select";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { api } from "@/lib/api";
-import { toast } from "@/lib/toast";
-import { qTypeLabel } from "@/lib/labels";
-import { pluralize } from "@/lib/utils";
-import type { BrowseQuestion } from "@/lib/bankBrowse";
-import type { QType } from "@/lib/types";
+} from "@lsat/components/ui/card";
+import { api } from "@lsat/lib/api";
+import { toast } from "@lsat/lib/toast";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { pluralize } from "@lsat/lib/utils";
+import type { BrowseQuestion } from "@lsat/lib/bankBrowse";
+import type { QType } from "@lsat/lib/types";
 
 const LR_TYPES = [
   "MainPoint", "NecessaryAssumption", "SufficientAssumption", "Strengthen",

@@ -1,10 +1,10 @@
 import { Inbox, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { Logo } from "@/components/logo";
-import { IllustrationError, IllustrationOffline } from "@/components/illustrations";
-import { ApiError } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { Logo } from "@lsat/components/logo";
+import { IllustrationError, IllustrationOffline } from "@lsat/components/illustrations";
+import { ApiError } from "@lsat/lib/api";
+import { cn } from "@lsat/lib/utils";
 
 // ---------------------------------------------------------------------------
 // R8 "system status" — error / offline / AI-prereq / empty / loading states all

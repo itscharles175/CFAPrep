@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { QType } from "@/lib/types";
+import type { QType } from "@lsat/lib/types";
 import type { AnalyticsRange } from "./AnalyticsFilters";
 import type { Source } from "./tabs";
 

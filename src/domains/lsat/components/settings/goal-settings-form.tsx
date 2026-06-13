@@ -7,12 +7,12 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { getGoal, getPlanBudgetMin, setGoal as persistGoal } from "@/lib/prefs";
-import { useSaveStudyPlan } from "@/lib/mutations";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Input } from "@lsat/components/ui/input";
+import { Label } from "@lsat/components/ui/label";
+import { getGoal, getPlanBudgetMin, setGoal as persistGoal } from "@lsat/lib/prefs";
+import { useSaveStudyPlan } from "@lsat/lib/mutations";
 
 const schema = z.object({
   targetScore: z.number().min(120).max(180),

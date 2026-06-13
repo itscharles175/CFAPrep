@@ -1,8 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { TimerSettingsForm } from "@/components/settings/timer-settings-form";
-import { AnalyticsFilters } from "@/components/analytics/AnalyticsFilters";
+import { TimerSettingsForm } from "@lsat/components/settings/timer-settings-form";
+import { AnalyticsFilters } from "@lsat/components/analytics/AnalyticsFilters";
 
 // Bundle F2 — form controls must be programmatically associated with their
 // labels (id + htmlFor, or aria-labelledby for non-labelable Radix groups).

@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Search, Sparkles, Target } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { EmptyState, SkeletonList } from "@/components/states";
-import { VirtualList } from "@/components/ui/virtual-list";
-import { unwrap, useErrorLog } from "@/lib/hooks";
-import { formatDate } from "@/lib/utils";
-import type { ErrorLogEntry, ErrorReason } from "@/lib/types";
-import { ERROR_REASONS, qTypeLabel } from "@/lib/labels";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Badge } from "@lsat/components/ui/badge";
+import { Button } from "@lsat/components/ui/button";
+import { Input } from "@lsat/components/ui/input";
+import { EmptyState, SkeletonList } from "@lsat/components/states";
+import { VirtualList } from "@lsat/components/ui/virtual-list";
+import { unwrap, useErrorLog } from "@lsat/lib/hooks";
+import { formatDate } from "@lsat/lib/utils";
+import type { ErrorLogEntry, ErrorReason } from "@lsat/lib/types";
+import { ERROR_REASONS, qTypeLabel } from "@lsat/lib/labels";
 
 export function ErrorLogWorkspace() {
   const { data, isLoading, isError, error, refetch } = unwrap(useErrorLog());

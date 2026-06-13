@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { cn, formatClock } from "@/lib/utils";
-import { LiveRegion } from "@/components/question/live-region";
+import { cn, formatClock } from "@lsat/lib/utils";
+import { LiveRegion } from "@lsat/components/question/live-region";
 
 // 5.6 — assertive callouts at these remaining-time marks (seconds). We announce
 // once as the clock crosses each mark, never every tick.

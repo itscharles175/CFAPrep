@@ -1,8 +1,8 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestQueryClient } from "@/test/setup";
-import type { AiHealth, ObservabilityStatus, Settings } from "@/lib/types";
+import { createTestQueryClient } from "@lsat/test/setup";
+import type { AiHealth, ObservabilityStatus, Settings } from "@lsat/lib/types";
 import {
   isLoopbackLmsUrl,
   ModelRolePicker,
@@ -37,13 +37,13 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/lib/hooks", () => ({
+vi.mock("@lsat/lib/hooks", () => ({
   useAiHealth: mocks.useAiHealth,
   useObservability: mocks.useObservability,
   useSettings: mocks.useSettings,
 }));
 
-vi.mock("@/lib/mutations", () => ({
+vi.mock("@lsat/lib/mutations", () => ({
   useSaveSettings: mocks.useSaveSettings,
   usePregenerate: mocks.usePregenerate,
 }));

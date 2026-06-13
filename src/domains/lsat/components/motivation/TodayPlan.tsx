@@ -16,16 +16,16 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { ProgressRing } from "@/components/viz";
-import { UtilityTradeoffChips } from "@/components/motivation/utility-tradeoff-chips";
-import { useSrsDue, useDashboard, useTodayPlan } from "@/lib/hooks";
-import { api } from "@/lib/api";
-import { qTypeLabel } from "@/lib/labels";
-import { cn, countLabel } from "@/lib/utils";
-import { formatUtilityPriority, utilityTradeoffs } from "@/lib/utilityTradeoffs";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { ProgressRing } from "@lsat/components/viz";
+import { UtilityTradeoffChips } from "@lsat/components/motivation/utility-tradeoff-chips";
+import { useSrsDue, useDashboard, useTodayPlan } from "@lsat/lib/hooks";
+import { api } from "@lsat/lib/api";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { cn, countLabel } from "@lsat/lib/utils";
+import { formatUtilityPriority, utilityTradeoffs } from "@lsat/lib/utilityTradeoffs";
 import {
   getPlanBudgetMin,
   getPlanDone,
@@ -34,8 +34,8 @@ import {
   setPlanDone,
   setPlanOrder,
   todayKey,
-} from "@/lib/prefs";
-import type { NotebookContextMeta, Recommendation, TodayPlanFeedbackBody } from "@/lib/types";
+} from "@lsat/lib/prefs";
+import type { NotebookContextMeta, Recommendation, TodayPlanFeedbackBody } from "@lsat/lib/types";
 
 interface PlanItem {
   id: string;

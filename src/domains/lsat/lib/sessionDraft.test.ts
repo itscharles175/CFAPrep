@@ -6,7 +6,7 @@ import {
   loadSessionDraft,
   saveSessionDraft,
 } from "./sessionDraft";
-import { blankState, type QState } from "@/components/question/section-runner";
+import { blankState, type QState } from "@lsat/components/question/section-runner";
 
 function st(patch: Partial<QState>): QState {
   return { ...blankState(), ...patch };

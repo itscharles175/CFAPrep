@@ -1,16 +1,16 @@
 import { useId } from "react";
 import { Filter } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { Button } from "@lsat/components/ui/button";
+import { Label } from "@lsat/components/ui/label";
+import { Switch } from "@lsat/components/ui/switch";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+} from "@lsat/components/ui/select";
+import { Sheet, SheetContent, SheetTrigger } from "@lsat/components/ui/sheet";
 import type { Source } from "./tabs";
 
 export type AnalyticsRange = "7" | "30" | "all";

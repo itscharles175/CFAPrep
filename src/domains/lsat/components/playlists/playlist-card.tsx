@@ -6,21 +6,21 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Icon } from "@/components/ui/icon";
+import { Card, CardContent } from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Icon } from "@lsat/components/ui/icon";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { qTypeLabel } from "@/lib/labels";
-import { CRITERIA_OUTCOMES, type WireCriteria } from "@/lib/playlistCriteria";
-import { countLabel } from "@/lib/utils";
-import type { PlaylistSummary } from "@/lib/types";
+} from "@lsat/components/ui/dropdown-menu";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { CRITERIA_OUTCOMES, type WireCriteria } from "@lsat/lib/playlistCriteria";
+import { countLabel } from "@lsat/lib/utils";
+import type { PlaylistSummary } from "@lsat/lib/types";
 
 /**
  * R9 (docs/19 F4.7) — a smart set rendered as a *designed collection*: a

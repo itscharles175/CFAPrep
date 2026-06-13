@@ -5,14 +5,14 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { ProgressRing } from "@/components/viz";
-import { MilestoneShareCard } from "@/components/motivation/milestone-share-card";
-import { exportNodeAsPng } from "@/lib/recapExport";
-import type { ByTypeRow, SessionSummary } from "@/lib/types";
-import { qTypeLabel } from "@/lib/labels";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { ProgressRing } from "@lsat/components/viz";
+import { MilestoneShareCard } from "@lsat/components/motivation/milestone-share-card";
+import { exportNodeAsPng } from "@lsat/lib/recapExport";
+import type { ByTypeRow, SessionSummary } from "@lsat/lib/types";
+import { qTypeLabel } from "@lsat/lib/labels";
 
 export interface MilestonesProps {
   byType: ByTypeRow[];

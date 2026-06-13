@@ -1,6 +1,6 @@
 import { Filter, X } from "lucide-react";
-import { qTypeLabel } from "@/lib/labels";
-import { cn } from "@/lib/utils";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { cn } from "@lsat/lib/utils";
 import { useAnalyticsContext } from "./analytics-context";
 
 /**

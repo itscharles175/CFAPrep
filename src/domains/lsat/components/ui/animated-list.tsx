@@ -1,6 +1,6 @@
 import { AnimatePresence, m, useReducedMotion } from "motion/react";
-import { fadeUp } from "@/lib/motion";
-import { cn } from "@/lib/utils";
+import { fadeUp } from "@lsat/lib/motion";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * R9 (docs/19 F2.4) — list choreography. Animates add / remove / reorder of list

@@ -1,20 +1,20 @@
 import { useNavigate } from "react-router-dom";
 import { Zap } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { useByType, useTraps } from "@/lib/hooks";
-import { useCreateDrill } from "@/lib/mutations";
-import { trapLabel } from "@/lib/labels";
-import { pct } from "@/lib/utils";
-import type { DrillConfig } from "@/lib/types";
+} from "@lsat/components/ui/card";
+import { Badge } from "@lsat/components/ui/badge";
+import { useByType, useTraps } from "@lsat/lib/hooks";
+import { useCreateDrill } from "@lsat/lib/mutations";
+import { trapLabel } from "@lsat/lib/labels";
+import { pct } from "@lsat/lib/utils";
+import type { DrillConfig } from "@lsat/lib/types";
 
 /** R4-A5 — 5-question micro-drill from top trap + weakest type. */
 export function TrapSpiralCard() {

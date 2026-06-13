@@ -2,25 +2,25 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { m, useReducedMotion } from "motion/react";
 import { BarChart3, Download, Printer } from "lucide-react";
-import { PageLayout } from "@/components/page-layout";
-import { AnalyticsFilters, type AnalyticsRange } from "@/components/analytics/AnalyticsFilters";
+import { PageLayout } from "@lsat/components/page-layout";
+import { AnalyticsFilters, type AnalyticsRange } from "@lsat/components/analytics/AnalyticsFilters";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TrendChart } from "@/components/viz";
-import { avg, inRange, splitTrendPeriods } from "@/lib/dateRange";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
+import { TrendChart } from "@lsat/components/viz";
+import { avg, inRange, splitTrendPeriods } from "@lsat/lib/dateRange";
 import {
   EmptyState,
   ErrorState,
   SkeletonCard,
   SkeletonChart,
-} from "@/components/states";
+} from "@lsat/components/states";
 import {
   KpiRow,
   NarrativeCards,
@@ -30,8 +30,8 @@ import {
   PrintReport,
   downloadReport,
   printReport,
-} from "@/components/analytics";
-import { AnalyticsProvider } from "@/components/analytics/analytics-context";
+} from "@lsat/components/analytics";
+import { AnalyticsProvider } from "@lsat/components/analytics/analytics-context";
 import {
   ByTypeTab,
   DifficultyTab,
@@ -39,7 +39,7 @@ import {
   TimingTab,
   TrapsTab,
   type Source,
-} from "@/components/analytics/tabs";
+} from "@lsat/components/analytics/tabs";
 import {
   useBlindReviewGap,
   useByDifficulty,
@@ -52,18 +52,18 @@ import {
   useSessions,
   useSrsDue,
   useTraps,
-} from "@/lib/hooks";
-import { forecastConeBands } from "@/lib/forecast";
-import { liveReadinessStatus } from "@/lib/readiness";
-import { daysFromRange } from "@/lib/analyticsParams";
-import { inBrushRange } from "@/lib/brushFilter";
-import { fadeUp, stagger } from "@/lib/motion";
-import { SavedAnalyticsViews } from "@/components/analytics/saved-views";
-import { AnalyticsAlerts } from "@/components/analytics/analytics-alerts";
-import { WidgetBoundary } from "@/components/error-boundary";
-import { toast } from "@/lib/toast";
-import { getGoal, type SavedAnalyticsView } from "@/lib/prefs";
-import type { QType } from "@/lib/types";
+} from "@lsat/lib/hooks";
+import { forecastConeBands } from "@lsat/lib/forecast";
+import { liveReadinessStatus } from "@lsat/lib/readiness";
+import { daysFromRange } from "@lsat/lib/analyticsParams";
+import { inBrushRange } from "@lsat/lib/brushFilter";
+import { fadeUp, stagger } from "@lsat/lib/motion";
+import { SavedAnalyticsViews } from "@lsat/components/analytics/saved-views";
+import { AnalyticsAlerts } from "@lsat/components/analytics/analytics-alerts";
+import { WidgetBoundary } from "@lsat/components/error-boundary";
+import { toast } from "@lsat/lib/toast";
+import { getGoal, type SavedAnalyticsView } from "@lsat/lib/prefs";
+import type { QType } from "@lsat/lib/types";
 
 
 /**

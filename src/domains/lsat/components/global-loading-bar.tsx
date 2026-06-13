@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { useLocation } from "react-router-dom";
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * R9 (docs/19 F7) — navigation-driven top progress bar.

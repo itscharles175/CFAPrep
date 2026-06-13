@@ -6,23 +6,23 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Icon } from "@/components/ui/icon";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Input } from "@lsat/components/ui/input";
+import { Icon } from "@lsat/components/ui/icon";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useAiHealth, useObservability, useSettings } from "@/lib/hooks";
-import { usePregenerate, useSaveSettings } from "@/lib/mutations";
-import { getAiMetrics } from "@/lib/aiMetrics";
-import { cn } from "@/lib/utils";
+} from "@lsat/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@lsat/components/ui/toggle-group";
+import { useAiHealth, useObservability, useSettings } from "@lsat/lib/hooks";
+import { usePregenerate, useSaveSettings } from "@lsat/lib/mutations";
+import { getAiMetrics } from "@lsat/lib/aiMetrics";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * The model roles the user can assign. `key` is the /settings patch key written

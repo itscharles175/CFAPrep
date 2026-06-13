@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useReducedMotion } from "motion/react";
 import { TrendingDown, TrendingUp } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { duration } from "@/lib/motion";
+import { cn } from "@lsat/lib/utils";
+import { duration } from "@lsat/lib/motion";
 
 export interface StatNumberProps {
   value: number | null | undefined;

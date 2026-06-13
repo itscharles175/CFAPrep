@@ -19,15 +19,15 @@ import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PageLayout, PageSection } from "@/components/page-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { ApiError, api } from "@/lib/api";
+import { PageLayout, PageSection } from "@lsat/components/page-layout";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Input } from "@lsat/components/ui/input";
+import { Label } from "@lsat/components/ui/label";
+import { Switch } from "@lsat/components/ui/switch";
+import { Textarea } from "@lsat/components/ui/textarea";
+import { ApiError, api } from "@lsat/lib/api";
 import type {
   ContentSourceRegistry,
   ContentVersionFilters,
@@ -37,7 +37,7 @@ import type {
   ValidatorRunContext,
   ValidatorRunMeta,
   ValidatorRunRecord,
-} from "@/lib/types";
+} from "@lsat/lib/types";
 import {
   useBenchmarkRuns,
   useContentHealth,
@@ -48,7 +48,7 @@ import {
   useMigrationPreview,
   useScheduledTasks,
   useValidatorRuns,
-} from "@/lib/hooks";
+} from "@lsat/lib/hooks";
 
 type ContentSourceRow = Pick<
   ContentSourceRegistry,

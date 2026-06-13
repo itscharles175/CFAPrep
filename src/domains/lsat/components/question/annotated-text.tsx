@@ -1,13 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StickyNote, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@lsat/components/ui/button";
+import { Textarea } from "@lsat/components/ui/textarea";
 import {
   HighlightableText,
   type AnnotationStyle,
   type Highlight,
 } from "./highlightable-text";
-import { newNoteId, type MarginNote } from "@/lib/prefs";
+import { newNoteId, type MarginNote } from "@lsat/lib/prefs";
 
 /**
  * Stimulus/passage text with highlights + underline + margin notes (docs/06

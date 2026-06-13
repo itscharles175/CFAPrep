@@ -14,36 +14,36 @@ import {
   Minimize2,
   Maximize2,
 } from "lucide-react";
-import { Logo } from "@/components/logo";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ChoiceList } from "@/components/question/choice-list";
+import { Logo } from "@lsat/components/logo";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { ChoiceList } from "@lsat/components/question/choice-list";
 import {
   LineReferenceChips,
   PassageScrollPane,
   usePassageScroll,
-} from "@/components/question/line-reference";
+} from "@lsat/components/question/line-reference";
 import {
   NavigatorStrip,
   ProgressDots,
   type NavItem,
-} from "@/components/question/navigator-strip";
-import { QuestionOverview } from "@/components/question/question-overview";
-import { HighlighterToolbar } from "@/components/question/highlighter-toolbar";
-import { AnnotatedText } from "@/components/question/annotated-text";
-import { ReadingControls } from "@/components/question/reading-controls";
-import { ExamTimer, PaceBar, ResizableSplit } from "@/components/question/exam-chrome";
-import { ClockStore, useClockTime } from "@/components/question/section-clock";
-import { LiveRegion } from "@/components/question/live-region";
-import type { AnnotationStyle, Highlight } from "@/components/question/highlightable-text";
-import { TypeBadge } from "@/components/viz";
+} from "@lsat/components/question/navigator-strip";
+import { QuestionOverview } from "@lsat/components/question/question-overview";
+import { HighlighterToolbar } from "@lsat/components/question/highlighter-toolbar";
+import { AnnotatedText } from "@lsat/components/question/annotated-text";
+import { ReadingControls } from "@lsat/components/question/reading-controls";
+import { ExamTimer, PaceBar, ResizableSplit } from "@lsat/components/question/exam-chrome";
+import { ClockStore, useClockTime } from "@lsat/components/question/section-clock";
+import { LiveRegion } from "@lsat/components/question/live-region";
+import type { AnnotationStyle, Highlight } from "@lsat/components/question/highlightable-text";
+import { TypeBadge } from "@lsat/components/viz";
 import {
   answerLabelFromAction,
   getKeyboardMap,
   resolveExamKey,
-} from "@/lib/keyboardMap";
-import { useCommandPalette } from "@/components/command-palette";
-import { cn } from "@/lib/utils";
+} from "@lsat/lib/keyboardMap";
+import { useCommandPalette } from "@lsat/components/command-palette";
+import { cn } from "@lsat/lib/utils";
 import {
   adjustedTimeLimitSec,
   getAccommodations,
@@ -55,23 +55,23 @@ import {
   nextReadingSize,
   prevReadingSize,
   type MarginNote,
-} from "@/lib/prefs";
-import { api } from "@/lib/api";
+} from "@lsat/lib/prefs";
+import { api } from "@lsat/lib/api";
 import {
   getQuestionAnnotations,
   setQuestionAnnotations,
-} from "@/lib/annotationPrefs";
-import { ScratchPad } from "@/components/exam/scratch-pad";
-import { RcLineRuler } from "@/components/question/rc-line-ruler";
-import { getDrillTimeCapMin } from "@/lib/drillPrefs";
-import { setResume } from "@/lib/resume";
+} from "@lsat/lib/annotationPrefs";
+import { ScratchPad } from "@lsat/components/exam/scratch-pad";
+import { RcLineRuler } from "@lsat/components/question/rc-line-ruler";
+import { getDrillTimeCapMin } from "@lsat/lib/drillPrefs";
+import { setResume } from "@lsat/lib/resume";
 import {
   draftKeyForSection,
   loadSessionDraft,
   saveSessionDraft,
-} from "@/lib/sessionDraft";
-import { openPassagePopout } from "@/lib/tauri";
-import type { SectionDetail } from "@/lib/types";
+} from "@lsat/lib/sessionDraft";
+import { openPassagePopout } from "@lsat/lib/tauri";
+import type { SectionDetail } from "@lsat/lib/types";
 
 /**
  * 1.2 — one process-of-elimination interaction. `order_index` is the position in

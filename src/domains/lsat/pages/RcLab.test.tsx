@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestQueryClient } from "@/test/setup";
+import { createTestQueryClient } from "@lsat/test/setup";
 import RcLab from "./RcLab";
 
 const mocks = vi.hoisted(() => ({
@@ -11,12 +11,12 @@ const mocks = vi.hoisted(() => ({
   success: vi.fn(),
 }));
 
-vi.mock("@/lib/hooks", () => ({
+vi.mock("@lsat/lib/hooks", () => ({
   useRCDashboard: mocks.useRCDashboard,
   useRCPassageMaps: mocks.useRCPassageMaps,
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@lsat/lib/api", () => ({
   api: {
     rcPassageMap: mocks.rcPassageMap,
   },

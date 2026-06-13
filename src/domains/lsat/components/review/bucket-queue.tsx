@@ -1,31 +1,31 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { ListRow } from "@/components/ui/list-row";
-import { AnimatedList } from "@/components/ui/animated-list";
+import { Badge } from "@lsat/components/ui/badge";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { ListRow } from "@lsat/components/ui/list-row";
+import { AnimatedList } from "@lsat/components/ui/animated-list";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@lsat/components/ui/select";
 import { BookmarkPlus } from "lucide-react";
-import { IllustrationReview } from "@/components/illustrations";
-import { EmptyState, SkeletonList } from "@/components/states";
-import { SmartSetBuilder } from "@/components/playlists/smart-set-builder";
-import { unwrap, useSessions } from "@/lib/hooks";
-import { useCreatePlaylist } from "@/lib/mutations";
+import { IllustrationReview } from "@lsat/components/illustrations";
+import { EmptyState, SkeletonList } from "@lsat/components/states";
+import { SmartSetBuilder } from "@lsat/components/playlists/smart-set-builder";
+import { unwrap, useSessions } from "@lsat/lib/hooks";
+import { useCreatePlaylist } from "@lsat/lib/mutations";
 import {
   reviewableSessions,
   useMultiSessionResults,
-} from "@/lib/hooks/useReviewSessions";
-import { OUTCOME_META, qTypeLabel } from "@/lib/labels";
-import type { WireCriteria } from "@/lib/playlistCriteria";
-import { countLabel, formatDate, formatMs } from "@/lib/utils";
-import type { Outcome, ResultItem } from "@/lib/types";
+} from "@lsat/lib/hooks/useReviewSessions";
+import { OUTCOME_META, qTypeLabel } from "@lsat/lib/labels";
+import type { WireCriteria } from "@lsat/lib/playlistCriteria";
+import { countLabel, formatDate, formatMs } from "@lsat/lib/utils";
+import type { Outcome, ResultItem } from "@lsat/lib/types";
 
 const OUTCOME_ORDER: Outcome[] = [
   "timing_problem",

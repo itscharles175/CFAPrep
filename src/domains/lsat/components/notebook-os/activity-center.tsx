@@ -1,8 +1,8 @@
 import { Activity } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Icon } from "@/components/ui/icon";
-import { Progress } from "@/components/ui/progress";
-import type { ActivityEvent } from "@/lib/types";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Icon } from "@lsat/components/ui/icon";
+import { Progress } from "@lsat/components/ui/progress";
+import type { ActivityEvent } from "@lsat/lib/types";
 
 export function ActivityCenter({ events }: { events: ActivityEvent[] }) {
   return (

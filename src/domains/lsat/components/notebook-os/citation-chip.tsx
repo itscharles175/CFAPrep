@@ -1,6 +1,6 @@
 import { Link2, ShieldCheck } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { Badge } from "@lsat/components/ui/badge";
+import { cn } from "@lsat/lib/utils";
 
 export function CitationChip({
   target,

@@ -2,16 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { m, AnimatePresence, useReducedMotion } from "motion/react";
 import { MessageSquareText, RefreshCw, Send, X, ArrowRight, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useCoach } from "@/lib/hooks";
-import { useRefreshCoach, useCoachChat } from "@/lib/mutations";
-import { getRaw, setRaw } from "@/lib/storage";
-import { duration, easing } from "@/lib/motion";
-import { timeAgo } from "@/lib/utils";
-import type { ChatTurn, Recommendation } from "@/lib/types";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { Textarea } from "@lsat/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
+import { useCoach } from "@lsat/lib/hooks";
+import { useRefreshCoach, useCoachChat } from "@lsat/lib/mutations";
+import { getRaw, setRaw } from "@lsat/lib/storage";
+import { duration, easing } from "@lsat/lib/motion";
+import { timeAgo } from "@lsat/lib/utils";
+import type { ChatTurn, Recommendation } from "@lsat/lib/types";
 
 // Map a coach recommendation to an in-app route. The backend coach emits
 // `action.type` of drill / srs / analytics / blind_review / start_section.

@@ -6,19 +6,19 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+} from "@lsat/components/ui/dialog";
+import { Button } from "@lsat/components/ui/button";
+import { Input } from "@lsat/components/ui/input";
+import { Label } from "@lsat/components/ui/label";
+import { Switch } from "@lsat/components/ui/switch";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { qTypeLabel } from "@/lib/labels";
+} from "@lsat/components/ui/select";
+import { qTypeLabel } from "@lsat/lib/labels";
 import {
   CRITERIA_OUTCOMES,
   EMPTY_CRITERIA,
@@ -26,8 +26,8 @@ import {
   criteriaToDraft,
   type CriteriaDraft,
   type WireCriteria,
-} from "@/lib/playlistCriteria";
-import type { LrType, RcType, SectionType } from "@/lib/types";
+} from "@lsat/lib/playlistCriteria";
+import type { LrType, RcType, SectionType } from "@lsat/lib/types";
 
 const LR_TYPES: LrType[] = [
   "MainPoint", "NecessaryAssumption", "SufficientAssumption", "Strengthen",

@@ -1,11 +1,11 @@
 import { Check, Monitor, Moon, Sun } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Icon } from "@/components/ui/icon";
-import { useTheme } from "@/components/theme-provider";
-import { cn } from "@/lib/utils";
-import { type Density } from "@/lib/prefs";
+import { Label } from "@lsat/components/ui/label";
+import { Switch } from "@lsat/components/ui/switch";
+import { Icon } from "@lsat/components/ui/icon";
+import { useTheme } from "@lsat/components/theme-provider";
+import { cn } from "@lsat/lib/utils";
+import { type Density } from "@lsat/lib/prefs";
 
 type ThemeChoice = "light" | "dark" | "system";
 

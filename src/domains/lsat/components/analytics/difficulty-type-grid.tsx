@@ -6,19 +6,19 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { qTypeLabel } from "@/lib/labels";
-import { useByDifficulty, useByType, useSessions } from "@/lib/hooks";
+} from "@lsat/components/ui/card";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { useByDifficulty, useByType, useSessions } from "@lsat/lib/hooks";
 import {
   reviewableSessions,
   useMultiSessionResults,
-} from "@/lib/hooks/useReviewSessions";
-import { filterSessionsForAnalytics } from "@/lib/analyticsParams";
-import { pct } from "@/lib/utils";
-import type { ByTypeRow, ResultItem } from "@/lib/types";
+} from "@lsat/lib/hooks/useReviewSessions";
+import { filterSessionsForAnalytics } from "@lsat/lib/analyticsParams";
+import { pct } from "@lsat/lib/utils";
+import type { ByTypeRow, ResultItem } from "@lsat/lib/types";
 import { useAnalyticsContext } from "./analytics-context";
 import { ChartDataTable } from "./chart-data-table";
-import { SkeletonChart } from "@/components/states";
+import { SkeletonChart } from "@lsat/components/states";
 
 interface GridCell {
   accuracy: number;

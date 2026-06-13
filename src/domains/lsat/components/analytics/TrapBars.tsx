@@ -1,8 +1,8 @@
 import { m, useReducedMotion } from "motion/react";
-import { trapLabel, TRAP_DESCRIPTIONS } from "@/lib/labels";
-import { duration, easing } from "@/lib/motion";
-import { cn, pct } from "@/lib/utils";
-import type { TrapRow } from "@/lib/types";
+import { trapLabel, TRAP_DESCRIPTIONS } from "@lsat/lib/labels";
+import { duration, easing } from "@lsat/lib/motion";
+import { cn, pct } from "@lsat/lib/utils";
+import type { TrapRow } from "@lsat/lib/types";
 
 export interface TrapBarsProps {
   rows: TrapRow[];

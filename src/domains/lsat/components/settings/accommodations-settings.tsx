@@ -5,18 +5,18 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Input } from "@lsat/components/ui/input";
+import { Label } from "@lsat/components/ui/label";
+import { Switch } from "@lsat/components/ui/switch";
 import {
   getAccommodations,
   setAccommodations,
   type Accommodations,
-} from "@/lib/prefs";
-import { toast } from "@/lib/toast";
-import { ExamSoundsSettings } from "@/components/settings/exam-sounds-settings";
+} from "@lsat/lib/prefs";
+import { toast } from "@lsat/lib/toast";
+import { ExamSoundsSettings } from "@lsat/components/settings/exam-sounds-settings";
 
 export function AccommodationsSettings() {
   const [acc, setAcc] = useState<Accommodations>(() => getAccommodations());

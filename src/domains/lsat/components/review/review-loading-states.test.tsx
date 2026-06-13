@@ -19,7 +19,7 @@ type QueryLike = {
   refetch?: () => unknown;
 };
 
-vi.mock("@/lib/hooks", () => ({
+vi.mock("@lsat/lib/hooks", () => ({
   unwrap: (query: QueryLike) => {
     const envelope = query.data as
       | { data?: unknown; usingSample?: boolean }
@@ -38,7 +38,7 @@ vi.mock("@/lib/hooks", () => ({
   useSessions: () => hookMocks.useSessions(),
 }));
 
-vi.mock("@/lib/hooks/useReviewSessions", () => ({
+vi.mock("@lsat/lib/hooks/useReviewSessions", () => ({
   reviewableSessions: (sessions: unknown[]) => sessions,
   useMultiSessionResults: (...args: unknown[]) =>
     hookMocks.useMultiSessionResults(...args),

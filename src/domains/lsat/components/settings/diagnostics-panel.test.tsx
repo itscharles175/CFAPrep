@@ -2,7 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestQueryClient } from "@/test/setup";
+import { createTestQueryClient } from "@lsat/test/setup";
 import { DiagnosticsPanel } from "./diagnostics-panel";
 
 const mocks = vi.hoisted(() => ({
@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   openPath: vi.fn(),
 }));
 
-vi.mock("@/lib/hooks", () => ({
+vi.mock("@lsat/lib/hooks", () => ({
   useBackupIntegrity: mocks.useBackupIntegrity,
   useBackups: mocks.useBackups,
   useContentHealth: mocks.useContentHealth,
@@ -35,25 +35,25 @@ vi.mock("@/lib/hooks", () => ({
   useScheduledTasks: mocks.useScheduledTasks,
 }));
 
-vi.mock("@/lib/mutations", () => ({
+vi.mock("@lsat/lib/mutations", () => ({
   useCreateBackup: mocks.useCreateBackup,
   useRestoreBackup: mocks.useRestoreBackup,
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@lsat/lib/api", () => ({
   api: {
     runScheduledTask: mocks.runScheduledTask,
   },
 }));
 
-vi.mock("@/lib/toast", () => ({
+vi.mock("@lsat/lib/toast", () => ({
   toast: {
     success: mocks.success,
     error: mocks.error,
   },
 }));
 
-vi.mock("@/lib/tauri", () => ({
+vi.mock("@lsat/lib/tauri", () => ({
   exportBackendLogs: mocks.exportBackendLogs,
   getAppLogDir: mocks.getAppLogDir,
   getBackendStatus: mocks.getBackendStatus,

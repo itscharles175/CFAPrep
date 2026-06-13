@@ -1,24 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { History, TrendingDown, TrendingUp } from "lucide-react";
-import { PageLayout } from "@/components/page-layout";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { ListRow } from "@/components/ui/list-row";
+import { PageLayout } from "@lsat/components/page-layout";
+import { Badge } from "@lsat/components/ui/badge";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { ListRow } from "@lsat/components/ui/list-row";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover";
-import { LoadingState, EmptyState, ErrorState } from "@/components/states";
-import { IllustrationTimeline } from "@/components/illustrations";
-import { SessionComparePicker } from "@/components/analytics/session-compare-picker";
-import { VirtualList } from "@/components/ui/virtual-list";
-import { unwrap, useSessions } from "@/lib/hooks";
-import { getReflection } from "@/lib/prefs";
-import { cn, formatDate, formatDuration, pct, timeAgo } from "@/lib/utils";
-import type { SessionSummary } from "@/lib/types";
+} from "@lsat/components/ui/popover";
+import { LoadingState, EmptyState, ErrorState } from "@lsat/components/states";
+import { IllustrationTimeline } from "@lsat/components/illustrations";
+import { SessionComparePicker } from "@lsat/components/analytics/session-compare-picker";
+import { VirtualList } from "@lsat/components/ui/virtual-list";
+import { unwrap, useSessions } from "@lsat/lib/hooks";
+import { getReflection } from "@lsat/lib/prefs";
+import { cn, formatDate, formatDuration, pct, timeAgo } from "@lsat/lib/utils";
+import type { SessionSummary } from "@lsat/lib/types";
 
 // R11 6 — reconcile with the shared `formatDuration` (was a private minute-only
 // rounder that drifted: it showed "0m" for sub-minute sessions and dropped the

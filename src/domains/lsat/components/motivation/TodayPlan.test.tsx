@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestQueryClient } from "@/test/setup";
+import { createTestQueryClient } from "@lsat/test/setup";
 import { TodayPlan } from "./TodayPlan";
 
 const mocks = vi.hoisted(() => ({
@@ -14,13 +14,13 @@ const mocks = vi.hoisted(() => ({
   todayFeedback: vi.fn(),
 }));
 
-vi.mock("@/lib/hooks", () => ({
+vi.mock("@lsat/lib/hooks", () => ({
   useSrsDue: mocks.useSrsDue,
   useDashboard: mocks.useDashboard,
   useTodayPlan: mocks.useTodayPlan,
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@lsat/lib/api", () => ({
   api: {
     diagnose: mocks.diagnose,
     todayFeedback: mocks.todayFeedback,

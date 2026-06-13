@@ -1,9 +1,9 @@
 import { memo, useState } from "react";
-import { cn } from "@/lib/utils";
-import { formatMs } from "@/lib/utils";
-import { qTypeLabel, typeColor } from "@/lib/labels";
-import { getNavigatorMode, type NavigatorMode } from "@/lib/prefs";
-import type { QType } from "@/lib/types";
+import { cn } from "@lsat/lib/utils";
+import { formatMs } from "@lsat/lib/utils";
+import { qTypeLabel, typeColor } from "@lsat/lib/labels";
+import { getNavigatorMode, type NavigatorMode } from "@lsat/lib/prefs";
+import type { QType } from "@lsat/lib/types";
 
 export interface NavItem {
   /** Whether the question has a chosen answer. */

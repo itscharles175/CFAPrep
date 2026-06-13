@@ -1,5 +1,5 @@
-import { OUTCOME_META } from "@/lib/labels";
-import type { Outcome, ResultItem } from "@/lib/types";
+import { OUTCOME_META } from "@lsat/lib/labels";
+import type { Outcome, ResultItem } from "@lsat/lib/types";
 
 const OUTCOMES: Outcome[] = [
   "timed_ok",

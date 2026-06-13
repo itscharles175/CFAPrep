@@ -1,4 +1,4 @@
-import type { AnalyticsRange } from "@/components/analytics/AnalyticsFilters";
+import type { AnalyticsRange } from "@lsat/components/analytics/AnalyticsFilters";
 import { rangeCutoffIso } from "./dateRange";
 import type { SessionSummary } from "./types";
 

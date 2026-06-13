@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 export interface VirtualListProps<T> {
   items: T[];

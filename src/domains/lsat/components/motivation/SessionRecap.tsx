@@ -1,26 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { m, useReducedMotion } from "motion/react";
 import { Download, Flame, Trophy } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@lsat/components/ui/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Icon } from "@/components/ui/icon";
-import { StatNumber, TypeBadge } from "@/components/viz";
-import { AccentPanel } from "@/components/accent-panel";
-import { formatDate, formatMs, pct, pluralize } from "@/lib/utils";
-import { getBestScore, recordScore } from "@/lib/prefs";
-import { stagger, fadeUp } from "@/lib/motion";
+} from "@lsat/components/ui/card";
+import { Icon } from "@lsat/components/ui/icon";
+import { StatNumber, TypeBadge } from "@lsat/components/viz";
+import { AccentPanel } from "@lsat/components/accent-panel";
+import { formatDate, formatMs, pct, pluralize } from "@lsat/lib/utils";
+import { getBestScore, recordScore } from "@lsat/lib/prefs";
+import { stagger, fadeUp } from "@lsat/lib/motion";
 import { celebratePersonalBest } from "./confetti";
 import {
   RecapShareCard,
   recapSharePropsFromStats,
 } from "./recap-share-card";
-import { exportNodeAsPng, exportNodeAsSvg } from "@/lib/recapExport";
-import type { SessionResults, SessionSummary, QType } from "@/lib/types";
+import { exportNodeAsPng, exportNodeAsSvg } from "@lsat/lib/recapExport";
+import type { SessionResults, SessionSummary, QType } from "@lsat/lib/types";
 
 export interface SessionRecapProps {
   results: SessionResults;

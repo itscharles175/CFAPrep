@@ -6,38 +6,38 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Icon } from "@/components/ui/icon";
-import { PageLayout } from "@/components/page-layout";
-import { SystemNotice } from "@/components/system-notice";
-import { IllustrationImport } from "@/components/illustrations";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { ApiError, api } from "@/lib/api";
-import { useImportCommit } from "@/lib/mutations";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Checkbox } from "@lsat/components/ui/checkbox";
+import { Input } from "@lsat/components/ui/input";
+import { Label } from "@lsat/components/ui/label";
+import { Icon } from "@lsat/components/ui/icon";
+import { PageLayout } from "@lsat/components/page-layout";
+import { SystemNotice } from "@lsat/components/system-notice";
+import { IllustrationImport } from "@lsat/components/illustrations";
+import { ScrollArea } from "@lsat/components/ui/scroll-area";
+import { ApiError, api } from "@lsat/lib/api";
+import { useImportCommit } from "@lsat/lib/mutations";
 import {
   ImportNameField,
   isImportNameValid,
-} from "@/components/import/import-name-field";
-import { ImportStructureTree } from "@/components/import/import-structure-tree";
-import { ImportJobHistory } from "@/components/import/import-job-history";
-import { ImportIntegrityGate } from "@/components/import/import-integrity-gate";
-import { ImportStepper } from "@/components/import/import-stepper";
+} from "@lsat/components/import/import-name-field";
+import { ImportStructureTree } from "@lsat/components/import/import-structure-tree";
+import { ImportJobHistory } from "@lsat/components/import/import-job-history";
+import { ImportIntegrityGate } from "@lsat/components/import/import-integrity-gate";
+import { ImportStepper } from "@lsat/components/import/import-stepper";
 import {
   getImportCountMismatch,
   rawQuestionLineIndices,
-} from "@/lib/importDiff";
-import { pickPdfFile, readFileFromPath } from "@/lib/tauri";
-import { toast } from "@/lib/toast";
+} from "@lsat/lib/importDiff";
+import { pickPdfFile, readFileFromPath } from "@lsat/lib/tauri";
+import { toast } from "@lsat/lib/toast";
 import type {
   ImportIntegrityError,
   ImportIntegrityIssue,
   ImportParseResult,
   ParsedPrepTest,
-} from "@/lib/types";
+} from "@lsat/lib/types";
 
 /** Narrow an unknown ApiError.detail into the D1 integrity-gate payload. */
 function integrityIssuesFrom(err: unknown): ImportIntegrityIssue[] | null {

@@ -1,42 +1,42 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Logo } from "@/components/logo";
-import { AnnotatedText } from "@/components/question/annotated-text";
-import { ReadingControls } from "@/components/question/reading-controls";
-import { BrAnswerPanel } from "@/components/blind-review/br-answer-panel";
-import { RevealedBlock } from "@/components/blind-review/revealed-block";
-import { TypeBadge } from "@/components/viz";
-import { LoadingState, ErrorState } from "@/components/states";
-import { useSessionResults } from "@/lib/hooks";
-import { useAddErrorLog, useBulkSrsCards } from "@/lib/mutations";
-import { api } from "@/lib/api";
-import { enqueue } from "@/lib/offlineQueue";
-import { cn } from "@/lib/utils";
-import { OUTCOME_META } from "@/lib/labels";
+import { Button } from "@lsat/components/ui/button";
+import { Logo } from "@lsat/components/logo";
+import { AnnotatedText } from "@lsat/components/question/annotated-text";
+import { ReadingControls } from "@lsat/components/question/reading-controls";
+import { BrAnswerPanel } from "@lsat/components/blind-review/br-answer-panel";
+import { RevealedBlock } from "@lsat/components/blind-review/revealed-block";
+import { TypeBadge } from "@lsat/components/viz";
+import { LoadingState, ErrorState } from "@lsat/components/states";
+import { useSessionResults } from "@lsat/lib/hooks";
+import { useAddErrorLog, useBulkSrsCards } from "@lsat/lib/mutations";
+import { api } from "@lsat/lib/api";
+import { enqueue } from "@lsat/lib/offlineQueue";
+import { cn } from "@lsat/lib/utils";
+import { OUTCOME_META } from "@lsat/lib/labels";
 import {
   getBrLastConfidence,
   getNotes,
   readingClasses,
   setBrLastConfidence,
   useReadingPrefs,
-} from "@/lib/prefs";
-import { getQuestionAnnotations } from "@/lib/annotationPrefs";
-import { getKeyboardMap, resolveBrKey } from "@/lib/keyboardMap";
+} from "@lsat/lib/prefs";
+import { getQuestionAnnotations } from "@lsat/lib/annotationPrefs";
+import { getKeyboardMap, resolveBrKey } from "@lsat/lib/keyboardMap";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { setResume } from "@/lib/resume";
+} from "@lsat/components/ui/select";
+import { setResume } from "@lsat/lib/resume";
 import {
   buildBrWorksheetHtml,
   downloadBrWorksheet,
-} from "@/lib/br-worksheet-export";
-import type { Confidence, Outcome } from "@/lib/types";
+} from "@lsat/lib/br-worksheet-export";
+import type { Confidence, Outcome } from "@lsat/lib/types";
 
 type BrFilter = "all" | "flagged" | "wrong";
 

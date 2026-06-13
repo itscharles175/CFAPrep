@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ReadinessCard } from "./readiness-card";
-import type { ReadinessStatus } from "@/lib/types";
+import type { ReadinessStatus } from "@lsat/lib/types";
 
 describe("ReadinessCard", () => {
   it("prefers backend Ability Engine readiness over local heuristic inputs", () => {

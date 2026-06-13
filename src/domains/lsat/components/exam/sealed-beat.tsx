@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import { m, useReducedMotion } from "motion/react";
 import { Lock } from "lucide-react";
-import { Logo } from "@/components/logo";
-import { LiveRegion } from "@/components/question/live-region";
-import { duration as motionDuration, easing } from "@/lib/motion";
+import { Logo } from "@lsat/components/logo";
+import { LiveRegion } from "@lsat/components/question/live-region";
+import { duration as motionDuration, easing } from "@lsat/lib/motion";
 
 /**
  * R9 (docs/19 "section-complete 'sealed' beat").

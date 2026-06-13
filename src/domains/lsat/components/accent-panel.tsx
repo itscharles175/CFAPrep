@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * R10 B3.2 — one primitive for the "primary verdict-accented hero panel" idiom

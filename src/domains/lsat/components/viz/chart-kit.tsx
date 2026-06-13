@@ -1,5 +1,5 @@
 import { type CSSProperties, type ReactNode } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * R8 W3.3 — the shared chart kit. One tooltip identity, one legend grammar, one

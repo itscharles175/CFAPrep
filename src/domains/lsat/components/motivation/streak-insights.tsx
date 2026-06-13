@@ -5,11 +5,11 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Icon } from "@/components/ui/icon";
-import { StatNumber } from "@/components/viz";
+} from "@lsat/components/ui/card";
+import { Icon } from "@lsat/components/ui/icon";
+import { StatNumber } from "@lsat/components/viz";
 import { computeStreak } from "./streak";
-import type { ActivityDay } from "@/lib/types";
+import type { ActivityDay } from "@lsat/lib/types";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 

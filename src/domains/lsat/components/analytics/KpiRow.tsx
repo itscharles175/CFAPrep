@@ -1,5 +1,5 @@
-import { Card } from "@/components/ui/card";
-import { StatNumber, Sparkline } from "@/components/viz";
+import { Card } from "@lsat/components/ui/card";
+import { StatNumber, Sparkline } from "@lsat/components/viz";
 
 export interface KpiRowProps {
   predictedScore: number | null | undefined;

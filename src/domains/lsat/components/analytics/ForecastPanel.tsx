@@ -6,12 +6,12 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ReadinessGauge, StatNumber } from "@/components/viz";
-import { readinessFromStatus, type ReadinessInput } from "@/lib/readiness";
-import type { Forecast, ReadinessStatus } from "@/lib/types";
-import { cn } from "@/lib/utils";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { ReadinessGauge, StatNumber } from "@lsat/components/viz";
+import { readinessFromStatus, type ReadinessInput } from "@lsat/lib/readiness";
+import type { Forecast, ReadinessStatus } from "@lsat/lib/types";
+import { cn } from "@lsat/lib/utils";
 
 export interface ForecastPanelProps {
   /** Server forecast (may be partial / empty offline). */

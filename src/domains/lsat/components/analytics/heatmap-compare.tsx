@@ -5,22 +5,22 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@lsat/components/ui/card";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { HeatStrip, ColorScaleKey, ChartEmpty, type HeatCell } from "@/components/viz";
-import { formatDate } from "@/lib/utils";
-import { useChartScales } from "@/lib/chartTheme";
-import { useTiming } from "@/lib/hooks";
-import { filterSessionsForAnalytics } from "@/lib/analyticsParams";
+} from "@lsat/components/ui/select";
+import { HeatStrip, ColorScaleKey, ChartEmpty, type HeatCell } from "@lsat/components/viz";
+import { formatDate } from "@lsat/lib/utils";
+import { useChartScales } from "@lsat/lib/chartTheme";
+import { useTiming } from "@lsat/lib/hooks";
+import { filterSessionsForAnalytics } from "@lsat/lib/analyticsParams";
 import { useAnalyticsContext } from "./analytics-context";
-import type { SessionSummary } from "@/lib/types";
-import { SkeletonChart } from "@/components/states";
+import type { SessionSummary } from "@lsat/lib/types";
+import { SkeletonChart } from "@lsat/components/states";
 
 function timingCells(
   rows: { question_order: number; time_ms: number; is_correct: boolean }[],

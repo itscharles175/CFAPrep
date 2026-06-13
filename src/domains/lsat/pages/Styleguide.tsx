@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { m } from "motion/react";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Logo } from "@/components/logo";
-import { TYPE_FAMILY_LIST, qTypeLabel } from "@/lib/labels";
-import type { QType } from "@/lib/types";
-import { PageLayout } from "@/components/page-layout";
-import { fadeUp, stagger } from "@/lib/motion";
-import { toast } from "@/lib/toast";
+import { Button } from "@lsat/components/ui/button";
+import { Card } from "@lsat/components/ui/card";
+import { Logo } from "@lsat/components/logo";
+import { TYPE_FAMILY_LIST, qTypeLabel } from "@lsat/lib/labels";
+import type { QType } from "@lsat/lib/types";
+import { PageLayout } from "@lsat/components/page-layout";
+import { fadeUp, stagger } from "@lsat/lib/motion";
+import { toast } from "@lsat/lib/toast";
 import {
   ContributionHeatmap,
   GapDumbbell,
@@ -18,7 +18,7 @@ import {
   StatNumber,
   TrendChart,
   TypeBadge,
-} from "@/components/viz";
+} from "@lsat/components/viz";
 import {
   EmptyState,
   ErrorState,
@@ -27,12 +27,12 @@ import {
   SkeletonCard,
   SkeletonChart,
   SkeletonList,
-} from "@/components/states";
+} from "@lsat/components/states";
 import {
   IllustrationAnalytics,
   IllustrationPrepTests,
   IllustrationSrsCaughtUp,
-} from "@/components/illustrations";
+} from "@lsat/components/illustrations";
 
 // R8 truth-fix (docs/18): the Styleguide MUST read the live design tokens, never
 // re-declare them. Swatches render via the Tailwind classes that resolve to the

@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useSyncExternalStore } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { SystemNotice } from "@/components/system-notice";
-import { getOfflineStatus, subscribeOfflineStatus } from "@/lib/offline";
-import { flushQueue } from "@/lib/offlineQueue";
-import { toast } from "@/lib/toast";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { SystemNotice } from "@lsat/components/system-notice";
+import { getOfflineStatus, subscribeOfflineStatus } from "@lsat/lib/offline";
+import { flushQueue } from "@lsat/lib/offlineQueue";
+import { toast } from "@lsat/lib/toast";
 
 function getStatusSnapshot() {
   return getOfflineStatus();

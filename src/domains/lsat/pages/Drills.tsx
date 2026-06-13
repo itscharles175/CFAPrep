@@ -6,34 +6,34 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Label } from "@lsat/components/ui/label";
+import { Input } from "@lsat/components/ui/input";
+import { Switch } from "@lsat/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@lsat/components/ui/toggle-group";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { PageLayout } from "@/components/page-layout";
-import { Icon } from "@/components/ui/icon";
-import { TrapSpiralCard } from "@/components/drills/trap-spiral-card";
-import { setDrillTimeCapMin } from "@/lib/drillPrefs";
-import { ErrorState } from "@/components/states";
-import { api } from "@/lib/api";
-import { toast } from "@/lib/toast";
-import { useCreateDrill } from "@/lib/mutations";
-import { qTypeLabel } from "@/lib/labels";
+} from "@lsat/components/ui/select";
+import { PageLayout } from "@lsat/components/page-layout";
+import { Icon } from "@lsat/components/ui/icon";
+import { TrapSpiralCard } from "@lsat/components/drills/trap-spiral-card";
+import { setDrillTimeCapMin } from "@lsat/lib/drillPrefs";
+import { ErrorState } from "@lsat/components/states";
+import { api } from "@lsat/lib/api";
+import { toast } from "@lsat/lib/toast";
+import { useCreateDrill } from "@lsat/lib/mutations";
+import { qTypeLabel } from "@lsat/lib/labels";
 import type {
   DrillConfig,
   LrType,
   RcType,
   SectionType,
-} from "@/lib/types";
+} from "@lsat/lib/types";
 
 const LR_TYPES: LrType[] = [
   "MainPoint", "NecessaryAssumption", "SufficientAssumption", "Strengthen",

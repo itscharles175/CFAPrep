@@ -1,8 +1,8 @@
 import { memo, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpRight } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { formatMs, pct } from "@/lib/utils";
-import type { QType } from "@/lib/types";
+import { cn } from "@lsat/lib/utils";
+import { formatMs, pct } from "@lsat/lib/utils";
+import type { QType } from "@lsat/lib/types";
 import { TypeBadge } from "./TypeBadge";
 
 export interface MasteryRow {

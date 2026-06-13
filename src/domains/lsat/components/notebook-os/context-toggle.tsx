@@ -1,12 +1,12 @@
 import { Eye, Lock, ShieldCheck, Sparkles, TextSearch, X } from "lucide-react";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Icon } from "@/components/ui/icon";
+import { ToggleGroup, ToggleGroupItem } from "@lsat/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@lsat/components/ui/tooltip";
+import { Icon } from "@lsat/components/ui/icon";
 import {
   DEFAULT_NOTEBOOK_CAPABILITIES,
   enabledCapabilities,
-} from "@/lib/notebookCapabilities";
-import type { ContextMode, NotebookContextModeCapability } from "@/lib/types";
+} from "@lsat/lib/notebookCapabilities";
+import type { ContextMode, NotebookContextModeCapability } from "@lsat/lib/types";
 
 const modeIcons: Record<string, typeof X> = {
   off: X,

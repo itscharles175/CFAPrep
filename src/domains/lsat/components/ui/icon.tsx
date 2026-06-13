@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * R8 (docs/18 W1.9): a single icon identity — one stroke weight and a small set

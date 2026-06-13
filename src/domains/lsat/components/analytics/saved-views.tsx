@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { Bookmark, Link2, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@lsat/components/ui/button";
+import { Input } from "@lsat/components/ui/input";
+import { Label } from "@lsat/components/ui/label";
 import {
   deleteAnalyticsView,
   getSavedAnalyticsViews,
   saveAnalyticsView,
   type SavedAnalyticsView,
-} from "@/lib/prefs";
-import { toast } from "@/lib/toast";
+} from "@lsat/lib/prefs";
+import { toast } from "@lsat/lib/toast";
 import type { AnalyticsRange } from "./AnalyticsFilters";
 import type { Source } from "./tabs";
 

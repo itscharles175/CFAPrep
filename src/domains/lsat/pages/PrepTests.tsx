@@ -5,16 +5,16 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Icon } from "@/components/ui/icon";
-import { Progress } from "@/components/ui/progress";
-import { ProgressRing } from "@/components/viz";
-import { getPtProgress } from "@/lib/ptProgress";
-import { PageLayout } from "@/components/page-layout";
-import { IllustrationPrepTests } from "@/components/illustrations";
-import { LoadingState, ErrorState, EmptyState } from "@/components/states";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Icon } from "@lsat/components/ui/icon";
+import { Progress } from "@lsat/components/ui/progress";
+import { ProgressRing } from "@lsat/components/viz";
+import { getPtProgress } from "@lsat/lib/ptProgress";
+import { PageLayout } from "@lsat/components/page-layout";
+import { IllustrationPrepTests } from "@lsat/components/illustrations";
+import { LoadingState, ErrorState, EmptyState } from "@lsat/components/states";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   prefetchPrepTest,
@@ -22,8 +22,8 @@ import {
   usePrepTests,
   usePrepTest,
   usePrepTestProgress,
-} from "@/lib/hooks";
-import type { PrepTestSummary } from "@/lib/types";
+} from "@lsat/lib/hooks";
+import type { PrepTestSummary } from "@lsat/lib/types";
 
 export default function PrepTests() {
   const navigate = useNavigate();

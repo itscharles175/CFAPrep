@@ -1,5 +1,5 @@
-import { cn } from "@/lib/utils";
-import type { SectionSummary } from "@/lib/types";
+import { cn } from "@lsat/lib/utils";
+import type { SectionSummary } from "@lsat/lib/types";
 
 /** R4-C9 — visual PT progress through sections. */
 export function ExamProgressMap({

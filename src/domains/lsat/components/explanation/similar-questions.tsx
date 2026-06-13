@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight, ListPlus } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { api } from "@/lib/api";
-import { qTypeLabel } from "@/lib/labels";
-import { useBulkSrsCards } from "@/lib/mutations";
-import type { Question } from "@/lib/types";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { api } from "@lsat/lib/api";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { useBulkSrsCards } from "@lsat/lib/mutations";
+import type { Question } from "@lsat/lib/types";
 
 /** R4-A4 / D9 — similar questions carousel + batch SRS queue. */
 export function SimilarQuestions({

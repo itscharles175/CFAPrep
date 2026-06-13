@@ -2,7 +2,7 @@ import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TagEditor } from "./tag-editor";
-import type { BrowseQuestion } from "@/lib/bankBrowse";
+import type { BrowseQuestion } from "@lsat/lib/bankBrowse";
 
 const apiMocks = vi.hoisted(() => ({
   bankBulkTag: vi.fn(),
@@ -13,17 +13,17 @@ const toastMocks = vi.hoisted(() => ({
   success: vi.fn(),
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@lsat/lib/api", () => ({
   api: {
     bankBulkTag: apiMocks.bankBulkTag,
   },
 }));
 
-vi.mock("@/lib/toast", () => ({
+vi.mock("@lsat/lib/toast", () => ({
   toast: toastMocks,
 }));
 
-vi.mock("@/components/ui/select", async () => {
+vi.mock("@lsat/components/ui/select", async () => {
   const ReactModule = await import("react");
   const SelectContext = ReactModule.createContext<{
     onValueChange: (value: string) => void;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Ruler } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 /** R4-C4 — horizontal drag guide for RC passages. */
 export function RcLineRuler({ containerRef }: { containerRef: React.RefObject<HTMLElement | null> }) {

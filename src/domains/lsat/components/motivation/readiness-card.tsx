@@ -1,10 +1,10 @@
 import { useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ReadinessGauge } from "@/components/viz";
-import { readinessFromStatus, type ReadinessResult } from "@/lib/readiness";
-import { getGoal } from "@/lib/prefs";
-import type { ReadinessStatus } from "@/lib/types";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Badge } from "@lsat/components/ui/badge";
+import { ReadinessGauge } from "@lsat/components/viz";
+import { readinessFromStatus, type ReadinessResult } from "@lsat/lib/readiness";
+import { getGoal } from "@lsat/lib/prefs";
+import type { ReadinessStatus } from "@lsat/lib/types";
 
 /** One short serif verdict from the readiness label — counsel voice, no new data. */
 function verdictLine(label: ReadinessResult["label"]): string {

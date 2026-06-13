@@ -2,25 +2,25 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, m, useReducedMotion } from "motion/react";
 import { CircleCheck, CircleX, Keyboard, Loader2, PlayCircle } from "lucide-react";
-import { KEYBOARD_HELP_EVENT } from "@/components/keyboard-help";
-import { Logo } from "@/components/logo";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Icon } from "@/components/ui/icon";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { StatNumber } from "@/components/viz";
-import { useAiHealth } from "@/lib/hooks";
-import { useSaveSettings } from "@/lib/mutations";
-import { fadeUp } from "@/lib/motion";
-import { cn } from "@/lib/utils";
+import { KEYBOARD_HELP_EVENT } from "@lsat/components/keyboard-help";
+import { Logo } from "@lsat/components/logo";
+import { Button } from "@lsat/components/ui/button";
+import { Input } from "@lsat/components/ui/input";
+import { Label } from "@lsat/components/ui/label";
+import { Icon } from "@lsat/components/ui/icon";
+import { ToggleGroup, ToggleGroupItem } from "@lsat/components/ui/toggle-group";
+import { StatNumber } from "@lsat/components/viz";
+import { useAiHealth } from "@lsat/lib/hooks";
+import { useSaveSettings } from "@lsat/lib/mutations";
+import { fadeUp } from "@lsat/lib/motion";
+import { cn } from "@lsat/lib/utils";
 import {
   daysUntil,
   getGoal,
   isOnboardingDone,
   setGoal,
   setOnboardingDone,
-} from "@/lib/prefs";
+} from "@lsat/lib/prefs";
 
 /**
  * R9 F3.1 — "First Light" onboarding. A full-bleed dark stage with a breathing

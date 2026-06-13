@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { AlertTriangle } from "lucide-react";
-import { SystemNotice } from "@/components/system-notice";
-import { unwrap, useErrorLog } from "@/lib/hooks";
-import { detectErrorPatterns } from "@/lib/errorPatterns";
+import { SystemNotice } from "@lsat/components/system-notice";
+import { unwrap, useErrorLog } from "@lsat/lib/hooks";
+import { detectErrorPatterns } from "@lsat/lib/errorPatterns";
 
 /**
  * R4-A9 — surfaces recurring error-log reasons.

@@ -1,13 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ImportJobHistory } from "./import-job-history";
-import type { ImportJobSummary } from "@/lib/types";
+import type { ImportJobSummary } from "@lsat/lib/types";
 
 const apiMocks = vi.hoisted(() => ({
   listImportJobs: vi.fn(),
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@lsat/lib/api", () => ({
   api: {
     listImportJobs: apiMocks.listImportJobs,
   },

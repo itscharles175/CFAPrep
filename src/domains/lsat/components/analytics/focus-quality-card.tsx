@@ -4,10 +4,10 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { FocusTimeline, type FocusEvent } from "@/components/viz";
-import { useFocusQuality } from "@/lib/hooks";
-import type { ResultItem } from "@/lib/types";
+} from "@lsat/components/ui/card";
+import { FocusTimeline, type FocusEvent } from "@lsat/components/viz";
+import { useFocusQuality } from "@lsat/lib/hooks";
+import type { ResultItem } from "@lsat/lib/types";
 
 const COMPONENT_META: Record<
   string,

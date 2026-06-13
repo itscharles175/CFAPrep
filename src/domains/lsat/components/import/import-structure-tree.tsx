@@ -1,10 +1,10 @@
 import { AlertTriangle } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { qTypeLabel } from "@/lib/labels";
-import type { ImportCountMismatch } from "@/lib/importDiff";
-import type { ParsedPrepTest } from "@/lib/types";
+import { Badge } from "@lsat/components/ui/badge";
+import { Input } from "@lsat/components/ui/input";
+import { Textarea } from "@lsat/components/ui/textarea";
+import { qTypeLabel } from "@lsat/lib/labels";
+import type { ImportCountMismatch } from "@lsat/lib/importDiff";
+import type { ParsedPrepTest } from "@lsat/lib/types";
 
 /** Match warnings to section/question indices when possible (R4-F3). */
 function warningsForQuestion(

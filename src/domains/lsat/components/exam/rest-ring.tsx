@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { m, useReducedMotion } from "motion/react";
-import { cn, formatClock } from "@/lib/utils";
-import { LiveRegion } from "@/components/question/live-region";
+import { cn, formatClock } from "@lsat/lib/utils";
+import { LiveRegion } from "@lsat/components/question/live-region";
 
 /**
  * R9 (docs/19 "the break timer as a designed rest moment").

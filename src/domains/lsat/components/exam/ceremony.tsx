@@ -1,9 +1,9 @@
 import { m, useReducedMotion } from "motion/react";
 import type { LucideIcon } from "lucide-react";
-import { Logo } from "@/components/logo";
-import { Icon } from "@/components/ui/icon";
-import { cn } from "@/lib/utils";
-import { duration, easing } from "@/lib/motion";
+import { Logo } from "@lsat/components/logo";
+import { Icon } from "@lsat/components/ui/icon";
+import { cn } from "@lsat/lib/utils";
+import { duration, easing } from "@lsat/lib/motion";
 
 /**
  * R9 (docs/19 Study Loop "exam as a ceremony") — the shared pre/post-clock stage.

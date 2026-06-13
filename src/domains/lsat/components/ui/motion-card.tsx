@@ -1,7 +1,7 @@
 import { type ComponentProps } from "react";
 import { m, useReducedMotion } from "motion/react";
-import { hoverLift, tapPress } from "@/lib/motion";
-import { cn } from "@/lib/utils";
+import { hoverLift, tapPress } from "@lsat/lib/motion";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * R10 B2.1 — the tactile micro-interaction layer. A motion-driven hover-lift +

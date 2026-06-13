@@ -5,16 +5,16 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Button } from "@/components/ui/button";
+} from "@lsat/components/ui/card";
+import { Label } from "@lsat/components/ui/label";
+import { Switch } from "@lsat/components/ui/switch";
+import { Button } from "@lsat/components/ui/button";
 import {
   getExamSoundsEnabled,
   playSectionEndBeep,
   setExamSoundsEnabled,
-} from "@/lib/examSounds";
-import { toast } from "@/lib/toast";
+} from "@lsat/lib/examSounds";
+import { toast } from "@lsat/lib/toast";
 
 export function ExamSoundsSettings() {
   const [on, setOn] = useState(() => getExamSoundsEnabled());

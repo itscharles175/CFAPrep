@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Minus, Plus, Type } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Icon } from "@/components/ui/icon";
-import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
+import { cn } from "@lsat/lib/utils";
+import { Icon } from "@lsat/components/ui/icon";
+import { Switch } from "@lsat/components/ui/switch";
+import { Slider } from "@lsat/components/ui/slider";
 import {
   READING_PRESETS,
   READING_SIZES,
@@ -11,7 +11,7 @@ import {
   type ChoiceSpacing,
   type ReadingPrefs,
   type ReadingSize,
-} from "@/lib/prefs";
+} from "@lsat/lib/prefs";
 
 const SIZE_LABEL: Record<ReadingSize, string> = { sm: "S", md: "M", lg: "L" };
 const SIZE_PX: Record<ReadingSize, string> = { sm: "16px", md: "19px", lg: "22px" };

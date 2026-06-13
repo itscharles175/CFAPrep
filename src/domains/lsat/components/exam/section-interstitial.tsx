@@ -1,4 +1,4 @@
-import { formatClock, formatMs } from "@/lib/utils";
+import { formatClock, formatMs } from "@lsat/lib/utils";
 
 /**
  * R4-C8 / C4 — pacing postmortem between exam sections. Deliberately shows no

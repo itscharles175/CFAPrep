@@ -7,12 +7,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import type { PrepTestDetail } from "@/lib/types";
-import { formatClock } from "@/lib/utils";
+} from "@lsat/components/ui/dialog";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Switch } from "@lsat/components/ui/switch";
+import type { PrepTestDetail } from "@lsat/lib/types";
+import { formatClock } from "@lsat/lib/utils";
 
 /** R4-F9 — pick sections for a timed study plan. */
 export function StudyPtWizard({

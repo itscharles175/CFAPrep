@@ -1,11 +1,11 @@
 import { memo } from "react";
 import { Check, X } from "lucide-react";
 import { AnimatePresence, m, useReducedMotion } from "motion/react";
-import { cn } from "@/lib/utils";
-import { duration, easing } from "@/lib/motion";
-import type { ChoiceSize, ChoiceSpacing } from "@/lib/prefs";
-import type { Choice, TrapType } from "@/lib/types";
-import { trapLabel } from "@/lib/labels";
+import { cn } from "@lsat/lib/utils";
+import { duration, easing } from "@lsat/lib/motion";
+import type { ChoiceSize, ChoiceSpacing } from "@lsat/lib/prefs";
+import type { Choice, TrapType } from "@lsat/lib/types";
+import { trapLabel } from "@lsat/lib/labels";
 
 const LETTER_SIZE: Record<ChoiceSize, string> = {
   sm: "h-5 w-5 text-[10px]",

@@ -7,7 +7,7 @@ const hookMocks = vi.hoisted(() => ({
   useTraps: vi.fn(),
 }));
 
-vi.mock("@/lib/hooks", () => ({
+vi.mock("@lsat/lib/hooks", () => ({
   useTraps: () => hookMocks.useTraps(),
 }));
 

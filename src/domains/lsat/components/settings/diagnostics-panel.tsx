@@ -21,9 +21,9 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -31,7 +31,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@lsat/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -39,8 +39,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { EmptyState } from "@/components/states";
+} from "@lsat/components/ui/table";
+import { EmptyState } from "@lsat/components/states";
 import {
   useBackupIntegrity,
   useBackups,
@@ -49,10 +49,10 @@ import {
   useReleaseTrust,
   useRuntimeEvidence,
   useScheduledTasks,
-} from "@/lib/hooks";
-import { useCreateBackup, useRestoreBackup } from "@/lib/mutations";
-import { api } from "@/lib/api";
-import { toast } from "@/lib/toast";
+} from "@lsat/lib/hooks";
+import { useCreateBackup, useRestoreBackup } from "@lsat/lib/mutations";
+import { api } from "@lsat/lib/api";
+import { toast } from "@lsat/lib/toast";
 import {
   exportBackendLogs,
   getAppLogDir,
@@ -60,8 +60,8 @@ import {
   openPath,
   restartBackend,
   type BackendStatus,
-} from "@/lib/tauri";
-import { timeAgo } from "@/lib/utils";
+} from "@lsat/lib/tauri";
+import { timeAgo } from "@lsat/lib/utils";
 
 // G6 — crash record shape written by ErrorBoundary.componentDidCatch.
 interface LastCrash {

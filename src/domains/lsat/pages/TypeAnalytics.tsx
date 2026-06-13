@@ -1,15 +1,15 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { Crosshair } from "lucide-react";
-import { PageLayout } from "@/components/page-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { GapDumbbell, type GapRow } from "@/components/viz";
-import { EmptyState, SkeletonChart } from "@/components/states";
-import { useTypeAnalytics } from "@/lib/hooks";
-import { qTypeLabel } from "@/lib/labels";
-import { pct, formatMs } from "@/lib/utils";
-import type { QType } from "@/lib/types";
+import { PageLayout } from "@lsat/components/page-layout";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { GapDumbbell, type GapRow } from "@lsat/components/viz";
+import { EmptyState, SkeletonChart } from "@lsat/components/states";
+import { useTypeAnalytics } from "@lsat/lib/hooks";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { pct, formatMs } from "@lsat/lib/utils";
+import type { QType } from "@lsat/lib/types";
 
 const TREND_GLYPH: Record<string, string> = { up: "↑", down: "↓", flat: "→" };
 

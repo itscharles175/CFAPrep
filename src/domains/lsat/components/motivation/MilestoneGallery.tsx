@@ -1,10 +1,10 @@
 import { m, useReducedMotion } from "motion/react";
 import { Trophy } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Icon } from "@/components/ui/icon";
-import { formatDate } from "@/lib/utils";
-import { fadeUp, stagger } from "@/lib/motion";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Badge } from "@lsat/components/ui/badge";
+import { Icon } from "@lsat/components/ui/icon";
+import { formatDate } from "@lsat/lib/utils";
+import { fadeUp, stagger } from "@lsat/lib/motion";
 
 export interface Milestone {
   id: string;

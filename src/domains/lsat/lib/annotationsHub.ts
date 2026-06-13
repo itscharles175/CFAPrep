@@ -15,7 +15,7 @@
 // /explanation/{questionId}). Scratch is keyed by SECTION id and is grouped on
 // its own (it has no single question to link to).
 
-import type { Highlight } from "@/components/question/highlightable-text";
+import type { Highlight } from "@lsat/components/question/highlightable-text";
 import type { MarginNote } from "./prefs";
 
 const ANNOT_PREFIX = "lsatlab.annotations.";

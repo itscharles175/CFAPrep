@@ -7,8 +7,8 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
-import { routeCommandLabel } from "@/lib/commandRecents";
+} from "@lsat/components/ui/breadcrumb";
+import { routeCommandLabel } from "@lsat/lib/commandRecents";
 
 /**
  * R9 (docs/19 F5) — router-driven breadcrumb. Wakes the dormant `ui/breadcrumb`

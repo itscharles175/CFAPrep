@@ -1,7 +1,7 @@
-import { cn } from "@/lib/utils";
-import { qTypeLabel } from "@/lib/labels";
-import { typeColor, typeColorNeedsDarkText } from "@/lib/labels";
-import type { QType } from "@/lib/types";
+import { cn } from "@lsat/lib/utils";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { typeColor, typeColorNeedsDarkText } from "@lsat/lib/labels";
+import type { QType } from "@lsat/lib/types";
 
 export interface TypeBadgeProps {
   qType: QType;

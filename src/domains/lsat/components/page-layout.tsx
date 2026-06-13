@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
-import { Icon } from "@/components/ui/icon";
-import { cn } from "@/lib/utils";
+import { Icon } from "@lsat/components/ui/icon";
+import { cn } from "@lsat/lib/utils";
 
 export type PageWidth = "md" | "lg" | "xl" | "2xl" | "full";
 

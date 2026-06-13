@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ChoiceList } from "./choice-list";
-import type { Choice } from "@/lib/types";
+import type { Choice } from "@lsat/lib/types";
 
 // Choices carry the correctness flags the review form would include — the timed
 // list must IGNORE them entirely while `reveal` is false.

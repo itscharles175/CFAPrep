@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { saveScroll, restoreScroll } from "@/lib/scrollRestore";
-import { prefetchRoute } from "@/lib/routePrefetch";
+import { saveScroll, restoreScroll } from "@lsat/lib/scrollRestore";
+import { prefetchRoute } from "@lsat/lib/routePrefetch";
 import { m, useReducedMotion } from "motion/react";
 import {
   Flame,
@@ -12,32 +12,32 @@ import {
   Search,
   Sun,
 } from "lucide-react";
-import { cn, countLabel } from "@/lib/utils";
-import { Logo } from "@/components/logo";
-import { Icon } from "@/components/ui/icon";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Kbd } from "@/components/keyboard-help";
-import { RouteBreadcrumb } from "@/components/breadcrumb";
-import { useCommandPalette } from "@/components/command-palette";
+import { cn, countLabel } from "@lsat/lib/utils";
+import { Logo } from "@lsat/components/logo";
+import { Icon } from "@lsat/components/ui/icon";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { ToggleGroup, ToggleGroupItem } from "@lsat/components/ui/toggle-group";
+import { Kbd } from "@lsat/components/keyboard-help";
+import { RouteBreadcrumb } from "@lsat/components/breadcrumb";
+import { useCommandPalette } from "@lsat/components/command-palette";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { useTheme } from "@/components/theme-provider";
-import { useMode } from "@/components/mode-provider";
+} from "@lsat/components/ui/tooltip";
+import { useTheme } from "@lsat/components/theme-provider";
+import { useMode } from "@lsat/components/mode-provider";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { useDashboard, useSrsDue } from "@/lib/hooks";
-import { getRaw, setRaw } from "@/lib/storage";
-import { manifestRoutesByGroup, type RouteManifestEntry } from "@/lib/routeManifest";
+} from "@lsat/components/ui/dropdown-menu";
+import { useDashboard, useSrsDue } from "@lsat/lib/hooks";
+import { getRaw, setRaw } from "@lsat/lib/storage";
+import { manifestRoutesByGroup, type RouteManifestEntry } from "@lsat/lib/routeManifest";
 
 // R9 (docs/19 F4) — persisted rail-collapse pin. Not in STORAGE_KEYS (that
 // registry is owned elsewhere); the storage module accepts an explicit key

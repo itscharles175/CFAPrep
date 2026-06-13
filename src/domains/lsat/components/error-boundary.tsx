@@ -1,7 +1,7 @@
 import { Component, type ReactNode } from "react";
 import { AlertTriangle, RotateCcw } from "lucide-react";
-import { ErrorState } from "@/components/states";
-import { Button } from "@/components/ui/button";
+import { ErrorState } from "@lsat/components/states";
+import { Button } from "@lsat/components/ui/button";
 
 interface Props {
   children: ReactNode;

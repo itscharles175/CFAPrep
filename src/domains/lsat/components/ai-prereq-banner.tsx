@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { ServerOff } from "lucide-react";
-import { SystemNotice } from "@/components/system-notice";
-import { useAiHealth } from "@/lib/hooks";
-import { isAiPrereqDismissed, setAiPrereqDismissed } from "@/lib/prefs";
+import { SystemNotice } from "@lsat/components/system-notice";
+import { useAiHealth } from "@lsat/lib/hooks";
+import { isAiPrereqDismissed, setAiPrereqDismissed } from "@lsat/lib/prefs";
 
 // Active local-provider labels, consistent with model-routing-card.tsx.
 const PROVIDER_LABEL: Record<string, string> = {

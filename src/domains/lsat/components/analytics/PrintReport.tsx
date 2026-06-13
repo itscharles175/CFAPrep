@@ -3,10 +3,10 @@ import {
   GapDumbbell,
   type TrendDatum,
   type GapRow,
-} from "@/components/viz";
+} from "@lsat/components/viz";
 import { DifficultyCurve } from "./DifficultyCurve";
-import { pct } from "@/lib/utils";
-import type { DifficultyRow } from "@/lib/types";
+import { pct } from "@lsat/lib/utils";
+import type { DifficultyRow } from "@lsat/lib/types";
 
 export interface PrintReportProps {
   generatedAt: string;

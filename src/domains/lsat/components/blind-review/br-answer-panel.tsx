@@ -3,12 +3,12 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ChoiceList } from "@/components/question/choice-list";
-import { cn } from "@/lib/utils";
-import { setBrLastConfidence } from "@/lib/prefs";
-import type { Choice, Confidence } from "@/lib/types";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { ChoiceList } from "@lsat/components/question/choice-list";
+import { cn } from "@lsat/lib/utils";
+import { setBrLastConfidence } from "@lsat/lib/prefs";
+import type { Choice, Confidence } from "@lsat/lib/types";
 
 const CONFIDENCE: { value: Confidence; label: string }[] = [
   { value: "sure", label: "Sure" },

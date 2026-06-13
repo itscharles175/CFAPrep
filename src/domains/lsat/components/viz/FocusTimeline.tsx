@@ -1,6 +1,6 @@
 import { Flag } from "lucide-react";
 import { useTooltip, useTooltipInPortal } from "@visx/tooltip";
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 import { chartTooltipStyle } from "./chart-kit";
 
 export interface FocusEvent {

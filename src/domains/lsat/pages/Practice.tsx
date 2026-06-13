@@ -5,12 +5,12 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { PageLayout } from "@/components/page-layout";
-import { ResumeBanner } from "@/components/practice/resume-banner";
-import { ErrorState, SkeletonListPage } from "@/components/states";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { PageLayout } from "@lsat/components/page-layout";
+import { ResumeBanner } from "@lsat/components/practice/resume-banner";
+import { ErrorState, SkeletonListPage } from "@lsat/components/states";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,9 +19,9 @@ import {
   usePrepTest,
   usePrepTests,
   useSrsDue,
-} from "@/lib/hooks";
-import { StudyPtWizard } from "@/components/practice/study-pt-wizard";
-import { formatClock } from "@/lib/utils";
+} from "@lsat/lib/hooks";
+import { StudyPtWizard } from "@lsat/components/practice/study-pt-wizard";
+import { formatClock } from "@lsat/lib/utils";
 
 /** R4-B1 — unified practice hub. */
 export default function Practice() {

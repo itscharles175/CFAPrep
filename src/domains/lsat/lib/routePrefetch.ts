@@ -5,7 +5,7 @@ import { routePrefetchImporters } from "./routeManifest";
 // chunk is usually already fetched + parsed and the transition is instant.
 //
 // These dynamic imports use the same specifiers as App.tsx's
-// `lazy(() => import("@/pages/X"))` route definitions; Vite dedupes dynamic
+// `lazy(() => import("@lsat/pages/X"))` route definitions; Vite dedupes dynamic
 // imports by specifier, so prefetching warms the exact chunk the route loads
 // (no duplicate chunk). Unknown paths no-op — Dashboard ("/") is eager and not
 // every link is code-split, so calling this on any nav target is safe.

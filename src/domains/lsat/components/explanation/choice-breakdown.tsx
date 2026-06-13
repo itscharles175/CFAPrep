@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { trapLabel } from "@/lib/labels";
-import type { Choice, TrapType } from "@/lib/types";
+import { cn } from "@lsat/lib/utils";
+import { trapLabel } from "@lsat/lib/labels";
+import type { Choice, TrapType } from "@lsat/lib/types";
 
 /** R4-D8 — collapsible accordion per answer choice. */
 export function ChoiceBreakdown({

@@ -1,4 +1,4 @@
-import type { Highlight } from "@/components/question/highlightable-text";
+import type { Highlight } from "@lsat/components/question/highlightable-text";
 import { getJSON, setJSON } from "./storage";
 
 const PREFIX = "lsatlab.annotations.";

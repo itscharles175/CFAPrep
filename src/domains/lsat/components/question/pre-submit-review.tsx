@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 import type { NavItem } from "./navigator-strip";
 
 /** Grid summary before finishing a timed section (v2: jump to flagged / unanswered). */

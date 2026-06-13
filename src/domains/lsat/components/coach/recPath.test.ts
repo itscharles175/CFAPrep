@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { recPath } from "./docked-coach";
-import type { Recommendation } from "@/lib/types";
+import type { Recommendation } from "@lsat/lib/types";
 
 function rec(type: string, payload?: Record<string, unknown>): Recommendation {
   return { label: type, action: { type, payload } };

@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { ChoiceList } from "@/components/question/choice-list";
-import { ScratchPad } from "@/components/exam/scratch-pad";
-import { Progress } from "@/components/ui/progress";
-import type { Choice } from "@/lib/types";
+import { ChoiceList } from "@lsat/components/question/choice-list";
+import { ScratchPad } from "@lsat/components/exam/scratch-pad";
+import { Progress } from "@lsat/components/ui/progress";
+import type { Choice } from "@lsat/lib/types";
 
 // Focused coverage for BUNDLE F1 — frontend ARIA fixes (#13, #15, #18, #19).
 // These assert the accessible names / states the fixes introduce; they do not

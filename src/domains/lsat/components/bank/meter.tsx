@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * R8 (docs/18) — one shared bar for "The Archive". Replaces the three

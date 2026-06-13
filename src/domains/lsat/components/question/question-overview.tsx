@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 import { AnimatePresence, m, useReducedMotion } from "motion/react";
 import { CheckCheck, Flag, Scissors, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { cn, formatClock, formatMs } from "@/lib/utils";
-import { duration, scaleIn } from "@/lib/motion";
-import { qTypeLabel, typeColor } from "@/lib/labels";
-import type { NavItem } from "@/components/question/navigator-strip";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { cn, formatClock, formatMs } from "@lsat/lib/utils";
+import { duration, scaleIn } from "@lsat/lib/motion";
+import { qTypeLabel, typeColor } from "@lsat/lib/labels";
+import type { NavItem } from "@lsat/components/question/navigator-strip";
 
 /**
  * R9 (docs/19 "a summonable question overview map").

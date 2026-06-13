@@ -23,8 +23,8 @@
  * for diagnostics only.
  */
 
-import type { ChoiceEventRecord, QState } from "@/components/question/section-runner";
-import type { Highlight } from "@/components/question/highlightable-text";
+import type { ChoiceEventRecord, QState } from "@lsat/components/question/section-runner";
+import type { Highlight } from "@lsat/components/question/highlightable-text";
 
 const PREFIX = "lsatlab.sessionDraft.";
 

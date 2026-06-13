@@ -1,6 +1,6 @@
-import type { GapRow } from "@/components/viz";
+import type { GapRow } from "@lsat/components/viz";
 import type { QType, ResultItem, SessionSummary } from "./types";
-import type { AnalyticsRange } from "@/components/analytics/AnalyticsFilters";
+import type { AnalyticsRange } from "@lsat/components/analytics/AnalyticsFilters";
 import { rangeCutoffIso } from "./dateRange";
 
 export interface ComputedGap {

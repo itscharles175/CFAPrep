@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * R8 brand mark (docs/18 W2.1). The app shipped a bespoke, display-P3 violet

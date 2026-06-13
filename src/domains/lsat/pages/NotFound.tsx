@@ -1,9 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import { FileQuestion, Search } from "lucide-react";
-import { PageLayout } from "@/components/page-layout";
-import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/states";
-import { KEYBOARD_HELP_EVENT } from "@/components/keyboard-help";
+import { PageLayout } from "@lsat/components/page-layout";
+import { Button } from "@lsat/components/ui/button";
+import { EmptyState } from "@lsat/components/states";
+import { KEYBOARD_HELP_EVENT } from "@lsat/components/keyboard-help";
 
 export default function NotFound() {
   const navigate = useNavigate();

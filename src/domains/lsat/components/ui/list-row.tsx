@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 /**
  * R9 (docs/19 F4 / secondary surfaces) — one shared dense data-row for the

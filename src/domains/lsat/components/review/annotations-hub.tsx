@@ -1,11 +1,11 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileText, Highlighter, PencilLine, StickyNote } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { EmptyState } from "@/components/states";
-import { aggregateAnnotations } from "@/lib/annotationsHub";
+import { Card, CardContent } from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { EmptyState } from "@lsat/components/states";
+import { aggregateAnnotations } from "@lsat/lib/annotationsHub";
 
 /**
  * R7 6.2 — Annotations & notes review hub. Aggregates every highlight, margin

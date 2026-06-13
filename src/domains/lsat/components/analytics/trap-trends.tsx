@@ -5,13 +5,13 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { trapLabel } from "@/lib/labels";
-import { trapsByWeek } from "@/lib/trapTrends";
-import { pct } from "@/lib/utils";
-import type { TrapRow } from "@/lib/types";
+} from "@lsat/components/ui/card";
+import { trapLabel } from "@lsat/lib/labels";
+import { trapsByWeek } from "@lsat/lib/trapTrends";
+import { pct } from "@lsat/lib/utils";
+import type { TrapRow } from "@lsat/lib/types";
 import { ChartDataTable } from "./chart-data-table";
-import { ChartEmpty } from "@/components/viz";
+import { ChartEmpty } from "@lsat/components/viz";
 
 /** R4-E7 — weekly trap small multiples from aggregate trap stats. */
 export function TrapTrends({ traps }: { traps: TrapRow[] }) {

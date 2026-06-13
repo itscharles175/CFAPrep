@@ -1,25 +1,25 @@
 import { useMemo, useState } from "react";
 import { Flame, Snowflake } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@lsat/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { toast } from "@/lib/toast";
-import { pluralize } from "@/lib/utils";
-import { getWeeklyGoals, applyStreakFreeze } from "@/lib/prefs";
+} from "@lsat/components/ui/dialog";
+import { toast } from "@lsat/lib/toast";
+import { pluralize } from "@lsat/lib/utils";
+import { getWeeklyGoals, applyStreakFreeze } from "@lsat/lib/prefs";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { ContributionHeatmap, ProgressRing } from "@/components/viz";
-import type { ContributionDay } from "@/components/viz";
-import type { ActivityDay } from "@/lib/types";
+} from "@lsat/components/ui/card";
+import { ContributionHeatmap, ProgressRing } from "@lsat/components/viz";
+import type { ContributionDay } from "@lsat/components/viz";
+import type { ActivityDay } from "@lsat/lib/types";
 import { computeStreak, daysStudiedThisWeek } from "./streak";
 
 type Metric = "questions" | "minutes";

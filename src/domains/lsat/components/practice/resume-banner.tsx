@@ -1,9 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import { PlayCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { AccentPanel } from "@/components/accent-panel";
-import { getResume } from "@/lib/resume";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { AccentPanel } from "@lsat/components/accent-panel";
+import { getResume } from "@lsat/lib/resume";
 
 export function ResumeBanner() {
   const navigate = useNavigate();

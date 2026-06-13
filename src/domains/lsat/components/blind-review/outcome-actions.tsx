@@ -1,9 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import { Plus, Target } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { OUTCOME_META } from "@/lib/labels";
-import type { Outcome, QType } from "@/lib/types";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { OUTCOME_META } from "@lsat/lib/labels";
+import type { Outcome, QType } from "@lsat/lib/types";
 
 /** Post-reveal routing CTAs (Wave 2). */
 export function OutcomeActions({

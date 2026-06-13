@@ -4,7 +4,7 @@ import {
   getCommandRecents,
   pushCommandRecent,
   routeCommandLabel,
-} from "@/lib/commandRecents";
+} from "@lsat/lib/commandRecents";
 import { AnimatePresence } from "motion/react";
 import {
   Keyboard,
@@ -17,24 +17,24 @@ import {
   SwatchBook,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
-import { AppShell } from "@/components/app-shell";
-import { Titlebar } from "@/components/titlebar";
-import { PageTransition } from "@/components/page-transition";
-import { KeyboardHelp, KEYBOARD_HELP_EVENT } from "@/components/keyboard-help";
+import { AppShell } from "@lsat/components/app-shell";
+import { Titlebar } from "@lsat/components/titlebar";
+import { PageTransition } from "@lsat/components/page-transition";
+import { KeyboardHelp, KEYBOARD_HELP_EVENT } from "@lsat/components/keyboard-help";
 import {
   CommandPaletteProvider,
   type CommandAction,
-} from "@/components/command-palette";
-import { useTheme } from "@/components/theme-provider";
-import { useMode } from "@/components/mode-provider";
-import { OnboardingWizard } from "@/components/onboarding-wizard";
+} from "@lsat/components/command-palette";
+import { useTheme } from "@lsat/components/theme-provider";
+import { useMode } from "@lsat/components/mode-provider";
+import { OnboardingWizard } from "@lsat/components/onboarding-wizard";
 import {
   LoadingState,
   SkeletonDetailPage,
   SkeletonExam,
   SkeletonListPage,
-} from "@/components/states";
-import { getResume } from "@/lib/resume";
+} from "@lsat/components/states";
+import { getResume } from "@lsat/lib/resume";
 import {
   listenBackendDegraded,
   listenBackendReady,
@@ -44,52 +44,52 @@ import {
   listenQuickCaptureNote,
   listenTrayNavigate,
   listenTrayOpen,
-} from "@/lib/tauri";
+} from "@lsat/lib/tauri";
 import {
   GlobalLoadingBar,
   SuspenseSignal,
-} from "@/components/global-loading-bar";
-import { OfflineBanner } from "@/components/offline-banner";
-import { AiPrereqBanner } from "@/components/ai-prereq-banner";
-import { ErrorBoundary } from "@/components/error-boundary";
+} from "@lsat/components/global-loading-bar";
+import { OfflineBanner } from "@lsat/components/offline-banner";
+import { AiPrereqBanner } from "@lsat/components/ai-prereq-banner";
+import { ErrorBoundary } from "@lsat/components/error-boundary";
 import {
   canonicalRoutePath,
   primaryRouteManifest,
   routeIsVisible,
   routeManifest,
-} from "@/lib/routeManifest";
+} from "@lsat/lib/routeManifest";
 
 // Code-split heavy routes (R4-H1) + non-critical shelled routes (R5-J1).
 // P5 — the full-bleed exam screens are large and never the first paint (the
 // landing route is Dashboard), so they are lazy-loaded too to shrink the entry
 // chunk.
-const TakeSection = lazy(() => import("@/pages/TakeSection"));
-const BlindReview = lazy(() => import("@/pages/BlindReview"));
-const Exam = lazy(() => import("@/pages/Exam"));
-const PrepTests = lazy(() => import("@/pages/PrepTests"));
-const Drills = lazy(() => import("@/pages/Drills"));
-const Playlists = lazy(() => import("@/pages/Playlists"));
-const Practice = lazy(() => import("@/pages/Practice"));
-const Dashboard = lazy(() => import("@/pages/Dashboard"));
-const Review = lazy(() => import("@/pages/Review"));
-const Srs = lazy(() => import("@/pages/Srs"));
-const SettingsPage = lazy(() => import("@/pages/Settings"));
-const Analytics = lazy(() => import("@/pages/Analytics"));
-const Tutor = lazy(() => import("@/pages/Tutor"));
-const Notebook = lazy(() => import("@/pages/Notebook"));
-const RcLab = lazy(() => import("@/pages/RcLab"));
-const ContentOps = lazy(() => import("@/pages/ContentOps"));
-const Styleguide = lazy(() => import("@/pages/Styleguide"));
-const Import = lazy(() => import("@/pages/Import"));
-const Bank = lazy(() => import("@/pages/Bank"));
-const BankTagReview = lazy(() => import("@/pages/BankTagReview"));
-const PassagePopout = lazy(() => import("@/pages/PassagePopout"));
-const Quarantine = lazy(() => import("@/pages/Quarantine"));
-const Explanation = lazy(() => import("@/pages/Explanation"));
-const SessionHistory = lazy(() => import("@/pages/SessionHistory"));
-const TypeAnalytics = lazy(() => import("@/pages/TypeAnalytics"));
-const PrepTestAnalytics = lazy(() => import("@/pages/PrepTestAnalytics"));
-const NotFound = lazy(() => import("@/pages/NotFound"));
+const TakeSection = lazy(() => import("@lsat/pages/TakeSection"));
+const BlindReview = lazy(() => import("@lsat/pages/BlindReview"));
+const Exam = lazy(() => import("@lsat/pages/Exam"));
+const PrepTests = lazy(() => import("@lsat/pages/PrepTests"));
+const Drills = lazy(() => import("@lsat/pages/Drills"));
+const Playlists = lazy(() => import("@lsat/pages/Playlists"));
+const Practice = lazy(() => import("@lsat/pages/Practice"));
+const Dashboard = lazy(() => import("@lsat/pages/Dashboard"));
+const Review = lazy(() => import("@lsat/pages/Review"));
+const Srs = lazy(() => import("@lsat/pages/Srs"));
+const SettingsPage = lazy(() => import("@lsat/pages/Settings"));
+const Analytics = lazy(() => import("@lsat/pages/Analytics"));
+const Tutor = lazy(() => import("@lsat/pages/Tutor"));
+const Notebook = lazy(() => import("@lsat/pages/Notebook"));
+const RcLab = lazy(() => import("@lsat/pages/RcLab"));
+const ContentOps = lazy(() => import("@lsat/pages/ContentOps"));
+const Styleguide = lazy(() => import("@lsat/pages/Styleguide"));
+const Import = lazy(() => import("@lsat/pages/Import"));
+const Bank = lazy(() => import("@lsat/pages/Bank"));
+const BankTagReview = lazy(() => import("@lsat/pages/BankTagReview"));
+const PassagePopout = lazy(() => import("@lsat/pages/PassagePopout"));
+const Quarantine = lazy(() => import("@lsat/pages/Quarantine"));
+const Explanation = lazy(() => import("@lsat/pages/Explanation"));
+const SessionHistory = lazy(() => import("@lsat/pages/SessionHistory"));
+const TypeAnalytics = lazy(() => import("@lsat/pages/TypeAnalytics"));
+const PrepTestAnalytics = lazy(() => import("@lsat/pages/PrepTestAnalytics"));
+const NotFound = lazy(() => import("@lsat/pages/NotFound"));
 
 /**
  * R9 (docs/19 F2.2 + F7) — a Suspense boundary whose fallback is a route-shaped

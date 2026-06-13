@@ -38,6 +38,23 @@ export const domains = [
     badge: 'PRACTICAL',
     stats: { modules: 5, exercises: '100+', templates: 12 },
   },
+  {
+    id: 'lsat',
+    title: 'LSAT Lab',
+    subtitle: 'Law School Admission Test prep',
+    description:
+      'Logical Reasoning, Reading Comprehension, blind review, timed sections + full exams, adaptive drills, and a local question bank — backed by the LSAT sidecar.',
+    path: '/lsat',
+    color: '#6366F1',
+    gradient: 'linear-gradient(135deg, #6366F1 0%, #4338CA 100%)',
+    badge: 'NEW',
+    stats: { sections: 'LR · RC', modes: 4, bank: 'local' },
+    // The LSAT domain is a self-contained sub-app mounted at /lsat via a
+    // top-level branch in main.jsx (its own router). It is NOT a route in the
+    // host's client router, so the dashboard card must hard-navigate to it
+    // rather than use a client-side <Link>.
+    external: true,
+  },
 ];
 
 export const cfaTopics = [

@@ -3,7 +3,7 @@ import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useM
 // G7 — lazy-load the cmdk dialog body so cmdk (~35 KB) is excluded from the
 // initial bundle and only fetched the first time the palette is opened.
 const CommandPaletteDialog = lazy(
-  () => import("@/components/command-palette-dialog"),
+  () => import("@lsat/components/command-palette-dialog"),
 );
 
 export interface CommandAction {

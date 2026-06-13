@@ -1,16 +1,16 @@
 import { useEffect, useRef } from "react";
-import { useBlindReviewGap, useRegressionAlerts } from "@/lib/hooks";
+import { useBlindReviewGap, useRegressionAlerts } from "@lsat/lib/hooks";
 import {
   captureGapSnapshot,
   computeGapAlerts,
   formatGapAlertMessage,
   formatRegressionAlertMessage,
-} from "@/lib/analyticsAlerts";
+} from "@lsat/lib/analyticsAlerts";
 import {
   dismissAnalyticsAlertsToday,
   getAnalyticsAlertsDismissed,
-} from "@/lib/prefs";
-import { toast } from "@/lib/toast";
+} from "@lsat/lib/prefs";
+import { toast } from "@lsat/lib/toast";
 
 /** R4-E9 — dismissible toast when a type gap exceeds prefs thresholds. */
 export function AnalyticsAlerts() {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useReducedMotion } from "motion/react";
-import { cn } from "@/lib/utils";
-import { duration, easing } from "@/lib/motion";
+import { cn } from "@lsat/lib/utils";
+import { duration, easing } from "@lsat/lib/motion";
 
 // R11 2.4 — the sweep tempo from the shared motion tokens (was an inline
 // `0.5s cubic-bezier(0.3,0,0,1)` literal): duration.celebrate + easing.emphasized.

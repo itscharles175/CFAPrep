@@ -17,28 +17,28 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { toast } from "sonner";
-import { PageLayout, PageSection } from "@/components/page-layout";
-import { ActivityCenter } from "@/components/notebook-os/activity-center";
-import { CitationChip } from "@/components/notebook-os/citation-chip";
-import { ContextToggle } from "@/components/notebook-os/context-toggle";
-import { EvidencePanel } from "@/components/notebook-os/evidence-panel";
-import { SourceStatusPill } from "@/components/notebook-os/source-status-pill";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Icon } from "@/components/ui/icon";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
+import { PageLayout, PageSection } from "@lsat/components/page-layout";
+import { ActivityCenter } from "@lsat/components/notebook-os/activity-center";
+import { CitationChip } from "@lsat/components/notebook-os/citation-chip";
+import { ContextToggle } from "@lsat/components/notebook-os/context-toggle";
+import { EvidencePanel } from "@lsat/components/notebook-os/evidence-panel";
+import { SourceStatusPill } from "@lsat/components/notebook-os/source-status-pill";
+import { Badge } from "@lsat/components/ui/badge";
+import { Button } from "@lsat/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Icon } from "@lsat/components/ui/icon";
+import { Input } from "@lsat/components/ui/input";
+import { Switch } from "@lsat/components/ui/switch";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
+} from "@lsat/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
+import { Textarea } from "@lsat/components/ui/textarea";
+import { api } from "@lsat/lib/api";
 import {
   useArtifactVersions,
   useBacklinks,
@@ -54,18 +54,18 @@ import {
   usePodcasts,
   useTransformations,
   useWorkspaceDefault,
-} from "@/lib/hooks";
+} from "@lsat/lib/hooks";
 import {
   DEFAULT_NOTEBOOK_CAPABILITIES,
   enabledCapabilities,
-} from "@/lib/notebookCapabilities";
+} from "@lsat/lib/notebookCapabilities";
 import type {
   CitationTarget,
   ContextMode,
   NotebookChatMessage,
   NotebookExportBundle,
   NotebookNote,
-} from "@/lib/types";
+} from "@lsat/lib/types";
 type NotebookExportFormat = NotebookExportBundle["format"];
 type NotebookImportFormat = "auto" | "json" | "markdown" | "html";
 

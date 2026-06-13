@@ -1,13 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import { Check, Download } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { MilestoneShareCard } from "@/components/motivation/milestone-share-card";
-import { exportNodeAsPng } from "@/lib/recapExport";
-import type { ByTypeRow, SessionSummary } from "@/lib/types";
-import { qTypeLabel } from "@/lib/labels";
-import { cn } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { MilestoneShareCard } from "@lsat/components/motivation/milestone-share-card";
+import { exportNodeAsPng } from "@lsat/lib/recapExport";
+import type { ByTypeRow, SessionSummary } from "@lsat/lib/types";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { cn } from "@lsat/lib/utils";
 
 export interface ProgressLedgerProps {
   byType: ByTypeRow[];

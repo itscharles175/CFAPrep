@@ -5,13 +5,13 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { ProgressRing } from "@/components/viz";
-import { cn } from "@/lib/utils";
-import { useForecast } from "@/lib/hooks";
-import { daysUntil, type Goal } from "@/lib/prefs";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { ProgressRing } from "@lsat/components/viz";
+import { cn } from "@lsat/lib/utils";
+import { useForecast } from "@lsat/lib/hooks";
+import { daysUntil, type Goal } from "@lsat/lib/prefs";
 
 export interface CountdownProps {
   goal: Goal | null;

@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ListMusic, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { Input } from "@lsat/components/ui/input";
+import { Label } from "@lsat/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -12,21 +12,21 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { PageLayout } from "@/components/page-layout";
-import { EmptyState, ErrorState, LoadingState } from "@/components/states";
-import { IllustrationPlaylists } from "@/components/illustrations";
-import { SmartSetBuilder } from "@/components/playlists/smart-set-builder";
-import { PlaylistCard } from "@/components/playlists/playlist-card";
-import { usePlaylists } from "@/lib/hooks";
+} from "@lsat/components/ui/dialog";
+import { PageLayout } from "@lsat/components/page-layout";
+import { EmptyState, ErrorState, LoadingState } from "@lsat/components/states";
+import { IllustrationPlaylists } from "@lsat/components/illustrations";
+import { SmartSetBuilder } from "@lsat/components/playlists/smart-set-builder";
+import { PlaylistCard } from "@lsat/components/playlists/playlist-card";
+import { usePlaylists } from "@lsat/lib/hooks";
 import {
   useCreatePlaylist,
   useDeletePlaylist,
   usePlayPlaylist,
   useUpdatePlaylist,
-} from "@/lib/mutations";
-import { type WireCriteria } from "@/lib/playlistCriteria";
-import type { PlaylistSummary } from "@/lib/types";
+} from "@lsat/lib/mutations";
+import { type WireCriteria } from "@lsat/lib/playlistCriteria";
+import type { PlaylistSummary } from "@lsat/lib/types";
 
 /**
  * R7 6.1 — custom problem sets ("Smart sets"). Lists saved playlists with their

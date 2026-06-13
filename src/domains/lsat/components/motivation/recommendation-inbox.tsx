@@ -6,31 +6,31 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { AnimatedList } from "@/components/ui/animated-list";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { AnimatedList } from "@lsat/components/ui/animated-list";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { useDashboard, useSrsDue } from "@/lib/hooks";
-import { api } from "@/lib/api";
-import { qTypeLabel } from "@/lib/labels";
+} from "@lsat/components/ui/dropdown-menu";
+import { useDashboard, useSrsDue } from "@lsat/lib/hooks";
+import { api } from "@lsat/lib/api";
+import { qTypeLabel } from "@lsat/lib/labels";
 import {
   getInboxItems,
   markInboxDone,
   mergeInboxItems,
   snoozeInbox,
   type InboxItem,
-} from "@/lib/recommendationInbox";
-import { routeForRecommendation } from "@/lib/recommendationRoutes";
+} from "@lsat/lib/recommendationInbox";
+import { routeForRecommendation } from "@lsat/lib/recommendationRoutes";
 
 function buildItemsFromData(
   srsDue: number,
-  weakTypes: { q_type: string | import("@/lib/types").QType }[],
+  weakTypes: { q_type: string | import("@lsat/lib/types").QType }[],
   coachLabel?: string,
   coachRoute?: string,
 ): InboxItem[] {

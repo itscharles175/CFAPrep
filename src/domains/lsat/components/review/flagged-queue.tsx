@@ -1,14 +1,14 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Flag } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
-import { ListRow } from "@/components/ui/list-row";
-import { AnimatedList } from "@/components/ui/animated-list";
-import { EmptyState, SkeletonList } from "@/components/states";
-import { useMultiSessionResults, reviewableSessions } from "@/lib/hooks/useReviewSessions";
-import { unwrap, useSessions } from "@/lib/hooks";
-import { qTypeLabel } from "@/lib/labels";
+import { Button } from "@lsat/components/ui/button";
+import { Icon } from "@lsat/components/ui/icon";
+import { ListRow } from "@lsat/components/ui/list-row";
+import { AnimatedList } from "@lsat/components/ui/animated-list";
+import { EmptyState, SkeletonList } from "@lsat/components/states";
+import { useMultiSessionResults, reviewableSessions } from "@lsat/lib/hooks/useReviewSessions";
+import { unwrap, useSessions } from "@lsat/lib/hooks";
+import { qTypeLabel } from "@lsat/lib/labels";
 
 /** R4-B5 — flagged questions across recent sessions. */
 export function FlaggedQueue() {

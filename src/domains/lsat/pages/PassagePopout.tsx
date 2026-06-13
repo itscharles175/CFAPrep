@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { useDocumentTitle } from "@/lib/useDocumentTitle";
-import { POPOUT_PASSAGE_KEY, type PopoutPassage } from "@/lib/tauri";
-import { getJSON } from "@/lib/storage";
-import { Logo } from "@/components/logo";
+import { useDocumentTitle } from "@lsat/lib/useDocumentTitle";
+import { POPOUT_PASSAGE_KEY, type PopoutPassage } from "@lsat/lib/tauri";
+import { getJSON } from "@lsat/lib/storage";
+import { Logo } from "@lsat/components/logo";
 import {
   nextReadingSize,
   prevReadingSize,
   readingClasses,
   useReadingPrefs,
-} from "@/lib/prefs";
+} from "@lsat/lib/prefs";
 
 function readPassage(): PopoutPassage | null {
   return getJSON<PopoutPassage | null>(POPOUT_PASSAGE_KEY, null);

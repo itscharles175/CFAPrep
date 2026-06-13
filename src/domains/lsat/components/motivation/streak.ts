@@ -1,6 +1,6 @@
 // Streak + weekly-goal computations from activity days (§5.1, §5.4).
 // Pure functions so they can be unit-reasoned and reused across cards.
-import type { ActivityDay } from "@/lib/types";
+import type { ActivityDay } from "@lsat/lib/types";
 
 function dayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

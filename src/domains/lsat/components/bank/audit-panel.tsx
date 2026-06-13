@@ -9,12 +9,12 @@ import {
   Tags,
   TrendingDown,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Icon } from "@/components/ui/icon";
-import { Skeleton } from "@/components/states";
-import { Meter } from "@/components/bank/meter";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Icon } from "@lsat/components/ui/icon";
+import { Skeleton } from "@lsat/components/states";
+import { Meter } from "@lsat/components/bank/meter";
 import {
   useAiDrift,
   useBankAudit,
@@ -22,10 +22,10 @@ import {
   useDuplicates,
   useGenJobs,
   useGenQuality,
-} from "@/lib/hooks";
-import { useEmbedBank, useRequarantine } from "@/lib/mutations";
-import { qTypeLabel } from "@/lib/labels";
-import { pct } from "@/lib/utils";
+} from "@lsat/lib/hooks";
+import { useEmbedBank, useRequarantine } from "@lsat/lib/mutations";
+import { qTypeLabel } from "@lsat/lib/labels";
+import { pct } from "@lsat/lib/utils";
 
 const JOB_VARIANT: Record<string, "secondary" | "outline" | "destructive" | "default"> = {
   done: "secondary",

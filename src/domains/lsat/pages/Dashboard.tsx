@@ -15,22 +15,22 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Icon } from "@/components/ui/icon";
-import { MotionCard } from "@/components/ui/motion-card";
-import { PageLayout } from "@/components/page-layout";
-import { ErrorState, Skeleton } from "@/components/states";
-import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
-import { FirstLightConsole } from "@/components/dashboard/first-light-console";
+} from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Icon } from "@lsat/components/ui/icon";
+import { MotionCard } from "@lsat/components/ui/motion-card";
+import { PageLayout } from "@lsat/components/page-layout";
+import { ErrorState, Skeleton } from "@lsat/components/states";
+import { DashboardSkeleton } from "@lsat/components/dashboard/dashboard-skeleton";
+import { FirstLightConsole } from "@lsat/components/dashboard/first-light-console";
 // R10 A1.1 — StatNumber/TypeBadge come from their DIRECT paths, not the
 // `@/components/viz` barrel: the barrel co-exports the visx-heavy TrendChart,
 // so a barrel import would drag that chart vendor back onto first paint even
 // though TrendChart itself is lazy()'d below.
-import { StatNumber } from "@/components/viz/StatNumber";
-import { TypeBadge } from "@/components/viz/TypeBadge";
-import type { TrendDatum } from "@/components/viz/TrendChart";
+import { StatNumber } from "@lsat/components/viz/StatNumber";
+import { TypeBadge } from "@lsat/components/viz/TypeBadge";
+import type { TrendDatum } from "@lsat/components/viz/TrendChart";
 import {
   Countdown,
   ReadinessCard,
@@ -38,23 +38,23 @@ import {
   SessionRecap,
   StudyNudge,
   TodayPlan,
-} from "@/components/motivation";
-import { UtilityTradeoffChips } from "@/components/motivation/utility-tradeoff-chips";
+} from "@lsat/components/motivation";
+import { UtilityTradeoffChips } from "@lsat/components/motivation/utility-tradeoff-chips";
 
 const DashboardBelowFold = lazy(
-  () => import("@/components/motivation/dashboard-below-fold"),
+  () => import("@lsat/components/motivation/dashboard-below-fold"),
 );
 
 // R10 A1.1 — the ~37KB visx chart vendor is split off the Dashboard's
 // first-paint critical path. The chart sits below the instrument cluster, so it
 // streams in behind a reserved-height fallback after the focal cards render.
 const TrendChart = lazy(() =>
-  import("@/components/viz/TrendChart").then((m) => ({ default: m.TrendChart })),
+  import("@lsat/components/viz/TrendChart").then((m) => ({ default: m.TrendChart })),
 );
-import { NarrativeCards } from "@/components/analytics/NarrativeCards";
-import { ResumeHero } from "@/components/practice/resume-hero";
-import { AnalyticsAlerts } from "@/components/analytics/analytics-alerts";
-import { buildWeeklyReportHtml, downloadWeeklyReport } from "@/lib/weeklyReport";
+import { NarrativeCards } from "@lsat/components/analytics/NarrativeCards";
+import { ResumeHero } from "@lsat/components/practice/resume-hero";
+import { AnalyticsAlerts } from "@lsat/components/analytics/analytics-alerts";
+import { buildWeeklyReportHtml, downloadWeeklyReport } from "@lsat/lib/weeklyReport";
 import {
   useActivity,
   useAdaptivityPlan,
@@ -69,22 +69,22 @@ import {
   useSessionResults,
   useSessions,
   useSrsDue,
-} from "@/lib/hooks";
-import { forecastConeBands } from "@/lib/forecast";
+} from "@lsat/lib/hooks";
+import { forecastConeBands } from "@lsat/lib/forecast";
 import type {
   AdaptivityPlan,
   ByTypeRow,
   ReadinessStatus,
   ReleaseTrustManifest,
   SessionSummary,
-} from "@/lib/types";
-import { getGoal } from "@/lib/prefs";
-import { liveReadinessStatus, readinessFromStatus } from "@/lib/readiness";
-import { computeMilestoneUnlocks } from "@/lib/milestones";
-import { stagger, fadeUp } from "@/lib/motion";
-import { formatMs, pct } from "@/lib/utils";
-import { formatUtilityPriority, utilityTradeoffs } from "@/lib/utilityTradeoffs";
-import type { Trend } from "@/lib/types";
+} from "@lsat/lib/types";
+import { getGoal } from "@lsat/lib/prefs";
+import { liveReadinessStatus, readinessFromStatus } from "@lsat/lib/readiness";
+import { computeMilestoneUnlocks } from "@lsat/lib/milestones";
+import { stagger, fadeUp } from "@lsat/lib/motion";
+import { formatMs, pct } from "@lsat/lib/utils";
+import { formatUtilityPriority, utilityTradeoffs } from "@lsat/lib/utilityTradeoffs";
+import type { Trend } from "@lsat/lib/types";
 
 function TrendIcon({ trend }: { trend: Trend }) {
   if (trend === "up")

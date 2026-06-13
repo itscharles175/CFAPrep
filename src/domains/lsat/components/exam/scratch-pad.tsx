@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Eraser, Pencil, StickyNote } from "lucide-react";
-import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
+import { Textarea } from "@lsat/components/ui/textarea";
+import { Button } from "@lsat/components/ui/button";
 import {
   getScratch,
   getScratchDrawing,
@@ -9,8 +9,8 @@ import {
   setScratchDrawing,
   type Stroke,
   type StrokePoint,
-} from "@/lib/scratchPrefs";
-import { cn } from "@/lib/utils";
+} from "@lsat/lib/scratchPrefs";
+import { cn } from "@lsat/lib/utils";
 
 type Tab = "text" | "draw";
 

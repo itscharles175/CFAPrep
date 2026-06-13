@@ -39,8 +39,8 @@ export function createTestQueryClient() {
 // ---------------------------------------------------------------------------
 // isTauri stub — always return false in tests so Tauri-gated paths are skipped.
 // ---------------------------------------------------------------------------
-vi.mock("@/lib/tauri", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/tauri")>("@/lib/tauri");
+vi.mock("@lsat/lib/tauri", async () => {
+  const actual = await vi.importActual<typeof import("@lsat/lib/tauri")>("@lsat/lib/tauri");
   return { ...actual, isTauri: () => false };
 });
 

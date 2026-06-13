@@ -5,16 +5,16 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { TrendChart, ChartEmpty, type TrendDatum } from "@/components/viz";
+} from "@lsat/components/ui/card";
+import { TrendChart, ChartEmpty, type TrendDatum } from "@lsat/components/viz";
 import {
   reviewableSessions,
   useMultiSessionResults,
-} from "@/lib/hooks/useReviewSessions";
-import { typeFamily } from "@/lib/labels";
-import { SkeletonChart } from "@/components/states";
+} from "@lsat/lib/hooks/useReviewSessions";
+import { typeFamily } from "@lsat/lib/labels";
+import { SkeletonChart } from "@lsat/components/states";
 import { ChartDataTable } from "./chart-data-table";
-import type { SessionSummary } from "@/lib/types";
+import type { SessionSummary } from "@lsat/lib/types";
 
 /**
  * B8 — session-compare small multiples. Facets the accuracy trend by section

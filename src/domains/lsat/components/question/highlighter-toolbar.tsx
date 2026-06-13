@@ -1,5 +1,5 @@
 import { Eraser, Highlighter, StickyNote, Underline } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 import type { AnnotationStyle } from "./highlightable-text";
 
 // 4.x — swatch hues ride the SAME per-theme `--hl-*` vars the applied highlight

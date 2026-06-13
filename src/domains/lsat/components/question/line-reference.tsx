@@ -1,5 +1,5 @@
 import { useCallback, useRef } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 /** Parse "lines 12–15" / "line 3" from RC question prompts. */
 export function parseLineRef(text: string): { start: number; end: number } | null {

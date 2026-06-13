@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
 }));
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@lsat/lib/api", () => ({
   ApiError: class ApiError extends Error {
     status: number;
     detail?: unknown;
@@ -34,19 +34,19 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-vi.mock("@/lib/mutations", () => ({
+vi.mock("@lsat/lib/mutations", () => ({
   useImportCommit: () => ({
     mutate: mocks.importCommitMutate,
     isPending: false,
   }),
 }));
 
-vi.mock("@/lib/tauri", () => ({
+vi.mock("@lsat/lib/tauri", () => ({
   pickPdfFile: mocks.pickPdfFile,
   readFileFromPath: mocks.readFileFromPath,
 }));
 
-vi.mock("@/lib/toast", () => ({
+vi.mock("@lsat/lib/toast", () => ({
   toast: {
     error: mocks.toastError,
     success: vi.fn(),

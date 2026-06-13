@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { getRaw, setRaw } from "@/lib/storage";
+import { getRaw, setRaw } from "@lsat/lib/storage";
 import {
   getDensity,
   getHighContrast,
   setDensity as persistDensity,
   setHighContrast as persistHighContrast,
   type Density,
-} from "@/lib/prefs";
+} from "@lsat/lib/prefs";
 
 type Theme = "dark" | "light" | "system";
 

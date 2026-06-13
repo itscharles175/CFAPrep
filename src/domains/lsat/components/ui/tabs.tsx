@@ -1,7 +1,7 @@
 import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { m, useReducedMotion } from "motion/react";
-import { cn } from "@/lib/utils";
+import { cn } from "@lsat/lib/utils";
 
 const Tabs = TabsPrimitive.Root;
 

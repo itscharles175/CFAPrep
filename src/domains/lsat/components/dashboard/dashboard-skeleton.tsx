@@ -1,4 +1,4 @@
-import { Skeleton } from "@/components/states";
+import { Skeleton } from "@lsat/components/states";
 
 /**
  * R8 — layout-faithful Dashboard loading state. Mirrors the real composition

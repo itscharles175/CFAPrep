@@ -7,16 +7,16 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@lsat/components/ui/card";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { IllustrationAnalytics } from "@/components/illustrations";
-import { EmptyState, SkeletonChart } from "@/components/states";
+} from "@lsat/components/ui/select";
+import { IllustrationAnalytics } from "@lsat/components/illustrations";
+import { EmptyState, SkeletonChart } from "@lsat/components/states";
 import {
   GapDumbbell,
   GapSankey,
@@ -28,9 +28,9 @@ import {
   type HeatCell,
   type MasteryRow,
   type RidgelineSeries,
-} from "@/components/viz";
-import { qTypeLabel, trapLabel, typeColor } from "@/lib/labels";
-import { DifficultyCurve, TrapBars } from "@/components/analytics";
+} from "@lsat/components/viz";
+import { qTypeLabel, trapLabel, typeColor } from "@lsat/lib/labels";
+import { DifficultyCurve, TrapBars } from "@lsat/components/analytics";
 import {
   useBlindReviewGap,
   useByDifficulty,
@@ -40,19 +40,19 @@ import {
   useSessions,
   useTiming,
   useTraps,
-} from "@/lib/hooks";
-import { filterSessionsForAnalytics } from "@/lib/analyticsParams";
+} from "@lsat/lib/hooks";
+import { filterSessionsForAnalytics } from "@lsat/lib/analyticsParams";
 import {
   computeGapForSessions,
   gapRowsFromComputed,
   outcomeCountsForSessions,
   splitSessionsByRange,
-} from "@/lib/gapFromSessions";
+} from "@lsat/lib/gapFromSessions";
 import {
   reviewableSessions,
   useMultiSessionResults,
-} from "@/lib/hooks/useReviewSessions";
-import { pct, formatDate } from "@/lib/utils";
+} from "@lsat/lib/hooks/useReviewSessions";
+import { pct, formatDate } from "@lsat/lib/utils";
 import { useAnalyticsContext } from "./analytics-context";
 import { CrossFilterChip } from "./cross-filter";
 import { SessionCompare } from "./SessionCompare";
@@ -63,8 +63,8 @@ import { FocusQualityCard } from "./focus-quality-card";
 import { TopTrapExplainer } from "./top-trap-explainer";
 import { SectionTypeTrends } from "./section-type-trends";
 import { HeatmapCompare } from "./heatmap-compare";
-import type { QType } from "@/lib/types";
-import { Button } from "@/components/ui/button";
+import type { QType } from "@lsat/lib/types";
+import { Button } from "@lsat/components/ui/button";
 import { Download } from "lucide-react";
 import { ChartDataTable } from "./chart-data-table";
 import { downloadCsv } from "./exportCsv";

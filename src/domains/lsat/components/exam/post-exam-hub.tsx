@@ -1,15 +1,15 @@
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { OutcomeFunnel } from "@/components/analytics/outcome-funnel";
-import { Ceremony } from "@/components/exam/ceremony";
-import { useSessionResults } from "@/lib/hooks";
-import { api } from "@/lib/api";
+import { OutcomeFunnel } from "@lsat/components/analytics/outcome-funnel";
+import { Ceremony } from "@lsat/components/exam/ceremony";
+import { useSessionResults } from "@lsat/lib/hooks";
+import { api } from "@lsat/lib/api";
 import { BarChart3, Flag, PlayCircle, Target } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { pct } from "@/lib/utils";
-import type { SectionSummary } from "@/lib/types";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { pct } from "@lsat/lib/utils";
+import type { SectionSummary } from "@lsat/lib/types";
 
 export function PostExamHub({
   examName,

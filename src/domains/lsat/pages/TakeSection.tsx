@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/button";
+import { Button } from "@lsat/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -8,32 +8,32 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { LoadingState, ErrorState } from "@/components/states";
-import { PostExamWizard } from "@/components/exam/post-exam-wizard";
-import { SealedBeat } from "@/components/exam/sealed-beat";
+} from "@lsat/components/ui/dialog";
+import { LoadingState, ErrorState } from "@lsat/components/states";
+import { PostExamWizard } from "@lsat/components/exam/post-exam-wizard";
+import { SealedBeat } from "@lsat/components/exam/sealed-beat";
 import {
   SectionPresetsDialog,
   type SectionPreset,
-} from "@/components/exam/section-presets-dialog";
-import { PreSubmitReview } from "@/components/question/pre-submit-review";
-import type { NavItem } from "@/components/question/navigator-strip";
+} from "@lsat/components/exam/section-presets-dialog";
+import { PreSubmitReview } from "@lsat/components/question/pre-submit-review";
+import type { NavItem } from "@lsat/components/question/navigator-strip";
 import {
   SectionRunner,
   blankState,
   type QState,
-} from "@/components/question/section-runner";
-import { useDrillSession, useSection, useSessions } from "@/lib/hooks";
-import { api } from "@/lib/api";
+} from "@lsat/components/question/section-runner";
+import { useDrillSession, useSection, useSessions } from "@lsat/lib/hooks";
+import { api } from "@lsat/lib/api";
 import {
   enqueueFinishSession,
   enqueueSectionAttempts,
-} from "@/lib/offlineQueue";
-import { attemptIdFor, clearAttemptIds } from "@/lib/attemptIds";
-import { playSectionEndBeep } from "@/lib/examSounds";
-import { setResume, clearResume } from "@/lib/resume";
-import { clearSessionDraft, draftKeyForSection } from "@/lib/sessionDraft";
-import type { AttemptCreateWire } from "@/lib/apiTypes";
+} from "@lsat/lib/offlineQueue";
+import { attemptIdFor, clearAttemptIds } from "@lsat/lib/attemptIds";
+import { playSectionEndBeep } from "@lsat/lib/examSounds";
+import { setResume, clearResume } from "@lsat/lib/resume";
+import { clearSessionDraft, draftKeyForSection } from "@lsat/lib/sessionDraft";
+import type { AttemptCreateWire } from "@lsat/lib/apiTypes";
 
 export default function TakeSection({
   sessionMode = false,

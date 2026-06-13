@@ -65,12 +65,19 @@ interface DomainCardProps {
 
 function DomainCard({ domain, index }: DomainCardProps) {
   const Icon = domainIcons[domain.id] || BookOpen;
-  const tone = domain.id === 'cfa' ? 'exam' : domain.id === 'quant' ? 'quant' : 'excel';
+  const tone =
+    domain.id === 'cfa' ? 'exam' : domain.id === 'quant' ? 'quant' : domain.id === 'lsat' ? 'study' : 'excel';
+
+  // `external` domains (the LSAT sub-app) are mounted by a top-level branch in
+  // main.jsx, not the host client router — so navigate with a real anchor
+  // (full page load) instead of a client-side <Link>.
+  const linkProps = domain.external
+    ? { as: 'a' as const, href: domain.path }
+    : { as: Link, to: domain.path };
 
   return (
     <Panel
-      as={Link}
-      to={domain.path}
+      {...linkProps}
       tone={domain.id}
       status={tone}
       interactive

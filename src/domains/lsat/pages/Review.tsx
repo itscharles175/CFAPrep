@@ -1,27 +1,27 @@
 import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { ClipboardCheck } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PageLayout } from "@/components/page-layout";
-import { ListRow } from "@/components/ui/list-row";
-import { AnimatedList } from "@/components/ui/animated-list";
-import { EmptyState, SkeletonCard, SkeletonList } from "@/components/states";
-import { IllustrationSrsCaughtUp } from "@/components/illustrations";
-import { TypeBadge } from "@/components/viz";
-import { SessionRecap } from "@/components/motivation";
-import { BucketQueue } from "@/components/review/bucket-queue";
-import { FlaggedQueue } from "@/components/review/flagged-queue";
-import { ErrorLogWorkspace } from "@/components/review/error-log-workspace";
-import { ErrorPatternBanner } from "@/components/review/error-pattern-banner";
-import { AnnotationsHub } from "@/components/review/annotations-hub";
-import { DockedCoach } from "@/components/coach/docked-coach";
-import { useSessionResults, useSessions, useSrsDue } from "@/lib/hooks";
-import { api } from "@/lib/api";
-import { enqueue } from "@/lib/offlineQueue";
-import { toast } from "@/lib/toast";
-import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
+import { PageLayout } from "@lsat/components/page-layout";
+import { ListRow } from "@lsat/components/ui/list-row";
+import { AnimatedList } from "@lsat/components/ui/animated-list";
+import { EmptyState, SkeletonCard, SkeletonList } from "@lsat/components/states";
+import { IllustrationSrsCaughtUp } from "@lsat/components/illustrations";
+import { TypeBadge } from "@lsat/components/viz";
+import { SessionRecap } from "@lsat/components/motivation";
+import { BucketQueue } from "@lsat/components/review/bucket-queue";
+import { FlaggedQueue } from "@lsat/components/review/flagged-queue";
+import { ErrorLogWorkspace } from "@lsat/components/review/error-log-workspace";
+import { ErrorPatternBanner } from "@lsat/components/review/error-pattern-banner";
+import { AnnotationsHub } from "@lsat/components/review/annotations-hub";
+import { DockedCoach } from "@lsat/components/coach/docked-coach";
+import { useSessionResults, useSessions, useSrsDue } from "@lsat/lib/hooks";
+import { api } from "@lsat/lib/api";
+import { enqueue } from "@lsat/lib/offlineQueue";
+import { toast } from "@lsat/lib/toast";
+import { Button } from "@lsat/components/ui/button";
 import { useNavigate } from "react-router-dom";
-import type { SrsDue } from "@/lib/types";
+import type { SrsDue } from "@lsat/lib/types";
 
 /** R4-B5 — unified review inbox. */
 export default function Review() {

@@ -1,6 +1,6 @@
 import { m } from "motion/react";
-import { fadeUp } from "@/lib/motion";
-import type { ActivityDay, ByTypeRow, SessionSummary } from "@/lib/types";
+import { fadeUp } from "@lsat/lib/motion";
+import type { ActivityDay, ByTypeRow, SessionSummary } from "@lsat/lib/types";
 import { ProgressLedger } from "./progress-ledger";
 import { StreakInsights } from "./streak-insights";
 import { StudyCalendar } from "./StudyCalendar";

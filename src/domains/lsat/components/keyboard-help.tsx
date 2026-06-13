@@ -5,12 +5,12 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@lsat/components/ui/dialog";
 import {
   actionLabel,
   getKeyboardMap,
   type ExamKeyAction,
-} from "@/lib/keyboardMap";
+} from "@lsat/lib/keyboardMap";
 
 interface Shortcut {
   keys: string[];

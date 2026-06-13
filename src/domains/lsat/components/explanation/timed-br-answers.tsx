@@ -1,5 +1,5 @@
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@lsat/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
 
 /** R4-D6 — timed vs blind-review answers side-by-side. */
 export function TimedBrAnswers({

@@ -2,21 +2,21 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { m, useReducedMotion } from "motion/react";
 import { BookOpen, Check, Layers, RotateCcw } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Icon } from "@/components/ui/icon";
-import { ChoiceList } from "@/components/question/choice-list";
-import { PageLayout } from "@/components/page-layout";
-import { IllustrationSrsCaughtUp } from "@/components/illustrations";
-import { LoadingState, ErrorState, EmptyState } from "@/components/states";
-import { useSrsDue } from "@/lib/hooks";
-import { api } from "@/lib/api";
-import { enqueue } from "@/lib/offlineQueue";
-import { qTypeLabel, srsOriginLabel } from "@/lib/labels";
-import { toast } from "@/lib/toast";
-import { cn } from "@/lib/utils";
-import { duration, easing } from "@/lib/motion";
+import { Card, CardContent } from "@lsat/components/ui/card";
+import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@lsat/components/ui/badge";
+import { Icon } from "@lsat/components/ui/icon";
+import { ChoiceList } from "@lsat/components/question/choice-list";
+import { PageLayout } from "@lsat/components/page-layout";
+import { IllustrationSrsCaughtUp } from "@lsat/components/illustrations";
+import { LoadingState, ErrorState, EmptyState } from "@lsat/components/states";
+import { useSrsDue } from "@lsat/lib/hooks";
+import { api } from "@lsat/lib/api";
+import { enqueue } from "@lsat/lib/offlineQueue";
+import { qTypeLabel, srsOriginLabel } from "@lsat/lib/labels";
+import { toast } from "@lsat/lib/toast";
+import { cn } from "@lsat/lib/utils";
+import { duration, easing } from "@lsat/lib/motion";
 
 const RATINGS: { value: 1 | 2 | 3 | 4; label: string; hint: string }[] = [
   { value: 1, label: "Again", hint: "Forgot — see it soon" },

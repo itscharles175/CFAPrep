@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { AlertTriangle, CheckCircle2, KeyRound, Loader2 } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription, AlertTitle } from "@lsat/components/ui/alert";
+import { Badge } from "@lsat/components/ui/badge";
+import { Button } from "@lsat/components/ui/button";
+import { Textarea } from "@lsat/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -11,14 +11,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { api } from "@/lib/api";
-import { toast } from "@/lib/toast";
+} from "@lsat/components/ui/table";
+import { api } from "@lsat/lib/api";
+import { toast } from "@lsat/lib/toast";
 import type {
   ImportIntegrityIssue,
   ImportReconcileResult,
   ParsedPrepTest,
-} from "@/lib/types";
+} from "@lsat/lib/types";
 
 /**
  * Parse a pasted answer key into an array of A–E letters. Accepts entries

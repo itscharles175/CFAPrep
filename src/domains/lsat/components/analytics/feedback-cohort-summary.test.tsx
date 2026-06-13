@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { FeedbackCohortSummaryCard } from "./feedback-cohort-summary";
-import type { FeedbackCohortSummary, FeedbackOutcomeSummary } from "@/lib/types";
+import type { FeedbackCohortSummary, FeedbackOutcomeSummary } from "@lsat/lib/types";
 
 const populated: FeedbackCohortSummary = {
   model: "daily_plan_feedback_cohorts_v1",
