@@ -173,9 +173,11 @@ fn services_dir() -> PathBuf {
 /// when no candidate is usable.
 ///
 /// Heuristic for "this is a services directory": the candidate exists and
-/// contains either a `bin/` subdirectory (where the SurrealDB binary lives) or
-/// an `open-notebook/` subdirectory (the FastAPI clone). Either is enough to
-/// pin the layout — both are usually present in dev.
+/// contains a `bin/` subdirectory (where the SurrealDB binary lives), an
+/// `open-notebook/` subdirectory (the FastAPI clone), or an `lsat-backend/`
+/// subdirectory (StudyVault's frozen LSAT sidecar). Any one is enough to pin
+/// the layout — in dev several are present; in a packaged install only the
+/// bundled ones exist.
 fn services_dir_search(
     env_override: Option<&Path>,
     cwd: &Path,
@@ -195,7 +197,10 @@ fn services_dir_search(
         exe_dir.join("..").join("Resources").join("services"),
     ];
     for cand in &candidates {
-        if cand.join("bin").exists() || cand.join("open-notebook").exists() {
+        if cand.join("bin").exists()
+            || cand.join("open-notebook").exists()
+            || cand.join("lsat-backend").exists()
+        {
             return Some(cand.clone());
         }
     }
@@ -312,7 +317,31 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
         ],
     };
 
-    vec![surreal, api, worker]
+    // StudyVault's LSAT domain backend — the frozen PyInstaller sidecar built
+    // by scripts/build-lsat-binary.mjs into <dir>/lsat-backend/. Unlike the
+    // open-notebook specs (which shell through `uv` against the dev `spike/`
+    // checkout), this runs the self-contained binary directly, so it works in
+    // a packaged install with no system Python. Binds 127.0.0.1:8100; the
+    // backend resolves its SQLite bank under the OS app-data dir by default
+    // (LSATLAB_DATA_DIR can override). PYTHONUTF8/IOENCODING keep the frozen
+    // process's stdio safe on the Windows console.
+    let lsat = SidecarSpec {
+        name: "LSAT backend".into(),
+        program: dir.join("lsat-backend").join("lsatlab-backend.exe"),
+        args: vec![
+            "--host".into(),
+            "127.0.0.1".into(),
+            "--port".into(),
+            "8100".into(),
+        ],
+        env: vec![
+            ("LSATLAB_PORT".into(), "8100".into()),
+            ("PYTHONUTF8".into(), "1".into()),
+            ("PYTHONIOENCODING".into(), "utf-8".into()),
+        ],
+    };
+
+    vec![surreal, api, worker, lsat]
 }
 
 /// Iterate the given launcher over `build_sidecar_specs(dir)`, logging
@@ -559,6 +588,21 @@ mod tests {
     }
 
     #[test]
+    fn services_dir_search_recognizes_lsat_backend_only_layout() {
+        // A packaged install may carry only the LSAT sidecar (no bin/ or
+        // open-notebook/). The lsat-backend/ subdir alone must pin the layout.
+        let tmp = tempdir().expect("tempdir");
+        let cwd = tmp.path().join("workdir-empty");
+        fs::create_dir_all(&cwd).unwrap();
+        let exe = tmp.path().join("exe");
+        let services = exe.join("resources").join("services");
+        fs::create_dir_all(services.join("lsat-backend")).unwrap();
+
+        let got = services_dir_search(None, &cwd, &exe).expect("found");
+        assert_eq!(got, services);
+    }
+
+    #[test]
     fn services_dir_search_falls_back_to_macos_resources_layout() {
         let tmp = tempdir().expect("tempdir");
         let cwd = tmp.path().join("workdir-empty");
@@ -622,16 +666,28 @@ mod tests {
         let dir = PathBuf::from("C:/qv/services");
         let specs = build_sidecar_specs(&dir);
 
-        assert_eq!(specs.len(), 3);
+        assert_eq!(specs.len(), 4);
         assert_eq!(specs[0].name, "SurrealDB");
         assert_eq!(specs[1].name, "open-notebook API");
         assert_eq!(specs[2].name, "open-notebook worker");
+        assert_eq!(specs[3].name, "LSAT backend");
 
         // SurrealDB binary lives under <dir>/bin/surreal2.exe.
         assert_eq!(specs[0].program, dir.join("bin").join("surreal2.exe"));
-        // The other two shell through `uv` on PATH.
+        // The open-notebook pair shells through `uv` on PATH.
         assert_eq!(specs[1].program, PathBuf::from("uv"));
         assert_eq!(specs[2].program, PathBuf::from("uv"));
+        // The LSAT backend runs its frozen binary directly from <dir>/lsat-backend.
+        assert_eq!(
+            specs[3].program,
+            dir.join("lsat-backend").join("lsatlab-backend.exe")
+        );
+        assert!(specs[3].args.iter().any(|a| a == "--port"));
+        assert!(specs[3].args.iter().any(|a| a == "8100"));
+        assert!(specs[3]
+            .env
+            .iter()
+            .any(|(k, v)| k == "LSATLAB_PORT" && v == "8100"));
     }
 
     #[test]
@@ -717,9 +773,14 @@ mod tests {
         let names: Vec<_> = calls.iter().map(|s| s.name.clone()).collect();
         assert_eq!(
             names,
-            vec!["SurrealDB", "open-notebook API", "open-notebook worker"]
+            vec![
+                "SurrealDB",
+                "open-notebook API",
+                "open-notebook worker",
+                "LSAT backend"
+            ]
         );
-        assert_eq!(kids.len(), 3);
+        assert_eq!(kids.len(), 4);
         // Lifecycle: reap the synthesized mock children so they don't linger.
         for c in kids.iter_mut() {
             let _ = c.kill();
@@ -731,10 +792,10 @@ mod tests {
     fn spawn_sidecars_with_skips_failed_sidecars_but_continues() {
         let launcher = MockLauncher::new(vec!["SurrealDB"]);
         let mut kids = spawn_sidecars_with(&launcher, Path::new("C:/qv/services"));
-        // All three specs were attempted, even though SurrealDB returned Err.
-        assert_eq!(launcher.calls.borrow().len(), 3);
-        // Only the two successful launches yield Child handles.
-        assert_eq!(kids.len(), 2);
+        // All four specs were attempted, even though SurrealDB returned Err.
+        assert_eq!(launcher.calls.borrow().len(), 4);
+        // Only the three successful launches yield Child handles.
+        assert_eq!(kids.len(), 3);
         for c in kids.iter_mut() {
             let _ = c.kill();
             let _ = c.wait();
