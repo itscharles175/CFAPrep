@@ -22,5 +22,7 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src", "vite.config.js", "eslint.config.js"]
+  "include": ["src", "vite.config.js", "eslint.config.js"],
+  "//": "The LSAT domain is a vendored React-18/TS-5.6 subtree with its own (non-strict) tsconfig at src/domains/lsat/tsconfig.json. Vite/esbuild bundles it; the host's strict tsc does not type-check it.",
+  "exclude": ["src/domains/lsat"]
 }

@@ -22,6 +22,11 @@ export default [
       '.pyinstaller-build',
       '.pyinstaller-dist',
       'data',
+      // Vendored LSAT domain: React-18/TS-5.6 subtree with its own toolchain
+      // conventions (Tailwind, @/ alias → its own root). Linted by its own
+      // config during the merge port, not the host's strict flat config.
+      'src/domains/lsat',
+      '.venv-lsat',
     ],
   },
   js.configs.recommended,

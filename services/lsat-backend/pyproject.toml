@@ -1,0 +1,49 @@
+[project]
+name = "lsatlab-backend"
+version = "0.1.0"
+description = "LSAT Lab backend: local FastAPI study engine over SQLite + Ollama."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.136.1",
+    "fsrs>=6.3.1",
+    "httpx>=0.28.1",
+    "mcp>=1.27.1",
+    "pymupdf>=1.27.2.3",
+    "python-multipart>=0.0.29",
+    "sqlite-vec>=0.1.9",
+    "sqlmodel>=0.0.38",
+    # Bank-expansion plan Wave 2.3 — Flesch-Kincaid Grade Level + readability
+    # stats for the RC authenticity gate. Pure Python, zero runtime deps; fine
+    # for the offline-local stack.
+    "textstat>=0.7.4",
+    "uvicorn[standard]>=0.47.0",
+]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.152.9",
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# Coverage is opt-in (CI passes --cov) so day-to-day runs stay fast:
+#   uv run pytest --cov=app --cov-report=term-missing
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "app/seed.py",          # large fixture content, not product logic
+    "app/__init__.py",
+]
+
+[tool.coverage.report]
+# A floor, not a ceiling. The live-Ollama paths can't run in CI so 100% is moot.
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]

@@ -48,7 +48,9 @@ export default defineConfig({
     globals: true,
     // `spike/` holds the gitignored open-notebook clone with its own test
     // suite (and an `@/` alias that collides with ours) — never run it here.
-    exclude: ['**/node_modules/**', '**/dist/**', 'spike/**', '.claude/**', 'src-tauri/**'],
+    // `src/domains/lsat/` is the vendored LSAT subtree (React-18/Vitest-2 era
+    // tests with the same colliding `@/` alias) — run under its own config.
+    exclude: ['**/node_modules/**', '**/dist/**', 'spike/**', '.claude/**', 'src-tauri/**', 'src/domains/lsat/**'],
   },
   resolve: {
     alias: {

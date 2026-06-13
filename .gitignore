@@ -30,6 +30,20 @@ spike/
 # never shadows the tracked src/data/ source.
 /data/
 
+# LSAT (StudyVault) backend sidecar — build venv, PyInstaller artifacts, and
+# the SQLite question bank. The bank is user data / copyrighted content and
+# must NEVER enter git history (it is ~2.4GB live). Source lives in
+# services/lsat-backend/; the DB is created in app-data at runtime.
+.venv-lsat/
+.pyinstaller-lsat-build/
+.pyinstaller-lsat-dist/
+/lsatlab.spec
+services/lsat-backend/**/*.db
+services/lsat-backend/**/*.sqlite*
+services/lsat-backend/.venv*/
+services/lsat-backend/datasets/
+**/lsatlab.db
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

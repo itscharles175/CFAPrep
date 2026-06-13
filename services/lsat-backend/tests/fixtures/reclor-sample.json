@@ -1,0 +1,4 @@
+[
+  {"id_string": "reclor-lsat-001", "context": "Most species of birds living near the coast forage at low tide. A new study found that, contrary to expectations, the species of bird called the rockwren actually forages mainly at high tide.", "question": "Which one of the following, if true, most helps to explain the surprising finding above?", "answers": ["Rockwrens nest only in the inland mountains far from any coast.", "At high tide, predators of the rockwren retreat to deeper waters, allowing the rockwren to forage with reduced risk.", "Rockwrens often forage in groups rather than alone.", "Low-tide foragers of all species typically eat the same insects as high-tide foragers."], "label": 1},
+  {"id_string": "reclor-other-001", "context": "Some non-LSAT philosophy snippet that should be filtered out.", "question": "Filler.", "answers": ["a", "b", "c", "d"], "label": 0}
+]
