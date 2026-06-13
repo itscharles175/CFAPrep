@@ -21,7 +21,26 @@ function showBootError(label, err) {
   }
 }
 
+// Phase 4 — theme bridge. The host (qv-theme → data-theme attr) and the LSAT
+// app (lsatlab-theme → `dark` class) use the SAME vocabulary (light/dark/system,
+// system resolved via prefers-color-scheme). The host is the primary theme
+// surface, so on entering the /lsat branch we copy the host's choice into the
+// LSAT key BEFORE its ThemeProvider reads it — /lsat then matches the host's
+// light/dark/system selection. (One-way by design: the host dashboard is where
+// the umbrella theme is set; per-domain tweaks inside LSAT remain possible.)
+function bridgeThemeToLsat() {
+  try {
+    const host = localStorage.getItem('qv-theme');
+    if (host === 'light' || host === 'dark' || host === 'system') {
+      localStorage.setItem('lsatlab-theme', host);
+    }
+  } catch {
+    /* private-mode / quota — LSAT falls back to its own stored/default theme */
+  }
+}
+
 if (isLsat) {
+  bridgeThemeToLsat();
   import('./domains/lsat/LsatRoot.tsx')
     .then(({ default: LsatRoot }) => {
       ReactDOM.createRoot(rootEl).render(
