@@ -180,7 +180,9 @@ export default function App() {
             className={`main-content ${sidebarCollapsed ? 'collapsed' : ''}`}
             role="main"
           >
-            <ErrorBoundary name="app-root" level="page">
+            {/* P5: resetKey={pathname} auto-clears a caught crash on navigation,
+                so a bad page doesn't strand the user on the error screen. */}
+            <ErrorBoundary name="app-root" level="page" resetKey={location.pathname}>
               <Suspense fallback={<RouteFallback />}>
                 <Routes>
                   {appRoutes.map((definition) => (

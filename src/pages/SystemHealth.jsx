@@ -17,6 +17,7 @@ import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 import { getStorage, getActiveDriverName, cutoverTo, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
 import { checkLsatBackendHealth, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
+import { readLastCrash, clearLastCrash } from '../components/ErrorBoundary';
 import {
   clearPersistedParameters,
   persistOptimizedParameters,
@@ -82,6 +83,9 @@ export default function SystemHealth() {
   // LSAT backend sidecar (:8100) health — probed independently so a down
   // sidecar never blocks the page. null = not yet checked.
   const [lsatHealth, setLsatHealth] = useState(null);
+  // P5: the last render crash the ErrorBoundary persisted (local-first apps
+  // have no remote telemetry). Read once on mount; null when there's none.
+  const [lastCrash, setLastCrash] = useState(() => readLastCrash());
   const desktopAvailable = isTauri();
   const [ingestState, setIngestState] = useState('idle'); // idle | picking | running | done | error | cancelled
   const [ingestProgress, setIngestProgress] = useState(null);
@@ -968,6 +972,39 @@ export default function SystemHealth() {
           </div>
         </div>
       </Surface>
+
+      {/* P5: last render crash, persisted by the host ErrorBoundary. Only shown
+          when one exists — a local-first diagnostics readout in place of remote
+          telemetry. */}
+      {lastCrash && (
+        <Surface tone="ops" status="warning" className="ops-report-panel">
+          <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <StatusBadge tone="exam">Diagnostics</StatusBadge>
+              <h3 className="qv-m-0 qv-mt-2">Last render crash</h3>
+              <p className="qv-m-0 qv-mt-2 qv-fs-sm qv-text-warning qv-mono" style={{ wordBreak: 'break-word' }}>
+                {lastCrash.message || '(no message)'}
+              </p>
+              <p className="qv-m-0 qv-mt-1 qv-fs-sm qv-text-secondary">
+                {lastCrash.name && lastCrash.name !== 'unknown' ? `boundary: ${lastCrash.name} · ` : ''}
+                {lastCrash.route ? `route: ${lastCrash.route} · ` : ''}
+                {new Date(lastCrash.ts).toLocaleString()}
+              </p>
+            </div>
+            <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  clearLastCrash();
+                  setLastCrash(null);
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        </Surface>
+      )}
 
       <Surface tone="vault" status={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} className="ops-report-panel">
         <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>

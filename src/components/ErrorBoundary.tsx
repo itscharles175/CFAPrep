@@ -12,11 +12,49 @@ export interface ErrorBoundaryProps {
   name?: string;
   level?: 'page' | 'section';
   fallback?: (props: ErrorBoundaryFallbackProps) => ReactNode;
+  /**
+   * P5: when this value changes, the boundary clears its captured error so the
+   * subtree re-mounts — e.g. pass `resetKey={location.pathname}` so navigating
+   * away from a crashed route recovers automatically. (Ported from the LSAT
+   * boundary's resetKey API.)
+   */
+  resetKey?: unknown;
 }
 
 export interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
+}
+
+/** P5: shape of the last render crash persisted to localStorage. */
+export interface LastCrash {
+  message: string;
+  stack: string;
+  componentStack: string;
+  route: string;
+  name: string;
+  ts: number;
+}
+
+const LAST_CRASH_KEY = 'studyvault.lastCrash';
+
+/** P5: read the last persisted render crash (null if none / unreadable). */
+export function readLastCrash(): LastCrash | null {
+  try {
+    const raw = localStorage.getItem(LAST_CRASH_KEY);
+    return raw ? (JSON.parse(raw) as LastCrash) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** P5: clear the persisted crash (called from the System Health readout). */
+export function clearLastCrash(): void {
+  try {
+    localStorage.removeItem(LAST_CRASH_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -35,6 +73,32 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('[ErrorBoundary]', this.props.name || 'unknown', error, info.componentStack);
+
+    // P5: persist the last crash locally so System Health can surface it — a
+    // local-first app has no remote telemetry. Truncated + try/catch so a
+    // localStorage write failure never masks the original error. (Ported from
+    // the LSAT boundary's crash-persistence behaviour.)
+    try {
+      const entry: LastCrash = {
+        message: error.message,
+        stack: (error.stack ?? '').slice(0, 4000),
+        componentStack: (info.componentStack ?? '').slice(0, 4000),
+        route: typeof window !== 'undefined' ? window.location.pathname : '',
+        name: this.props.name || 'unknown',
+        ts: Date.now(),
+      };
+      localStorage.setItem(LAST_CRASH_KEY, JSON.stringify(entry));
+    } catch {
+      /* ignore write errors */
+    }
+  }
+
+  componentDidUpdate(prevProps: ErrorBoundaryProps) {
+    // P5: clear the captured error when the caller's resetKey changes so the
+    // subtree re-mounts (e.g. after navigating away from a crashed route).
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.handleReset();
+    }
   }
 
   handleReset = () => {
