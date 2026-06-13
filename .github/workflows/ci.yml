@@ -1,4 +1,4 @@
-# J1: QuantVault CI Pipeline
+# J1: StudyVault CI Pipeline
 name: CI
 
 on:
@@ -66,6 +66,45 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reports
+          path: |
+            dist/reports/
+            !**/*.qvsource
+            !**/*.pdf
+            !**/*.epub
+          retention-days: 14
+
+  # The vendored LSAT subtree runs on the host's hoisted toolchain (no separate
+  # node_modules) but is excluded from the host's strict tsc + the default
+  # `npm test`. This parallel job is its safety net: 251 tests + a strict
+  # type-check via tsconfig.lsat.json. Runs alongside `quality` — no host
+  # slowdown. (Plan S2.)
+  lsat-quality:
+    name: LSAT subtree — Typecheck + Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: TypeScript check (LSAT subtree)
+        run: npm run typecheck:lsat
+
+      - name: LSAT unit tests
+        run: npm run test:lsat:ci
+
+      - name: Upload LSAT reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-lsat
           path: |
             dist/reports/
             !**/*.qvsource

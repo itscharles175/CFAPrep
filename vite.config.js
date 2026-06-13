@@ -56,14 +56,42 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'jsdom',
-    setupFiles: './src/setupTests.js',
-    globals: true,
-    // `spike/` holds the gitignored open-notebook clone with its own test
-    // suite (and an `@/` alias that collides with ours) — never run it here.
-    // `src/domains/lsat/` is the vendored LSAT subtree (React-18/Vitest-2 era
-    // tests with the same colliding `@/` alias) — run under its own config.
-    exclude: ['**/node_modules/**', '**/dist/**', 'spike/**', '.claude/**', 'src-tauri/**', 'src/domains/lsat/**'],
+    // Two vitest projects share this one config (and its `resolve.alias` +
+    // react plugin via `extends: true`) so the vendored LSAT subtree runs on
+    // the host's single hoisted toolchain (React 19 / vitest 4) — there is no
+    // separate LSAT node_modules. Run all: `vitest run`; host-only (the fast
+    // default): `--project host`; LSAT-only: `--project lsat`. (Plan S2.)
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'host',
+          environment: 'jsdom',
+          setupFiles: './src/setupTests.js',
+          globals: true,
+          // `spike/` holds the gitignored open-notebook clone with its own
+          // test suite (and a colliding `@/` alias) — never run it here.
+          // `src/domains/lsat/` is the LSAT project below.
+          exclude: ['**/node_modules/**', '**/dist/**', 'spike/**', '.claude/**', 'src-tauri/**', 'src/domains/lsat/**'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'lsat',
+          environment: 'jsdom',
+          // The vendored subtree ships its own setup (jest-dom, localStorage
+          // stub, `@lsat/lib/tauri` mock, fetch guard).
+          setupFiles: './src/domains/lsat/test/setup.ts',
+          globals: true,
+          include: ['src/domains/lsat/**/*.{test,spec}.{ts,tsx}'],
+          // The ContentOps cockpit tests drive long multi-step userEvent flows
+          // that exceed the 5s default on a loaded machine; they pass with room
+          // to spare at 25s. Integration-test budget, not a masked hang.
+          testTimeout: 25000,
+        },
+      },
+    ],
   },
   resolve: {
     alias: {

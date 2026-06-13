@@ -156,7 +156,10 @@ export async function openPath(path: string): Promise<void> {
 /** Wrap on-disk bytes at `path` in a `File` (name + MIME inferred). */
 function fileFromBytes(path: string, bytes: Uint8Array): File {
   const name = path.split(/[/\\]/).pop() ?? "import.pdf";
-  return new File([bytes], name, {
+  // Copy into a fresh ArrayBuffer-backed view: TS 5.7+ types `Uint8Array` as
+  // `Uint8Array<ArrayBufferLike>`, which isn't assignable to `BlobPart` (it
+  // wants an ArrayBuffer-backed view, not a possibly-shared one).
+  return new File([new Uint8Array(bytes)], name, {
     type: name.toLowerCase().endsWith(".txt") ? "text/plain" : "application/pdf",
   });
 }

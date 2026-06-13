@@ -58,7 +58,7 @@ export function StatNumber({
   const hasValue = typeof value === "number" && Number.isFinite(value);
   const numericValue = hasValue ? value : 0;
   const [display, setDisplay] = useState(reduce ? numericValue : 0);
-  const raf = useRef<number>();
+  const raf = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (!hasValue) {
