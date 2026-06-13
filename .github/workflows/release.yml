@@ -90,6 +90,74 @@ jobs:
           rustup target add x86_64-apple-darwin
 
       - run: npm ci --legacy-peer-deps
+
+      # --- Backend sidecars (Plan P3 / P4) -----------------------------------
+      # PyInstaller binaries are platform-native, so each must be frozen on the
+      # SAME runner OS that builds the Tauri bundle (they can't be built once and
+      # shared). Without this, `tauri build` happily bundles an empty
+      # resources/services/ dir → a tagged release that ships with no working
+      # backend. This is the single biggest release-correctness risk.
+      - name: Set up Python (sidecar builds)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # LSAT backend: source is committed (services/lsat-backend) → always built.
+      - name: Build LSAT backend sidecar
+        run: npm run build:lsat-binary
+
+      # P4: boot the frozen binary on a throwaway port and assert /api/health →
+      # {ok:true}. Catches a missed PyInstaller hidden-import (builds fine, dies
+      # at boot) that bundling alone would never surface. LSATLAB_DATA_DIR points
+      # at a runner-temp dir so the first-run SQLite create can't fail on perms.
+      - name: Smoke-test LSAT backend sidecar
+        shell: bash
+        env:
+          LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-smoke
+        run: |
+          node scripts/smoke-sidecar.mjs \
+            --bin src-tauri/resources/services/lsat-backend/lsatlab-backend \
+            --url http://127.0.0.1:8123/api/health \
+            --expect-ok --timeout 90000 --label lsat-backend \
+            -- --host 127.0.0.1 --port 8123
+
+      # open-notebook (RAG): an external project living in gitignored spike/, so
+      # there is no committed source to build from. Built only when a clone
+      # source is configured via the ONB_GIT_URL (+ optional ONB_GIT_REF) repo
+      # variables; otherwise the release is built WITHOUT RAG features and says
+      # so loudly. (No HTTP smoke here — its health route isn't pinned in-repo.)
+      - name: Build open-notebook sidecar (optional)
+        shell: bash
+        env:
+          ONB_GIT_URL: ${{ vars.ONB_GIT_URL }}
+          ONB_GIT_REF: ${{ vars.ONB_GIT_REF }}
+        run: |
+          if [ -z "${ONB_GIT_URL}" ]; then
+            echo "::warning::ONB_GIT_URL repo variable is not set — skipping the open-notebook RAG sidecar. This build will NOT include RAG / notebook features. Set ONB_GIT_URL (and optionally ONB_GIT_REF) to include it."
+            exit 0
+          fi
+          git clone "${ONB_GIT_URL}" spike/open-notebook
+          if [ -n "${ONB_GIT_REF}" ]; then
+            git -C spike/open-notebook checkout "${ONB_GIT_REF}"
+          fi
+          npm run build:onb-binary
+
+      # Fail the build NOW (not at user-install time) if a required sidecar is
+      # missing from the bundle staging dir.
+      - name: Verify required sidecars are present
+        shell: bash
+        run: |
+          missing=0
+          for f in "src-tauri/resources/services/lsat-backend/lsatlab-backend"; do
+            if [ -s "$f" ] || [ -s "$f.exe" ]; then
+              echo "ok: $f"
+            else
+              echo "::error::required sidecar binary missing: $f"
+              missing=1
+            fi
+          done
+          [ "$missing" = "0" ]
+
       - run: npm run build
 
       # Decode signing certs from base64 secrets into the runner's cert store.
@@ -133,7 +201,7 @@ jobs:
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
-          name: quantvault-${{ matrix.os }}
+          name: studyvault-${{ matrix.os }}
           path: ${{ matrix.artifact-glob }}
           if-no-files-found: warn
           retention-days: 30
