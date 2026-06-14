@@ -1,20 +1,27 @@
-# QuantVault
+# StudyVault
 
-A **local-first, fully offline** CFA exam-prep app — desktop (Tauri) and
-PWA — that turns your own curriculum PDFs into a multimodal study OS: a
-spaced-repetition queue, generative mock exams, grounded-RAG question
-answering with citations, an agentic Study Director, and analytics — all
-on your machine, no cloud, no API keys.
+A **local-first, fully offline** study OS — desktop (Tauri) and PWA — bundling
+two exam-prep domains in one window: **CFA / Quant / Excel** (the original
+QuantVault host) and **LSAT** (vendored from LSAT Lab). It turns your own
+curriculum PDFs into a multimodal study OS — spaced repetition, generative mock
+exams, grounded-RAG answering with citations, an agentic Study Director, and
+analytics — plus the LSAT domain's question bank, timed sections, blind review,
+and adaptive drills. All on your machine, no cloud, no account, no API keys.
+
+> New here? Read **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the
+> two-apps-one-window design and **[docs/LSAT-INTEGRATION.md](docs/LSAT-INTEGRATION.md)**
+> for how the LSAT domain is embedded.
 
 ## Stack
 
 | Layer | What |
 |---|---|
 | **Desktop shell** | Tauri 2 (Rust core, supervisor) — bundles the sidecars below and hosts the React UI as the webview |
-| **One local brain** (current → target) | Dexie / IndexedDB → SurrealDB (Wave-1) |
+| **Domains** | Host (CFA/Quant/Excel) at `/`, LSAT at `/lsat` — one Vite bundle, each with its own router; see [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| **One local brain** (current → target) | Dexie / IndexedDB → SurrealDB (Wave-1); LSAT uses a FastAPI + SQLite sidecar on :8100 |
 | **Notebook + RAG** | Embedded open-notebook (FastAPI on :5055, worker, transformations) |
 | **Local model** | LM Studio or Ollama, OpenAI-compatible chat + embeddings. Standardize on **Gemma 4 E4B** (multimodal, 128K context) |
-| **Frontend** | React 19 + Vite 8 + react-router-dom 7 + recharts + lucide-react + pdfjs-dist; vite-plugin-pwa for offline service-worker |
+| **Frontend** | React 19 + Vite 8 + react-router-dom 7 + recharts/@visx + lucide-react + pdfjs-dist; Geist/Newsreader fonts; vite-plugin-pwa for offline service-worker |
 
 ## What works today
 
