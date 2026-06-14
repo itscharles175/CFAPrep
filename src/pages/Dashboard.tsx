@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ComponentType } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   GraduationCap, BrainCircuit, Table2, Calculator,
@@ -7,6 +7,7 @@ import {
   Bookmark, StickyNote, ShieldAlert, Inbox, BadgeCheck, ClipboardList, BarChart3, Lock,
 } from 'lucide-react';
 import { domains } from '../data/catalog';
+import { navigateDomain } from '../lib/domainNav';
 import { useProgressSummary } from '../hooks/useProgress';
 import { exportVaultData, importVaultData, previewVaultImportPayload, resetVaultData } from '../lib/learning';
 import type { VaultImportPreview } from '../lib/learning';
@@ -68,11 +69,22 @@ function DomainCard({ domain, index }: DomainCardProps) {
   const tone =
     domain.id === 'cfa' ? 'exam' : domain.id === 'quant' ? 'quant' : domain.id === 'lsat' ? 'study' : 'excel';
 
-  // `external` domains (the LSAT sub-app) are mounted by a top-level branch in
-  // main.jsx, not the host client router — so navigate with a real anchor
-  // (full page load) instead of a client-side <Link>.
+  // `external` domains (the LSAT sub-app) live under their own router, not the
+  // host client router. The anchor keeps a real href (so modifier/middle-click
+  // and a11y work), but a plain left-click soft-swaps domains via the unified
+  // StudyVault root (no full page reload). (Plan S6.)
   const linkProps = domain.external
-    ? { as: 'a' as const, href: domain.path }
+    ? {
+        as: 'a' as const,
+        href: domain.path,
+        onClick: (e: MouseEvent) => {
+          if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+            return;
+          }
+          e.preventDefault();
+          navigateDomain(domain.path);
+        },
+      }
     : { as: Link, to: domain.path };
 
   return (

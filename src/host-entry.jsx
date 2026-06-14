@@ -1,9 +1,9 @@
-// Host (CFA / Quant / Excel) entry. Loaded ONLY by the host branch in
-// main.jsx — so its static CSS imports + bootstraps never load in the LSAT
-// branch, keeping the two style/runtime worlds isolated while sharing one
-// window + bundle. This is the original top-level entry logic, unchanged.
-import React from 'react';
-import ReactDOM from 'react-dom/client';
+// Host (CFA / Quant / Excel) app, lazy-loaded by the unified StudyVault root in
+// main.jsx. Its static CSS imports live here so they only load on the host
+// branch (the LSAT domain loads its own Tailwind world from LsatRoot) — and the
+// style-isolation observer (lib/domainNav) attributes them to the host so they
+// go inert while the LSAT domain is showing. (Plan S6.)
+import { useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
@@ -17,25 +17,16 @@ import 'katex/dist/katex.min.css';
 import { registerServiceWorker } from './registerServiceWorker';
 import { bootstrapSourceVault } from './lib/bootstrapSourceVault';
 import { bootstrapAiContent } from './lib/bootstrapAiContent';
-import { applyTheme, getStoredTheme } from './lib/theme';
 import { bootstrapFsrsParameters } from './lib/bootstrapFsrsParameters';
 import { bootstrapStorage } from './lib/bootstrapStorage';
 
-export function mountHost(rootEl) {
-  // Apply the stored theme to <html> BEFORE React mounts so the first paint
-  // already shows the correct palette (avoids a one-frame wrong-theme flash).
-  applyTheme(getStoredTheme());
-
-  ReactDOM.createRoot(rootEl).render(
-    <React.StrictMode>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </React.StrictMode>
-  );
-
+// App-lifetime startup side-effects. Guarded so they run once even though the
+// host tree unmounts/remounts as the user soft-switches domains.
+let hostStarted = false;
+function runHostStartupOnce() {
+  if (hostStarted) return;
+  hostStarted = true;
   registerServiceWorker();
-
   // Re-activate the user's chosen storage backend BEFORE the data bootstraps
   // run, so they read/write through the correct driver. Falls back to Dexie.
   bootstrapStorage().finally(() => {
@@ -43,4 +34,20 @@ export function mountHost(rootEl) {
     bootstrapAiContent();
     bootstrapFsrsParameters();
   });
+}
+
+/** The host SPA (CFA/Quant/Excel) under its own router. Mounted by the unified
+ *  StudyVault root when the URL is NOT under /lsat. Default export so
+ *  React.lazy() can consume it directly (no `.then` re-export — rolldown, Vite
+ *  8's bundler, didn't resolve the named-export wrapper form). */
+export default function HostApp() {
+  useEffect(() => {
+    runHostStartupOnce();
+  }, []);
+
+  return (
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  );
 }

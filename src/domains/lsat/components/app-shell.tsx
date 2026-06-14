@@ -4,6 +4,7 @@ import { saveScroll, restoreScroll } from "@lsat/lib/scrollRestore";
 import { prefetchRoute } from "@lsat/lib/routePrefetch";
 import { m, useReducedMotion } from "motion/react";
 import {
+  ArrowLeft,
   Flame,
   type LucideIcon,
   Moon,
@@ -12,6 +13,9 @@ import {
   Search,
   Sun,
 } from "lucide-react";
+// Host-side cross-domain navigation (Plan S6). The `@` alias resolves to /src
+// (host), so the vendored domain can soft-hop back to the StudyVault host.
+import { navigateDomain } from "@/lib/domainNav";
 import { cn, countLabel } from "@lsat/lib/utils";
 import { Logo } from "@lsat/components/logo";
 import { Icon } from "@lsat/components/ui/icon";
@@ -334,6 +338,35 @@ export function AppShell() {
           <Logo className="h-6 w-6" />
           {!collapsed && (
             <span className="text-lg font-bold tracking-tight">LSAT Lab</span>
+          )}
+        </div>
+        {/* S6: soft-hop back to the StudyVault host (CFA/Quant/Excel). Keeps the
+            two domains feeling like one product — the host dashboard links in,
+            this links back, both without a full page reload. */}
+        <div className="px-2 pt-2">
+          {collapsed ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => navigateDomain("/")}
+                  aria-label="Back to StudyVault"
+                  className="flex w-full items-center justify-center rounded-md p-2 text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98] motion-reduce:active:scale-100"
+                >
+                  <Icon as={ArrowLeft} size="sm" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Back to StudyVault</TooltipContent>
+            </Tooltip>
+          ) : (
+            <button
+              type="button"
+              onClick={() => navigateDomain("/")}
+              className="group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.99] motion-reduce:active:scale-100"
+            >
+              <Icon as={ArrowLeft} size="sm" />
+              <span>StudyVault</span>
+            </button>
           )}
         </div>
         {/* Command-palette affordance — surfaces the ⌘K palette. */}

@@ -1,33 +1,31 @@
-import React from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
+import { applyTheme, getStoredTheme } from './lib/theme';
+import {
+  DOMAIN_NAV_EVENT,
+  domainForPath,
+  setActiveDomain,
+  startStyleIsolation,
+} from './lib/domainNav';
 
 // StudyVault is two large apps sharing one window + bundle: the CFA/Quant/Excel
-// host and the vendored LSAT domain. They never render simultaneously — we
-// branch at the very top on the URL so only one BrowserRouter is ever live
-// (the LSAT app brings its own, with basename="/lsat"). Domain switches are
-// hard navigations (window.location), giving a clean state boundary. Each
-// branch dynamically imports its own entry, so the host's CSS/bootstraps and
-// the LSAT app's Tailwind/providers stay in separate chunks and never collide.
+// host and the vendored LSAT domain. Each keeps its OWN router + design system.
+// Before S6 they lived in separate page loads (a hard window.location switch);
+// now ONE React root swaps which sub-app is mounted, so crossing /cfa <-> /lsat
+// is a soft navigation (no reload, no white flash, no bundle re-download).
+//
+// Only one sub-app is ever mounted, so the two BrowserRouters never coexist.
+// Their stylesheets WOULD conflict in one document, so lib/domainNav keeps only
+// the active domain's CSS live (see startStyleIsolation / setActiveDomain).
 const rootEl = document.getElementById('root');
-const isLsat =
-  typeof window !== 'undefined' && window.location.pathname.startsWith('/lsat');
 
-function showBootError(label, err) {
-  console.error(`StudyVault: ${label} failed to load:`, err);
-  if (rootEl) {
-    rootEl.innerHTML =
-      `<div style="padding:2rem;font-family:system-ui;line-height:1.5">` +
-      `<strong>${label} failed to load.</strong><br/>See the console for details.</div>`;
-  }
-}
+const HostApp = lazy(() => import('./host-entry.jsx'));
+const LsatRoot = lazy(() => import('./domains/lsat/LsatRoot.tsx'));
 
-// Phase 4 — theme bridge. The host (qv-theme → data-theme attr) and the LSAT
-// app (lsatlab-theme → `dark` class) use the SAME vocabulary (light/dark/system,
-// system resolved via prefers-color-scheme). The host is the primary theme
-// surface, so on entering the /lsat branch we copy the host's choice into the
-// LSAT key BEFORE its ThemeProvider reads it — /lsat then matches the host's
-// light/dark/system selection. (One-way by design: the host dashboard is where
-// the umbrella theme is set; per-domain tweaks inside LSAT remain possible.)
+// Theme bridge. The host (qv-theme -> data-theme attr) and the LSAT app
+// (lsatlab-theme -> `dark` class) use the SAME vocabulary (light/dark/system).
+// The host is the primary theme surface, so before showing the LSAT branch we
+// copy the host's choice into the LSAT key BEFORE its ThemeProvider reads it.
 function bridgeThemeToLsat() {
   try {
     const host = localStorage.getItem('qv-theme');
@@ -39,19 +37,50 @@ function bridgeThemeToLsat() {
   }
 }
 
-if (isLsat) {
-  bridgeThemeToLsat();
-  import('./domains/lsat/LsatRoot.tsx')
-    .then(({ default: LsatRoot }) => {
-      ReactDOM.createRoot(rootEl).render(
-        <React.StrictMode>
-          <LsatRoot />
-        </React.StrictMode>
-      );
-    })
-    .catch((err) => showBootError('The LSAT module', err));
-} else {
-  import('./host-entry.jsx')
-    .then(({ mountHost }) => mountHost(rootEl))
-    .catch((err) => showBootError('StudyVault', err));
+function DomainFallback() {
+  // Brief, themed blank while a domain's chunk resolves on first switch.
+  return <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #080B10)' }} />;
 }
+
+function StudyVaultRoot() {
+  const [pathname, setPathname] = useState(() => window.location.pathname);
+
+  useEffect(() => {
+    const sync = () => setPathname(window.location.pathname);
+    // popstate = browser back/forward (incl. crossing the domain boundary);
+    // DOMAIN_NAV_EVENT = our programmatic cross-domain hops.
+    window.addEventListener('popstate', sync);
+    window.addEventListener(DOMAIN_NAV_EVENT, sync);
+    return () => {
+      window.removeEventListener('popstate', sync);
+      window.removeEventListener(DOMAIN_NAV_EVENT, sync);
+    };
+  }, []);
+
+  const domain = domainForPath(pathname);
+
+  // Keep only the active domain's CSS live, and bridge the theme before the LSAT
+  // provider tree reads it. Done in render (not an effect) so the swap is
+  // isolated BEFORE the new sub-app paints — both calls are idempotent.
+  setActiveDomain(domain);
+  if (domain === 'lsat') bridgeThemeToLsat();
+
+  return (
+    <Suspense fallback={<DomainFallback />}>
+      {domain === 'lsat' ? <LsatRoot /> : <HostApp />}
+    </Suspense>
+  );
+}
+
+// Apply the stored theme to <html> BEFORE React mounts so the first paint shows
+// the correct palette (avoids a one-frame wrong-theme flash).
+applyTheme(getStoredTheme());
+// Start attributing injected stylesheets to a domain before any sub-app's CSS
+// loads, seeded with the domain of the initial URL.
+startStyleIsolation(domainForPath(window.location.pathname));
+
+ReactDOM.createRoot(rootEl).render(
+  <React.StrictMode>
+    <StudyVaultRoot />
+  </React.StrictMode>,
+);
