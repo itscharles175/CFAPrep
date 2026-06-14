@@ -15,13 +15,13 @@ describe('app shell', () => {
     // aria-hides the main content, so the PageHeader <h1> isn't in the
     // accessible tree (the 'Knowledge Domains' getByText below also matches
     // hidden content). We're asserting the dashboard rendered, not focus order.
-    // `timeout: 5000` — Dashboard is a lazy()/Suspense route, so allow generous
+    // `timeout: 8000` — Dashboard is a lazy()/Suspense route, so allow generous
     // time for the chunk to resolve on slow/loaded CI.
     expect(
-      await screen.findByRole('heading', { name: 'StudyVault', hidden: true }, { timeout: 5000 }),
+      await screen.findByRole('heading', { name: 'StudyVault', hidden: true }, { timeout: 8000 }),
     ).toBeInTheDocument();
     expect(screen.getByText('Knowledge Domains')).toBeInTheDocument();
-  });
+  }, 15000); // overall test budget > the lazy-chunk wait, for full-suite concurrency
 
   it('renders a controlled 404 state', async () => {
     render(

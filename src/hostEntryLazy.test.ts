@@ -11,8 +11,14 @@ vi.mock('./registerServiceWorker', () => ({ registerServiceWorker: () => {} }));
 // the Suspense boundary stuck; this asserts the canonical default-export
 // contract holds so the host actually mounts under the unified root.
 describe('host-entry lazy contract (S6)', () => {
-  it('exposes HostApp as a function default export', async () => {
-    const mod = await import('./host-entry.jsx');
-    expect(typeof mod.default).toBe('function');
-  });
+  it(
+    'exposes HostApp as a function default export',
+    async () => {
+      const mod = await import('./host-entry.jsx');
+      expect(typeof mod.default).toBe('function');
+    },
+    // Imports the entire host module graph (App + all deps) — heavy under
+    // full-suite concurrency on a loaded machine; passes with room at 20s.
+    20000,
+  );
 });
