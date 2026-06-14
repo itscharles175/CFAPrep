@@ -752,6 +752,43 @@ input:focus, select:focus, textarea:focus {
   border-color: rgba(59, 130, 246, 0.35);
 }
 
+/* UB6: shared keyboard-help overlay (KeyboardHelp.tsx) — laid out inside the
+   host Dialog primitive's surface. */
+.keyboard-help-section + .keyboard-help-section {
+  margin-top: var(--space-4);
+}
+
+.keyboard-help-heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-sm);
+}
+
+.keyboard-help-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.keyboard-help-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.keyboard-help-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.keyboard-help-scope {
+  text-transform: capitalize;
+}
+
 .planner-form {
   display: flex;
   align-items: flex-end;
@@ -2488,12 +2525,66 @@ input:focus, select:focus, textarea:focus {
 .search-result {
   width: 100%;
   display: grid;
-  grid-template-columns: 76px 1fr;
+  /* UB6: type · title/subtitle · domain badge */
+  grid-template-columns: 76px 1fr auto;
   align-items: center;
   gap: var(--space-3);
   text-align: left;
   padding: var(--space-3);
   border-radius: var(--radius-md);
+}
+
+/* UB6: per-result domain badge (CFA / LSAT / Quant / Excel / Vault / App). */
+.search-result-domain {
+  justify-self: end;
+  flex-shrink: 0;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full, 999px);
+  border: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.1);
+  line-height: 1.4;
+}
+
+.search-result-domain-cfa {
+  color: #d4a853;
+  border-color: rgba(212, 168, 83, 0.4);
+  background: rgba(212, 168, 83, 0.12);
+}
+
+.search-result-domain-quant {
+  color: #a78bfa;
+  border-color: rgba(139, 92, 246, 0.4);
+  background: rgba(139, 92, 246, 0.12);
+}
+
+.search-result-domain-excel {
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.search-result-domain-lsat {
+  color: #818cf8;
+  border-color: rgba(99, 102, 241, 0.4);
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.search-result-domain-vault {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+/* UB6: "Jump to domain" sub-heading inside the palette popover. */
+.search-palette-subtitle {
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+  margin-top: var(--space-1);
 }
 
 .search-result:hover:not(:disabled),

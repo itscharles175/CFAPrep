@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, HelpCircle, Menu, Monitor, Moon, RefreshCw, Search, Sun, WifiOff, X } from 'lucide-react';
 import { buildSearchItems } from '../../data/catalog';
 import { navigateDomain } from '../../lib/domainNav';
@@ -10,6 +10,7 @@ import { useProgressSummary } from '../../hooks/useProgress';
 import { exportVaultData, repairVaultData } from '../../lib/learning';
 import { searchCfaSourceVault } from '../../lib/cfaSourceVault';
 import { commandRoutes } from '../../routes/routeManifest';
+import { KEYBOARD_HELP_EVENT } from '../KeyboardHelp/KeyboardHelp';
 
 // Unified shape used to render the command-palette results. Both
 // `buildSearchItems` and `commandRoutes` items conform to this, and
@@ -26,6 +27,55 @@ interface SearchResultItem {
   /** S4: route lives in another domain (LSAT) → soft-navigate cross-domain. */
   external?: boolean;
 }
+
+// UB6 — palette domain scope. Every result is attributed to one domain so the
+// row can carry a badge (CFA / LSAT / Quant / Excel / …) and so results from the
+// currently active domain can be ranked above the rest. `general` covers
+// cross-cutting tools, commands, and vault items that don't belong to a single
+// study domain.
+type PaletteDomain = 'cfa' | 'lsat' | 'quant' | 'excel' | 'vault' | 'general';
+
+const domainBadgeLabel: Record<PaletteDomain, string> = {
+  cfa: 'CFA',
+  lsat: 'LSAT',
+  quant: 'Quant',
+  excel: 'Excel',
+  vault: 'Vault',
+  general: 'App',
+};
+
+// Resolve the study domain a search result belongs to from its path (the most
+// reliable signal — ids and types vary across catalog/command sources).
+function domainForResult(item: SearchResultItem): PaletteDomain {
+  const path = item.path || '';
+  if (item.external || path === '/lsat' || path.startsWith('/lsat/')) return 'lsat';
+  if (path === '/cfa' || path.startsWith('/cfa/')) return 'cfa';
+  if (path === '/quant' || path.startsWith('/quant/')) return 'quant';
+  if (path === '/excel' || path.startsWith('/excel/')) return 'excel';
+  if (path === '/vault' || path.startsWith('/vault')) return 'vault';
+  return 'general';
+}
+
+// Which study domain the user is currently in, from the active URL — used to
+// float that domain's results to the top of the palette.
+function activeDomainForPath(pathname: string): PaletteDomain {
+  if (pathname === '/lsat' || pathname.startsWith('/lsat/')) return 'lsat';
+  if (pathname === '/cfa' || pathname.startsWith('/cfa/')) return 'cfa';
+  if (pathname === '/quant' || pathname.startsWith('/quant/')) return 'quant';
+  if (pathname === '/excel' || pathname.startsWith('/excel/')) return 'excel';
+  if (pathname === '/vault' || pathname.startsWith('/vault')) return 'vault';
+  return 'general';
+}
+
+// UB6 — "jump to domain" quick hops. Each entry is a full-fat SearchResultItem
+// so it routes through the same goToResult() path (LSAT carries `external` so it
+// soft-navigates cross-domain via navigateDomain).
+const domainJumps: SearchResultItem[] = [
+  { id: 'jump:cfa', title: 'CFA Program', subtitle: 'Jump to the CFA dashboard', type: 'Jump', path: '/cfa', keywords: ['cfa', 'jump', 'domain'] },
+  { id: 'jump:quant', title: 'Quant Finance', subtitle: 'Jump to the Quant dashboard', type: 'Jump', path: '/quant', keywords: ['quant', 'jump', 'domain'] },
+  { id: 'jump:excel', title: 'Excel Training', subtitle: 'Jump to the Excel dashboard', type: 'Jump', path: '/excel', keywords: ['excel', 'jump', 'domain'] },
+  { id: 'jump:lsat', title: 'LSAT Lab', subtitle: 'Jump to the LSAT domain', type: 'Jump', path: '/lsat', keywords: ['lsat', 'jump', 'domain'], external: true },
+];
 
 function normalizeSearch(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -66,6 +116,8 @@ interface TopBarProps {
 
 export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: TopBarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const activeDomain = activeDomainForPath(location.pathname);
   const { theme, cycleTheme } = useTheme();
   const summary = useProgressSummary();
   const [activePathway] = useLevel3Pathway() as [string, (next: string) => void];
@@ -94,16 +146,47 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
 
   const results = useMemo<SearchResultItem[]>(() => {
     const normalized = normalizeSearch(query);
-    if (!normalized) return commandItems.slice(0, 8);
+    if (!normalized) {
+      // UB6: default list floats the active domain's items to the top so the
+      // palette opens with the most relevant context first (stable order within
+      // each domain tier preserves the catalog ordering).
+      if (activeDomain === 'general') return commandItems.slice(0, 8);
+      const inDomain = commandItems.filter((item) => domainForResult(item) === activeDomain);
+      const others = commandItems.filter((item) => domainForResult(item) !== activeDomain);
+      return [...inDomain, ...others].slice(0, 8);
+    }
     const terms = normalized.split(' ');
     const routeResults = commandItems
       .map((item) => ({ item, score: scoreSearchItem(item, terms) }))
       .filter((row) => row.score >= 0)
-      .sort((a, b) => b.score - a.score)
+      // UB6: current-domain priority — equal-relevance results from the active
+      // domain rank above other domains. The bump is small enough that a strong
+      // textual match from another domain still wins.
+      .sort((a, b) => {
+        const domainBump =
+          (domainForResult(b.item) === activeDomain ? 2 : 0) -
+          (domainForResult(a.item) === activeDomain ? 2 : 0);
+        return b.score - a.score + domainBump;
+      })
       .map((row) => row.item)
       .slice(0, 6);
     return [...sourceResults, ...routeResults].slice(0, 8);
-  }, [commandItems, query, sourceResults]);
+  }, [commandItems, query, sourceResults, activeDomain]);
+
+  // UB6: "jump to domain" quick hops — always exclude the domain the user is
+  // already in so the section only offers cross-domain moves.
+  const domainJumpRows = useMemo<SearchResultItem[]>(
+    () => domainJumps.filter((jump) => domainForResult(jump) !== activeDomain),
+    [activeDomain],
+  );
+
+  // The keyboard cursor (ArrowUp/Down + Enter + aria-activedescendant) spans
+  // both the result rows and the jump-to-domain rows as one flat list, so the
+  // two visual sections feel like a single navigable palette.
+  const navigableResults = useMemo<SearchResultItem[]>(
+    () => [...results, ...domainJumpRows],
+    [results, domainJumpRows],
+  );
 
   useEffect(() => {
     let active = true;
@@ -221,6 +304,35 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
     setSearchOpen(false);
   }
 
+  // UB6: one result row, used by both the main result list and the
+  // jump-to-domain section. `index` is the row's position in navigableResults so
+  // the keyboard cursor and aria-selected stay in sync across both sections.
+  function renderResultRow(item: SearchResultItem, index: number) {
+    const domain = domainForResult(item);
+    return (
+      <div
+        key={item.id}
+        id={commandResultDomId(item.id)}
+        role="option"
+        aria-selected={index === selectedIndex}
+        aria-disabled={item.disabled || undefined}
+        className={`search-result ${index === selectedIndex ? 'active' : ''}`}
+        tabIndex={-1}
+        onMouseDown={(event) => event.preventDefault()}
+        onMouseEnter={() => setSelectedIndex(index)}
+        onClick={() => goToResult(item)}
+      >
+        <span className="search-result-type">{item.type}</span>
+        <span>
+          <strong>{item.title}</strong>
+          <small>{item.disabled ? 'Coming soon' : item.subtitle}</small>
+        </span>
+        {/* UB6: domain badge so each result shows which domain it belongs to. */}
+        <span className={`search-result-domain search-result-domain-${domain}`}>{domainBadgeLabel[domain]}</span>
+      </div>
+    );
+  }
+
   return (
     <header className={`topbar ${collapsed ? 'collapsed' : ''}`}>
       <button
@@ -248,7 +360,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
           aria-expanded={searchOpen}
           aria-haspopup="listbox"
           aria-controls={searchOpen ? 'command-palette-results' : undefined}
-          aria-activedescendant={searchOpen && results[selectedIndex] ? commandResultDomId(results[selectedIndex].id) : undefined}
+          aria-activedescendant={searchOpen && navigableResults[selectedIndex] ? commandResultDomId(navigableResults[selectedIndex].id) : undefined}
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -259,13 +371,13 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
           onKeyDown={(event) => {
             if (event.key === 'ArrowDown') {
               event.preventDefault();
-              setSelectedIndex((value) => Math.min(results.length - 1, value + 1));
+              setSelectedIndex((value) => Math.min(navigableResults.length - 1, value + 1));
             }
             if (event.key === 'ArrowUp') {
               event.preventDefault();
               setSelectedIndex((value) => Math.max(0, value - 1));
             }
-            if (event.key === 'Enter' && results[selectedIndex]) goToResult(results[selectedIndex]);
+            if (event.key === 'Enter' && navigableResults[selectedIndex]) goToResult(navigableResults[selectedIndex]);
           }}
         />
         {query ? (
@@ -280,28 +392,17 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
           <div id="command-palette-results" className="search-popover" role="listbox" aria-label="Command palette results">
             <div className="search-palette-title">Command Palette</div>
             {results.length ? (
-              results.map((item, index) => (
-                <div
-                  key={item.id}
-                  id={commandResultDomId(item.id)}
-                  role="option"
-                  aria-selected={index === selectedIndex}
-                  aria-disabled={item.disabled || undefined}
-                  className={`search-result ${index === selectedIndex ? 'active' : ''}`}
-                  tabIndex={-1}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setSelectedIndex(index)}
-                  onClick={() => goToResult(item)}
-                >
-                  <span className="search-result-type">{item.type}</span>
-                  <span>
-                    <strong>{item.title}</strong>
-                    <small>{item.disabled ? 'Coming soon' : item.subtitle}</small>
-                  </span>
-                </div>
-              ))
+              results.map((item, index) => renderResultRow(item, index))
             ) : (
               <div className="search-empty">No matching modules or formulas.</div>
+            )}
+            {/* UB6: jump-to-domain section — fast cross-domain hops, keyboard
+                cursor continues from the main results into these rows. */}
+            {domainJumpRows.length > 0 && (
+              <>
+                <div className="search-palette-title search-palette-subtitle">Jump to domain</div>
+                {domainJumpRows.map((item, index) => renderResultRow(item, results.length + index))}
+              </>
             )}
             {commandMessage && <div className="search-empty">{commandMessage}</div>}
           </div>
@@ -343,7 +444,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
           className="btn-icon btn-ghost"
           title="Keyboard shortcuts (press ?)"
           aria-label="Open keyboard shortcuts help"
-          onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', shiftKey: true, bubbles: true }))}
+          onClick={() => window.dispatchEvent(new Event(KEYBOARD_HELP_EVENT))}
         >
           <HelpCircle size={18} />
         </button>
