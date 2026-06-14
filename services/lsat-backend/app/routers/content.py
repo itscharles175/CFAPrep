@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, func, select
 
-from .. import ai, embeddings, scoring, serializers
+from .. import ai, embeddings, queries, scoring, serializers
 from ..db import get_session
 from ..models import (
     Attempt,
@@ -14,7 +14,6 @@ from ..models import (
     Passage,
     PrepTest,
     Question,
-    QuestionSource,
     Section,
     StudySession,
 )
@@ -34,49 +33,21 @@ async def ai_health() -> dict[str, Any]:
 
 @router.get("/preptests")
 def list_preptests(session: Session = Depends(get_session)):
-    # Audit B5: bulk-fetch all sections, questions, and attempts in three queries
-    # then aggregate in Python, eliminating the prior O(n) per-preptest queries.
-    pts = session.exec(select(PrepTest)).all()
-    if not pts:
-        return []
-
-    all_secs = session.exec(select(Section)).all()
-    secs_by_pt: dict[int, list] = {}
-    for s in all_secs:
-        secs_by_pt.setdefault(s.preptest_id, []).append(s)
-
-    all_sec_ids = [s.id for s in all_secs]
-    q_to_sec: dict[int, int] = {}
-    if all_sec_ids:
-        qs = session.exec(
-            select(Question).where(Question.section_id.in_(all_sec_ids))
-        ).all()
-        q_to_sec = {q.id: q.section_id for q in qs}
-
-    attempted_sec_ids: set[int] = set()
-    if q_to_sec:
-        atts = session.exec(
-            select(Attempt).where(Attempt.question_id.in_(list(q_to_sec)))
-        ).all()
-        for a in atts:
-            sid = q_to_sec.get(a.question_id)
-            if sid:
-                attempted_sec_ids.add(sid)
-
-    out = []
-    for pt in pts:
-        secs = secs_by_pt.get(pt.id, [])
-        completed = sum(1 for s in secs if s.id in attempted_sec_ids)
-        out.append({
-            "id": pt.id,
-            "name": pt.name,
-            "source": pt.source,
-            "date_admin": pt.date_admin,
-            "is_official": pt.is_official,
-            "section_count": len(secs),
-            "completed_sections": completed,
-        })
-    return out
+    # Audit B5 / BC3: a fixed handful of set-based queries (see
+    # queries.bulk_preptest_stats) replace the prior O(n) per-preptest loop, so
+    # the query count stays flat as the bank grows. Response shape unchanged.
+    return [
+        {
+            "id": stat.preptest.id,
+            "name": stat.preptest.name,
+            "source": stat.preptest.source,
+            "date_admin": stat.preptest.date_admin,
+            "is_official": stat.preptest.is_official,
+            "section_count": stat.section_count,
+            "completed_sections": stat.completed_sections,
+        }
+        for stat in queries.bulk_preptest_stats(session)
+    ]
 
 
 @router.get("/preptests/{preptest_id}")
@@ -151,18 +122,18 @@ def preptest_progress(preptest_id: int, session: Session = Depends(get_session))
     pt = session.get(PrepTest, preptest_id)
     if not pt:
         raise HTTPException(404, "PrepTest not found")
-    sections = session.exec(
-        select(Section).where(Section.preptest_id == pt.id).order_by(Section.order)
-    ).all()
+    # BC3: two queries (sections + their questions) via bulk_section_progress
+    # replace the prior per-section SELECT loop; per-attempt aggregation below is
+    # unchanged so the payload stays byte-identical.
+    sec_stats = queries.bulk_section_progress(session, pt.id)
+    sections = [st.section for st in sec_stats]
     all_attempts = session.exec(select(Attempt)).all()
 
     sec_out = []
-    for s in sections:
-        q_rows = session.exec(
-            select(Question).where(Question.section_id == s.id)
-        ).all()
-        q_ids = {q.id for q in q_rows}
-        official_ids = {q.id for q in q_rows if q.source == QuestionSource.official}
+    for st in sec_stats:
+        s = st.section
+        q_ids = st.question_ids
+        official_ids = st.official_question_ids
         sa = [a for a in all_attempts
               if a.question_id in q_ids and a.mode != AttemptMode.blind_review]
         attempted = len({a.question_id for a in sa})

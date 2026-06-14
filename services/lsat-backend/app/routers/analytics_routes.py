@@ -2,6 +2,13 @@
 
 All time-series endpoints accept an optional ``?days=`` window applied
 server-side (the frontend previously filtered client-side only).
+
+BC3 — query budget: these routes delegate to ``app.analytics``, which already
+fetches attempts/questions in a fixed number of set-based queries (the ``days``
+window is pushed into SQL and ``_question_map`` loads only the referenced ids)
+rather than issuing one query per attempt/section. ``tests/test_query_budget.py``
+guards the ``/analytics/dashboard`` path against query-count regressions so a
+re-introduced N+1 loop fails CI.
 """
 from __future__ import annotations
 

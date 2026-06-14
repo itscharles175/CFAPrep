@@ -6,6 +6,7 @@ the throwaway file. We reset by dropping/recreating tables on the shared engine
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 
@@ -77,6 +78,59 @@ def db_session():
     _reset_and_seed()
     with Session(engine) as s:
         yield s
+
+
+class _QueryCounter:
+    """Counts SQL statements executed on the shared engine within a ``with``
+    block. BC3 query-budget gate: wrap a request/call to assert it stays under a
+    sane number of round-trips, so a re-introduced N+1 loop fails CI.
+
+    Usage::
+
+        with count_queries() as counter:
+            client.get("/api/preptests")
+        assert counter.count <= 6
+        # counter.statements holds the captured SQL text for debugging
+    """
+
+    def __init__(self, engine):
+        self._engine = engine
+        self.count = 0
+        self.statements: list[str] = []
+
+    def _before_cursor_execute(self, _conn, _cursor, statement, _params,
+                               _context, _executemany):
+        self.count += 1
+        self.statements.append(statement)
+
+    @contextlib.contextmanager
+    def measure(self):
+        from sqlalchemy import event
+
+        self.count = 0
+        self.statements = []
+        event.listen(self._engine, "before_cursor_execute",
+                     self._before_cursor_execute)
+        try:
+            yield self
+        finally:
+            event.remove(self._engine, "before_cursor_execute",
+                         self._before_cursor_execute)
+
+
+@pytest.fixture()
+def count_queries():
+    """Pytest helper that counts SQL queries issued on the app engine per block.
+
+    Returns a context-manager factory. Each ``with count_queries() as c:`` block
+    resets and tallies every statement the shared engine executes inside it via
+    SQLAlchemy's ``before_cursor_execute`` event; read ``c.count`` (and
+    ``c.statements``) after the block.
+    """
+    from app.db import engine
+
+    counter = _QueryCounter(engine)
+    return counter.measure
 
 
 @pytest.fixture(autouse=True)
