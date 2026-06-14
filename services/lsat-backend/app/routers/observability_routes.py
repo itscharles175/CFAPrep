@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
-from .. import ai, backup, config, jobs, llm, observability
+from .. import ai, backup, config, jobs, llm, observability, trust
 from ..db import get_session
 from ..models import CoachSnapshot, EmbeddingVector, GenJob, GenStatus, Question
 
@@ -205,3 +205,30 @@ def metrics(task: str = "explain_stream", window: int = 200,
 def runtime_evidence(session: Session = Depends(get_session)) -> dict[str, Any]:
     """Local log/metric evidence for the native Reliability Console."""
     return observability.runtime_evidence_summary(session)
+
+
+@router.get("/observability/sqlite-health", response_model=dict[str, Any])
+def sqlite_health() -> dict[str, Any]:
+    """BC4 — SQLite contention/PRAGMA snapshot.
+
+    Returns the live connection PRAGMA values, the observed SQLITE_BUSY/LOCKED
+    retry count since process start, and a cheap WAL-size estimate (``None`` when
+    the WAL sidecar is absent or unreadable). O(1): no DB rows are read.
+    """
+    return observability.sqlite_health()
+
+
+@router.get("/observability/trust-status", response_model=dict[str, Any])
+def trust_status(
+    tier: Literal["dev", "release", "packaged"] = "dev",
+    refresh: bool = False,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """BC4 — cached lightweight trust verdict for the Settings trust strip.
+
+    Runs only the content-health, privacy-firewall, and model-readiness checks
+    (NOT the full release manifest) and rolls them up into a single
+    ``ok`` | ``warning`` | ``blocked`` status. Cached ~1h; pass ``refresh=true``
+    to recompute. The full manifest stays on /observability/trust.
+    """
+    return trust.trust_status(session, tier=tier, force_refresh=refresh)

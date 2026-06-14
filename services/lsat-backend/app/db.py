@@ -1,8 +1,11 @@
 """Database engine + session helpers."""
 from __future__ import annotations
 
+import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
@@ -15,6 +18,90 @@ engine = create_engine(
     echo=False,
     connect_args={"check_same_thread": False},
 )
+
+
+# --- BC4: SQLITE_BUSY contention counter ------------------------------------
+# busy_timeout (set in the connection PRAGMAs below) makes writer-writer
+# collisions wait-and-retry inside SQLite instead of erroring out. That retry is
+# invisible from the app — a request just gets slightly slower — so a rising
+# contention rate (the precursor to an eventual SQLITE_BUSY *failure* once the
+# timeout is exhausted) would otherwise go unobserved on a laptop with no APM.
+# We hook SQLAlchemy's ``handle_error`` event: it fires for every DBAPI error,
+# and we count only the ones whose underlying SQLite code is BUSY/LOCKED. The
+# count is a cheap RAM-only gauge (resets on restart, like the latency ring in
+# observability.py) surfaced via /observability/sqlite-health.
+_busy_lock = threading.Lock()
+_busy_retries = 0
+
+
+def _is_sqlite_busy(error: BaseException | None) -> bool:
+    """True when ``error`` (or its chain) is a SQLite BUSY/LOCKED condition."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, sqlite3.OperationalError):
+            text = str(current).lower()
+            if "database is locked" in text or "database table is locked" in text:
+                return True
+        sqlite_code = getattr(current, "sqlite_errorname", None)
+        if isinstance(sqlite_code, str) and sqlite_code.upper() in {
+            "SQLITE_BUSY",
+            "SQLITE_LOCKED",
+        }:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _record_busy_error(exception_context: Any) -> None:
+    """``handle_error`` listener: bump the BUSY counter on a contention error."""
+    global _busy_retries
+    if _is_sqlite_busy(getattr(exception_context, "original_exception", None)):
+        with _busy_lock:
+            _busy_retries += 1
+        try:
+            from . import observability
+
+            observability.record_sqlite_busy()
+        except Exception:  # pragma: no cover - telemetry must never break a query
+            pass
+
+
+def sqlite_busy_retries() -> int:
+    """Current process-local count of observed SQLITE_BUSY/LOCKED errors."""
+    with _busy_lock:
+        return _busy_retries
+
+
+def current_pragmas() -> dict[str, Any]:
+    """Read the live connection PRAGMA values for the observability surface.
+
+    Opens a short-lived connection off the shared engine so the reported values
+    reflect what ``_set_connection_pragmas`` actually applied (busy_timeout and
+    synchronous are per-connection and not visible in the DB file header).
+    """
+    keys = ("journal_mode", "busy_timeout", "synchronous", "foreign_keys")
+    pragmas: dict[str, Any] = {}
+    try:
+        raw = engine.raw_connection()
+        try:
+            cur = raw.cursor()
+            try:
+                for key in keys:
+                    row = cur.execute(f"PRAGMA {key}").fetchone()
+                    pragmas[key] = row[0] if row else None
+            finally:
+                cur.close()
+        finally:
+            raw.close()
+    except Exception:  # pragma: no cover - diagnostics must degrade softly
+        return {"available": False, **pragmas}
+    pragmas["available"] = True
+    return pragmas
+
+
+event.listen(engine, "handle_error", _record_busy_error)
 
 
 # --- connection PRAGMAs (applied on every new connection) -------------------

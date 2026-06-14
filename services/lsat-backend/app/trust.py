@@ -13,6 +13,8 @@ import os
 import platform
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -148,6 +150,72 @@ def build_release_trust_manifest(
         path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
         manifest["written_to"] = str(path)
     return manifest
+
+
+# --- BC4: cached lightweight trust status -----------------------------------
+# A cheap subset of the full manifest (content_health + privacy_firewall +
+# model_readiness only) for a live "is the app trustworthy right now?" strip.
+# It deliberately skips the release-gate checks (release:local report, OpenAPI
+# snapshot, sidecar/updater config, scheduler/benchmark evidence) that are slow,
+# release-only, or shell out to git/rustc. Cached ~1h because the model-readiness
+# probe hits the local provider; the cache is process-local and resets on
+# restart, mirroring the other RAM gauges in observability.py.
+_TRUST_STATUS_TTL_SECONDS = 3600
+_trust_status_cache: tuple[float, dict[str, Any]] | None = None
+_trust_status_lock = threading.Lock()
+
+# block > warn > ok — the worst child status wins for the rollup. ``_STATUS_BY_RANK``
+# maps that worst rank back to the public ok|warning|blocked label.
+_STATUS_RANK = {"ok": 0, "warn": 1, "block": 2}
+_STATUS_BY_RANK = {0: "ok", 1: "warning", 2: "blocked"}
+
+
+def trust_status(
+    session: Session,
+    *,
+    tier: TrustTier = "dev",
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    """BC4 — lightweight, cached trust status for the Settings trust strip.
+
+    Runs only ``content_health``, ``privacy_firewall``, and ``model_readiness``
+    (NOT the full release manifest) and rolls their statuses up into a single
+    ``ok`` | ``warning`` | ``blocked`` verdict. Cached for ~1h (process-local) so
+    the model-readiness probe of the local provider is not repeated on every
+    poll. Pass ``force_refresh=True`` to bypass the cache.
+    """
+    global _trust_status_cache
+    tier = _normalize_tier(tier)
+    now = time.monotonic()
+    with _trust_status_lock:
+        cached = _trust_status_cache
+        if (
+            not force_refresh
+            and cached is not None
+            and now - cached[0] < _TRUST_STATUS_TTL_SECONDS
+        ):
+            return cached[1]
+
+    checks = {
+        "content_health": _content_check(session, tier),
+        "privacy_firewall": _privacy_check(session, tier),
+        "model_readiness": _model_readiness_check(tier),
+    }
+    worst = max(
+        (_STATUS_RANK.get(c.get("status", "ok"), 0) for c in checks.values()),
+        default=0,
+    )
+    status = _STATUS_BY_RANK[worst]
+    payload = {
+        "status": status,
+        "tier": tier,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cache_ttl_seconds": _TRUST_STATUS_TTL_SECONDS,
+        "checks": checks,
+    }
+    with _trust_status_lock:
+        _trust_status_cache = (now, payload)
+    return payload
 
 
 def _normalize_tier(tier: str) -> TrustTier:

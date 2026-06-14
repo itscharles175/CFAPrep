@@ -27,6 +27,7 @@ import logging
 import logging.handlers
 import os
 import re
+import threading
 import time
 import uuid
 from collections import deque
@@ -48,6 +49,13 @@ _LATENCY: dict[str, deque] = {}
 # W2-6 — cumulative cloud token usage (input + output) for spend visibility.
 _CLOUD_INPUT_TOKENS = 0
 _CLOUD_OUTPUT_TOKENS = 0
+
+# BC4 — cumulative SQLITE_BUSY/LOCKED contention count (RAM-only, resets on
+# restart, like the latency ring above). The engine's handle_error listener in
+# db.py feeds this; the sqlite-health endpoint reads it. Guarded by a lock
+# because db writes happen on FastAPI request threads AND the job worker thread.
+_SQLITE_BUSY_RETRIES = 0
+_SQLITE_BUSY_LOCK = threading.Lock()
 
 _LOG_LEVEL_RE = re.compile(r"\b(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b")
 _REQ_RE = re.compile(r"\breq=([^\s]+)")
@@ -79,6 +87,56 @@ def cloud_token_totals() -> dict[str, int]:
         "output_tokens": _CLOUD_OUTPUT_TOKENS,
         "total_tokens": _CLOUD_INPUT_TOKENS + _CLOUD_OUTPUT_TOKENS,
     }
+
+
+def record_sqlite_busy(count: int = 1) -> None:
+    """BC4 — bump the SQLITE_BUSY/LOCKED contention gauge. Fed by db.py's
+    ``handle_error`` engine listener; never raises (telemetry must not break a
+    query)."""
+    global _SQLITE_BUSY_RETRIES
+    with _SQLITE_BUSY_LOCK:
+        _SQLITE_BUSY_RETRIES += max(0, int(count))
+
+
+def sqlite_busy_total() -> int:
+    """Current process-local SQLITE_BUSY/LOCKED count (resets on restart)."""
+    with _SQLITE_BUSY_LOCK:
+        return _SQLITE_BUSY_RETRIES
+
+
+def sqlite_health(*, include_wal: bool = True) -> dict[str, Any]:
+    """BC4 — lightweight SQLite contention/PRAGMA snapshot for diagnostics.
+
+    Returns the live connection PRAGMA values (journal_mode, busy_timeout,
+    synchronous, foreign_keys), the observed BUSY/LOCKED retry count, and — only
+    when cheap — an estimate of the WAL sidecar size in bytes. The WAL estimate
+    is a plain ``os.stat`` of the ``-wal`` file (no checkpoint, no DB read) and
+    is skipped/None whenever it would be missing or unreadable, so this endpoint
+    stays O(1) and never touches the busy write path.
+    """
+    from .db import current_pragmas, sqlite_busy_retries
+
+    pragmas = current_pragmas()
+    return {
+        "pragmas": pragmas,
+        "busy_retries": sqlite_busy_retries(),
+        "wal_estimate_if_cheap": _wal_estimate_bytes() if include_wal else None,
+    }
+
+
+def _wal_estimate_bytes() -> Optional[int]:
+    """Best-effort byte size of the SQLite ``-wal`` sidecar, or ``None``.
+
+    Only a single ``stat`` call — cheap and side-effect free. Returns ``None``
+    when the file is absent (WAL checkpointed/empty) or unreadable.
+    """
+    try:
+        wal_path = config.DB_PATH.with_name(config.DB_PATH.name + "-wal")
+        if not wal_path.exists():
+            return None
+        return wal_path.stat().st_size
+    except OSError:  # pragma: no cover - diagnostics must degrade softly
+        return None
 
 
 def worker_readiness(
