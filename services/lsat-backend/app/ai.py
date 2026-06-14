@@ -54,6 +54,34 @@ def _model_in_list(name: str, models: list[str]) -> bool:
     return False
 
 
+def _recovery_for_missing(mid: str, *, provider: str, key: str,
+                          fallback: Optional[str]) -> dict:
+    """Build an actionable recovery hint for a configured-but-absent model (BA6).
+
+    Returns ``{model, action, command, fallback}`` so the UI can tell the user
+    exactly how to fix a missing model. For Ollama the command is the concrete
+    ``ollama pull <id>``; for LMStudio there is no CLI pull, so the action points
+    the user at loading the model in the LMStudio UI (``command`` is ``None``).
+    ``fallback`` is the configured fallback id for that slot when one exists
+    (e.g. the explain model's ``EXPLAIN_FALLBACK_MODEL``), else ``None``.
+    """
+    if provider == "ollama":
+        action = f"Pull '{mid}' into Ollama, or load a substitute model."
+        command = f"ollama pull {mid}"
+    else:
+        action = (
+            f"Load '{mid}' in {provider} (the model id must match exactly), "
+            "or update the configured model id to one that is loaded."
+        )
+        command = None
+    return {
+        "model": mid,
+        "action": action,
+        "command": command,
+        "fallback": fallback or None,
+    }
+
+
 def resolve_explain_model() -> str:
     """Return the effective Tier-A explain model, falling back to
     ``EXPLAIN_FALLBACK_MODEL`` when the preferred one isn't pulled. Cached for
@@ -520,7 +548,12 @@ async def health() -> dict:
     # after switching to LMStudio, whose model ids differ from Ollama tags (e.g.
     # the phi4:14b explain default). Lets the UI prompt for a loaded model instead
     # of only failing at call time. Empty when unreachable (can't tell) or all present.
-    missing: list[str] = []
+    #
+    # BA6: each missing entry is an actionable recovery object
+    # ``{model, action, command, fallback}`` (e.g. command="ollama pull phi4:14b")
+    # so the UI can tell the user exactly how to fix it, not just that it's gone.
+    # The fallback id is per-slot (only the explain slot has a configured fallback).
+    missing: list[dict] = []
     if ok and models:
         keys = ["explain_model", "gen_model", "diagnose_model", "embed_model"]
         # The gate's critic is only a local model when offline generation is
@@ -528,15 +561,31 @@ async def health() -> dict:
         # against the local model list.
         if not info.get("cloud_enabled"):
             keys.append("critic_model")
+        fallback_by_key = {"explain_model": info.get("explain_model_fallback")}
+        seen: set[str] = set()
         for key in keys:
             mid = info.get(key)
-            if mid and not _model_in_list(mid, models):
-                missing.append(mid)
+            if mid and mid not in seen and not _model_in_list(mid, models):
+                seen.add(mid)
+                missing.append(
+                    _recovery_for_missing(
+                        mid,
+                        provider=prov.name,
+                        key=key,
+                        fallback=fallback_by_key.get(key),
+                    )
+                )
+        missing.sort(key=lambda m: m["model"])
     return {
         "ok": ok,
         "provider": prov.name,
         "models": models,
         "ollama": ok if prov.name == "ollama" else False,
-        "missing_models": sorted(set(missing)),
+        # Backward-compatible: missing_models stays a sorted list of STRING ids
+        # (the host lsatBackend client + existing tests consume strings). BA6's
+        # actionable recovery objects {model, action, command, fallback} are
+        # exposed alongside under missing_models_recovery for the UI.
+        "missing_models": sorted(m["model"] for m in missing),
+        "missing_models_recovery": missing,
         **info,
     }

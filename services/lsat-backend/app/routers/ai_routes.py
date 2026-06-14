@@ -514,6 +514,52 @@ async def coach_refresh():
     }
 
 
+class KeepAliveBody(BaseModel):
+    model: str
+    mode: str  # "pin" (keep_alive=-1) or "unload" (keep_alive=0)
+
+
+@router.post("/model/keep-alive")
+def model_keep_alive(body: KeepAliveBody):
+    """BB1 — pin or unload a model in the active provider's VRAM.
+
+    ``mode="pin"`` keeps the model resident (keep_alive=-1) so the realtime
+    explain model stays warm during study; ``mode="unload"`` evicts it
+    (keep_alive=0) so two ~9 GB models don't thrash a 12 GB GPU. Delegates to the
+    existing ``OllamaProvider.set_keep_alive``, which is best-effort and never
+    raises. No-ops gracefully (``applied=False``) when the active local provider
+    is not Ollama (e.g. LMStudio has no keep-alive control)."""
+    model = (body.model or "").strip()
+    if not model:
+        raise HTTPException(400, "Empty model")
+    mode = (body.mode or "").strip().lower()
+    if mode not in ("pin", "unload"):
+        raise HTTPException(400, "mode must be 'pin' or 'unload'")
+    keep_alive = -1 if mode == "pin" else 0
+
+    prov = ai.llm.local_provider()
+    set_keep_alive = getattr(prov, "set_keep_alive", None)
+    if prov.name != "ollama" or set_keep_alive is None:
+        # Active provider doesn't support keep-alive control: no-op gracefully so
+        # the caller's study action is never blocked by an unsupported provider.
+        return {
+            "ok": True,
+            "applied": False,
+            "provider": prov.name,
+            "model": model,
+            "mode": mode,
+            "reason": "keep-alive is only supported on Ollama",
+        }
+    applied = set_keep_alive(model, keep_alive)
+    return {
+        "ok": True,
+        "applied": bool(applied),
+        "provider": prov.name,
+        "model": model,
+        "mode": mode,
+    }
+
+
 class CoachChatBody(BaseModel):
     message: str
     history: Optional[list[dict]] = None

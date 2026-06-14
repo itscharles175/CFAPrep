@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from sqlmodel import Session, select
 
-from . import audit, backup, coach, config, jobs, observability, settings_store
+from . import ai, audit, backup, coach, config, jobs, llm, observability, settings_store
 from .db import engine, init_db
 from .routers import (
     ai_routes,
@@ -120,6 +120,89 @@ def make_idle_hook(eng, *, calibration_interval_s: float | None = None):
 _ANTHROPIC_MODEL_RE = re.compile(r"^claude-[a-z0-9-]+$")
 
 
+async def _log_resolved_models(log) -> None:
+    """BA6: at startup, resolve the configured explain/gen/critic/embed models
+    against the active local provider and log them explicitly.
+
+    Logs one INFO line listing the resolved model ids and the provider's
+    reachability. For each preferred model the provider does NOT have loaded,
+    logs a WARNING with the configured fallback (when present). If BOTH a
+    preferred model AND its fallback are missing — i.e. the slot has no usable
+    model — logs a clear ERROR with the recovery command. Never raises: the app
+    keeps serving (other routes, cached content, settings) even when no model is
+    pulled yet, so startup must not crash on a model probe.
+    """
+    try:
+        prov = llm.local_provider()
+        try:
+            models = await prov.list_models()
+            reachable = True
+        except Exception:
+            models = []
+            reachable = False
+        info = llm.provider_info()
+        # Slot -> (configured-preferred id, configured-fallback id or None).
+        slots = {
+            "explain": (
+                info.get("explain_model_configured") or config.EXPLAIN_MODEL,
+                info.get("explain_model_fallback") or config.EXPLAIN_FALLBACK_MODEL,
+            ),
+            "gen": (config.GEN_MODEL, None),
+            "critic": (llm.critic_model_name(), None),
+            "embed": (config.EMBED_MODEL, None),
+        }
+        # The critic is only a local model when offline generation is local; under
+        # cloud generation it's a cloud slug, so don't probe it against the local list.
+        if info.get("cloud_enabled"):
+            slots.pop("critic", None)
+
+        resolved = {slot: pref for slot, (pref, _fb) in slots.items()}
+        log.info(
+            "startup models provider=%s reachable=%s loaded=%d resolved=%s",
+            prov.name, reachable, len(models), resolved,
+        )
+        if not reachable:
+            log.warning(
+                "model provider %s unreachable at startup; cannot verify configured "
+                "models. Realtime AI features will fail until it is running.",
+                prov.name,
+            )
+            return
+
+        for slot, (preferred, fallback) in slots.items():
+            if not preferred:
+                continue
+            if ai._model_in_list(preferred, models):
+                continue
+            # Preferred is absent — is the fallback usable?
+            recovery = ai._recovery_for_missing(
+                preferred, provider=prov.name, key=slot, fallback=fallback
+            )
+            cmd = recovery.get("command")
+            cmd_hint = f" (run: {cmd})" if cmd else ""
+            if fallback and ai._model_in_list(fallback, models):
+                log.warning(
+                    "startup model slot=%s preferred='%s' NOT loaded on %s; "
+                    "falling back to '%s'.%s",
+                    slot, preferred, prov.name, fallback, cmd_hint,
+                )
+            else:
+                # BOTH preferred AND fallback missing: this slot has no usable model.
+                fb_note = (
+                    f" and fallback '{fallback}' is also missing"
+                    if fallback else " and no fallback is configured"
+                )
+                log.error(
+                    "startup model slot=%s has NO usable model on %s: preferred "
+                    "'%s' is not loaded%s. Features using this slot will fail until "
+                    "a model is loaded.%s",
+                    slot, prov.name, preferred, fb_note, cmd_hint,
+                )
+    except Exception:
+        # Never let model probing crash startup — the app must keep serving.
+        log.exception("startup model resolution failed (continuing to serve)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     observability.setup_logging()
@@ -170,6 +253,12 @@ async def lifespan(app: FastAPI):
     with Session(engine) as s:
         settings_store.apply_saved_settings(s)
         jobs.ensure_default_schedules(s)
+    # BA6: resolve+log the configured explain/gen/critic/embed models against the
+    # active provider AFTER saved settings are applied (so a saved provider/model
+    # override is reflected). Re-probe the explain fallback rather than trusting a
+    # cache set before settings landed. Never crashes the app — logs and continues.
+    ai.reset_resolved_models()
+    await _log_resolved_models(log)
     n = jobs.reconcile_orphans()
     if n:
         log.info("reconciled interrupted generation jobs n=%s", n)
