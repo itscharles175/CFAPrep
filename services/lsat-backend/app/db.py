@@ -39,86 +39,14 @@ def _set_connection_pragmas(dbapi_connection, _connection_record) -> None:
 event.listen(engine, "connect", _set_connection_pragmas)
 
 
-# Additive columns SQLModel.create_all() will NOT add to a pre-existing table.
-# Kept as raw ALTER TABLE so we don't have to introduce Alembic for a single-user
-# local DB. Each entry: (table, column_name, column_def_after_ADD_COLUMN).
-_ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("question", "external_id", "external_id VARCHAR"),
-    ("question", "content_hash", "content_hash VARCHAR"),
-    ("question", "tag_confidence", "tag_confidence VARCHAR"),
-    ("question", "deleted_at", "deleted_at DATETIME"),  # D5 soft-delete
-    ("genjob", "parent_question_id", "parent_question_id INTEGER"),
-    # --- R7 additive columns (every new column on a PRE-EXISTING table must be
-    # listed here, or an upgraded real DB will lack it even though tests pass via
-    # create_all). New *tables* need no entry — create_all handles them. ---
-    ("preptest", "scale_table_json", "scale_table_json TEXT"),          # 3.5
-    ("question", "updated_at", "updated_at DATETIME"),                  # 5.4
-    ("question", "empirical_difficulty", "empirical_difficulty FLOAT"),  # 2.8
-    ("genjob", "priority", "priority INTEGER DEFAULT 0"),               # Tutor OS scheduler
-    ("genjob", "progress_pct", "progress_pct FLOAT DEFAULT 0"),         # Tutor OS scheduler
-    ("genjob", "retry_count", "retry_count INTEGER DEFAULT 0"),         # Tutor OS scheduler
-    ("genjob", "max_retries", "max_retries INTEGER DEFAULT 0"),         # Tutor OS scheduler
-    ("genjob", "updated_at", "updated_at DATETIME"),                    # Tutor OS scheduler
-    ("genjob", "cancelled_at", "cancelled_at DATETIME"),                # Tutor OS scheduler
-    ("explanation", "model_used", "model_used VARCHAR"),               # 2.6
-    ("explanation", "confidence", "confidence VARCHAR"),               # 2.6
-    ("explanation", "answer_checked", "answer_checked BOOLEAN DEFAULT 0"),  # 2.6
-    ("attempt", "client_attempt_id", "client_attempt_id VARCHAR"),     # 5.2
-    ("srscard", "origin", "origin VARCHAR"),                           # 1.1
-    ("srscard", "leech", "leech BOOLEAN DEFAULT 0"),                   # 3.2
-    ("srscard", "last_reviewed", "last_reviewed DATETIME"),            # 3.2
-    ("parsejob", "import_run_id", "import_run_id INTEGER"),            # P1 ledger
-)
-
-# Indexes we want even for pre-existing databases.
-_ADDITIVE_INDEXES: tuple[tuple[str, str, str], ...] = (
-    ("ix_question_external_id", "question", "external_id"),
-    ("ix_question_content_hash", "question", "content_hash"),
-)
-
-
-def _apply_additive_migrations() -> None:
-    with engine.begin() as conn:
-        for table, column, ddl in _ADDITIVE_COLUMNS:
-            existing = {
-                row[1]
-                for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
-            }
-            if column not in existing:
-                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {ddl}")
-        for index_name, table, column in _ADDITIVE_INDEXES:
-            conn.exec_driver_sql(
-                f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({column})"
-            )
-
-
-def _check_additive_coverage() -> None:
-    """B8: in dev mode, warn if any _ADDITIVE_COLUMNS entry lacks a migration.
-
-    This is a soft assertion only — it never raises — so it can't break startup.
-    The two lists (_ADDITIVE_COLUMNS and MIGRATIONS) serve different concerns:
-    _ADDITIVE_COLUMNS handles ALTER TABLE for live upgrades of pre-existing DBs;
-    MIGRATIONS handles non-additive DDL (indexes, backfills, triggers).
-    TODO(B8): consolidate the two lists in 1.0 by migrating all additive columns
-    into recorded migrations so init_db only calls run_migrations.
-    """
-    import logging as _lg
-    import os
-
-    if os.environ.get("LSATLAB_DEV", "0") not in ("1", "true", "True"):
-        return
-    from .migrations import MIGRATIONS
-
-    migration_sql = " ".join(
-        fn.__doc__ or "" for _, _, fn in MIGRATIONS
-    ).lower()
-    log = _lg.getLogger("lsatlab.db")
-    for table, column, _ddl in _ADDITIVE_COLUMNS:
-        if column not in migration_sql:
-            log.warning(
-                "B8: additive column %s.%s has no corresponding migration entry",
-                table, column,
-            )
+# BC1: single migration ledger. The former ``_ADDITIVE_COLUMNS`` /
+# ``_ADDITIVE_INDEXES`` lists and their ``_apply_additive_migrations`` step have
+# been folded into the ordered, recorded migrations (see ``migrations.py``,
+# migration 20 ``fold_additive_columns``). ``init_db`` now performs schema setup
+# through exactly two steps — ``create_all`` for new tables, then
+# ``run_migrations`` for every recorded change, additive columns included — so
+# the two-list split-brain (which passed tests via ``create_all`` but skipped
+# pre-existing tables in prod) no longer exists.
 
 
 def init_db() -> None:
@@ -127,10 +55,9 @@ def init_db() -> None:
     from .migrations import run_migrations
 
     SQLModel.metadata.create_all(engine)
-    _apply_additive_migrations()
-    # Ordered, recorded migrations for non-additive changes (indexes, backfills).
+    # Ordered, recorded migrations for every non-create_all change: additive
+    # columns (folded in BC1), indexes, backfills, triggers.
     run_migrations(engine)
-    _check_additive_coverage()
 
 
 def get_session() -> Iterator[Session]:

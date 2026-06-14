@@ -138,6 +138,37 @@ def _add_column_idempotent(conn, sql: str, *, mig: str) -> None:
         raise
 
 
+def _table_columns(conn, table: str) -> set[str]:
+    """Return the set of existing column names on ``table`` (empty if missing).
+
+    SQLite has no ``ADD COLUMN IF NOT EXISTS``; this PRAGMA check is the guard the
+    additive migrations use to stay idempotent on a DB that already has the column
+    (e.g. ``create_all`` added it on a fresh DB, or an older recorded migration /
+    the legacy ``_apply_additive_migrations`` step already ran)."""
+    try:
+        rows = conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+    except Exception:  # pragma: no cover - missing table on a partial/old DB
+        return set()
+    return {str(row[1]) for row in rows}
+
+
+def _add_column_if_missing(conn, table: str, column: str, ddl: str, *, mig: str) -> None:
+    """Idempotent ``ALTER TABLE <table> ADD COLUMN <ddl>`` guarded by a
+    ``PRAGMA table_info`` existence check (SQLite lacks ADD COLUMN IF NOT EXISTS).
+
+    A DB that already has the column is a no-op and never errors. A missing table
+    is skipped (the table is created by ``create_all`` on a fresh DB; on an old
+    partial DB it simply may not exist yet)."""
+    existing = _table_columns(conn, table)
+    if not existing:
+        log.warning("%s: table %s absent — skipped ADD COLUMN %s", mig, table, column)
+        return
+    if column in existing:
+        log.debug("%s: column %s.%s already present", mig, table, column)
+        return
+    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 # --- migration functions ----------------------------------------------------
 def _m001_hot_path_indexes(conn) -> None:
     """Composite indexes for the hottest query paths as the bank grows to
@@ -610,6 +641,58 @@ def _m019_notebook_knowledge_fts(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 19")
 
 
+def _m020_fold_additive_columns(conn) -> None:
+    """BC1 — single migration ledger.
+
+    Folds the former ``db._ADDITIVE_COLUMNS`` / ``_ADDITIVE_INDEXES`` lists into
+    the ordered, recorded ledger so ``init_db`` only runs ``run_migrations``. The
+    old split-brain applied these ALTERs separately from the recorded migrations:
+    fine for fresh test DBs (``create_all`` makes the columns) but on a
+    PRE-EXISTING production table ``create_all`` adds nothing, so the column had to
+    be ALTERed in — which is exactly what this migration now does, recorded.
+
+    Each ADD COLUMN is guarded by a ``PRAGMA table_info`` existence check
+    (``_add_column_if_missing``) because SQLite has no ADD COLUMN IF NOT EXISTS, so
+    a DB that already has any of these columns is a clean no-op and never errors.
+
+    NOTE: the six ``genjob`` scheduler columns (priority, progress_pct,
+    retry_count, max_retries, updated_at, cancelled_at) were already folded into
+    migration 16, so they are intentionally NOT repeated here."""
+    additive_columns: tuple[tuple[str, str, str], ...] = (
+        ("question", "external_id", "external_id VARCHAR"),
+        ("question", "content_hash", "content_hash VARCHAR"),
+        ("question", "tag_confidence", "tag_confidence VARCHAR"),
+        ("question", "deleted_at", "deleted_at DATETIME"),  # D5 soft-delete
+        ("genjob", "parent_question_id", "parent_question_id INTEGER"),
+        ("preptest", "scale_table_json", "scale_table_json TEXT"),          # 3.5
+        ("question", "updated_at", "updated_at DATETIME"),                  # 5.4
+        ("question", "empirical_difficulty", "empirical_difficulty FLOAT"),  # 2.8
+        ("explanation", "model_used", "model_used VARCHAR"),               # 2.6
+        ("explanation", "confidence", "confidence VARCHAR"),               # 2.6
+        ("explanation", "answer_checked", "answer_checked BOOLEAN DEFAULT 0"),  # 2.6
+        ("attempt", "client_attempt_id", "client_attempt_id VARCHAR"),     # 5.2
+        ("srscard", "origin", "origin VARCHAR"),                           # 1.1
+        ("srscard", "leech", "leech BOOLEAN DEFAULT 0"),                   # 3.2
+        ("srscard", "last_reviewed", "last_reviewed DATETIME"),            # 3.2
+        ("parsejob", "import_run_id", "import_run_id INTEGER"),            # P1 ledger
+    )
+    for table, column, ddl in additive_columns:
+        _add_column_if_missing(conn, table, column, ddl, mig="migration 20")
+
+    # Indexes we want even for pre-existing databases (formerly _ADDITIVE_INDEXES).
+    for sql in (
+        "CREATE INDEX IF NOT EXISTS ix_question_external_id "
+        "ON question (external_id)",
+        "CREATE INDEX IF NOT EXISTS ix_question_content_hash "
+        "ON question (content_hash)",
+    ):
+        try:
+            conn.exec_driver_sql(sql)
+        except Exception as exc:
+            log.warning("migration 20: skipped %s (%s)", sql, exc)
+    conn.exec_driver_sql("PRAGMA user_version = 20")
+
+
 MIGRATIONS: list[Migration] = [
     (1, "hot_path_indexes", _m001_hot_path_indexes),
     (2, "embedding_unique_index", _m002_embedding_unique_index),
@@ -630,6 +713,7 @@ MIGRATIONS: list[Migration] = [
     (17, "tutor_os_product_surfaces", _m017_tutor_os_product_surfaces),
     (18, "notebook_os_contracts", _m018_notebook_os_contracts),
     (19, "notebook_knowledge_fts", _m019_notebook_knowledge_fts),
+    (20, "fold_additive_columns", _m020_fold_additive_columns),
 ]
 
 
