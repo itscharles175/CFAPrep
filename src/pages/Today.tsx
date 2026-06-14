@@ -59,6 +59,40 @@ interface AiQuestion {
   explanation: string;
 }
 
+// UB3: animates a number from 0 up to `value` once, ~600ms, easing out.
+// Respects prefers-reduced-motion (renders the final value immediately).
+// Purely cosmetic — the `value` passed in is the already-correct score.
+function ScoreCountUp({ value }: { value: number }) {
+  const [shown, setShown] = useState(value);
+  useEffect(() => {
+    const prefersReduced =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced || value <= 0) {
+      setShown(value);
+      return undefined;
+    }
+    setShown(0);
+    const durationMs = 600;
+    const start =
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      // easeOutCubic for a settled finish
+      const eased = 1 - Math.pow(1 - t, 3);
+      setShown(Math.round(eased * value));
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value]);
+  return <>{shown}</>;
+}
+
 type DrillState =
   | { state: 'idle'; questions: AiQuestion[]; error: '' }
   | { state: 'loading'; questions: AiQuestion[]; error: '' }
@@ -495,8 +529,11 @@ export default function Today() {
                 return (
                   <div className="qv-stack-3 qv-mt-3">
                     {answered === total && (
-                      <p className="muted-copy qv-m-0">
-                        Score: <strong className="qv-text-success">{correct}</strong>
+                      <p className="muted-copy qv-m-0 drill-explanation">
+                        Score:{' '}
+                        <strong className="qv-text-success">
+                          <ScoreCountUp value={correct} />
+                        </strong>
                         {' / '}
                         {total}
                       </p>
@@ -517,14 +554,21 @@ export default function Today() {
                               let bg = 'transparent';
                               let color = 'inherit';
                               let weight = 400;
+                              // UB3: cosmetic per-option feedback class. drill-correct
+                              // pulses a success glow on the right answer; drill-incorrect
+                              // shakes the wrongly-picked option. Both are gated by
+                              // prefers-reduced-motion in index.css.
+                              let feedbackClass = '';
                               if (isAnswered) {
                                 if (oi === question.correct) {
                                   bg = 'rgba(52, 211, 153, 0.12)';
                                   color = 'var(--success)';
                                   weight = 700;
+                                  feedbackClass = ' drill-correct';
                                 } else if (oi === picked) {
                                   bg = 'rgba(239, 68, 68, 0.12)';
                                   color = 'var(--danger)';
+                                  feedbackClass = ' drill-incorrect';
                                 }
                               } else if (oi === picked) {
                                 bg = 'var(--accent-soft, rgba(96,165,250,0.18))';
@@ -533,6 +577,7 @@ export default function Today() {
                                 <button
                                   key={oi}
                                   type="button"
+                                  className={`drill-option${feedbackClass}`}
                                   onClick={() =>
                                     setDrillAnswers((prev) =>
                                       prev[question.id] != null ? prev : { ...prev, [question.id]: oi },
@@ -558,7 +603,7 @@ export default function Today() {
                             })}
                           </div>
                           {isAnswered && question.explanation && (
-                            <p className="qv-text-muted qv-fs-sm qv-m-0">
+                            <p className="qv-text-muted qv-fs-sm qv-m-0 drill-explanation">
                               {question.explanation}
                             </p>
                           )}

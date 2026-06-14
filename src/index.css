@@ -1880,6 +1880,62 @@ input:focus, select:focus, textarea:focus {
   100% { background-position: 0% 50%; }
 }
 
+/* UB3: quiz/drill micro-interactions. Subtle reveal + correct/incorrect
+   feedback for the targeted drill on /today. The global
+   prefers-reduced-motion block above already neutralizes these animations
+   (durations forced to ~0); the explicit guard at the end of this group
+   is belt-and-suspenders so the shake never plays and the press scale is
+   pinned, keeping a clean static fallback. */
+@keyframes drillReveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes drillShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+
+@keyframes drillCorrectGlow {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+  35% { box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.28); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+
+/* Press feedback: ~150ms active-state scale on a drill option. The
+   transition (not a keyframe animation) is also caught by the global
+   reduced-motion guard, which pins transition-duration to ~0. */
+.drill-option {
+  transition: transform var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+.drill-option:not(:disabled):active {
+  transform: scale(0.97);
+}
+.drill-option:not(:disabled):hover {
+  border-color: var(--accent);
+}
+.drill-correct {
+  animation: drillCorrectGlow 900ms var(--ease-out);
+}
+.drill-incorrect {
+  animation: drillShake 360ms var(--ease-out);
+}
+.drill-explanation {
+  animation: drillReveal var(--duration-base) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drill-option:not(:disabled):active { transform: none; }
+  .drill-correct,
+  .drill-incorrect,
+  .drill-explanation { animation: none !important; }
+}
+
 .animate-fade { animation: fadeIn var(--duration-base) var(--ease-out); }
 .animate-slide { animation: slideInLeft var(--duration-base) var(--ease-out); }
 .animate-scale { animation: scaleIn var(--duration-base) var(--ease-out); }
