@@ -65,3 +65,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv-lsat-test/
+
+# LSAT backend runtime artifacts (test/smoke writes)
+services/lsat-backend/backups/
+services/lsat-backend/**/*.db
+services/lsat-backend/data/
