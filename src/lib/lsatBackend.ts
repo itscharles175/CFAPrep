@@ -41,13 +41,19 @@ export interface LsatBackendHealth {
 async function fetchJson(
   path: string,
   timeoutMs: number,
+  init: { method?: string; body?: string } = {},
 ): Promise<{ ok: boolean; status: number; data: unknown } | { ok: false; status: 0; error: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${LSAT_API_BASE}${path}`, {
       signal: controller.signal,
-      headers: { accept: 'application/json' },
+      method: init.method || 'GET',
+      headers: {
+        accept: 'application/json',
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+      },
+      body: init.body,
     });
     let data: unknown = null;
     try {
@@ -117,5 +123,52 @@ export async function checkLsatBackendHealth(timeoutMs = 2500): Promise<LsatBack
     latencyMs,
     ai,
     detail: ai?.ready === false ? 'Sidecar up — LLM provider not reachable.' : 'Sidecar healthy.',
+  };
+}
+
+export interface LsatSyncResult {
+  ok: boolean;
+  detail: string;
+  /** The provider/endpoint patch that was pushed (when ok). */
+  applied?: { local_provider: string; lmstudio_url?: string };
+}
+
+/**
+ * S5-B: push the host's local-model provider + endpoint to the LSAT backend
+ * (`PUT /api/settings`) so the two domains use the same provider — the write
+ * side of the silent-mismatch fix (S5-A surfaces it read-only). Only the
+ * provider + LM Studio URL are synced; the per-role model ids (explain/gen/
+ * diagnose) are LSAT-specific and left untouched. Never throws.
+ *
+ * Provider is inferred from the host base URL (Ollama :11434 vs LM Studio
+ * :1234). For Ollama there is no URL field in the backend's settings patch, so
+ * only the provider is set.
+ */
+export async function syncProviderToLsat(
+  host: { baseUrl?: string },
+  timeoutMs = 4000,
+): Promise<LsatSyncResult> {
+  const base = (host.baseUrl || '').trim();
+  if (!base) return { ok: false, detail: 'No host model server URL is configured to sync.' };
+
+  const isOllama = /11434|ollama/i.test(base);
+  const patch: { local_provider: string; lmstudio_url?: string } = {
+    local_provider: isOllama ? 'ollama' : 'lmstudio',
+  };
+  if (!isOllama) patch.lmstudio_url = base;
+
+  const res = await fetchJson('/api/settings', timeoutMs, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+
+  if (!('ok' in res) || !res.ok) {
+    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    return { ok: false, detail: `Could not update LSAT settings — ${reason}.` };
+  }
+  return {
+    ok: true,
+    applied: patch,
+    detail: `LSAT now set to provider "${patch.local_provider}"${patch.lmstudio_url ? ` (${patch.lmstudio_url})` : ''}.`,
   };
 }

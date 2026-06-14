@@ -16,7 +16,7 @@ import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop
 import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 import { getStorage, getActiveDriverName, cutoverTo, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
-import { checkLsatBackendHealth, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
+import { checkLsatBackendHealth, syncProviderToLsat, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
 import { readLastCrash, clearLastCrash } from '../components/ErrorBoundary';
 import {
   clearPersistedParameters,
@@ -985,6 +985,20 @@ export default function SystemHealth() {
               }}
             >
               Re-check
+            </button>
+            {/* S5-B: push the host's provider/endpoint to the LSAT backend so
+                both domains use the same local model server. */}
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={!llm?.baseUrl || !lsatHealth?.ok}
+              title={!lsatHealth?.ok ? 'LSAT sidecar must be reachable' : 'Set LSAT to use the host model provider'}
+              onClick={async () => {
+                const result = await syncProviderToLsat({ baseUrl: llm?.baseUrl });
+                setMessage(result.detail);
+                checkLsatBackendHealth().then(setLsatHealth);
+              }}
+            >
+              Match host provider
             </button>
             <a className="btn btn-secondary btn-sm" href={LSAT_SETTINGS_PATH}>
               LSAT model settings

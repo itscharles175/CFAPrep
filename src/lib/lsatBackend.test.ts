@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { checkLsatBackendHealth, LSAT_SETTINGS_PATH } from './lsatBackend';
+import { checkLsatBackendHealth, syncProviderToLsat, LSAT_SETTINGS_PATH } from './lsatBackend';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -100,5 +100,44 @@ describe('checkLsatBackendHealth', () => {
 
   it('exposes the LSAT settings deep-link path', () => {
     expect(LSAT_SETTINGS_PATH).toBe('/lsat/settings');
+  });
+});
+
+describe('syncProviderToLsat (S5-B)', () => {
+  it('maps an Ollama host URL to local_provider=ollama (no url field)', async () => {
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+    );
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const r = await syncProviderToLsat({ baseUrl: 'http://localhost:11434/v1' });
+    expect(r.ok).toBe(true);
+    expect(r.applied?.local_provider).toBe('ollama');
+    expect(r.applied?.lmstudio_url).toBeUndefined();
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ local_provider: 'ollama' });
+    expect(init.method).toBe('PUT');
+  });
+
+  it('maps an LM Studio host URL to local_provider=lmstudio + lmstudio_url', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const r = await syncProviderToLsat({ baseUrl: 'http://localhost:1234/v1' });
+    expect(r.ok).toBe(true);
+    expect(r.applied).toEqual({ local_provider: 'lmstudio', lmstudio_url: 'http://localhost:1234/v1' });
+  });
+
+  it('returns ok:false (no request) when no host URL is set', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const r = await syncProviderToLsat({ baseUrl: '' });
+    expect(r.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns ok:false when the backend rejects the update', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('nope', { status: 422 }))) as unknown as typeof fetch);
+    const r = await syncProviderToLsat({ baseUrl: 'http://localhost:1234/v1' });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/422/);
   });
 });
