@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_LLM_SETTINGS,
   LLM_PRESETS,
+  LLM_TIMEOUT_CHAT_MS,
+  LLM_TIMEOUT_GENERATION_MS,
   checkLlmConnection,
   critiqueConstructedResponse,
   explainWrongAnswer,
   generateFlashcardsFromCurriculum,
   generateQuestionsFromCurriculum,
+  generateText,
   getLlmSettings,
   narrateStudyPlan,
   saveLlmSettings,
@@ -404,5 +407,168 @@ describe('generateFlashcardsFromCurriculum', () => {
         count: 6,
       }),
     ).rejects.toThrow(/CORS|OLLAMA_ORIGINS/);
+  });
+});
+
+// --- BB3: request dedup + cancellable timeout -----------------------------
+describe('BB3: in-flight request dedup', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('exports sensible default timeouts (chat < generation)', () => {
+    expect(LLM_TIMEOUT_CHAT_MS).toBe(150000);
+    expect(LLM_TIMEOUT_GENERATION_MS).toBe(300000);
+    expect(LLM_TIMEOUT_CHAT_MS).toBeLessThan(LLM_TIMEOUT_GENERATION_MS);
+  });
+
+  it('coalesces two identical CONCURRENT calls onto one fetch (double-click guard)', async () => {
+    // A fetch that stays pending until we resolve it — keeps both calls
+    // genuinely in-flight at the same time so the dedup map is exercised.
+    let resolveFetch;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = () =>
+            resolve(jsonResponse({ choices: [{ message: { content: 'shared answer' } }] }));
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const args = {
+      prompt: 'Explain modified duration.',
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+    };
+    const a = generateText({ ...args });
+    const b = generateText({ ...args });
+
+    // Both are awaiting the SAME in-flight promise — only one fetch fired.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveFetch();
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(ra).toEqual({ text: 'shared answer' });
+    expect(rb).toEqual({ text: 'shared answer' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT coalesce after the first call settles (not a result cache)', async () => {
+    // A FRESH Response per call — a Response body can only be read once, so
+    // reusing one object across the two sequential calls throws
+    // "Body has already been read".
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => jsonResponse({ choices: [{ message: { content: 'fresh' } }] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const args = {
+      prompt: 'Same prompt',
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+    };
+    await generateText({ ...args });
+    await generateText({ ...args }); // sequential — first one already settled
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT coalesce calls with different params', async () => {
+    let pending = 0;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          pending += 1;
+          resolve(jsonResponse({ choices: [{ message: { content: 'x' } }] }));
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const settings = { baseUrl: 'http://localhost:1234/v1', model: 'gemma' };
+    const a = generateText({ prompt: 'first', settings });
+    const b = generateText({ prompt: 'second', settings }); // different prompt
+    await Promise.all([a, b]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(pending).toBe(2);
+  });
+});
+
+describe('BB3: cancellable timeout guard', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('aborts and throws a DISTINCT timeout error after the deadline', async () => {
+    vi.useFakeTimers();
+    // fetch never resolves on its own; it rejects only when the signal aborts,
+    // mimicking a real aborted request (DOMException-style AbortError).
+    const fetchMock = vi.fn(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => {
+            const err = new Error('The operation was aborted.');
+            err.name = 'AbortError';
+            reject(err);
+          });
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = generateText({
+      prompt: 'stuck',
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+    });
+    // Attach the rejection assertion BEFORE advancing timers so the rejection
+    // is always observed (avoids an unhandled-rejection warning).
+    const assertion = expect(promise).rejects.toThrow(/timed out/i);
+
+    await vi.advanceTimersByTimeAsync(LLM_TIMEOUT_GENERATION_MS + 1);
+    await assertion;
+
+    // The timeout message must NOT collide with the CORS / connection /
+    // status strings the rest of the module (and its callers) match on.
+    await promise.catch((err) => {
+      expect(err.message).not.toMatch(/Could not reach/);
+      expect(err.message).not.toMatch(/responded \d/);
+      expect(err.name).not.toBe('AbortError');
+    });
+  });
+
+  it('does not fire the timeout when the request resolves in time', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'quick' } }] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateText({
+      prompt: 'fast',
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+    });
+    expect(result).toEqual({ text: 'quick' });
+    // Advancing past the deadline must not produce a late abort/throw.
+    await vi.advanceTimersByTimeAsync(LLM_TIMEOUT_GENERATION_MS + 1);
+  });
+
+  it('still honours a caller-supplied AbortSignal (re-thrown unchanged, not as a timeout)', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => {
+            const err = new Error('The operation was aborted.');
+            err.name = 'AbortError';
+            reject(err);
+          });
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = generateText({
+      prompt: 'cancel me',
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+      signal: controller.signal,
+    });
+    const assertion = expect(promise).rejects.toThrow(/aborted/i);
+    controller.abort();
+    await assertion;
+    // Caller cancellation is NOT a timeout.
+    await promise.catch((err) => expect(err.message).not.toMatch(/timed out/i));
   });
 });

@@ -78,7 +78,10 @@ export async function generateMockExam({
       try {
         // The raw model questions carry no topic tag; we add topic/topicTitle
         // (and a stable id) here, which is what makes each a GeneratedQuestion.
-        const generated = await generateQuestionsFromCurriculum({
+        // generateQuestionsFromCurriculum is now wrapped in the BB3 dedup
+        // helper (untyped .js), so annotate the raw rows explicitly — they gain
+        // topic/topicTitle below, which is what makes each a GeneratedQuestion.
+        const generated: Array<Record<string, unknown>> = await generateQuestionsFromCurriculum({
           settings,
           topicTitle: topic.title,
           chunks: chunks.slice(0, 14),

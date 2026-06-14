@@ -8,6 +8,147 @@ import { packExcerpts, pickBudget, renderExcerpts } from './contextBudget';
 
 const SETTINGS_KEY = 'local-llm';
 
+// --- BB3: request dedup + cancellable timeout -----------------------------
+//
+// Two small reliability guards shared by every fetch-issuing helper below:
+//
+//   1. In-flight dedup. A double-clicked "Explain" (or two views racing the
+//      same generation) should not double-hit the local sidecar. We key an
+//      in-flight Map on a stable signature (endpoint + JSON of the salient
+//      request params); identical CONCURRENT calls return the SAME promise,
+//      and the entry is deleted as soon as that promise settles. This is a
+//      best-effort coalescer for genuine in-flight overlap only — once a call
+//      finishes the key is gone, so it is NOT a result cache.
+//
+//   2. Cancellable timeout. The local model can wedge indefinitely (model
+//      crash, runaway generation). We race each fetch against a timer via an
+//      AbortController. On timeout we abort the request and throw an Error
+//      whose message clearly says "timed out" — DISTINCT from the existing
+//      CORS / "Could not reach" / "responded NNN" strings other code matches
+//      on. The caller's own AbortSignal (if any) is still honoured: aborting
+//      it cancels the underlying fetch exactly as before.
+//
+// Both guards are additive — every existing export, call signature, and
+// error-message string is preserved.
+
+// Default timeouts (ms). Chat/explain-style calls are interactive; generation
+// (questions / flashcards) is allowed to run longer.
+export const LLM_TIMEOUT_CHAT_MS = 150000;
+export const LLM_TIMEOUT_GENERATION_MS = 300000;
+
+// signature -> Promise. Entry lives only for the duration of an in-flight call.
+const inFlightRequests = new Map();
+
+/**
+ * Coalesce identical concurrent requests onto a single in-flight promise.
+ * `signature` must be a stable string for "the same request". `run` performs
+ * the actual work (fetch + decode + parse) and its resolved value is shared
+ * by every concurrent caller with the same signature. The map entry is
+ * removed as soon as the promise settles (resolve OR reject).
+ */
+function dedupeRequest(signature, run) {
+  const existing = inFlightRequests.get(signature);
+  if (existing) return existing;
+  const promise = (async () => run())();
+  inFlightRequests.set(signature, promise);
+  // Delete on settle (either outcome). `.finally` keeps the original
+  // resolution/rejection intact for callers awaiting `promise`.
+  promise
+    .finally(() => {
+      // Guard against clobbering a newer in-flight promise that may have taken
+      // this key after we settled (can only happen once we've been deleted, but
+      // be defensive).
+      if (inFlightRequests.get(signature) === promise) {
+        inFlightRequests.delete(signature);
+      }
+    })
+    // The `.finally` chain re-throws the original rejection on a NEW promise we
+    // don't return. Callers get the real error via the returned `promise`, so
+    // swallow it on this cleanup-only branch to avoid an unhandled rejection.
+    .catch(() => {});
+  return promise;
+}
+
+/**
+ * Build a stable request signature from an endpoint URL and the salient
+ * request params. JSON.stringify gives us a deterministic key for the bodies
+ * we send (model + messages + temperature, etc.).
+ */
+function requestSignature(endpoint, salient) {
+  let payload;
+  try {
+    payload = JSON.stringify(salient);
+  } catch {
+    // Non-serialisable params: fall back to a unique-ish key so we simply
+    // skip coalescing rather than throwing.
+    payload = `__nondeterministic__${Math.random()}`;
+  }
+  return `${endpoint}\n${payload}`;
+}
+
+/**
+ * `fetch` wrapped with a cancellable timeout. Aborts the request after
+ * `timeoutMs` and throws an Error flagged `isLlmTimeout` whose message clearly
+ * mentions a timeout (distinct from the CORS / connection / status strings the
+ * rest of this module already produces). A caller-supplied `callerSignal` is
+ * still honoured — aborting it cancels the fetch and surfaces as the original
+ * AbortError, exactly as before.
+ *
+ * @param {string} url
+ * @param {RequestInit} init      - fetch init WITHOUT a `signal` (we own it)
+ * @param {object} opts
+ * @param {number} opts.timeoutMs
+ * @param {AbortSignal} [opts.callerSignal]
+ * @returns {Promise<Response>}
+ */
+async function fetchWithTimeout(url, init, { timeoutMs, callerSignal } = {}) {
+  // If the caller already aborted, fail fast exactly like a normal aborted
+  // fetch (its catch sites re-throw AbortError unchanged).
+  if (callerSignal?.aborted) {
+    const reason = callerSignal.reason;
+    if (reason instanceof Error) throw reason;
+    const aborted = new Error('The request was aborted.');
+    aborted.name = 'AbortError';
+    throw aborted;
+  }
+
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer = null;
+
+  const onCallerAbort = () => controller.abort();
+  if (callerSignal) {
+    callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+  }
+
+  if (typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  }
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) {
+      const seconds = Math.round((timeoutMs || 0) / 1000);
+      const timeoutError = new Error(
+        `Local model request timed out after ${seconds}s. The model may be overloaded or stuck — try again, pick a smaller model, or raise the limit.`,
+        { cause: error },
+      );
+      timeoutError.isLlmTimeout = true;
+      throw timeoutError;
+    }
+    // Caller-initiated abort (or a genuine network error): surface unchanged so
+    // the existing AbortError / CORS handling downstream behaves as before.
+    throw error;
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    if (callerSignal) callerSignal.removeEventListener('abort', onCallerAbort);
+  }
+}
+
 export const DEFAULT_LLM_SETTINGS = {
   enabled: false,
   baseUrl: 'http://localhost:11434/v1',
@@ -111,46 +252,56 @@ export async function generateQuestionsFromCurriculum({ settings, topicTitle, ch
     '{"question": string, "options": [string, string, string], "correct": integer (0-based index of the correct option), "explanation": string}.';
   const user = `Topic: ${topicTitle}\n\nWrite ${count} questions grounded strictly in these excerpts:\n\n${context}`;
 
-  let response;
-  try {
-    response = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.3,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-      }),
-      signal,
-    });
-  } catch (error) {
-    // Browser fetch to a different port is cross-origin. LM Studio and Ollama
-    // both ship with CORS disabled by default; the fetch fails as a TypeError
-    // long before any HTTP status. Make that fix actionable.
-    if (error?.name === 'AbortError') throw error;
-    throw new Error(
-      `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
-      { cause: error },
-    );
-  }
-  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content || '';
-  const parsed = extractJsonArray(content);
-  if (!parsed) throw new Error('The model did not return parseable questions. Try a more capable local model.');
+  const endpoint = `${base}/chat/completions`;
+  const body = {
+    model,
+    temperature: 0.3,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  };
+  const signature = requestSignature(endpoint, body);
 
-  return parsed
-    .filter((item) => item && typeof item.question === 'string' && Array.isArray(item.options) && item.options.length >= 2)
-    .map((item, index) => ({
-      id: `ai-${index + 1}`,
-      question: item.question,
-      options: item.options.map((option) => String(option)),
-      correct: Number.isInteger(item.correct) && item.correct >= 0 && item.correct < item.options.length ? item.correct : 0,
-      explanation: typeof item.explanation === 'string' ? item.explanation : '',
-    }));
+  return dedupeRequest(signature, async () => {
+    let response;
+    try {
+      response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        { timeoutMs: LLM_TIMEOUT_GENERATION_MS, callerSignal: signal },
+      );
+    } catch (error) {
+      if (error?.isLlmTimeout) throw error;
+      // Browser fetch to a different port is cross-origin. LM Studio and Ollama
+      // both ship with CORS disabled by default; the fetch fails as a TypeError
+      // long before any HTTP status. Make that fix actionable.
+      if (error?.name === 'AbortError') throw error;
+      throw new Error(
+        `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
+        { cause: error },
+      );
+    }
+    if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || '';
+    const parsed = extractJsonArray(content);
+    if (!parsed) throw new Error('The model did not return parseable questions. Try a more capable local model.');
+
+    return parsed
+      .filter((item) => item && typeof item.question === 'string' && Array.isArray(item.options) && item.options.length >= 2)
+      .map((item, index) => ({
+        id: `ai-${index + 1}`,
+        question: item.question,
+        options: item.options.map((option) => String(option)),
+        correct: Number.isInteger(item.correct) && item.correct >= 0 && item.correct < item.options.length ? item.correct : 0,
+        explanation: typeof item.explanation === 'string' ? item.explanation : '',
+      }));
+  });
 }
 
 /**
@@ -170,35 +321,45 @@ export async function explainWrongAnswer({ settings, question, options, correctI
     'Be concrete and quantitative where it helps. Do not restate the question text.';
   const user = `Question: ${question}\n\nOptions:\n${lines}\n\nCorrect answer: ${letters[correctIndex] || correctIndex + 1}\nStudent picked: ${letters[userIndex] || userIndex + 1}${baseExplanation ? `\n\nProvided explanation context:\n${baseExplanation}` : ''}`;
 
-  let response;
-  try {
-    response = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-      }),
-      signal,
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error;
-    throw new Error(
-      `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
-      { cause: error },
-    );
-  }
-  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('The model returned an empty explanation. Try a more capable local model.');
-  }
-  return content.trim();
+  const endpoint = `${base}/chat/completions`;
+  const body = {
+    model,
+    temperature: 0.2,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  };
+  const signature = requestSignature(endpoint, body);
+
+  return dedupeRequest(signature, async () => {
+    let response;
+    try {
+      response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        { timeoutMs: LLM_TIMEOUT_CHAT_MS, callerSignal: signal },
+      );
+    } catch (error) {
+      if (error?.isLlmTimeout) throw error;
+      if (error?.name === 'AbortError') throw error;
+      throw new Error(
+        `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+        { cause: error },
+      );
+    }
+    if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error('The model returned an empty explanation. Try a more capable local model.');
+    }
+    return content.trim();
+  });
 }
 
 /**
@@ -230,35 +391,45 @@ export async function critiqueConstructedResponse({ settings, prompt, response, 
   const user =
     `Prompt:\n${prompt}\n\nRubric criteria:\n${criteriaBlock}\n\nCandidate response:\n${response}`;
 
-  let fetchResponse;
-  try {
-    fetchResponse = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-      }),
-      signal,
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error;
-    throw new Error(
-      `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
-      { cause: error },
-    );
-  }
-  if (!fetchResponse.ok) throw new Error(`Local model server responded ${fetchResponse.status}.`);
-  const data = await fetchResponse.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('The model returned an empty critique. Try a more capable local model.');
-  }
-  return content.trim();
+  const endpoint = `${base}/chat/completions`;
+  const body = {
+    model,
+    temperature: 0.2,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  };
+  const signature = requestSignature(endpoint, body);
+
+  return dedupeRequest(signature, async () => {
+    let fetchResponse;
+    try {
+      fetchResponse = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        { timeoutMs: LLM_TIMEOUT_CHAT_MS, callerSignal: signal },
+      );
+    } catch (error) {
+      if (error?.isLlmTimeout) throw error;
+      if (error?.name === 'AbortError') throw error;
+      throw new Error(
+        `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+        { cause: error },
+      );
+    }
+    if (!fetchResponse.ok) throw new Error(`Local model server responded ${fetchResponse.status}.`);
+    const data = await fetchResponse.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error('The model returned an empty critique. Try a more capable local model.');
+    }
+    return content.trim();
+  });
 }
 
 /**
@@ -313,22 +484,31 @@ export async function gradeConstructedResponseStructured({ settings, prompt, res
   const user =
     `Prompt:\n${prompt}\n\nRubric criteria:\n${criteriaBlock}\n\nCandidate response:\n${response}\n\nReturn the JSON now.`;
 
+  const endpoint = `${base}/chat/completions`;
+  const requestBody = {
+    model,
+    temperature: 0.15,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  };
+  const signature = requestSignature(endpoint, requestBody);
+
+  return dedupeRequest(signature, async () => {
   let fetchResponse;
   try {
-    fetchResponse = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.15,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-      }),
-      signal,
-    });
+    fetchResponse = await fetchWithTimeout(
+      endpoint,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      },
+      { timeoutMs: LLM_TIMEOUT_CHAT_MS, callerSignal: signal },
+    );
   } catch (error) {
+    if (error?.isLlmTimeout) throw error;
     if (error?.name === 'AbortError') throw error;
     throw new Error(
       `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
@@ -418,6 +598,7 @@ export async function gradeConstructedResponseStructured({ settings, prompt, res
     overall: { verdict, percent, total, max, summary },
     criteria,
   };
+  });
 }
 
 /**
@@ -441,35 +622,45 @@ export async function narrateStudyPlan({ settings, plan, signal }) {
     'Be concrete, encouraging, exam-focused. Do not restate the plan as bullets; give prose.';
   const user = `Headline: ${plan?.headline || ''}\nDue reviews: ${plan?.dueCount ?? 0}\nWeak topics: ${plan?.weakCount ?? 0}\n${plan?.peakReviewDay ? `Upcoming peak: ${plan.peakReviewDay.date} (${plan.peakReviewDay.count} items)\n` : ''}\nAction list:\n${actionLines}`;
 
-  let response;
-  try {
-    response = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.3,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-      }),
-      signal,
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error;
-    throw new Error(
-      `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
-      { cause: error },
-    );
-  }
-  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('The model returned an empty narrative. Try a more capable local model.');
-  }
-  return content.trim();
+  const endpoint = `${base}/chat/completions`;
+  const body = {
+    model,
+    temperature: 0.3,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  };
+  const signature = requestSignature(endpoint, body);
+
+  return dedupeRequest(signature, async () => {
+    let response;
+    try {
+      response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        { timeoutMs: LLM_TIMEOUT_CHAT_MS, callerSignal: signal },
+      );
+    } catch (error) {
+      if (error?.isLlmTimeout) throw error;
+      if (error?.name === 'AbortError') throw error;
+      throw new Error(
+        `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+        { cause: error },
+      );
+    }
+    if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error('The model returned an empty narrative. Try a more capable local model.');
+    }
+    return content.trim();
+  });
 }
 
 /**
@@ -492,35 +683,45 @@ export async function summarizeTopicFromCurriculum({ settings, topicTitle, chunk
     'Output plain prose, no bullets, no headings.';
   const user = `Topic: ${topicTitle}\n\nExcerpts:\n\n${context}`;
 
-  let response;
-  try {
-    response = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.25,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-      }),
-      signal,
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error;
-    throw new Error(
-      `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
-      { cause: error },
-    );
-  }
-  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('The model returned an empty summary. Try a more capable local model.');
-  }
-  return content.trim();
+  const endpoint = `${base}/chat/completions`;
+  const body = {
+    model,
+    temperature: 0.25,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  };
+  const signature = requestSignature(endpoint, body);
+
+  return dedupeRequest(signature, async () => {
+    let response;
+    try {
+      response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        { timeoutMs: LLM_TIMEOUT_CHAT_MS, callerSignal: signal },
+      );
+    } catch (error) {
+      if (error?.isLlmTimeout) throw error;
+      if (error?.name === 'AbortError') throw error;
+      throw new Error(
+        `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+        { cause: error },
+      );
+    }
+    if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error('The model returned an empty summary. Try a more capable local model.');
+    }
+    return content.trim();
+  });
 }
 
 export async function getCachedGeneratedQuestions(level, topic) {
@@ -595,43 +796,53 @@ export async function generateFlashcardsFromCurriculum({ settings, topicTitle, c
     'Respond with a JSON array — no prose.';
   const user = `Topic: ${topicTitle}\n\nWrite ${count} flashcards grounded strictly in these excerpts:\n\n${context}`;
 
-  let response;
-  try {
-    response = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.3,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-      }),
-      signal,
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error;
-    throw new Error(
-      `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
-      { cause: error },
-    );
-  }
-  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content || '';
-  const parsed = extractJsonArray(content);
-  if (!parsed) throw new Error('The model did not return parseable flashcards. Try a more capable local model.');
+  const endpoint = `${base}/chat/completions`;
+  const body = {
+    model,
+    temperature: 0.3,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  };
+  const signature = requestSignature(endpoint, body);
 
-  return parsed
-    .filter((item) => item && typeof item.front === 'string' && item.front.trim() && typeof item.back === 'string' && item.back.trim())
-    .slice(0, count)
-    .map((item, index) => ({
-      id: `flash-${index + 1}`,
-      front: item.front.trim(),
-      back: item.back.trim(),
-      ...(typeof item.locator === 'string' && item.locator.trim() ? { locator: item.locator.trim() } : {}),
-    }));
+  return dedupeRequest(signature, async () => {
+    let response;
+    try {
+      response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        { timeoutMs: LLM_TIMEOUT_GENERATION_MS, callerSignal: signal },
+      );
+    } catch (error) {
+      if (error?.isLlmTimeout) throw error;
+      if (error?.name === 'AbortError') throw error;
+      throw new Error(
+        `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
+        { cause: error },
+      );
+    }
+    if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || '';
+    const parsed = extractJsonArray(content);
+    if (!parsed) throw new Error('The model did not return parseable flashcards. Try a more capable local model.');
+
+    return parsed
+      .filter((item) => item && typeof item.front === 'string' && item.front.trim() && typeof item.back === 'string' && item.back.trim())
+      .slice(0, count)
+      .map((item, index) => ({
+        id: `flash-${index + 1}`,
+        front: item.front.trim(),
+        back: item.back.trim(),
+        ...(typeof item.locator === 'string' && item.locator.trim() ? { locator: item.locator.trim() } : {}),
+      }));
+  });
 }
 
 /**
@@ -673,23 +884,32 @@ export async function generateText({
     body.max_tokens = maxTokens;
   }
 
-  let response;
-  try {
-    response = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error;
-    throw new Error(
-      `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set.`,
-      { cause: error },
-    );
-  }
-  if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content || '';
-  return { text: String(content) };
+  const endpoint = `${base}/chat/completions`;
+  const signature = requestSignature(endpoint, body);
+
+  return dedupeRequest(signature, async () => {
+    let response;
+    try {
+      response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        { timeoutMs: LLM_TIMEOUT_GENERATION_MS, callerSignal: signal },
+      );
+    } catch (error) {
+      if (error?.isLlmTimeout) throw error;
+      if (error?.name === 'AbortError') throw error;
+      throw new Error(
+        `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set.`,
+        { cause: error },
+      );
+    }
+    if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || '';
+    return { text: String(content) };
+  });
 }
