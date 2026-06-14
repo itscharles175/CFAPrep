@@ -136,10 +136,25 @@ struct SidecarStatus {
     /// Readiness port probed by the supervisor, or `None` for sidecars that
     /// expose no listening socket (e.g. the open-notebook worker).
     port: Option<u16>,
+    /// Alias of `port`, named to match `SidecarSpec::ready_port` so the UI can
+    /// label the readiness gate explicitly (BA2). Carries the same value as
+    /// `port`; both are emitted so existing consumers of `port` keep working.
+    ready_port: Option<u16>,
     /// `true` when the readiness port is accepting connections. Sidecars with
     /// no `port` report `true` as long as their process handle is retained
     /// (we have no socket to probe, so liveness is the best signal available).
     healthy: bool,
+    /// Whether this sidecar's readiness gate is satisfied (BA2). For a sidecar
+    /// with a readiness port, mirrors `healthy` (port listening). For a
+    /// port-less sidecar (the worker) it reports `true` as long as the process
+    /// handle is tracked — same liveness fallback as `healthy`. Surfaced as a
+    /// distinct field so the UI can speak in "ready" terms for the readiness
+    /// panel without conflating it with the health-poll signal.
+    ready: bool,
+    /// Names of sidecars that had to be ready before this one started (BA2), so
+    /// the UI can render the dependency chain alongside each row. Empty for
+    /// sidecars with no dependencies (SurrealDB, the LSAT backend).
+    depends_on: Vec<String>,
     /// OS process id of the live child, if one is currently tracked.
     pid: Option<u32>,
 }
@@ -334,7 +349,6 @@ fn services_dir_search(
 /// TCP "is this port up?" probe used by the supervisor's readiness checks and
 /// exercised by the integration tests. Returns false on any DNS, connect, or
 /// timeout error — callers treat absence as "not yet listening".
-#[allow(dead_code)] // Wired in by the readiness-gate work that owns sidecar startup ordering.
 fn is_port_listening(host: &str, port: u16, timeout_ms: u64) -> bool {
     let timeout = Duration::from_millis(timeout_ms);
     let addrs: Vec<SocketAddr> = match (host, port).to_socket_addrs() {
@@ -347,6 +361,64 @@ fn is_port_listening(host: &str, port: u16, timeout_ms: u64) -> bool {
         }
     }
     false
+}
+
+/// Total wall-clock budget for waiting on a dependency's readiness port during
+/// ordered startup (BA2). Capped so a dependency that never comes up degrades
+/// the dependent rather than hanging app launch forever.
+const READINESS_WAIT_BUDGET: Duration = Duration::from_secs(30);
+
+/// Gap between readiness probes while waiting on a dependency port. Short enough
+/// that a fast-booting dependency unblocks its dependent promptly, long enough
+/// that the poll loop doesn't busy-spin.
+const READINESS_POLL_GAP: Duration = Duration::from_millis(400);
+
+/// Per-probe TCP connect timeout used while waiting on a dependency port. Kept
+/// short so each attempt fails fast and the poll cadence stays close to
+/// `READINESS_POLL_GAP` even when the port is refusing connections.
+const READINESS_PROBE_TIMEOUT_MS: u64 = 500;
+
+/// Block until `port` on `127.0.0.1` is accepting connections, or until the
+/// bounded `READINESS_WAIT_BUDGET` elapses — whichever comes first (BA2).
+/// Returns `true` once the port is listening, `false` if the budget ran out.
+///
+/// Logs progress so a slow dependency is visible in the sidecar log viewer, and
+/// — crucially — never blocks forever: a dependency that never binds is reported
+/// as not-ready and the caller proceeds in a degraded state rather than wedging
+/// app startup. The `label` is the dependent waiting on the port, used only for
+/// log context.
+///
+/// `clock` returns "now"; injected so a unit test can drive the timeout branch
+/// deterministically without sleeping out a real 30s budget. Production callers
+/// pass `Instant::now`.
+fn wait_for_port_ready(
+    label: &str,
+    port: u16,
+    budget: Duration,
+    clock: impl Fn() -> std::time::Instant,
+) -> bool {
+    let start = clock();
+    let mut attempts: u32 = 0;
+    loop {
+        if is_port_listening("127.0.0.1", port, READINESS_PROBE_TIMEOUT_MS) {
+            log::info!(
+                "sidecar: readiness for {label}: port {port} is up (after {attempts} probe(s))"
+            );
+            return true;
+        }
+        attempts += 1;
+        if clock().duration_since(start) >= budget {
+            log::warn!(
+                "sidecar: readiness for {label}: port {port} not up after {budget:?} \
+                 ({attempts} probe(s)); proceeding degraded"
+            );
+            return false;
+        }
+        log::info!(
+            "sidecar: readiness for {label}: waiting for port {port} (probe {attempts})"
+        );
+        std::thread::sleep(READINESS_POLL_GAP);
+    }
 }
 
 /// Declarative description of one sidecar process. Decoupled from
@@ -368,6 +440,15 @@ struct SidecarSpec {
     /// processes that expose no listening socket — the worker, which the
     /// supervisor can only watch by process liveness, not by port.
     ready_port: Option<u16>,
+    /// Names of sidecars that must be confirmed listening on their readiness
+    /// port BEFORE this one is spawned (BA2). The ordered startup walks the
+    /// `build_sidecar_specs` vec and, for each dependency named here that has a
+    /// readiness port, blocks on a bounded wait until that port accepts a
+    /// connection. SurrealDB has no deps; open-notebook's API depends on
+    /// SurrealDB; the worker depends on the API; the LSAT backend is
+    /// independent. A dependency with no readiness port (or one that never came
+    /// up) is logged and skipped so a wedged dependency can't hang startup.
+    depends_on: Vec<String>,
 }
 
 /// Abstraction over "spawn this child". The production impl shells out via
@@ -431,6 +512,8 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
         env: vec![],
         // SurrealDB defaults to binding 127.0.0.1:8000.
         ready_port: Some(8000),
+        // The storage layer — nothing else can connect until it's up.
+        depends_on: vec![],
     };
 
     let api = SidecarSpec {
@@ -448,6 +531,8 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
         env: vec![],
         // open-notebook's FastAPI app listens on 127.0.0.1:5055.
         ready_port: Some(5055),
+        // The API connects to SurrealDB on boot — wait for :8000 first.
+        depends_on: vec!["SurrealDB".into()],
     };
 
     let worker = SidecarSpec {
@@ -470,6 +555,10 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
         // The worker is a background queue consumer with no listening socket;
         // the supervisor can only watch it by process liveness.
         ready_port: None,
+        // The worker drains the same SurrealDB-backed command queue the API
+        // serves; gate it behind the API (which itself gates behind SurrealDB)
+        // so the whole open-notebook stack comes up in order.
+        depends_on: vec!["open-notebook API".into()],
     };
 
     // StudyVault's LSAT domain backend — the frozen PyInstaller sidecar built
@@ -496,16 +585,38 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
         ],
         // The frozen LSAT backend binds 127.0.0.1:8100.
         ready_port: Some(8100),
+        // Self-contained: its own SQLite bank, no SurrealDB dependency, so it
+        // starts independently (and in parallel with the SurrealDB stack).
+        depends_on: vec![],
     };
 
     vec![surreal, api, worker, lsat]
 }
 
-/// Iterate the given launcher over `build_sidecar_specs(dir)`, logging
-/// successes and failures the same way the prior inline supervisor did.
-/// Returns each spawned child paired with the spec that produced it, so the
-/// Tauri runtime can kill them on exit and the health-poll task can respawn a
-/// crashed one from its retained recipe.
+/// Iterate the given launcher over `build_sidecar_specs(dir)` in dependency
+/// order (BA2), logging successes and failures the same way the prior inline
+/// supervisor did. Returns each spawned child paired with the spec that
+/// produced it, so the Tauri runtime can kill them on exit and the health-poll
+/// task can respawn a crashed one from its retained recipe.
+///
+/// Ordering (BA2): the specs are walked front-to-back, and before each is
+/// launched, every dependency named in its `depends_on` that exposes a
+/// readiness port is confirmed listening via a bounded `wait_for_port_ready`.
+/// Concretely this makes SurrealDB (:8000) ready before open-notebook's API
+/// (:5055) connects, and the API ready before the worker drains its queue. The
+/// LSAT backend declares no deps, so it starts without waiting. A dependency
+/// that fails to launch — or never binds within the budget — is logged and the
+/// dependent is started anyway in a degraded state, so one wedged sidecar can
+/// never hang the whole launch.
+///
+/// `build_sidecar_specs` is the single source of truth for spec order, so the
+/// `depends_on` graph must be consistent with it (a dependency must appear
+/// earlier in the vec than its dependents); the production specs satisfy this.
+///
+/// `readiness_budget` caps how long each dependency gate may wait before the
+/// dependent is started degraded. Production passes `READINESS_WAIT_BUDGET`
+/// (~30s); tests pass a tiny budget so the mock-launcher path (whose specs
+/// never actually bind their ports) doesn't pay the full wait.
 ///
 /// BA8: each successfully-launched child has its stdout + stderr attached to
 /// the shared `logs` ring buffer before being retained, so the log viewer sees
@@ -514,9 +625,52 @@ fn spawn_sidecars_with<L: SidecarLauncher>(
     launcher: &L,
     dir: &Path,
     logs: &SidecarLogs,
+    readiness_budget: Duration,
 ) -> Vec<SupervisedSidecar> {
+    let specs = build_sidecar_specs(dir);
+    // Index every spec's readiness port by name so a dependent can look up the
+    // port it must wait on. Specs without a readiness port (the worker) map to
+    // `None` and are skipped by the wait below.
+    let ports_by_name: HashMap<String, Option<u16>> = specs
+        .iter()
+        .map(|s| (s.name.clone(), s.ready_port))
+        .collect();
+
     let mut kids = Vec::new();
-    for spec in build_sidecar_specs(dir) {
+    for spec in specs {
+        // BA2: gate this sidecar behind its dependencies. For each named
+        // dependency that has a readiness port, block (bounded) until that port
+        // is listening. A dependency with no port, or one not in the spec set,
+        // can't be probed — log and move on rather than wait on nothing.
+        for dep in &spec.depends_on {
+            match ports_by_name.get(dep) {
+                Some(Some(dep_port)) => {
+                    let label = format!("{} (dep of {})", dep, spec.name);
+                    wait_for_port_ready(
+                        &label,
+                        *dep_port,
+                        readiness_budget,
+                        std::time::Instant::now,
+                    );
+                }
+                Some(None) => {
+                    log::info!(
+                        "sidecar: {} depends on {} which has no readiness port; \
+                         not gating on it",
+                        spec.name,
+                        dep
+                    );
+                }
+                None => {
+                    log::warn!(
+                        "sidecar: {} declares unknown dependency {}; ignoring",
+                        spec.name,
+                        dep
+                    );
+                }
+            }
+        }
+
         match launcher.launch(&spec) {
             Ok(mut child) => {
                 log::info!("sidecar: {} started (pid {})", spec.name, child.id());
@@ -531,7 +685,7 @@ fn spawn_sidecars_with<L: SidecarLauncher>(
 
 fn spawn_sidecars(logs: &SidecarLogs) -> Vec<SupervisedSidecar> {
     let dir = services_dir();
-    spawn_sidecars_with(&ProcessLauncher, &dir, logs)
+    spawn_sidecars_with(&ProcessLauncher, &dir, logs, READINESS_WAIT_BUDGET)
 }
 
 /// Probe one sidecar's readiness port. Sidecars with no `ready_port` (the
@@ -643,11 +797,21 @@ fn get_sidecar_status(state: tauri::State<'_, Sidecars>) -> Vec<SidecarStatus> {
     };
     guard
         .iter()
-        .map(|slot| SidecarStatus {
-            name: slot.spec.name.clone(),
-            port: slot.spec.ready_port,
-            healthy: probe_sidecar_healthy(&slot.spec),
-            pid: Some(slot.child.id()),
+        .map(|slot| {
+            let healthy = probe_sidecar_healthy(&slot.spec);
+            SidecarStatus {
+                name: slot.spec.name.clone(),
+                port: slot.spec.ready_port,
+                ready_port: slot.spec.ready_port,
+                healthy,
+                // `probe_sidecar_healthy` already encodes the readiness gate:
+                // port listening for socketed sidecars, liveness fallback (true)
+                // for port-less ones. Reuse it so `ready` and `healthy` can't
+                // drift apart.
+                ready: healthy,
+                depends_on: slot.spec.depends_on.clone(),
+                pid: Some(slot.child.id()),
+            }
         })
         .collect()
 }
@@ -1065,7 +1229,12 @@ mod tests {
     fn spawn_sidecars_with_invokes_launcher_for_every_spec() {
         let launcher = MockLauncher::new(vec![]);
         let logs = SidecarLogs::default();
-        let mut kids = spawn_sidecars_with(&launcher, Path::new("C:/qv/services"), &logs);
+        // Zero readiness budget: the mock launcher never binds the readiness
+        // ports, so each dependency gate probes once and immediately proceeds
+        // degraded rather than waiting out the full production budget. The
+        // launch order is still dependency order.
+        let mut kids =
+            spawn_sidecars_with(&launcher, Path::new("C:/qv/services"), &logs, Duration::ZERO);
         let calls = launcher.calls.borrow();
         let names: Vec<_> = calls.iter().map(|s| s.name.clone()).collect();
         assert_eq!(
@@ -1092,7 +1261,12 @@ mod tests {
     fn spawn_sidecars_with_skips_failed_sidecars_but_continues() {
         let launcher = MockLauncher::new(vec!["SurrealDB"]);
         let logs = SidecarLogs::default();
-        let mut kids = spawn_sidecars_with(&launcher, Path::new("C:/qv/services"), &logs);
+        // Zero readiness budget for the same reason as the prior test: the mock
+        // ports never bind, so the dependency gates degrade immediately. This
+        // also exercises that a dependency which *failed to launch* (SurrealDB
+        // here) doesn't block its dependents past the budget.
+        let mut kids =
+            spawn_sidecars_with(&launcher, Path::new("C:/qv/services"), &logs, Duration::ZERO);
         // All four specs were attempted, even though SurrealDB returned Err.
         assert_eq!(launcher.calls.borrow().len(), 4);
         // Only the three successful launches yield Child handles.
@@ -1115,6 +1289,7 @@ mod tests {
             args: vec![],
             env: vec![],
             ready_port: None,
+            depends_on: vec![],
         };
         assert!(probe_sidecar_healthy(&worker));
     }
@@ -1129,6 +1304,7 @@ mod tests {
             args: vec![],
             env: vec![],
             ready_port: Some(up_port),
+            depends_on: vec![],
         };
         assert!(probe_sidecar_healthy(&up), "bound port should read healthy");
         drop(listener);
@@ -1140,6 +1316,7 @@ mod tests {
             args: vec![],
             env: vec![],
             ready_port: Some(0),
+            depends_on: vec![],
         };
         assert!(!probe_sidecar_healthy(&down), "port 0 should read down");
     }
@@ -1157,6 +1334,7 @@ mod tests {
             args: vec![],
             env: vec![],
             ready_port: None,
+            depends_on: vec![],
         };
         // Spawn a trivial child and let it finish so try_wait() reports exited.
         let mut child = launcher.launch(&spec).expect("initial launch");
@@ -1191,6 +1369,7 @@ mod tests {
             args: vec![],
             env: vec![],
             ready_port: None,
+            depends_on: vec![],
         };
         let child = spawn_long_lived_child();
         let state: Mutex<Vec<SupervisedSidecar>> =
@@ -1236,17 +1415,24 @@ mod tests {
 
     #[test]
     fn sidecar_status_serializes_expected_shape() {
-        // Guards the JSON contract the UI consumes: name/port/healthy/pid.
+        // Guards the JSON contract the UI consumes: name/port/ready_port/
+        // healthy/ready/depends_on/pid.
         let status = SidecarStatus {
-            name: "SurrealDB".into(),
-            port: Some(8000),
+            name: "open-notebook API".into(),
+            port: Some(5055),
+            ready_port: Some(5055),
             healthy: false,
+            ready: false,
+            depends_on: vec!["SurrealDB".into()],
             pid: Some(1234),
         };
         let json = serde_json::to_value(&status).expect("serialize");
-        assert_eq!(json["name"], "SurrealDB");
-        assert_eq!(json["port"], 8000);
+        assert_eq!(json["name"], "open-notebook API");
+        assert_eq!(json["port"], 5055);
+        assert_eq!(json["ready_port"], 5055);
         assert_eq!(json["healthy"], false);
+        assert_eq!(json["ready"], false);
+        assert_eq!(json["depends_on"][0], "SurrealDB");
         assert_eq!(json["pid"], 1234);
     }
 
@@ -1257,6 +1443,80 @@ mod tests {
         assert_eq!(specs[1].ready_port, Some(5055)); // open-notebook API
         assert_eq!(specs[2].ready_port, None); // worker (no socket)
         assert_eq!(specs[3].ready_port, Some(8100)); // LSAT backend
+    }
+
+    // ---- ordered startup / readiness gates (BA2) ----
+
+    #[test]
+    fn build_sidecar_specs_declares_dependency_chain() {
+        let specs = build_sidecar_specs(Path::new("C:/qv/services"));
+        // SurrealDB is the root of the storage stack — no dependencies.
+        assert!(specs[0].depends_on.is_empty(), "SurrealDB has no deps");
+        // The API waits on SurrealDB.
+        assert_eq!(specs[1].depends_on, vec!["SurrealDB".to_string()]);
+        // The worker waits on the API (transitively on SurrealDB).
+        assert_eq!(specs[2].depends_on, vec!["open-notebook API".to_string()]);
+        // The LSAT backend is self-contained — independent of the stack.
+        assert!(specs[3].depends_on.is_empty(), "LSAT backend has no deps");
+    }
+
+    #[test]
+    fn build_sidecar_specs_dependencies_appear_before_dependents() {
+        // The ordered startup walks the vec front-to-back, so every dependency
+        // must be listed earlier than the sidecar that depends on it. Guard
+        // that invariant directly off the spec set.
+        let specs = build_sidecar_specs(Path::new("C:/qv/services"));
+        let index_of = |name: &str| specs.iter().position(|s| s.name == name);
+        for (i, spec) in specs.iter().enumerate() {
+            for dep in &spec.depends_on {
+                let dep_idx = index_of(dep)
+                    .unwrap_or_else(|| panic!("dependency {dep} not in spec set"));
+                assert!(
+                    dep_idx < i,
+                    "{} (idx {i}) depends on {dep} (idx {dep_idx}) which must come first",
+                    spec.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wait_for_port_ready_returns_true_once_port_is_listening() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        // The port is already listening, so the first probe succeeds and the
+        // helper returns immediately without consuming the budget.
+        let ready = wait_for_port_ready(
+            "test-dep",
+            port,
+            Duration::from_secs(5),
+            std::time::Instant::now,
+        );
+        assert!(ready, "a bound port should be reported ready");
+        drop(listener);
+    }
+
+    #[test]
+    fn wait_for_port_ready_gives_up_after_budget_without_hanging() {
+        // Port 0 is never a listening destination, so the helper can only exit
+        // via the budget. Drive the clock so the first elapsed check already
+        // exceeds the budget: the loop probes once, then returns false — proving
+        // a never-up dependency degrades instead of hanging startup forever.
+        let calls = std::cell::Cell::new(0u32);
+        let base = std::time::Instant::now();
+        let clock = || {
+            let n = calls.get();
+            calls.set(n + 1);
+            // First call (loop entry `start`) returns `base`; every subsequent
+            // call returns far past the budget so the elapsed check trips.
+            if n == 0 {
+                base
+            } else {
+                base + Duration::from_secs(3600)
+            }
+        };
+        let ready = wait_for_port_ready("never-up", 0, Duration::from_secs(30), clock);
+        assert!(!ready, "an unreachable port must time out, not hang");
     }
 
     // ---- SidecarLogs ring buffer (BA8) ----
@@ -1363,10 +1623,22 @@ pub fn run() {
                 .try_state::<SidecarLogs>()
                 .map(|s| s.inner().clone())
                 .unwrap_or_default();
-            let kids = spawn_sidecars(&logs);
-            if let Some(state) = app.try_state::<Sidecars>() {
-                *state.0.lock().unwrap() = kids;
-            }
+            // BA2: ordered startup gates each sidecar behind its dependencies'
+            // readiness ports with a bounded (~30s/dep) wait, so this can block
+            // for a noticeable stretch when a dependency is slow to bind. Run it
+            // off the setup thread so the webview opens immediately and the
+            // sidecars come up in dependency order behind it; the `Sidecars`
+            // state is populated once startup finishes. The health supervisor
+            // (started below) sweeps on an interval and harmlessly no-ops while
+            // the state is still empty, so there's no race in starting it first.
+            let startup_handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let kids = spawn_sidecars(&logs);
+                if let Some(state) = startup_handle.try_state::<Sidecars>() {
+                    *state.0.lock().unwrap() = kids;
+                    log::info!("sidecar: ordered startup complete");
+                }
+            });
             // BA1: start the background health supervisor that polls each
             // sidecar's readiness port and respawns any that fall over.
             spawn_health_supervisor(app.handle().clone());
