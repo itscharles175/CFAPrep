@@ -240,24 +240,27 @@
       /* Re-bind the raw palette tokens that `index.css` flips for
          `[data-theme="light"]`. Keeping this list in sync with that
          block is intentional — it lets users on a system-light OS
-         experience the same light palette without storing a choice. */
-      --bg-primary: #F4F7FB;
-      --bg-secondary: #FFFFFF;
-      --bg-card: #FFFFFF;
-      --bg-hover: #CBD5E1;
-      --text-primary: #0F172A;
-      --text-secondary: #334155;
-      --text-muted: #334155;
-      --accent: #1D4ED8;
-      --accent-hover: #1E40AF;
-      --exam: #8A5A05;
-      --study: #155E75;
-      --vault: #0F766E;
-      --ops: #92400E;
-      --quant: #6D28D9;
-      --excel: #065F46;
-      --danger: #B91C1C;
-      --success: #047857;
+         experience the same light palette without storing a choice.
+         UA1: the listed SEMANTIC tokens are stated in HSL (exact 1-decimal
+         equivalents of the prior hex — byte-identical round-trip); the raw
+         scale + rgba tokens below stay in their original format. */
+      --bg-primary: hsl(214 47% 97%);         /* #F4F7FB */
+      --bg-secondary: hsl(0 0% 100%);         /* #FFFFFF */
+      --bg-card: hsl(0 0% 100%);              /* #FFFFFF */
+      --bg-hover: hsl(213 27% 84%);           /* #CBD5E1 */
+      --text-primary: hsl(222.2 47.4% 11.2%); /* #0F172A */
+      --text-secondary: hsl(215.3 25% 26.7%); /* #334155 */
+      --text-muted: hsl(215.3 25% 26.7%);     /* #334155 */
+      --accent: hsl(224.3 76.3% 48%);         /* #1D4ED8 */
+      --accent-hover: hsl(225.9 70.7% 40.2%); /* #1E40AF */
+      --exam: hsl(38.3 93% 28%);              /* #8A5A05 */
+      --study: hsl(194.4 69.6% 27.1%);        /* #155E75 */
+      --vault: hsl(175.3 77.4% 26.1%);        /* #0F766E */
+      --ops: hsl(22.7 82.5% 31.4%);           /* #92400E */
+      --quant: hsl(263.4 70% 50.4%);          /* #6D28D9 */
+      --excel: hsl(163.1 88.1% 19.8%);        /* #065F46 */
+      --danger: hsl(0 73.7% 41.8%);           /* #B91C1C */
+      --success: hsl(162.9 93.5% 24.3%);      /* #047857 */
       --border: rgba(15, 23, 42, 0.1);
       --border-hover: rgba(15, 23, 42, 0.2);
       --input-bg: #FFFFFF;
@@ -308,10 +311,12 @@
    *   variant; `surface-soft` is the same hue at low opacity.
    * ───────────────────────────────────────────────────────────── */
 
-  /* CFA — blue (same as the app default). Restated for explicit-intent. */
+  /* CFA — blue (same as the app default). Restated for explicit-intent.
+     UA1: --accent / --accent-hover in HSL (exact byte-identical equivalents of
+     #60A5FA / #93C5FD); --surface-soft stays rgba (not a listed semantic). */
   [data-domain="cfa"] {
-    --accent:        #60A5FA;
-    --accent-hover:  #93C5FD;
+    --accent:        hsl(213.1 93.9% 67.8%); /* #60A5FA */
+    --accent-hover:  hsl(211.7 96.4% 78.4%); /* #93C5FD */
     --surface-soft:  rgba(96, 165, 250, 0.06);
     --color-accent:      var(--accent);
     --color-accent-soft: var(--surface-soft);
@@ -320,8 +325,8 @@
   /* Excel — green. Dark-theme defaults; light-theme block below tightens
      contrast for AA on white. */
   [data-domain="excel"] {
-    --accent:        #16A34A;
-    --accent-hover:  #4ADE80;
+    --accent:        hsl(142.1 76.2% 36.3%); /* #16A34A */
+    --accent-hover:  hsl(142 69% 58%);       /* #4ADE80 */
     --surface-soft:  rgba(22, 163, 74, 0.12);
     --color-accent:      var(--accent);
     --color-accent-soft: var(--surface-soft);
@@ -329,8 +334,8 @@
 
   /* Quant — magenta. Same per-theme pattern as Excel. */
   [data-domain="quant"] {
-    --accent:        #C084FC;
-    --accent-hover:  #E9D5FF;
+    --accent:        hsl(270 95.2% 75.3%);   /* #C084FC */
+    --accent-hover:  hsl(268.6 100% 91.8%);  /* #E9D5FF */
     --surface-soft:  rgba(192, 132, 252, 0.12);
     --color-accent:      var(--accent);
     --color-accent-soft: var(--surface-soft);
@@ -340,18 +345,18 @@
      WCAG 2.1 AA body-text contrast against #FFFFFF surface. Triggers on the
      explicit attribute and on the system-light media branch. */
   :root[data-theme="light"] [data-domain="cfa"] {
-    --accent:        #1D4ED8;
-    --accent-hover:  #1E40AF;
+    --accent:        hsl(224.3 76.3% 48%);   /* #1D4ED8 */
+    --accent-hover:  hsl(225.9 70.7% 40.2%); /* #1E40AF */
     --surface-soft:  rgba(37, 99, 235, 0.08);
   }
   :root[data-theme="light"] [data-domain="excel"] {
-    --accent:        #15803D;
-    --accent-hover:  #166534;
+    --accent:        hsl(142.4 71.8% 29.2%); /* #15803D */
+    --accent-hover:  hsl(142.8 64.2% 24.1%); /* #166534 */
     --surface-soft:  rgba(21, 128, 61, 0.10);
   }
   :root[data-theme="light"] [data-domain="quant"] {
-    --accent:        #A21CAF;
-    --accent-hover:  #86198F;
+    --accent:        hsl(294.7 72.4% 39.8%); /* #A21CAF */
+    --accent-hover:  hsl(295.4 70.2% 32.9%); /* #86198F */
     --surface-soft:  rgba(162, 28, 175, 0.10);
   }
 

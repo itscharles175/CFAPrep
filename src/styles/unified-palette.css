@@ -34,4 +34,41 @@
   --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Monaco,
     Consolas, 'Liberation Mono', 'Courier New', monospace;
   --font-serif: 'Newsreader Variable', ui-serif, Georgia, 'Times New Roman', serif;
+
+  /* ─────────────────────────────────────────────────────────────
+   * UA1 — SHARED SEMANTIC ALIASES (LSAT-vocabulary, BARE HSL triplets).
+   *
+   * The vendored LSAT domain consumes its Tailwind tokens as
+   * `hsl(var(--primary))`, `hsl(var(--border) / .5)`, etc. — i.e. each token
+   * is the bare "h s% l%" triplet WITHOUT an hsl() wrapper. These aliases give
+   * the host the SAME vocabulary, pointed at the host's own semantic colors so
+   * the two domains share one mental model. Each triplet equals the EXACT host
+   * value (1-decimal precision; byte-identical to the original hex — see the
+   * host :root in index.css). Consume with `hsl(var(--background))` etc.
+   *
+   * ADDITIVE + ZERO-REGRESSION. This file is imported LAST and unlayered, so a
+   * `:root` redefinition here WINS over index.css. Three LSAT names collide
+   * with EXISTING host tokens that the host reads as FULL colors (not triplets):
+   *   --border   → host: rgba(148,163,184,.1)  used as `1px solid var(--border)`
+   *   --success  → host: hsl(...)              used as `color: var(--success)`
+   *   --warning  → host: hsl(...)              used as `color: var(--warning)`
+   * ~100 host rules across src/ depend on those full-color forms; shadowing
+   * them with bare triplets would inject invalid values and break the host.
+   * So the colliding three are exposed under a `--lsat-` prefix instead — the
+   * parallel vocabulary stays complete (`hsl(var(--lsat-border))` works) while
+   * every existing host token name keeps its current value untouched. The
+   * LSAT domain itself still defines the un-prefixed --border/--success/
+   * --warning inside its own scoped @layer base (src/domains/lsat/index.css),
+   * so LSAT components are unaffected. */
+  --background:  217.5 33.3% 4.7%;  /* = host --bg-primary  (#080B10) */
+  --foreground:  210 40% 96%;       /* = host --text-primary (#F1F5F9) */
+  --card:        216.5 36.5% 12.4%; /* = host --bg-card      (#141D2B) */
+  --muted:       215 20% 65%;       /* = host --text-muted   (#94A3B8 slate-400) */
+  --primary:     213.1 93.9% 67.8%; /* = host --accent       (#60A5FA blue-400) */
+  --destructive: 0 84.2% 60.2%;     /* = host --danger       (#EF4444 red-500) */
+
+  /* Colliding LSAT names — prefixed to avoid shadowing host full-color tokens. */
+  --lsat-border:  213 27% 84%;      /* host border hue (slate-300 #CBD5E1) as a triplet */
+  --lsat-success: 160.1 84.1% 39.4%;/* = host --success (#10B981 emerald-500) */
+  --lsat-warning: 37.7 92.1% 50.2%; /* = host --warning (#F59E0B amber-500) */
 }

@@ -25,25 +25,30 @@
   --teal-500: #14B8A6;
   --ink-950: #05070B;
 
-  /* Semantic */
-  --bg-primary: var(--navy-900);
-  --bg-secondary: var(--navy-800);
-  --bg-card: #141D2B;
-  --bg-hover: var(--navy-600);
-  --text-primary: var(--slate-100);
-  --text-secondary: var(--slate-300);
-  --text-muted: var(--slate-400);
-  --accent: var(--blue-400);
-  --accent-hover: #93C5FD;
-  --exam: var(--gold);
-  --study: var(--cyan-500);
-  --vault: var(--teal-500);
-  --ops: var(--amber-500);
-  --quant: #C084FC;
-  --excel: var(--emerald-500);
-  --success: var(--emerald-500);
-  --warning: var(--amber-500);
-  --danger: var(--red-500);
+  /* Semantic — HSL form (UA1). Each value is the EXACT hsl() equivalent of its
+     prior hex (1-decimal precision so every channel round-trips byte-identical;
+     integer hsl would shift several colors by ±1 sRGB step). The semantic layer
+     is self-contained HSL — raw-token var() refs were inlined to their literal
+     hsl. Raw scale tokens (--navy-*, --slate-*, etc.) and rgba/border tokens are
+     unchanged. Original hex kept in the trailing comment for each line. */
+  --bg-primary: hsl(217.5 33.3% 4.7%);    /* #080B10 (navy-900) */
+  --bg-secondary: hsl(218.8 34.7% 9.6%);  /* #101621 (navy-800) */
+  --bg-card: hsl(216.5 36.5% 12.4%);      /* #141D2B */
+  --bg-hover: hsl(219.4 29.1% 21.6%);     /* #273247 (navy-600) */
+  --text-primary: hsl(210 40% 96%);       /* #F1F5F9 (slate-100) */
+  --text-secondary: hsl(213 27% 84%);     /* #CBD5E1 (slate-300) */
+  --text-muted: hsl(215 20% 65%);         /* #94A3B8 (slate-400) */
+  --accent: hsl(213.1 93.9% 67.8%);       /* #60A5FA (blue-400) */
+  --accent-hover: hsl(211.7 96.4% 78.4%); /* #93C5FD */
+  --exam: hsl(39.5 60% 57.8%);            /* #D4A853 (gold) */
+  --study: hsl(188.7 94.5% 42.7%);        /* #06B6D4 (cyan-500) */
+  --vault: hsl(173.4 80.4% 40%);          /* #14B8A6 (teal-500) */
+  --ops: hsl(37.7 92.1% 50.2%);           /* #F59E0B (amber-500) */
+  --quant: hsl(270 95.2% 75.3%);          /* #C084FC */
+  --excel: hsl(160.1 84.1% 39.4%);        /* #10B981 (emerald-500) */
+  --success: hsl(160.1 84.1% 39.4%);      /* #10B981 (emerald-500) */
+  --warning: hsl(37.7 92.1% 50.2%);       /* #F59E0B (amber-500) */
+  --danger: hsl(0 84.2% 60.2%);           /* #EF4444 (red-500) */
   --border: rgba(148, 163, 184, 0.1);
   --border-hover: rgba(148, 163, 184, 0.2);
   --input-bg: rgba(15, 23, 42, 0.76);
@@ -112,23 +117,25 @@
 }
 
 :root[data-theme="light"] {
-  --bg-primary: #F4F7FB;
-  --bg-secondary: #FFFFFF;
-  --bg-card: #FFFFFF;
-  --bg-hover: #CBD5E1;
-  --text-primary: #0F172A;
-  --text-secondary: #334155;
-  --text-muted: #334155;
-  --accent: #1D4ED8;
-  --accent-hover: #1E40AF;
-  --exam: #8A5A05;
-  --study: #155E75;
-  --vault: #0F766E;
-  --ops: #92400E;
-  --quant: #6D28D9;
-  --excel: #065F46;
-  --danger: #B91C1C;
-  --success: #047857;
+  /* Semantic tokens in HSL (UA1) — exact 1-decimal hsl equivalents of the prior
+     light-theme hex; each round-trips byte-identical. Original hex in comments. */
+  --bg-primary: hsl(214 47% 97%);         /* #F4F7FB */
+  --bg-secondary: hsl(0 0% 100%);         /* #FFFFFF */
+  --bg-card: hsl(0 0% 100%);              /* #FFFFFF */
+  --bg-hover: hsl(213 27% 84%);           /* #CBD5E1 */
+  --text-primary: hsl(222.2 47.4% 11.2%); /* #0F172A */
+  --text-secondary: hsl(215.3 25% 26.7%); /* #334155 */
+  --text-muted: hsl(215.3 25% 26.7%);     /* #334155 */
+  --accent: hsl(224.3 76.3% 48%);         /* #1D4ED8 */
+  --accent-hover: hsl(225.9 70.7% 40.2%); /* #1E40AF */
+  --exam: hsl(38.3 93% 28%);              /* #8A5A05 */
+  --study: hsl(194.4 69.6% 27.1%);        /* #155E75 */
+  --vault: hsl(175.3 77.4% 26.1%);        /* #0F766E */
+  --ops: hsl(22.7 82.5% 31.4%);           /* #92400E */
+  --quant: hsl(263.4 70% 50.4%);          /* #6D28D9 */
+  --excel: hsl(163.1 88.1% 19.8%);        /* #065F46 */
+  --danger: hsl(0 73.7% 41.8%);           /* #B91C1C */
+  --success: hsl(162.9 93.5% 24.3%);      /* #047857 */
   --border: rgba(15, 23, 42, 0.1);
   --border-hover: rgba(15, 23, 42, 0.2);
   --input-bg: #FFFFFF;
