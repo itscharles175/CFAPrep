@@ -8,10 +8,13 @@
 // packaging (Pillar 0, still open) needs to bundle the Python backend via
 // PyInstaller into Tauri's `resourceDir()` and update this path resolution.
 // Set the `QV_SERVICES_DIR` env var to override the search at runtime.
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::io::{BufRead, BufReader};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
-use std::sync::Mutex;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, RunEvent};
@@ -30,6 +33,93 @@ struct SupervisedSidecar {
 /// task and the Tauri exit handler both touch it.
 #[derive(Default)]
 struct Sidecars(Mutex<Vec<SupervisedSidecar>>);
+
+/// Max log lines retained per sidecar in the in-memory ring buffer. Once a
+/// sidecar's buffer reaches this length, each new line evicts the oldest, so
+/// memory stays bounded no matter how chatty (or long-lived) a sidecar is.
+const LOG_RING_CAPACITY: usize = 500;
+
+/// In-memory rolling log buffer (BA8). One bounded `VecDeque<String>` per
+/// sidecar name, holding the most recent `LOG_RING_CAPACITY` lines captured
+/// from that child's stdout + stderr. Wrapped in an `Arc<Mutex<..>>` so the
+/// per-stream reader threads (one stdout + one stderr thread per child, plus
+/// fresh ones on every respawn) can all append concurrently, and so the
+/// `get_sidecar_logs` Tauri command can snapshot a buffer for the UI.
+///
+/// Managed as Tauri state. `Arc` (not just a bare `Mutex`) because the reader
+/// threads outlive any single borrow of the managed state: they hold their own
+/// clone of the handle for the lifetime of the child.
+#[derive(Default, Clone)]
+struct SidecarLogs(Arc<Mutex<HashMap<String, VecDeque<String>>>>);
+
+impl SidecarLogs {
+    /// Append one captured line to `name`'s ring buffer, evicting the oldest
+    /// line once the buffer is at capacity. Lock poisoning is recovered from
+    /// rather than panicking — a wedged reader thread must not be able to take
+    /// down sibling capture or the log command.
+    fn push_line(&self, name: &str, line: String) {
+        let mut guard = match self.0.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let buf = guard.entry(name.to_string()).or_default();
+        if buf.len() >= LOG_RING_CAPACITY {
+            buf.pop_front();
+        }
+        buf.push_back(line);
+    }
+
+    /// Snapshot the current buffer for `name` as a `Vec<String>` (oldest →
+    /// newest). Returns an empty vec for a sidecar we've captured nothing from.
+    fn snapshot(&self, name: &str) -> Vec<String> {
+        let guard = match self.0.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard
+            .get(name)
+            .map(|buf| buf.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+}
+
+/// Take the piped stdout/stderr off a freshly-spawned child and stream each
+/// line into the shared ring buffer under `name`. Spawns one detached reader
+/// thread per stream; each reads to EOF (child exit / stream close) and then
+/// ends on its own. A child launched without `Stdio::piped()` (e.g. the test
+/// mock launcher) simply has `None` streams here, so this is a safe no-op for
+/// those — capture only engages for the real `ProcessLauncher`.
+///
+/// Used by both the initial spawn (`spawn_sidecars_with`) and the BA1 respawn
+/// path (`supervise_once`), so a respawned child re-attaches fresh capture.
+fn attach_log_capture(name: &str, child: &mut Child, logs: &SidecarLogs) {
+    if let Some(stdout) = child.stdout.take() {
+        spawn_stream_reader(name.to_string(), stdout, logs.clone());
+    }
+    if let Some(stderr) = child.stderr.take() {
+        spawn_stream_reader(name.to_string(), stderr, logs.clone());
+    }
+}
+
+/// Spawn a detached thread that reads `stream` line-by-line and appends each to
+/// `logs` under `name`. Generic over the reader so a unit test can drive it
+/// with an in-memory cursor instead of a real pipe. Lines that fail to decode
+/// (I/O error mid-read) end the loop quietly — partial capture beats crashing.
+fn spawn_stream_reader<R: std::io::Read + Send + 'static>(
+    name: String,
+    stream: R,
+    logs: SidecarLogs,
+) {
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stream);
+        for line in reader.lines() {
+            match line {
+                Ok(text) => logs.push_line(&name, text),
+                Err(_) => break,
+            }
+        }
+    });
+}
 
 /// How often the background supervisor probes each sidecar's readiness port.
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(7);
@@ -296,6 +386,14 @@ impl SidecarLauncher for ProcessLauncher {
         for (k, v) in &spec.env {
             cmd.env(k, v);
         }
+        // BA8: capture the child's stdout + stderr through pipes so the
+        // supervisor can stream each into the in-memory log ring buffer. The
+        // caller (`spawn_sidecars_with` / `supervise_once`) takes these handles
+        // off the returned child via `attach_log_capture`; if it didn't, the
+        // pipes would fill and eventually block the child — so piping here is
+        // always paired with a reader on the spawn path.
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
         cmd.spawn().map_err(|e| e.to_string())
     }
 }
@@ -408,12 +506,21 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
 /// Returns each spawned child paired with the spec that produced it, so the
 /// Tauri runtime can kill them on exit and the health-poll task can respawn a
 /// crashed one from its retained recipe.
-fn spawn_sidecars_with<L: SidecarLauncher>(launcher: &L, dir: &Path) -> Vec<SupervisedSidecar> {
+///
+/// BA8: each successfully-launched child has its stdout + stderr attached to
+/// the shared `logs` ring buffer before being retained, so the log viewer sees
+/// output from process start.
+fn spawn_sidecars_with<L: SidecarLauncher>(
+    launcher: &L,
+    dir: &Path,
+    logs: &SidecarLogs,
+) -> Vec<SupervisedSidecar> {
     let mut kids = Vec::new();
     for spec in build_sidecar_specs(dir) {
         match launcher.launch(&spec) {
-            Ok(child) => {
+            Ok(mut child) => {
                 log::info!("sidecar: {} started (pid {})", spec.name, child.id());
+                attach_log_capture(&spec.name, &mut child, logs);
                 kids.push(SupervisedSidecar { spec, child });
             }
             Err(e) => log::error!("sidecar: {} failed to start: {e}", spec.name),
@@ -422,9 +529,9 @@ fn spawn_sidecars_with<L: SidecarLauncher>(launcher: &L, dir: &Path) -> Vec<Supe
     kids
 }
 
-fn spawn_sidecars() -> Vec<SupervisedSidecar> {
+fn spawn_sidecars(logs: &SidecarLogs) -> Vec<SupervisedSidecar> {
     let dir = services_dir();
-    spawn_sidecars_with(&ProcessLauncher, &dir)
+    spawn_sidecars_with(&ProcessLauncher, &dir, logs)
 }
 
 /// Probe one sidecar's readiness port. Sidecars with no `ready_port` (the
@@ -442,9 +549,13 @@ fn probe_sidecar_healthy(spec: &SidecarSpec) -> bool {
 /// port and respawn any found down using its retained spec. Returns the names
 /// that were respawned (for logging / tests). Pulled out of the async loop so
 /// it can be driven directly in a unit test with a mock launcher.
+///
+/// BA8: a respawned child gets fresh log capture attached (its stdout/stderr
+/// pipes are new), so the ring buffer keeps streaming across a restart.
 fn supervise_once<L: SidecarLauncher>(
     launcher: &L,
     sidecars: &Mutex<Vec<SupervisedSidecar>>,
+    logs: &SidecarLogs,
 ) -> Vec<String> {
     let mut respawned = Vec::new();
     let mut guard = match sidecars.lock() {
@@ -471,8 +582,11 @@ fn supervise_once<L: SidecarLauncher>(
             let _ = slot.child.kill();
             let _ = slot.child.wait();
             match launcher.launch(&slot.spec) {
-                Ok(child) => {
+                Ok(mut child) => {
                     log::info!("sidecar: {name} respawned (pid {})", child.id());
+                    // Re-attach capture: the new child has fresh stdout/stderr
+                    // pipes, so its output keeps flowing into the ring buffer.
+                    attach_log_capture(&name, &mut child, logs);
                     slot.child = child;
                     respawned.push(name);
                 }
@@ -498,7 +612,15 @@ fn spawn_health_supervisor(app: AppHandle) {
             let join = tauri::async_runtime::spawn_blocking(move || {
                 std::thread::sleep(HEALTH_POLL_INTERVAL);
                 if let Some(state) = app.try_state::<Sidecars>() {
-                    supervise_once(&ProcessLauncher, &state.0);
+                    // BA8: hand the supervisor the shared log store so a
+                    // respawned child re-attaches capture. The store is always
+                    // managed alongside `Sidecars`; default to an empty one if
+                    // somehow absent rather than skip the sweep.
+                    let logs = app
+                        .try_state::<SidecarLogs>()
+                        .map(|s| s.inner().clone())
+                        .unwrap_or_default();
+                    supervise_once(&ProcessLauncher, &state.0, &logs);
                 }
             });
             // If the blocking task itself fails to join (runtime shutting down),
@@ -528,6 +650,16 @@ fn get_sidecar_status(state: tauri::State<'_, Sidecars>) -> Vec<SidecarStatus> {
             pid: Some(slot.child.id()),
         })
         .collect()
+}
+
+/// Tauri command backing the UI log viewer (BA8). Returns the most recent
+/// captured stdout/stderr lines (up to `LOG_RING_CAPACITY`) for the named
+/// sidecar, oldest first. An unknown name — or a sidecar that hasn't emitted
+/// anything yet — yields an empty vec rather than an error, so the viewer can
+/// poll any name without special-casing.
+#[tauri::command]
+fn get_sidecar_logs(name: String, logs: tauri::State<'_, SidecarLogs>) -> Vec<String> {
+    logs.snapshot(&name)
 }
 
 #[cfg(test)]
@@ -932,7 +1064,8 @@ mod tests {
     #[test]
     fn spawn_sidecars_with_invokes_launcher_for_every_spec() {
         let launcher = MockLauncher::new(vec![]);
-        let mut kids = spawn_sidecars_with(&launcher, Path::new("C:/qv/services"));
+        let logs = SidecarLogs::default();
+        let mut kids = spawn_sidecars_with(&launcher, Path::new("C:/qv/services"), &logs);
         let calls = launcher.calls.borrow();
         let names: Vec<_> = calls.iter().map(|s| s.name.clone()).collect();
         assert_eq!(
@@ -958,7 +1091,8 @@ mod tests {
     #[test]
     fn spawn_sidecars_with_skips_failed_sidecars_but_continues() {
         let launcher = MockLauncher::new(vec!["SurrealDB"]);
-        let mut kids = spawn_sidecars_with(&launcher, Path::new("C:/qv/services"));
+        let logs = SidecarLogs::default();
+        let mut kids = spawn_sidecars_with(&launcher, Path::new("C:/qv/services"), &logs);
         // All four specs were attempted, even though SurrealDB returned Err.
         assert_eq!(launcher.calls.borrow().len(), 4);
         // Only the three successful launches yield Child handles.
@@ -1031,7 +1165,8 @@ mod tests {
         let state: Mutex<Vec<SupervisedSidecar>> =
             Mutex::new(vec![SupervisedSidecar { spec, child }]);
 
-        let respawned = supervise_once(&launcher, &state);
+        let logs = SidecarLogs::default();
+        let respawned = supervise_once(&launcher, &state, &logs);
         assert_eq!(respawned, vec!["ephemeral".to_string()]);
         // The launcher was called once more for the respawn (initial launch
         // above used the same mock, so total calls == 2).
@@ -1061,7 +1196,8 @@ mod tests {
         let state: Mutex<Vec<SupervisedSidecar>> =
             Mutex::new(vec![SupervisedSidecar { spec, child }]);
 
-        let respawned = supervise_once(&launcher, &state);
+        let logs = SidecarLogs::default();
+        let respawned = supervise_once(&launcher, &state, &logs);
         assert!(
             respawned.is_empty(),
             "a running port-less sidecar should not be respawned"
@@ -1122,6 +1258,80 @@ mod tests {
         assert_eq!(specs[2].ready_port, None); // worker (no socket)
         assert_eq!(specs[3].ready_port, Some(8100)); // LSAT backend
     }
+
+    // ---- SidecarLogs ring buffer (BA8) ----
+
+    #[test]
+    fn sidecar_logs_snapshot_is_empty_for_unknown_name() {
+        let logs = SidecarLogs::default();
+        assert!(logs.snapshot("never-seen").is_empty());
+    }
+
+    #[test]
+    fn sidecar_logs_keeps_lines_in_order_and_keyed_by_name() {
+        let logs = SidecarLogs::default();
+        logs.push_line("SurrealDB", "starting".into());
+        logs.push_line("SurrealDB", "listening on 8000".into());
+        logs.push_line("LSAT backend", "boot".into());
+
+        assert_eq!(
+            logs.snapshot("SurrealDB"),
+            vec!["starting".to_string(), "listening on 8000".to_string()]
+        );
+        // A second sidecar's buffer is independent.
+        assert_eq!(logs.snapshot("LSAT backend"), vec!["boot".to_string()]);
+    }
+
+    #[test]
+    fn sidecar_logs_evicts_oldest_past_capacity() {
+        let logs = SidecarLogs::default();
+        // Push one more than the cap; the very first line must be evicted while
+        // the buffer length stays pinned at the capacity.
+        for i in 0..(LOG_RING_CAPACITY + 1) {
+            logs.push_line("worker", format!("line {i}"));
+        }
+        let snap = logs.snapshot("worker");
+        assert_eq!(snap.len(), LOG_RING_CAPACITY);
+        // Oldest ("line 0") evicted; window is now line 1 ..= line CAP.
+        assert_eq!(snap.first().unwrap(), "line 1");
+        assert_eq!(snap.last().unwrap(), &format!("line {LOG_RING_CAPACITY}"));
+    }
+
+    #[test]
+    fn spawn_stream_reader_captures_lines_into_the_buffer() {
+        use std::io::Cursor;
+        let logs = SidecarLogs::default();
+        // Drive the reader with an in-memory stream instead of a real pipe; the
+        // reader thread reads to EOF then exits. Join via the snapshot once the
+        // shared buffer reflects all three lines.
+        let stream = Cursor::new(b"first\nsecond\nthird\n".to_vec());
+        spawn_stream_reader("api".to_string(), stream, logs.clone());
+
+        // The reader runs on its own thread; poll the snapshot briefly until it
+        // has drained the cursor (bounded so a regression fails fast).
+        let mut snap = logs.snapshot("api");
+        for _ in 0..100 {
+            if snap.len() == 3 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+            snap = logs.snapshot("api");
+        }
+        assert_eq!(
+            snap,
+            vec!["first".to_string(), "second".to_string(), "third".to_string()]
+        );
+    }
+
+    #[test]
+    fn get_sidecar_logs_command_returns_named_buffer() {
+        // Exercises the command's pure path (snapshot lookup) without bringing
+        // up a Tauri State wrapper — the command body is a thin forward.
+        let logs = SidecarLogs::default();
+        logs.push_line("SurrealDB", "hello".into());
+        assert_eq!(logs.snapshot("SurrealDB"), vec!["hello".to_string()]);
+        assert!(logs.snapshot("absent").is_empty());
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1133,9 +1343,11 @@ pub fn run() {
             cfa_list_pdfs,
             cfa_pick_folder,
             cfa_read_pdf_bytes,
-            get_sidecar_status
+            get_sidecar_status,
+            get_sidecar_logs
         ])
         .manage(Sidecars::default())
+        .manage(SidecarLogs::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -1144,7 +1356,14 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            let kids = spawn_sidecars();
+            // BA8: capture sidecar stdout/stderr into the managed log ring
+            // buffer from launch. The store is shared with the health
+            // supervisor so respawned children re-attach capture.
+            let logs = app
+                .try_state::<SidecarLogs>()
+                .map(|s| s.inner().clone())
+                .unwrap_or_default();
+            let kids = spawn_sidecars(&logs);
             if let Some(state) = app.try_state::<Sidecars>() {
                 *state.0.lock().unwrap() = kids;
             }
