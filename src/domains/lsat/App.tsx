@@ -58,6 +58,8 @@ import {
   routeIsVisible,
   routeManifest,
 } from "@lsat/lib/routeManifest";
+// S4: cross-domain jumps into the StudyVault host (the `@` alias → /src).
+import { navigateDomain } from "@/lib/domainNav";
 
 // Code-split heavy routes (R4-H1) + non-critical shelled routes (R5-J1).
 // P5 — the full-bleed exam screens are large and never the first paint (the
@@ -490,9 +492,20 @@ function GlobalChrome({ children }: { children: React.ReactNode }) {
           perform: () => navigate("/dev/styleguide"),
         });
       }
+      // S4: the LSAT ⌘K also reaches the StudyVault host domains — one palette
+      // spans both apps. These soft-swap domains (no full reload).
+      const hostActions: CommandAction[] = [
+        { id: "host-home", group: "StudyVault", label: "StudyVault Home", keywords: ["host", "dashboard", "home"], perform: () => navigateDomain("/") },
+        { id: "host-cfa", group: "StudyVault", label: "CFA Program", keywords: ["host", "cfa", "finance"], perform: () => navigateDomain("/cfa") },
+        { id: "host-quant", group: "StudyVault", label: "Quant Finance", keywords: ["host", "quant"], perform: () => navigateDomain("/quant") },
+        { id: "host-excel", group: "StudyVault", label: "Excel Training", keywords: ["host", "excel"], perform: () => navigateDomain("/excel") },
+        { id: "host-today", group: "StudyVault", label: "Today (host)", keywords: ["host", "today", "plan"], perform: () => navigateDomain("/today") },
+        { id: "host-review", group: "StudyVault", label: "Review Inbox (host)", keywords: ["host", "review", "due"], perform: () => navigateDomain("/review") },
+      ];
       return [
       ...recents,
       ...navActions,
+      ...hostActions,
       // ---- Actions ----
       {
         id: "act-start-drill",

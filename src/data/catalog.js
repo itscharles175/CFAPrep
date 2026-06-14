@@ -133,8 +133,22 @@ export function buildSearchItems(options = {}) {
     subtitle: domain.subtitle,
     type: 'Domain',
     path: domain.path,
+    // S4: external domains (LSAT) live under their own router — the palette must
+    // soft-navigate cross-domain, not use the host client router.
+    external: domain.external || false,
     keywords: [domain.title, domain.subtitle, domain.description],
   }));
+
+  // S4: deep jumps into the LSAT domain from the host ⌘K (one palette reaches
+  // both domains). All cross-domain → soft-navigated via navigateDomain.
+  const lsatRouteItems = [
+    { id: 'lsat:practice', title: 'LSAT — Practice', path: '/lsat/practice', keywords: ['lsat', 'practice', 'questions'] },
+    { id: 'lsat:preptests', title: 'LSAT — PrepTests', path: '/lsat/preptests', keywords: ['lsat', 'preptest', 'exam', 'timed'] },
+    { id: 'lsat:drills', title: 'LSAT — Drills', path: '/lsat/drills', keywords: ['lsat', 'drill', 'adaptive'] },
+    { id: 'lsat:srs', title: 'LSAT — SRS Review', path: '/lsat/srs', keywords: ['lsat', 'srs', 'spaced repetition', 'due'] },
+    { id: 'lsat:analytics', title: 'LSAT — Analytics', path: '/lsat/analytics', keywords: ['lsat', 'analytics', 'readiness'] },
+    { id: 'lsat:settings', title: 'LSAT — Model Settings', path: '/lsat/settings', keywords: ['lsat', 'settings', 'model', 'ai', 'provider'] },
+  ].map((item) => ({ ...item, subtitle: 'LSAT domain', type: 'LSAT', external: true }));
 
   const cfaItems = cfaTopics.map((topic) => ({
     id: `cfa:${topic.id}`,
@@ -184,5 +198,5 @@ export function buildSearchItems(options = {}) {
     keywords: [formula.name, formula.category, formula.desc, formula.latex],
   }));
 
-  return [...searchToolRoutes, ...domainItems, ...cfaItems, ...cfaLevel3Items, ...quantItems, ...excelItems, ...formulaItems];
+  return [...searchToolRoutes, ...domainItems, ...lsatRouteItems, ...cfaItems, ...cfaLevel3Items, ...quantItems, ...excelItems, ...formulaItems];
 }

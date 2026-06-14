@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Bell, HelpCircle, Menu, Monitor, Moon, RefreshCw, Search, Sun, WifiOff, X } from 'lucide-react';
 import { buildSearchItems } from '../../data/catalog';
+import { navigateDomain } from '../../lib/domainNav';
 import { level3TopicBelongsToPathway } from '../../domains/cfa/cfaLevel3Pathways';
 import { useLevel3Pathway } from '../../domains/cfa/useLevel3Pathway';
 import { useTheme } from '../../context/ThemeContext';
@@ -22,6 +23,8 @@ interface SearchResultItem {
   keywords: string[];
   disabled?: boolean;
   action?: 'backup' | 'repair' | 'theme';
+  /** S4: route lives in another domain (LSAT) → soft-navigate cross-domain. */
+  external?: boolean;
 }
 
 function normalizeSearch(value: string): string {
@@ -207,6 +210,10 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
     } else if (item.action === 'theme') {
       cycleTheme();
       setCommandMessage('Theme cycled.');
+    } else if (item.external) {
+      // S4: cross-domain jump (e.g. into LSAT) — soft-swap via the unified root,
+      // not the host client router (which has no /lsat route).
+      navigateDomain(item.path);
     } else {
       navigate(item.path);
     }
