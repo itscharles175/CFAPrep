@@ -17,8 +17,42 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_dialog::DialogExt;
 
+/// One supervised sidecar: its declarative spec (retained so a crashed process
+/// can be respawned from the same recipe) paired with the live `Child` handle.
+struct SupervisedSidecar {
+    spec: SidecarSpec,
+    child: Child,
+}
+
+/// Managed supervisor state. Holds every sidecar we launched alongside the spec
+/// that produced it, so the health-poll task (BA1) can respawn a crashed one
+/// without re-deriving the recipe. Behind a `Mutex` because the background poll
+/// task and the Tauri exit handler both touch it.
 #[derive(Default)]
-struct Sidecars(Mutex<Vec<Child>>);
+struct Sidecars(Mutex<Vec<SupervisedSidecar>>);
+
+/// How often the background supervisor probes each sidecar's readiness port.
+const HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(7);
+
+/// Per-probe TCP connect timeout. Kept well under the poll interval so a slow
+/// or wedged port never stalls the supervisor loop for a full cycle.
+const HEALTH_PROBE_TIMEOUT_MS: u64 = 750;
+
+/// Status snapshot for one supervised sidecar, returned by the
+/// `get_sidecar_status` command so the UI can render a health panel.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+struct SidecarStatus {
+    name: String,
+    /// Readiness port probed by the supervisor, or `None` for sidecars that
+    /// expose no listening socket (e.g. the open-notebook worker).
+    port: Option<u16>,
+    /// `true` when the readiness port is accepting connections. Sidecars with
+    /// no `port` report `true` as long as their process handle is retained
+    /// (we have no socket to probe, so liveness is the best signal available).
+    healthy: bool,
+    /// OS process id of the live child, if one is currently tracked.
+    pid: Option<u32>,
+}
 
 #[derive(Serialize, Debug)]
 struct PdfEntry {
@@ -239,6 +273,11 @@ struct SidecarSpec {
     args: Vec<String>,
     /// Extra env vars layered onto the inherited environment.
     env: Vec<(String, String)>,
+    /// Local TCP port the supervisor probes to decide if this sidecar is up
+    /// (SurrealDB 8000, open-notebook API 5055, LSAT backend 8100). `None` for
+    /// processes that expose no listening socket — the worker, which the
+    /// supervisor can only watch by process liveness, not by port.
+    ready_port: Option<u16>,
 }
 
 /// Abstraction over "spawn this child". The production impl shells out via
@@ -292,6 +331,8 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
             format!("rocksdb:{}", db.display()),
         ],
         env: vec![],
+        // SurrealDB defaults to binding 127.0.0.1:8000.
+        ready_port: Some(8000),
     };
 
     let api = SidecarSpec {
@@ -307,6 +348,8 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
             "run_api.py".into(),
         ],
         env: vec![],
+        // open-notebook's FastAPI app listens on 127.0.0.1:5055.
+        ready_port: Some(5055),
     };
 
     let worker = SidecarSpec {
@@ -326,6 +369,9 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
             ("PYTHONUTF8".into(), "1".into()),
             ("PYTHONIOENCODING".into(), "utf-8".into()),
         ],
+        // The worker is a background queue consumer with no listening socket;
+        // the supervisor can only watch it by process liveness.
+        ready_port: None,
     };
 
     // StudyVault's LSAT domain backend — the frozen PyInstaller sidecar built
@@ -350,6 +396,8 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
             ("PYTHONUTF8".into(), "1".into()),
             ("PYTHONIOENCODING".into(), "utf-8".into()),
         ],
+        // The frozen LSAT backend binds 127.0.0.1:8100.
+        ready_port: Some(8100),
     };
 
     vec![surreal, api, worker, lsat]
@@ -357,14 +405,16 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
 
 /// Iterate the given launcher over `build_sidecar_specs(dir)`, logging
 /// successes and failures the same way the prior inline supervisor did.
-/// Returns the spawned children so the Tauri runtime can kill them on exit.
-fn spawn_sidecars_with<L: SidecarLauncher>(launcher: &L, dir: &Path) -> Vec<Child> {
+/// Returns each spawned child paired with the spec that produced it, so the
+/// Tauri runtime can kill them on exit and the health-poll task can respawn a
+/// crashed one from its retained recipe.
+fn spawn_sidecars_with<L: SidecarLauncher>(launcher: &L, dir: &Path) -> Vec<SupervisedSidecar> {
     let mut kids = Vec::new();
     for spec in build_sidecar_specs(dir) {
         match launcher.launch(&spec) {
-            Ok(c) => {
-                log::info!("sidecar: {} started (pid {})", spec.name, c.id());
-                kids.push(c);
+            Ok(child) => {
+                log::info!("sidecar: {} started (pid {})", spec.name, child.id());
+                kids.push(SupervisedSidecar { spec, child });
             }
             Err(e) => log::error!("sidecar: {} failed to start: {e}", spec.name),
         }
@@ -372,9 +422,112 @@ fn spawn_sidecars_with<L: SidecarLauncher>(launcher: &L, dir: &Path) -> Vec<Chil
     kids
 }
 
-fn spawn_sidecars() -> Vec<Child> {
+fn spawn_sidecars() -> Vec<SupervisedSidecar> {
     let dir = services_dir();
     spawn_sidecars_with(&ProcessLauncher, &dir)
+}
+
+/// Probe one sidecar's readiness port. Sidecars with no `ready_port` (the
+/// worker) have no socket to check, so we report them healthy here — the
+/// supervisor falls back to process-liveness for those. Extracted as a pure
+/// helper so the poll loop reads clearly and stays unit-testable.
+fn probe_sidecar_healthy(spec: &SidecarSpec) -> bool {
+    match spec.ready_port {
+        Some(port) => is_port_listening("127.0.0.1", port, HEALTH_PROBE_TIMEOUT_MS),
+        None => true,
+    }
+}
+
+/// One supervision sweep over the managed sidecars: probe each one's readiness
+/// port and respawn any found down using its retained spec. Returns the names
+/// that were respawned (for logging / tests). Pulled out of the async loop so
+/// it can be driven directly in a unit test with a mock launcher.
+fn supervise_once<L: SidecarLauncher>(
+    launcher: &L,
+    sidecars: &Mutex<Vec<SupervisedSidecar>>,
+) -> Vec<String> {
+    let mut respawned = Vec::new();
+    let mut guard = match sidecars.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    for slot in guard.iter_mut() {
+        // A sidecar that exposes a readiness port is "down" when that port is
+        // not accepting connections. Port-less sidecars (the worker) are only
+        // probed for process liveness via `try_wait`.
+        let port_down = slot
+            .spec
+            .ready_port
+            .map(|port| !is_port_listening("127.0.0.1", port, HEALTH_PROBE_TIMEOUT_MS))
+            .unwrap_or(false);
+        let process_exited = matches!(slot.child.try_wait(), Ok(Some(_)));
+
+        if port_down || process_exited {
+            let name = slot.spec.name.clone();
+            log::warn!(
+                "sidecar: {name} appears down (port_down={port_down}, exited={process_exited}); respawning"
+            );
+            // Reap the old handle so we don't leak a zombie on Unix.
+            let _ = slot.child.kill();
+            let _ = slot.child.wait();
+            match launcher.launch(&slot.spec) {
+                Ok(child) => {
+                    log::info!("sidecar: {name} respawned (pid {})", child.id());
+                    slot.child = child;
+                    respawned.push(name);
+                }
+                Err(e) => log::error!("sidecar: {name} respawn failed: {e}"),
+            }
+        }
+    }
+    respawned
+}
+
+/// Background supervisor: every `HEALTH_POLL_INTERVAL`, sweep the managed
+/// sidecars and respawn any that have fallen over. Spawned onto Tauri's async
+/// runtime during setup; runs for the lifetime of the app.
+///
+/// Each cycle's wait + probe is handed to `spawn_blocking` so the (blocking)
+/// `sleep` and synchronous TCP/`try_wait` probes never park an async executor
+/// worker. This keeps the supervisor dependency-free — no direct `tokio` timer
+/// dep — while still living on Tauri's runtime as required.
+fn spawn_health_supervisor(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let app = app.clone();
+            let join = tauri::async_runtime::spawn_blocking(move || {
+                std::thread::sleep(HEALTH_POLL_INTERVAL);
+                if let Some(state) = app.try_state::<Sidecars>() {
+                    supervise_once(&ProcessLauncher, &state.0);
+                }
+            });
+            // If the blocking task itself fails to join (runtime shutting down),
+            // stop the loop rather than spin.
+            if join.await.is_err() {
+                break;
+            }
+        }
+    });
+}
+
+/// Tauri command backing the UI health panel. Probes each managed sidecar's
+/// readiness port and reports name / port / healthy / pid. Port-less sidecars
+/// report healthy as long as their process handle is still tracked.
+#[tauri::command]
+fn get_sidecar_status(state: tauri::State<'_, Sidecars>) -> Vec<SidecarStatus> {
+    let guard = match state.0.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    guard
+        .iter()
+        .map(|slot| SidecarStatus {
+            name: slot.spec.name.clone(),
+            port: slot.spec.ready_port,
+            healthy: probe_sidecar_healthy(&slot.spec),
+            pid: Some(slot.child.id()),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -792,10 +945,13 @@ mod tests {
             ]
         );
         assert_eq!(kids.len(), 4);
+        // Each slot retains the spec that produced it (so a crash can be
+        // respawned), paired with the live child.
+        assert_eq!(kids[0].spec.name, "SurrealDB");
         // Lifecycle: reap the synthesized mock children so they don't linger.
-        for c in kids.iter_mut() {
-            let _ = c.kill();
-            let _ = c.wait();
+        for s in kids.iter_mut() {
+            let _ = s.child.kill();
+            let _ = s.child.wait();
         }
     }
 
@@ -807,10 +963,164 @@ mod tests {
         assert_eq!(launcher.calls.borrow().len(), 4);
         // Only the three successful launches yield Child handles.
         assert_eq!(kids.len(), 3);
-        for c in kids.iter_mut() {
-            let _ = c.kill();
-            let _ = c.wait();
+        for s in kids.iter_mut() {
+            let _ = s.child.kill();
+            let _ = s.child.wait();
         }
+    }
+
+    // ---- health supervisor (probe_sidecar_healthy + supervise_once) ----
+
+    #[test]
+    fn probe_sidecar_healthy_reports_portless_sidecar_as_healthy() {
+        // The worker has no readiness port; with no socket to probe we treat it
+        // as healthy at the probe level (liveness is checked separately).
+        let worker = SidecarSpec {
+            name: "open-notebook worker".into(),
+            program: PathBuf::from("uv"),
+            args: vec![],
+            env: vec![],
+            ready_port: None,
+        };
+        assert!(probe_sidecar_healthy(&worker));
+    }
+
+    #[test]
+    fn probe_sidecar_healthy_follows_the_port_state() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let up_port = listener.local_addr().unwrap().port();
+        let up = SidecarSpec {
+            name: "up".into(),
+            program: PathBuf::from("x"),
+            args: vec![],
+            env: vec![],
+            ready_port: Some(up_port),
+        };
+        assert!(probe_sidecar_healthy(&up), "bound port should read healthy");
+        drop(listener);
+
+        // Port 0 is never a listening destination — unambiguously down.
+        let down = SidecarSpec {
+            name: "down".into(),
+            program: PathBuf::from("x"),
+            args: vec![],
+            env: vec![],
+            ready_port: Some(0),
+        };
+        assert!(!probe_sidecar_healthy(&down), "port 0 should read down");
+    }
+
+    #[test]
+    fn supervise_once_respawns_a_sidecar_whose_process_has_exited() {
+        // Build one supervised slot around a spec with no readiness port (so
+        // the only down-signal is process exit) wrapping an already-finished
+        // child. `supervise_once` must detect the exit and relaunch from the
+        // retained spec via the mock launcher.
+        let launcher = MockLauncher::new(vec![]);
+        let spec = SidecarSpec {
+            name: "ephemeral".into(),
+            program: PathBuf::from("x"),
+            args: vec![],
+            env: vec![],
+            ready_port: None,
+        };
+        // Spawn a trivial child and let it finish so try_wait() reports exited.
+        let mut child = launcher.launch(&spec).expect("initial launch");
+        let _ = child.wait();
+
+        let state: Mutex<Vec<SupervisedSidecar>> =
+            Mutex::new(vec![SupervisedSidecar { spec, child }]);
+
+        let respawned = supervise_once(&launcher, &state);
+        assert_eq!(respawned, vec!["ephemeral".to_string()]);
+        // The launcher was called once more for the respawn (initial launch
+        // above used the same mock, so total calls == 2).
+        assert_eq!(launcher.calls.borrow().len(), 2);
+
+        // Clean up the respawned child.
+        let mut guard = state.lock().unwrap();
+        for slot in guard.iter_mut() {
+            let _ = slot.child.kill();
+            let _ = slot.child.wait();
+        }
+    }
+
+    #[test]
+    fn supervise_once_leaves_a_healthy_portless_sidecar_alone() {
+        // A long-lived port-less child that is still running must not be
+        // respawned. We use a child that blocks so try_wait() reports running.
+        let launcher = MockLauncher::new(vec![]);
+        let spec = SidecarSpec {
+            name: "long-lived".into(),
+            program: PathBuf::from("x"),
+            args: vec![],
+            env: vec![],
+            ready_port: None,
+        };
+        let child = spawn_long_lived_child();
+        let state: Mutex<Vec<SupervisedSidecar>> =
+            Mutex::new(vec![SupervisedSidecar { spec, child }]);
+
+        let respawned = supervise_once(&launcher, &state);
+        assert!(
+            respawned.is_empty(),
+            "a running port-less sidecar should not be respawned"
+        );
+        // No respawn launch happened.
+        assert_eq!(launcher.calls.borrow().len(), 0);
+
+        let mut guard = state.lock().unwrap();
+        for slot in guard.iter_mut() {
+            let _ = slot.child.kill();
+            let _ = slot.child.wait();
+        }
+    }
+
+    /// Spawn a child that stays alive (so `try_wait` reports "still running")
+    /// until killed. Cross-platform: a sleep on each OS.
+    fn spawn_long_lived_child() -> Child {
+        #[cfg(windows)]
+        {
+            // `ping` with a count loops for a few seconds without extra deps.
+            Command::new("cmd")
+                .args(["/C", "ping", "127.0.0.1", "-n", "30"])
+                .spawn()
+                .expect("spawn long-lived child")
+        }
+        #[cfg(not(windows))]
+        {
+            Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .expect("spawn long-lived child")
+        }
+    }
+
+    // ---- get_sidecar_status mapping (via probe helper) ----
+
+    #[test]
+    fn sidecar_status_serializes_expected_shape() {
+        // Guards the JSON contract the UI consumes: name/port/healthy/pid.
+        let status = SidecarStatus {
+            name: "SurrealDB".into(),
+            port: Some(8000),
+            healthy: false,
+            pid: Some(1234),
+        };
+        let json = serde_json::to_value(&status).expect("serialize");
+        assert_eq!(json["name"], "SurrealDB");
+        assert_eq!(json["port"], 8000);
+        assert_eq!(json["healthy"], false);
+        assert_eq!(json["pid"], 1234);
+    }
+
+    #[test]
+    fn build_sidecar_specs_pins_readiness_ports() {
+        let specs = build_sidecar_specs(Path::new("C:/qv/services"));
+        assert_eq!(specs[0].ready_port, Some(8000)); // SurrealDB
+        assert_eq!(specs[1].ready_port, Some(5055)); // open-notebook API
+        assert_eq!(specs[2].ready_port, None); // worker (no socket)
+        assert_eq!(specs[3].ready_port, Some(8100)); // LSAT backend
     }
 }
 
@@ -819,7 +1129,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![cfa_list_pdfs, cfa_pick_folder, cfa_read_pdf_bytes])
+        .invoke_handler(tauri::generate_handler![
+            cfa_list_pdfs,
+            cfa_pick_folder,
+            cfa_read_pdf_bytes,
+            get_sidecar_status
+        ])
         .manage(Sidecars::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -833,6 +1148,9 @@ pub fn run() {
             if let Some(state) = app.try_state::<Sidecars>() {
                 *state.0.lock().unwrap() = kids;
             }
+            // BA1: start the background health supervisor that polls each
+            // sidecar's readiness port and respawns any that fall over.
+            spawn_health_supervisor(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -840,9 +1158,9 @@ pub fn run() {
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<Sidecars>() {
-                    for mut child in state.0.lock().unwrap().drain(..) {
-                        let _ = child.kill();
-                        log::info!("sidecar: terminated on exit");
+                    for mut supervised in state.0.lock().unwrap().drain(..) {
+                        let _ = supervised.child.kill();
+                        log::info!("sidecar: {} terminated on exit", supervised.spec.name);
                     }
                 }
             }
