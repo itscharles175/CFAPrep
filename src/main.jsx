@@ -49,6 +49,15 @@ function StudyVaultRoot() {
     const sync = () => setPathname(window.location.pathname);
     // popstate = browser back/forward (incl. crossing the domain boundary);
     // DOMAIN_NAV_EVENT = our programmatic cross-domain hops.
+    //
+    // Cross-domain back/forward correctness: on a popstate that crosses the
+    // boundary, BOTH this listener (setPathname) and the mounted sub-app's
+    // BrowserRouter (its own internal setState) fire synchronously in the same
+    // event tick. React 18 automatic batching flushes them in ONE commit, in
+    // which `domain` flips and the old sub-app unmounts — so the inactive
+    // router never commits a wrong-domain (404) render. Do NOT introduce an
+    // async boundary (await/setTimeout) in this handler, which would split the
+    // updates into two commits and surface a one-frame flash of the old domain.
     window.addEventListener('popstate', sync);
     window.addEventListener(DOMAIN_NAV_EVENT, sync);
     return () => {

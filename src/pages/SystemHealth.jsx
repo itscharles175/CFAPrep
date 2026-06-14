@@ -991,7 +991,13 @@ export default function SystemHealth() {
             <button
               className="btn btn-secondary btn-sm"
               disabled={!llm?.baseUrl || !lsatHealth?.ok}
-              title={!lsatHealth?.ok ? 'LSAT sidecar must be reachable' : 'Set LSAT to use the host model provider'}
+              title={
+                !llm?.baseUrl
+                  ? 'Configure a host model server first (Local AI below)'
+                  : !lsatHealth?.ok
+                    ? 'LSAT sidecar must be reachable'
+                    : 'Set LSAT to use the host model provider'
+              }
               onClick={async () => {
                 const result = await syncProviderToLsat({ baseUrl: llm?.baseUrl });
                 setMessage(result.detail);

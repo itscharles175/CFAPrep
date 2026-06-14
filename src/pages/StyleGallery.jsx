@@ -282,8 +282,8 @@ const RADIUS_TOKENS = [
   { token: '--radius-xs', label: 'xs — 4px' },
   { token: '--radius-sm', label: 'sm — 6px' },
   { token: '--radius-md', label: 'md — 8px' },
-  { token: '--radius-lg', label: 'lg — 12px' },
-  { token: '--radius-xl', label: 'xl — 16px' },
+  { token: '--radius-lg', label: 'lg — 8px' },
+  { token: '--radius-xl', label: 'xl — 10px' },
   { token: '--radius-full', label: 'full — 9999px' },
 ];
 
