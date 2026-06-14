@@ -10,6 +10,10 @@ import { ParentSize } from "@visx/responsive";
 import { LinearGradient } from "@visx/gradient";
 import { ReferenceLine, ChartAnnotation } from "./chart-kit";
 import { deriveTrendAnnotations } from "./trendAnnotations";
+import {
+  LiveRegion,
+  useThrottledAnnouncement,
+} from "@lsat/components/question/live-region";
 
 export interface TrendDatum {
   /** ISO date string. */
@@ -51,6 +55,27 @@ export interface TrendChartProps {
 const MARGIN = { top: 12, right: 16, bottom: 28, left: 34 };
 const AXIS_COLOR = "hsl(var(--muted-foreground))";
 
+/**
+ * UC5 — spoken date for the live region. Reuses the chart's ISO `date` strings
+ * but reads them as a friendly "Jan 5" rather than "2024-01-05" so the
+ * announcement isn't a string of digits. Falls back to the raw string if the
+ * date can't be parsed.
+ */
+function spokenDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** UC5 — "point 3 of 8, Jan 5, score 165" for a focused/hovered datum. */
+function pointAnnouncement(
+  datum: TrendDatum,
+  index: number,
+  total: number,
+): string {
+  return `Point ${index + 1} of ${total}, ${spokenDate(datum.date)}, score ${datum.score}`;
+}
+
 function Inner({
   width,
   height,
@@ -67,6 +92,14 @@ function Inner({
   const [drag, setDrag] = useState<{ x0: number; x1: number } | null>(null);
   // Hover crosshair index into `parsed` (independent of the drag-brush).
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  // UC5 — keyboard data-point cursor into `parsed`. Driven by arrow/home/end
+  // keys while the chart is focused; null until the user steps in. Separate from
+  // the mouse hover so the two input modes never fight each other.
+  const [focusIdx, setFocusIdx] = useState<number | null>(null);
+  // UC5 — the message most recently set for the live region. Re-set (even to the
+  // same text) re-announces via useThrottledAnnouncement's nonce trick.
+  const [announce, setAnnounce] = useState<string | null>(null);
+  const liveMessage = useThrottledAnnouncement(announce);
   const gradId = useId();
   const innerW = Math.max(0, width - MARGIN.left - MARGIN.right);
   const innerH = Math.max(0, height - MARGIN.top - MARGIN.bottom);
@@ -113,6 +146,8 @@ function Inner({
       if (right - left < 8) {
         setBrush(null);
         onBrushRange?.(null);
+        // UC5 — speak the cleared selection so a SR user knows the brush reset.
+        setAnnounce("Selection cleared");
         return;
       }
       setBrush({ x0: left, x1: right });
@@ -127,6 +162,16 @@ function Inner({
           start: inBrush[0].date,
           end: inBrush[inBrush.length - 1].date,
         });
+        // UC5 — summarise the brushed range (point count + score span) for the
+        // live region so the selection isn't a purely visual affordance.
+        const scores = inBrush.map((d) => d.score);
+        const lo = Math.min(...scores);
+        const hi = Math.max(...scores);
+        const span = lo === hi ? `score ${lo}` : `scores ${lo} to ${hi}`;
+        setAnnounce(
+          `Selected ${inBrush.length} ${inBrush.length === 1 ? "point" : "points"}, ` +
+            `${spokenDate(inBrush[0].date)} to ${spokenDate(inBrush[inBrush.length - 1].date)}, ${span}`,
+        );
       }
     },
     [onBrushRange, parsed, xScale],
@@ -156,14 +201,66 @@ function Inner({
     return best;
   };
 
+  // UC5 — the datum a keyboard user has stepped onto. Drawn with a visible focus
+  // ring and announced via the live region. Independent of the mouse `hoverIdx`.
+  const focusPoint =
+    focusIdx != null ? parsed[Math.min(focusIdx, parsed.length - 1)] : undefined;
+
+  /** UC5 — move the keyboard cursor to `next`, clamp, and announce the datum. */
+  const moveFocus = (next: number) => {
+    const clamped = Math.max(0, Math.min(parsed.length - 1, next));
+    setFocusIdx(clamped);
+    setAnnounce(pointAnnouncement(parsed[clamped], clamped, parsed.length));
+  };
+
+  /** UC5 — arrow / home / end navigation across the series' data points. */
+  const onKeyDown = (e: React.KeyboardEvent<SVGSVGElement>) => {
+    // Start from the current keyboard cursor, falling back to the hovered
+    // point, then the last point so the first keypress lands somewhere sensible.
+    const from = focusIdx ?? hoverIdx ?? parsed.length - 1;
+    switch (e.key) {
+      case "ArrowRight":
+      case "ArrowUp":
+        e.preventDefault();
+        moveFocus(from + 1);
+        break;
+      case "ArrowLeft":
+      case "ArrowDown":
+        e.preventDefault();
+        moveFocus(from - 1);
+        break;
+      case "Home":
+        e.preventDefault();
+        moveFocus(0);
+        break;
+      case "End":
+        e.preventDefault();
+        moveFocus(parsed.length - 1);
+        break;
+      default:
+        break;
+    }
+  };
+
   return (
+    <>
     <svg
       width={width}
       height={height}
       role="img"
-      aria-label="Score trend"
-      className="select-none"
+      aria-label={`Score trend, ${parsed.length} data points. Use arrow keys to step through points; home and end jump to the first and last.`}
+      tabIndex={0}
+      className="select-none focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       onMouseLeave={() => drag && finishBrush(drag.x0, drag.x1)}
+      onKeyDown={onKeyDown}
+      onFocus={() => {
+        // Surface the current point the moment the chart receives focus so a SR
+        // user hears where they are before pressing a key. Default to the last
+        // (most recent) point when stepping in fresh.
+        const idx = focusIdx ?? parsed.length - 1;
+        setFocusIdx(idx);
+        setAnnounce(pointAnnouncement(parsed[idx], idx, parsed.length));
+      }}
     >
       <Group left={MARGIN.left} top={MARGIN.top}>
         <GridRows
@@ -468,6 +565,24 @@ function Inner({
           </Group>
         )}
 
+        {/* UC5 — visible keyboard focus marker: a token-colored ring on the
+            datum the arrow keys have landed on. The ring eases between points
+            (transition on cx/cy) unless the user prefers reduced motion, in
+            which case it snaps. aria-hidden — the spoken value comes from the
+            live region, not this SVG node. */}
+        {focusPoint && (
+          <circle
+            cx={xScale(focusPoint.t.getTime())}
+            cy={yScale(focusPoint.score)}
+            r={6}
+            fill="none"
+            stroke="hsl(var(--ring))"
+            strokeWidth={2}
+            aria-hidden
+            className={reduce ? undefined : "transition-[cx,cy] duration-150 ease-out"}
+          />
+        )}
+
         <AxisLeft
           scale={yScale}
           numTicks={4}
@@ -498,7 +613,14 @@ function Inner({
             const x = e.nativeEvent.offsetX - MARGIN.left;
             // Crosshair tracks hover even when not dragging; drag-brush still
             // owns the selection rect while the button is down.
-            setHoverIdx(nearestIdx(x));
+            const idx = nearestIdx(x);
+            // UC5 — announce the point under the cursor, but only when the
+            // hovered datum actually changes (not every pixel of movement) and
+            // not mid-drag (the brush summary speaks instead).
+            if (!drag && idx !== hoverIdx) {
+              setAnnounce(pointAnnouncement(parsed[idx], idx, parsed.length));
+            }
+            setHoverIdx(idx);
             if (!drag) return;
             setDrag({ x0: drag.x0, x1: x });
           }}
@@ -512,6 +634,10 @@ function Inner({
         />
       </Group>
     </svg>
+    {/* UC5 — polite live region: speaks the focused/hovered point and brush
+        range summaries to screen-reader users. Visually hidden (.sr-only). */}
+    <LiveRegion message={liveMessage} />
+    </>
   );
 }
 
