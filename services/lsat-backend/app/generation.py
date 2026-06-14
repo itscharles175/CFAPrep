@@ -903,6 +903,9 @@ def validate_candidate(cand: dict, runs: int, solver=_generate, critic=_generate
                                answer.                             -> "solve_mismatch"
       5. self_consistency    — the SOLVER answers N times; sampling must be stable
                                (repurposed: stability, not the correctness signal).
+                               The agreement ratio is ALSO recorded continuously
+                               as ``report["gate_confidence"]`` (0.0-1.0, BB5);
+                               the PASS bar is unchanged (unanimous agreement).
                                                                    -> "self_consistency"
       6. single_defensible   — a critique pass finds exactly one defensible answer.
                                                                    -> "ambiguous_answer"
@@ -1010,6 +1013,18 @@ def validate_candidate(cand: dict, runs: int, solver=_generate, critic=_generate
     self_consistent = agree == runs and runs > 0
     report["checks"]["self_consistency"] = f"{agree}/{runs}"
     report["self_consistency_pass"] = self_consistent
+    # BB5 — continuous self-consistency confidence. The hard gate above still
+    # requires UNANIMOUS agreement (``self_consistent``) to PASS, so this does
+    # NOT change which candidates pass/fail. But the binary pass/fail discards
+    # how *close* the solver was: 3/3 and 0/3 both read as "not unanimous" once
+    # any sample disagrees. Record the agreement ratio as a 0.0-1.0 score so a
+    # passer with a thin margin (e.g. a future relaxed bar) can be surfaced for
+    # review, and so reviewers can rank quarantined items by how nearly they
+    # passed. ``runs <= 0`` (gate effectively off) reports 0.0 rather than
+    # dividing by zero.
+    gate_confidence = round(agree / runs, 4) if runs > 0 else 0.0
+    report["checks"]["self_consistency_confidence"] = gate_confidence
+    report["gate_confidence"] = gate_confidence
 
     # (4b) permutation-invariant self-consistency (Wave 2.1). Probes positional
     # bias: rotate the choice letters and re-solve; the solver's answer, mapped
