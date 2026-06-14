@@ -22,6 +22,29 @@ interface DownloadProgress {
 }
 
 /**
+ * The voice model downloads as several ONNX/tokenizer files, and
+ * transformers.js fires `progress_callback` per-file — so the raw `progress`
+ * resets toward 0 each time a new file starts. To show ONE calm, never-going-
+ * backwards percent in the UI, we track the highest percent seen for this
+ * download. (A new synth run resets it via `setSynthDownloadPct(0)`.)
+ *
+ * `status` strings from transformers are lowercase machine tokens
+ * ("initiate" | "download" | "progress" | "done"); map them to a friendly
+ * label so the panel reads like a download, not a log line.
+ */
+const DOWNLOAD_STATUS_LABELS: Record<string, string> = {
+  initiate: 'Preparing voice model…',
+  download: 'Downloading voice model…',
+  progress: 'Downloading voice model…',
+  done: 'Voice model ready — synthesising…',
+  ready: 'Voice model ready — synthesising…',
+};
+
+function friendlyDownloadStatus(status: string): string {
+  return DOWNLOAD_STATUS_LABELS[status?.toLowerCase?.() ?? ''] ?? status;
+}
+
+/**
  * Multi-speaker study podcast component.
  *
  * Flow:
@@ -49,6 +72,9 @@ export default function PodcastPanel({
   const [synthBusy, setSynthBusy] = useState(false);
   const [synthError, setSynthError] = useState('');
   const [synthProgress, setSynthProgress] = useState<DownloadProgress | null>(null);
+  // Highest model-download percent seen this run — monotonic so the bar never
+  // jumps backwards as transformers.js switches between per-file downloads.
+  const [synthDownloadPct, setSynthDownloadPct] = useState(0);
   const [synthLineIndex, setSynthLineIndex] = useState<number>(-1);
 
   const [playing, setPlaying] = useState(false);
@@ -106,10 +132,19 @@ export default function PodcastPanel({
     setSynthError('');
     setSegments([]);
     setSynthProgress({ status: 'Loading voice model…' });
+    setSynthDownloadPct(0);
     setSynthLineIndex(-1);
     try {
       const result = await synthesizePodcastScript(script, {
-        onProgress: (info) => setSynthProgress(info),
+        onProgress: (info) => {
+          setSynthProgress(info);
+          // Clamp + keep the max so the surfaced percent only ever moves
+          // forward across the model's multiple per-file downloads.
+          if (typeof info.progress === 'number' && Number.isFinite(info.progress)) {
+            const clamped = Math.min(100, Math.max(0, info.progress));
+            setSynthDownloadPct((prev) => Math.max(prev, clamped));
+          }
+        },
         onLine: (segment, index) => {
           setSynthLineIndex(index);
           setSegments((prev) => [...prev, segment]);
@@ -263,10 +298,36 @@ export default function PodcastPanel({
           </div>
 
           {synthProgress && synthBusy && (
-            <p className="qv-text-secondary qv-m-0 qv-fs-xs">
-              {synthProgress.status}
-              {typeof synthProgress.progress === 'number' && ` · ${Math.round(synthProgress.progress)}%`}
-            </p>
+            <div className="qv-stack-1">
+              <p className="qv-text-secondary qv-m-0 qv-fs-xs">
+                {friendlyDownloadStatus(synthProgress.status)}
+                {synthDownloadPct > 0 && ` · ${Math.round(synthDownloadPct)}%`}
+              </p>
+              {synthDownloadPct > 0 && (
+                <div
+                  role="progressbar"
+                  aria-label="Voice model download"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(synthDownloadPct)}
+                  style={{
+                    height: 4,
+                    borderRadius: 2,
+                    background: 'var(--border)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${Math.round(synthDownloadPct)}%`,
+                      height: '100%',
+                      background: 'var(--color-accent, var(--accent, #60a5fa))',
+                      transition: 'width 120ms linear',
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           )}
           {synthError && <p className="qv-text-danger qv-m-0 qv-fs-sm">{synthError}</p>}
         </div>
