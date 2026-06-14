@@ -273,6 +273,12 @@ SRS_OPTIMIZE_MIN_REVIEWS = int(_env("LSATLAB_SRS_OPTIMIZE_MIN_REVIEWS", "200"))
 LLM_MAX_RETRIES = int(_env("LSATLAB_LLM_RETRIES", "2"))          # transient-error retries
 LLM_MAX_CONCURRENCY = int(_env("LSATLAB_LLM_CONCURRENCY", "2"))  # cap concurrent GPU calls
 EMBED_MODEL = _env("LSATLAB_EMBED_MODEL", "nomic-embed-text")
+# BA7 — optional secondary embed model. When the primary EMBED_MODEL embed call
+# fails (model not pulled, provider switched, transient error) the embeddings
+# layer falls back ONCE to this model for the rest of the session. Empty default
+# => no fallback (preserve the graceful no-op behaviour: the bank stays drillable
+# even with no embeddings). Env-overridable like the other config values.
+EMBED_MODEL_FALLBACK = _env("LSATLAB_EMBED_MODEL_FALLBACK", "")
 # Wave 3.5 — bump when the embed model changes; stale vectors are purged on
 # startup backfill.
 EMBED_MODEL_VERSION = _env("LSATLAB_EMBED_MODEL_VERSION", "1") or "1"

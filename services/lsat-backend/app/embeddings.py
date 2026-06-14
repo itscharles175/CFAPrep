@@ -20,6 +20,7 @@ and the embedder is injectable so tests never touch the network.
 """
 from __future__ import annotations
 
+import logging
 import math
 import struct
 import threading
@@ -46,6 +47,8 @@ Embedder = Callable[[str], list[float]]
 
 QUESTION = "question"
 NOTE = "note"
+
+_log = logging.getLogger("lsatlab.embeddings")
 
 
 # Bank-expansion plan Wave 2.5 — abstract the vector layer so a future backend
@@ -85,12 +88,41 @@ class VectorStore(Protocol):
 # reset_cache is safe even when called from within _question_vectors.
 _vec_cache: "dict[int, list[float]] | None" = None
 _vec_cache_lock = threading.RLock()
+# BA7 — the embed model the live cache was built under. The cached question
+# vectors are only comparable to a query embedded by the SAME model; if
+# config.EMBED_MODEL changes at runtime (via /settings) the cache silently mixes
+# vectors from two models. Track the build-time model name here and invalidate
+# the cache before use whenever it diverges from config.EMBED_MODEL. Guarded by
+# the same RLock as _vec_cache.
+_vec_cache_model: "str | None" = None
 
 
 def reset_cache() -> None:
-    global _vec_cache
+    global _vec_cache, _vec_cache_model
     with _vec_cache_lock:
         _vec_cache = None
+        _vec_cache_model = None
+
+
+def _invalidate_cache_if_model_changed() -> None:
+    """BA7 — drop the question-vector cache when the embed model has changed.
+
+    Called at the top of every cache-using path. Compares the model the cache
+    was built under (``_vec_cache_model``) against the live ``config.EMBED_MODEL``;
+    on a mismatch (and only when a cache actually exists) it logs the
+    invalidation and resets the cache so it rebuilds under the new model. Holding
+    the RLock keeps the check-and-reset atomic against concurrent readers.
+    """
+    global _vec_cache, _vec_cache_model
+    with _vec_cache_lock:
+        if _vec_cache is not None and _vec_cache_model != config.EMBED_MODEL:
+            _log.warning(
+                "Embed model changed (%r -> %r); invalidating question-vector "
+                "cache (%d entries) so it rebuilds under the new model.",
+                _vec_cache_model, config.EMBED_MODEL, len(_vec_cache),
+            )
+            _vec_cache = None
+            _vec_cache_model = None
 
 
 class SQLiteVectorStore:
@@ -127,6 +159,10 @@ class SQLiteVectorStore:
                      exclude_id: Optional[int] = None) -> list[tuple[int, float]]:
         if not query:
             return []
+        # BA7: ensure a stale-model cache is dropped before this cache-using path
+        # reads it. (all_for -> _question_vectors also checks, but doing it here
+        # keeps the guard at the top of the documented cache-using entry point.)
+        _invalidate_cache_if_model_changed()
         vectors = self.all_for(kind)
         scored: list[tuple[int, float]] = []
         for ref_id, vec in vectors.items():
@@ -270,12 +306,66 @@ def _row_vector(row: EmbeddingVector) -> list[float]:
     return list(row.vector_json or [])
 
 
-def _default_embedder(text: str) -> list[float]:
-    # B18: throttle embedding calls through the same GPU concurrency guard
-    # used by generate/critique so embeddings don't saturate the GPU
-    # concurrently with other LLM calls.
+# BA7 — session-scoped embed-model fallback decision. Once the primary
+# EMBED_MODEL embed fails and EMBED_MODEL_FALLBACK succeeds, we stick with the
+# fallback for the rest of the process instead of paying the (failing) primary
+# call's latency on every subsequent embed. The flag is set under its own lock so
+# the one-time warning is logged exactly once even under concurrent embedders.
+_embed_fallback_active = False
+_embed_fallback_lock = threading.Lock()
+
+
+def _embed_once(text: str, model: Optional[str] = None) -> list[float]:
+    """One embed call through the GPU concurrency guard.
+
+    B18: throttle embedding calls through the same GPU concurrency guard used by
+    generate/critique so embeddings don't saturate the GPU concurrently with
+    other LLM calls. ``model=None`` uses ``config.EMBED_MODEL`` (llm.embed_sync's
+    own default), so the primary path is byte-for-byte the historical call.
+    """
     with sync_guard():
-        return llm.embed_sync(text)
+        return llm.embed_sync(text) if model is None else llm.embed_sync(text, model=model)
+
+
+def _default_embedder(text: str) -> list[float]:
+    """Embed ``text`` with the primary embed model, falling back ONCE per session
+    to ``config.EMBED_MODEL_FALLBACK`` when the primary fails.
+
+    BA7: when a fallback is configured and the primary EMBED_MODEL embed raises,
+    try the fallback model exactly once; if it succeeds we latch that decision for
+    the rest of the session (subsequent calls go straight to the fallback) and log
+    a warning. With no fallback configured — or when the fallback also fails — the
+    original exception-propagation contract is preserved unchanged, so callers'
+    existing graceful no-op handling keeps the bank drillable.
+    """
+    global _embed_fallback_active
+    fallback = (config.EMBED_MODEL_FALLBACK or "").strip()
+
+    # Once latched this session, go straight to the fallback model.
+    if fallback and _embed_fallback_active:
+        return _embed_once(text, model=fallback)
+
+    try:
+        return _embed_once(text)
+    except Exception as primary_exc:
+        if not fallback:
+            raise  # no fallback configured -> preserve original behaviour
+        try:
+            vec = _embed_once(text, model=fallback)
+        except Exception:
+            # Both models failed: re-raise the PRIMARY error so the caller's
+            # existing try/except (graceful no-op) behaves exactly as before.
+            raise primary_exc
+        # Fallback worked — latch it for the session and warn once on the switch.
+        with _embed_fallback_lock:
+            if not _embed_fallback_active:
+                _embed_fallback_active = True
+                _log.warning(
+                    "Primary embed model %r failed (%s); falling back to "
+                    "EMBED_MODEL_FALLBACK %r for the rest of this session.",
+                    config.EMBED_MODEL, primary_exc, fallback,
+                )
+        return vec
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -394,7 +484,10 @@ def backfill_question_embeddings(session: Session, *, limit: int = 200,
 
 
 def _question_vectors(session: Session) -> dict[int, list[float]]:
-    global _vec_cache
+    global _vec_cache, _vec_cache_model
+    # BA7: drop a cache built under a now-stale embed model before reading it, so
+    # we never mix vectors from two models in one snapshot.
+    _invalidate_cache_if_model_changed()
     # B15: protect both the read check and the write with the RLock.
     with _vec_cache_lock:
         if _vec_cache is None:
@@ -405,6 +498,9 @@ def _question_vectors(session: Session) -> dict[int, list[float]]:
                 ).all()
                 if _row_vector(r)
             }
+            # BA7: stamp the model this snapshot was built under so a later
+            # EMBED_MODEL change invalidates it (see _invalidate_cache_if_model_changed).
+            _vec_cache_model = config.EMBED_MODEL
         return _vec_cache
 
 
