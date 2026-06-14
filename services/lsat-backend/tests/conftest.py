@@ -37,6 +37,17 @@ os.environ.setdefault("LSATLAB_GEN_INFORMATIVITY_CHECK", "0")
 os.environ.setdefault("LSATLAB_GEN_DISTRACTOR_QUALITY_CHECK", "0")
 os.environ.setdefault("LSATLAB_GEN_MULTI_MODEL_AGREEMENT", "0")
 os.environ.setdefault("LSATLAB_IMPORT_EMBED_ON_COMMIT", "0")
+# Hermetic model probes. The diagnostics/trust endpoints run a LIVE provider probe
+# (doctor.build_report -> ai.health -> provider.list_models). On a dev machine
+# where Ollama/LM Studio is actually running, that probe connects to the real
+# server and can BLOCK the request thread for tens of seconds, hanging the whole
+# suite (e.g. test_release_trust_manifest_and_diagnostics). Point both local
+# providers at a closed port and drop retry/backoff so the probe fails FAST with
+# connection-refused — identical to CI, where no provider runs. setdefault so the
+# few opt-in real-provider tests (which set these explicitly) still win.
+os.environ.setdefault("LSATLAB_OLLAMA_URL", "http://127.0.0.1:1")
+os.environ.setdefault("LSATLAB_LMSTUDIO_URL", "http://127.0.0.1:1/v1")
+os.environ.setdefault("LSATLAB_LLM_RETRIES", "0")
 
 
 def _reset_and_seed():
