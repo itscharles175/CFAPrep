@@ -59,3 +59,9 @@ services/lsat-backend/datasets/
 services/lsat-backend/build/
 services/lsat-backend/*.egg-info/
 services/lsat-backend/dist/
+
+# Python bytecode + pytest caches (backend test env)
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv-lsat-test/
