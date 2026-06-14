@@ -155,8 +155,9 @@ export default function App() {
     <ThemeProvider>
       <ToastProvider>
         <div className="app-layout">
-          {/* G1: Skip to main content link for keyboard/screen reader users */}
-          <a href="#main-content" className="skip-link">
+          {/* UC1: Skip to main content — first focusable child of the app shell,
+              visually hidden until focused (see .skip-to-main in index.css). */}
+          <a href="#main" className="skip-to-main">
             Skip to main content
           </a>
 
@@ -174,9 +175,10 @@ export default function App() {
             onClick={() => setMobileNavOpen(false)}
           />
           <TopBar collapsed={sidebarCollapsed} navOpen={mobileNavOpen} onMenuToggle={() => setMobileNavOpen((open) => !open)} />
-          {/* G1: Proper <main> landmark with id for skip-link target */}
+          {/* UC1: Primary scrolling content region — <main id="main"> is the
+              skip-to-main target and the page landmark. */}
           <main
-            id="main-content"
+            id="main"
             className={`main-content ${sidebarCollapsed ? 'collapsed' : ''}`}
             role="main"
           >
