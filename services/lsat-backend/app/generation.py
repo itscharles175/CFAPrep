@@ -1673,21 +1673,48 @@ def run_job(job_id: int, generate=None, *, critic=None, embedder=None) -> None:
                     })
                     quarantined += 1
                     continue
-                verdict = validate_candidate(
-                    cand, config.GEN_SELF_CONSISTENCY_RUNS,
-                    solver=gen_fn, critic=critic_fn, q_type=job.q_type,
-                    section_type=section_type,
-                    session=session, embedder=embed_fn,
-                )
-                verdict["section_type"] = section_type
-                if rc_context:
-                    verdict["rc_generation_context"] = rc_context
-                accepted_flag = verdict.get("passed", False)
-                q = _persist_candidate(
-                    session, cand, job.q_type, parent, accepted_flag,
-                    section_type=section_type,
-                )
-                verdict["question_id"] = q.id
+                # BA5: validate + persist ONE candidate inside a SAVEPOINT so a
+                # single bad candidate (a validator/persist exception, an
+                # IntegrityError, etc.) rolls back just its own partial rows and
+                # the job continues with the next candidate instead of aborting.
+                # On a clean candidate the savepoint releases and the iteration's
+                # trailing ``session.commit()`` makes it durable — identical to
+                # the prior per-candidate commit behavior.
+                try:
+                    with session.begin_nested():
+                        verdict = validate_candidate(
+                            cand, config.GEN_SELF_CONSISTENCY_RUNS,
+                            solver=gen_fn, critic=critic_fn, q_type=job.q_type,
+                            section_type=section_type,
+                            session=session, embedder=embed_fn,
+                        )
+                        verdict["section_type"] = section_type
+                        if rc_context:
+                            verdict["rc_generation_context"] = rc_context
+                        accepted_flag = verdict.get("passed", False)
+                        q = _persist_candidate(
+                            session, cand, job.q_type, parent, accepted_flag,
+                            section_type=section_type,
+                        )
+                        verdict["question_id"] = q.id
+                except Exception:  # noqa: BLE001 — one candidate must not kill the job
+                    log.warning(
+                        "BA5: candidate validate/persist rolled back job_id=%s",
+                        job.id, exc_info=True,
+                    )
+                    candidates_report.append({
+                        "passed": False,
+                        "reason": "persist_error",
+                        "section_type": section_type,
+                    })
+                    quarantined += 1
+                    job.produced = produced
+                    job.quarantined = quarantined
+                    job.progress_pct = round(100 * produced / max(1, job.count), 1)
+                    job.updated_at = datetime.now(timezone.utc)
+                    session.add(job)
+                    session.commit()
+                    continue
                 if parent is not None:
                     verdict["parent_question_id"] = parent.id
                     if bool(parent.training_eligible):
@@ -1799,7 +1826,10 @@ def _ensure_ai_section(session: Session, section_type: str) -> Section:
     if pt is None:
         pt = PrepTest(name=_AI_PREPTEST_NAME, source="ai_generated", is_official=False)
         session.add(pt)
-        session.commit()
+        # BA5: flush (not commit) so this stays inside the per-candidate
+        # SAVEPOINT opened by run_job; the synthetic PrepTest/Section is created
+        # idempotently and made durable by the iteration's trailing commit.
+        session.flush()
         session.refresh(pt)
     sec = session.exec(
         select(Section)
@@ -1809,7 +1839,7 @@ def _ensure_ai_section(session: Session, section_type: str) -> Section:
     if sec is None:
         sec = Section(preptest_id=pt.id, type=SectionType(section_type), order=0)
         session.add(sec)
-        session.commit()
+        session.flush()
         session.refresh(sec)
     return sec
 
@@ -1819,13 +1849,19 @@ def _persist_candidate(session: Session, cand: dict, q_type: str,
                        section_type: str = "LR") -> Question:
     section_id = None
     passage_id = None
+    # BA5: flush (not commit) so this persist stays inside the caller's
+    # per-candidate SAVEPOINT (``run_job`` wraps each iteration in
+    # ``session.begin_nested()``). flush still populates autoincrement ids for
+    # the refresh below; ``run_job`` commits once at the end of the iteration so
+    # a clean candidate lands identically to before, while a candidate that
+    # raises mid-persist rolls its own partial rows back without aborting the job.
     # RC items with a real passage get attached to the synthetic AI section so
     # they have a passage_id and behave like any other RC question in drills.
     if section_type == "RC" and str(cand.get("passage", "")).strip():
         sec = _ensure_ai_section(session, "RC")
         passage = Passage(section_id=sec.id, text=cand["passage"], type="single")
         session.add(passage)
-        session.commit()
+        session.flush()
         session.refresh(passage)
         section_id = sec.id
         passage_id = passage.id
@@ -1844,7 +1880,7 @@ def _persist_candidate(session: Session, cand: dict, q_type: str,
         approved=accepted,
     )
     session.add(q)
-    session.commit()
+    session.flush()
     session.refresh(q)
     for c in cand.get("choices", []):
         session.add(AnswerChoice(
@@ -1854,6 +1890,6 @@ def _persist_candidate(session: Session, cand: dict, q_type: str,
             is_correct=(c.get("label") == cand.get("correct_answer")),
             trap_type=c.get("trap_type"),
         ))
-    session.commit()
+    session.flush()
     session.refresh(q)
     return q

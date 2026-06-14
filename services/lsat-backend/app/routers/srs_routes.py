@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from .. import adaptivity, pedagogy, serializers, srs
-from ..db import get_session
+from ..db import atomic_batch, get_session
 from ..models import Question, SRSCard
 
 router = APIRouter(prefix="/srs")
@@ -30,21 +30,26 @@ def create_cards(body: BulkCardsBody, session: Session = Depends(get_session)):
     existing = {c.question_id for c in session.exec(select(SRSCard)).all()}
     created: list[int] = []
     skipped = 0
-    for qid in body.question_ids:
-        if qid in existing or not session.get(Question, qid):
-            skipped += 1
-            continue
-        card = SRSCard(
-            question_id=qid,
-            fsrs_state=srs.new_card_state(),
-            due_date=datetime.now(timezone.utc),
-            lapses=0,
-        )
-        session.add(card)
-        session.commit()
-        session.refresh(card)
-        created.append(card.id)
-        existing.add(qid)
+    # BA5: the whole set of new cards is one atomic batch. We flush (not commit)
+    # per row so each card's autoincrement id is populated for the response,
+    # then atomic_batch commits once on a clean exit — so a failure partway
+    # through can't leave the bank with only some of the requested cards.
+    with atomic_batch(session):
+        for qid in body.question_ids:
+            if qid in existing or not session.get(Question, qid):
+                skipped += 1
+                continue
+            card = SRSCard(
+                question_id=qid,
+                fsrs_state=srs.new_card_state(),
+                due_date=datetime.now(timezone.utc),
+                lapses=0,
+            )
+            session.add(card)
+            session.flush()
+            session.refresh(card)
+            created.append(card.id)
+            existing.add(qid)
     return {"created": len(created), "skipped": skipped, "card_ids": created}
 
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
@@ -64,3 +65,31 @@ def get_session() -> Iterator[Session]:
     """FastAPI dependency yielding a DB session."""
     with Session(engine) as session:
         yield session
+
+
+@contextmanager
+def atomic_batch(session: Session) -> Iterator[Session]:
+    """BA5 — all-or-nothing batch write on an existing ``session``.
+
+    Wraps a multi-row write so it commits as ONE unit: open a transaction
+    (a SAVEPOINT via ``begin_nested`` so it composes with any outer
+    transaction the same way ``import_dataset``/``bank_export`` do), yield the
+    session for the caller's writes, then commit on a clean exit. On ANY
+    exception the partial work is rolled back and the original exception is
+    re-raised — so a per-row loop that used to ``commit()`` each row (leaving a
+    half-written set if a later row blew up) instead lands wholly or not at all.
+
+    Usage::
+
+        with atomic_batch(session):
+            for row in rows:
+                session.add(row)
+        # every row is durable here, or none of them are
+    """
+    try:
+        with session.begin_nested():
+            yield session
+    except Exception:
+        session.rollback()
+        raise
+    session.commit()
