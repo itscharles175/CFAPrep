@@ -45,6 +45,7 @@ contract + UX layer at the boundary.
 | **K1** | **Typed cross-domain data contract + bridge** | The host↔backend boundary is hand-written, loosely-typed `fetch` (`lsatReviewBridge.ts` reads only `/api/srs/due`; `lsatBackend.ts` reads `/api/health`). No shared identity between host `ReviewItem`/`QuestionResult` (Dexie) and LSAT `SRSCard`/`Attempt` (SQLite), no generated client, no schema-version handshake. K1 is the prerequisite for **every** cross-domain query. |
 | **K2** | **Shared learning + intelligence engine** | The biggest asymmetry in the repo: the host has **no** ability model, daily plan, adaptive selection, blind-review analytics, or generation gates — the LSAT backend has all of them, fully built. K2 makes those engines domain-parameterized so host attempts flow through the same ability estimation, planning, weakness ranking, and content validation. Turns the host from a static vault into an adaptive coach. |
 | **K3** | **Unified trust + observability cockpit** | ~820 lines of `observability.py` + ~1130 of `trust.py` + scheduler evidence + runtime metrics + `sqlite_health` are live behind `:8100/api` but invisible in the host; BA8 captured sidecar logs but no UI consumes them; open-notebook `:5055` has no health surface. K3 wires the existing endpoints into one cockpit + an aggregated "ready?" signal + diagnostics export — the operator's release gate and the debuggability layer every other wave needs. |
+| **K4** | **Full UI unification: LSAT under the host shell** | The shipped UA work shared *tokens*, but LSAT pages still render with their own shell, router, and Radix/Tailwind components, so the two domains still *look and navigate* differently. K4 retires the LSAT shell/router + S6 CSS-isolation, mounts LSAT pages inside the host AppShell, and reskins them onto the host design system — so `/cfa`, `/quant`, `/excel`, `/lsat` are one product, not two apps in a window. The largest front-end bet (XL); see **§7** for the full strangler-fig plan. *(Added per the "match QuantVault" request.)* |
 
 ---
 
@@ -211,3 +212,109 @@ history → ~96 candidates → one synthesis pass (dedup by integration seam, pr
 write, not new backend work); `storage/types.ts` has no cross-domain namespace; and
 `study_routes.py` + `analytics_routes.py` already expose `/study/today`, `/study/plan`, and 20+
 analytics endpoints that the host simply never consumes. Nothing here is implemented.
+
+---
+
+## 7. Keystone K4 — Full UI Unification (LSAT under the host shell)
+
+> **Added 2026-06-15** by request: *"the UI is a bit different between them — full unification
+> to match QuantVault."* User decisions locked: **anchor = the HOST (QuantVault) look is
+> canonical; depth = FULL structural + visual** (retire the separate LSAT shell/router, mount
+> LSAT pages inside the host shell, restyle components + pages). Produced by a second read-only
+> GitNexus swarm (6 dimensions: shell/routing · primitives · page inventory · CSS-isolation ·
+> viz · migration-risk) → synthesis → an adversarial migration critic that **verified the tree
+> and corrected several load-bearing claims** (folded in below). This is the single largest
+> front-end bet in the program — **effort XL** — so the plan is a *strangler-fig*: gate-first,
+> behind a flag, page-by-page, exam runner last, reversible at every step.
+
+**K4 — Full UI unification: LSAT under the host shell + design system.** Retire the LSAT
+`BrowserRouter` (`LsatRoot.tsx`, `basename=/lsat`), the LSAT `app-shell.tsx`/titlebar/breadcrumb
+chrome, and the S6 CSS-isolation `MutationObserver` (`src/lib/domainNav.ts`); mount all ~27 LSAT
+pages inside the host shell (`App.jsx` Sidebar + TopBar + `<Outlet/>`) and reskin them onto the
+host design system. Grounded by the fact that **UA1–UA7 already converged the design *tokens***
+— so K4 is a *structural + cascade* merge on an already-unified token layer, not a recolor.
+
+### 7.1 Approach (load-bearing decisions)
+
+- **Keep Tailwind, repoint it — do NOT drop it.** ~115 LSAT components are Tailwind-native; the
+  host is raw-CSS-class. Merge the two near-identical configs into one root config. **⚠ Critic
+  correction:** the config relationship is *inverted* from what it looks like — the **live**
+  root `tailwind.config.js` `content` glob is LSAT-scoped (`./src/domains/lsat/**`) and the
+  whole-app `_meta/tailwind.config.js` is **dead** (postcss loads only the root). Widening the
+  live glob to `./src/**` is a **whole-app behavior change** (host `index.css` is ~2962 lines
+  with `@tailwind`/`@layer`/`@apply`), *not* a no-op dedup. → do it **early, behind the flag,
+  with S6 isolation still active**, prove the build is identical, and only **later** remove the
+  body rule (split from the cascade cutover).
+- **One router, keep the `/lsat` prefix.** Fold LSAT routes into the host's single
+  `BrowserRouter` as nested `<Route path="/lsat/*">`; a `useLsatNavigate`/`RoutePrefix` wrapper
+  supplies the prefix so the 27 pages' absolute `navigate()`/`NavLink` calls don't need hand
+  edits. **⚠ Critic:** the manifests **collide** — LSAT's manifest uses `/` (Notebook OS) and
+  `/dashboard`, which the host owns; rewrite LSAT paths to `/lsat/*` and port LSAT's
+  **AppMode (study/test) + `hideInTest`** visibility system (no host equivalent) before merging.
+- **Remove CSS-isolation only after the body rule is gone.** The S6 observer exists for exactly
+  one reason: LSAT `index.css @layer base` has `body { @apply bg-background text-foreground }`
+  which clobbers the host palette when both sheets are live. Sequence: delete that body rule →
+  then delete `startStyleIsolation`/`setActiveDomain` → then collapse `main.jsx` to one root.
+- **⚠ Critic — persistent-mount hazard:** today `main.jsx` *unmounts* the inactive sub-app
+  (fresh `QueryClient` per mount). As a nested route LSAT becomes **persistent**, so the real
+  new risk is the *inverse* of "lost state" — a long-lived shared `QueryClient` and retained
+  `ModeProvider`/timer state leaking across `/cfa`↔`/lsat`. Plan teardown/reset explicitly.
+
+### 7.2 Track K4 (I·E·R; "Deps" = prerequisite item ids)
+
+| # | Item | What | I·E·R | Deps |
+|---|------|------|-------|------|
+| **K4-0** | **Extend the gate itself, then resolve manifest collisions** *(critic prereq)* | Before any baseline: make `visual-regression.mjs` iterate **viewports (desktop + mobile)** not just themes, and read **both** route manifests; consider tighter/region-scoped diff for reskins. Then rewrite LSAT manifest paths to `/lsat/*` (`/`→`/lsat`, `/dashboard`→`/lsat/dashboard`), update `routePrefetchImporters`/`canonicalRoutePath`/`routeLabel`, and port the **AppMode study/test + `hideInTest`** system into the host manifest/sidebar. | H·M·M | none |
+| **K4-1** | **QA-1 realized: all LSAT routes into visual + a11y + smoke gates + baselines** | Add the LSAT routes to `CURATED_ROUTE_IDS`/`screenshotRoutes`/`smokeRoutes`; baseline against the **current** LSAT shell; add an `lsat-qa-gates` CI job. The safety net the whole keystone rides on. | H·M·L | K4-0 |
+| **K4-2** | **Shared host-styled primitive barrel** | Button/Card/Badge/Input/Select/Label/Dialog variant matrix as host CSS in `index.css @layer components` + `src/components/ui/*` wrappers that accept LSAT's prop surface but render host classes (top-5 primitives = ~71% of blast radius). Net-new; nothing imports yet. **⚠ Critic:** enumerate the Radix-backed ones (Dialog/Select/Popover/Tabs/Tooltip) and keep a host-styled **facade over Radix** where keyboard/focus-trap/typeahead matters — don't drop the a11y behavior. | H·M·L | K4-1 |
+| **K4-3** | **ANL-5 realized: shared viz barrel + host Analytics off recharts** | Promote `domains/lsat/components/viz/*` → `src/domains/shared/components/viz`, lock `@visx@4`, restyle to host tokens; migrate host `Analytics.jsx` off recharts (thin compat shim, one chart/PR); drop `recharts`. | H·M·M | ANL-5 |
+| **K4-4** | **Shared feedback + table/list-row barrel** | Expand the UB5 feedback barrel with LSAT's route-shaped skeletons restyled to host; add a shared Table (Radix facade) + ListRow; adopt per-route skeletons over the host's single `RouteFallback`. | M·M·L | K4-2 |
+| **K4-Tw** | **Tailwind content-glob merge (EARLY, isolated)** *(critic split from K4-12)* | Correct + widen the live root config glob to `./src/**`, delete the dead `_meta` config — **with S6 isolation still active and the LSAT body rule still present**, so a config regression is caught alone, not tangled with the cutover. | H·M·M | K4-1 |
+| **K4-5** | **Merge route manifests into one tree + nav wrapper** | One `AppRoute` manifest (extend with LSAT's `commandLabel`/`group`/`keywords`/`hideInTest`/breadcrumbs), LSAT routes at `/lsat/*`; `useLsatNavigate`/`RoutePrefix` so internal links resolve with minimal churn. Data + nav foundation; no router change yet. | H·M·M | K4-0 |
+| **K4-6** | **Feature flag + `SharedLayout`: mount LSAT under host Sidebar+TopBar (flag OFF)** | Create `featureFlags.ts` (**new** — read pre-paint to avoid a shell flash) + `SharedLayout.tsx` (**new**); add LSAT as a 4th collapsible Sidebar section; wire mode toggle + breadcrumb into TopBar; both shells coexist for instant rollback. | H·M·M | K4-5 |
+| **K4-cmd** | **Unify ⌘K + keyboard routing; decouple `section-runner` from the LSAT palette** *(critic prereq for K4-11/K4-13)* | Fold LSAT's route/command vocabulary + cmdk recents into the host TopBar palette (today it only "jumps" to `/lsat`); the exam runner imports `useCommandPalette` from the LSAT palette, so decouple it **before** the palette can be deleted. | M·M·M | K4-5 |
+| **K4-accent** | **Per-domain LSAT accent under one cascade** *(critic gap)* | Add `[data-domain='lsat']` to `tokens.css` and extend `App.jsx`'s `data-domain` effect (and `SharedLayout`) to set it for `/lsat/*`, reconciled with LSAT's `accent-panel.tsx`; today LSAT would fall back to the default host accent. | M·S·L | K4-6 |
+| **K4-7** | **Unify routers + consolidate providers** | Move LSAT routes into the host `BrowserRouter` (drop `basename`), fold `QueryClient`/`ModeProvider`/`MotionProvider`/`TooltipProvider` + LsatRoot startup effects (incl. the forgotten `visibilitychange`/`is-idle`/`mica` logic) into the host root, **collapse the two ThemeProviders** (UA2 unified the *store*, not the provider component), and plan `QueryClient`/timer **teardown** for the now-persistent mount. Highest structural risk. | H·L·H | K4-6, K4-cmd |
+| **K4-8** | **Reskin batch A — light list/detail** (Review, Srs, Quarantine, Practice, Playlists, Drills, PrepTests, SessionHistory, BankTagReview) | Container/chrome → host PageHeader/Surface/primitives; preserve state machines. One commit/page, each gated. | H·M·M | K4-7, K4-2, K4-4 |
+| **K4-9** | **Reskin batch B — dashboards + question-context** (Dashboard, Analytics, TypeAnalytics, PrepTestAnalytics, Bank, Import, Explanation, RcLab, Tutor) | Consume the viz barrel (K4-3); restyle chrome/cards/forms; preserve wizards/filters/selection. | H·L·M | K4-8, K4-3 |
+| **K4-10** | **Reskin batch C — settings/utility** (Settings, Notebook, ContentOps, Styleguide, NotFound, PassagePopout) | Form-dense Settings + large Notebook (chrome only) + admin/edge pages. | M·M·M | K4-9 |
+| **K4-11** | **Reskin batch D (LAST, highest-risk) — exam runners** (Exam, TakeSection, BlindReview) | **Page chrome + in-flow dialogs only.** **⚠ Critic:** `section-runner.tsx` is **~1036 lines** (not 400) and pulls a deep web of exam chrome (timer/pace/clock, LiveRegion, ScratchPad, ChoiceList, highlighter/annotation, NavigatorStrip, RcLineRuler, the separate `PassagePopout` Tauri window) where the timing/focus/keyboard logic lives — treat that chrome as its **own gated sub-batch** with the runner logic frozen; verify the PassagePopout window inherits the unified cascade; full exam dry-run + keyboard/SR + pause→switch-domain→resume tests. | H·L·H | K4-10, K4-cmd |
+| **K4-print** | **Print/PDF report regression pass** *(critic gap, paired with K4-Tw)* | Snapshot/verify `PrintReport.tsx` + the ~14 `@media print` / `print:` surfaces in light+dark after the Tailwind glob merge (print utilities come from the same config and have **no** current gate). | M·S·M | K4-Tw |
+| **K4-12** | **Remove the LSAT `@layer base` body rule** | Delete `body { @apply bg-background text-foreground }`; mounted LSAT pages inherit bg/text from the host shell. (Glob merge already landed in K4-Tw.) Re-run visual + UC2 gates light/dark. Must come **after** every page renders in the host shell. | H·S·M | K4-11, K4-Tw |
+| **K4-13** | **Retire S6 isolation + LSAT shell artifacts + the `main.jsx` domain branch** | Delete `startStyleIsolation`/`MutationObserver`; collapse `main.jsx` to one root; delete `LsatRoot`/`app-shell`/`titlebar`/`breadcrumb`/duplicate palette + `components/ui/*` once unused; drop unused Radix deps; flip the flag on, then remove it. The graduation commit. | M·M·M | K4-12 |
+| **K4-14** | **Full-matrix regression sign-off + e2e** | Visual + axe across all 4 domains × light/dark × **desktop+mobile**; QA-2 cross-domain e2e (Review-Inbox→`/lsat/srs`→complete→back; sidecar-kill graceful); manual exam end-to-end; bundle-size + LCP/FCP; document the unified cascade ordering. Go/no-go. | H·M·M | K4-13 |
+
+### 7.3 Phases
+
+- **Phase 0 — Gates & shared building blocks (zero structural change):** K4-0, K4-1, K4-2,
+  K4-3, K4-4, K4-Tw. *Make every later step safe + give reskins a target vocabulary.*
+- **Phase 1 — Structural merge behind the flag:** K4-5, K4-6, K4-accent, K4-cmd, K4-7. *One
+  manifest, one router, one provider tree, LSAT in the host shell — reversible via the flag.*
+- **Phase 2 — Reskin page-by-page (risk-ascending), exam last:** K4-8, K4-9, K4-10, K4-11.
+- **Phase 3 — Retire the old shell & isolation:** K4-print, K4-12, K4-13, K4-14.
+
+### 7.4 Effort, risk & regression net
+
+**Effort: XL** — breadth, not depth: >200 edit sites across 27 pages + 32 LSAT primitives +
+~115 import sites, but most edits are mechanical import-swaps + PageHeader bridging on top of
+the already-unified tokens. The two genuinely hard pockets are the **exam runner**
+(`section-runner.tsx` timing/focus — chrome only, never refactored) and the **cascade cutover**
+(Tailwind glob + body-rule + S6 removal, split into independently-revertible commits).
+
+**Top risks (critic-adjusted):** Tailwind-glob merge is a whole-app change (H, split + isolate);
+cascade `@layer`/specificity ordering once both sheets are live (identical tokens don't protect
+ordering); persistent-mount `QueryClient`/state retention across domains; exam-runner
+timing/focus; Radix→facade a11y parity; per-domain accent + print media (no current gate);
+mobile parity (the gate is **desktop-only today** — K4-0 fixes it first).
+
+**Regression net (the spine):** installed **first** (K4-0/K4-1). (1) Visual-regression — every
+LSAT route baselined in dark+light **and mobile** against the current shell; each reskin + each
+structural commit is a deliberate pixel diff. (2) axe/WCAG (UC2) on every LSAT route + explicit
+keyboard/SR passes for the exam batch. (3) QA-2 cross-domain e2e + smoke for behaviors frames
+miss (back/forward, ⌘K, Review-Inbox deep-links, mid-exam pause→switch→resume). (4) The
+`LSAT_UNIFIED_SHELL` flag lets the new and legacy shells coexist on one build for instant
+rollback. Critic verdict: strategy is sound (strangler-fig, gate-first, flag-gated, exam-last);
+**conditional on** the K4-0 prerequisites (gate-extension, manifest-collision + AppMode,
+Tailwind-glob split, ⌘K/runner decoupling, accent + print + provider gaps) landing before the
+structural merge — all folded into the table above.
+
