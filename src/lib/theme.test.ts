@@ -1,7 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { applyTheme, getActiveTheme, getStoredTheme, setTheme } from './theme';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  applyTheme,
+  getActiveTheme,
+  getStoredTheme,
+  migrateLegacyLsatTheme,
+  setTheme,
+  subscribeTheme,
+} from './theme';
 
 const STORAGE_KEY = 'qv-theme';
+const LEGACY_LSAT_KEY = 'lsatlab-theme';
 
 describe('theme manager', () => {
   beforeEach(() => {
@@ -82,6 +90,58 @@ describe('theme manager', () => {
       // jsdom returns matches=false for any query by default, which means
       // the OS preference is treated as "not light" → dark.
       expect(getActiveTheme('system')).toBe('dark');
+    });
+  });
+
+  // UA2 — single-source-of-truth wiring shared by the host ThemeContext and the
+  // vendored LSAT theme-provider.
+  describe('subscribeTheme', () => {
+    it('notifies subscribers when setTheme is called', () => {
+      const seen: string[] = [];
+      const off = subscribeTheme((t) => seen.push(t));
+      setTheme('light');
+      setTheme('system');
+      off();
+      setTheme('dark'); // ignored after unsubscribe
+      expect(seen).toEqual(['light', 'system']);
+    });
+
+    it('stops notifying after the returned unsubscribe is called', () => {
+      const listener = vi.fn();
+      const off = subscribeTheme(listener);
+      off();
+      setTheme('dark');
+      expect(listener).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('migrateLegacyLsatTheme', () => {
+    it('adopts a legacy lsatlab-theme value when no host choice exists, then clears it', () => {
+      window.localStorage.setItem(LEGACY_LSAT_KEY, 'light');
+      migrateLegacyLsatTheme();
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe('light');
+      expect(window.localStorage.getItem(LEGACY_LSAT_KEY)).toBeNull();
+    });
+
+    it('keeps an existing host choice over a stale legacy value', () => {
+      window.localStorage.setItem(STORAGE_KEY, 'dark');
+      window.localStorage.setItem(LEGACY_LSAT_KEY, 'light');
+      migrateLegacyLsatTheme();
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe('dark');
+      expect(window.localStorage.getItem(LEGACY_LSAT_KEY)).toBeNull();
+    });
+
+    it('is a no-op when there is no legacy value', () => {
+      migrateLegacyLsatTheme();
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+      expect(window.localStorage.getItem(LEGACY_LSAT_KEY)).toBeNull();
+    });
+
+    it('ignores a malformed legacy value but still clears the stale key', () => {
+      window.localStorage.setItem(LEGACY_LSAT_KEY, 'neon');
+      migrateLegacyLsatTheme();
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+      expect(window.localStorage.getItem(LEGACY_LSAT_KEY)).toBeNull();
     });
   });
 });

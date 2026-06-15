@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { applyTheme, getStoredTheme } from './lib/theme';
+import { applyTheme, getStoredTheme, migrateLegacyLsatTheme } from './lib/theme';
 import {
   DOMAIN_NAV_EVENT,
   domainForPath,
@@ -21,21 +21,6 @@ const rootEl = document.getElementById('root');
 
 const HostApp = lazy(() => import('./host-entry.jsx'));
 const LsatRoot = lazy(() => import('./domains/lsat/LsatRoot.tsx'));
-
-// Theme bridge. The host (qv-theme -> data-theme attr) and the LSAT app
-// (lsatlab-theme -> `dark` class) use the SAME vocabulary (light/dark/system).
-// The host is the primary theme surface, so before showing the LSAT branch we
-// copy the host's choice into the LSAT key BEFORE its ThemeProvider reads it.
-function bridgeThemeToLsat() {
-  try {
-    const host = localStorage.getItem('qv-theme');
-    if (host === 'light' || host === 'dark' || host === 'system') {
-      localStorage.setItem('lsatlab-theme', host);
-    }
-  } catch {
-    /* private-mode / quota — LSAT falls back to its own stored/default theme */
-  }
-}
 
 function DomainFallback() {
   // Brief, themed blank while a domain's chunk resolves on first switch.
@@ -68,11 +53,11 @@ function StudyVaultRoot() {
 
   const domain = domainForPath(pathname);
 
-  // Keep only the active domain's CSS live, and bridge the theme before the LSAT
-  // provider tree reads it. Done in render (not an effect) so the swap is
-  // isolated BEFORE the new sub-app paints — both calls are idempotent.
+  // Keep only the active domain's CSS live. Done in render (not an effect) so the
+  // swap is isolated BEFORE the new sub-app paints — idempotent. UA2: there is no
+  // longer a theme bridge here; both domains read the one shared `qv-theme` store
+  // (src/lib/theme.ts), so the LSAT provider already sees the host's choice.
   setActiveDomain(domain);
-  if (domain === 'lsat') bridgeThemeToLsat();
 
   return (
     <Suspense fallback={<DomainFallback />}>
@@ -81,6 +66,10 @@ function StudyVaultRoot() {
   );
 }
 
+// UA2: fold any legacy per-domain LSAT theme (`lsatlab-theme`) into the shared
+// `qv-theme` store once, before we read it — so an upgrading user keeps their
+// LSAT choice and the two keys can never drift again.
+migrateLegacyLsatTheme();
 // Apply the stored theme to <html> BEFORE React mounts so the first paint shows
 // the correct palette (avoids a one-frame wrong-theme flash).
 applyTheme(getStoredTheme());

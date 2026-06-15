@@ -13,6 +13,7 @@ import {
   getActiveTheme,
   getStoredTheme,
   setTheme as persistTheme,
+  subscribeTheme,
   type ResolvedTheme,
   type ThemeName,
 } from '../lib/theme';
@@ -65,6 +66,13 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     query.addEventListener?.('change', handle);
     return () => query.removeEventListener?.('change', handle);
   }, []);
+
+  // UA2 — follow the shared theme store (`src/lib/theme.ts`). This keeps the
+  // host in sync when the preference changes from another browser tab/window
+  // (the `storage` event); the LSAT provider reads the same store, so the two
+  // domains can no longer drift. Local `setTheme` already updates state, so this
+  // is idempotent for in-tab toggles.
+  useEffect(() => subscribeTheme(setThemeState), []);
 
   const resolved: ResolvedTheme = theme === 'system' ? systemPalette : theme;
 
