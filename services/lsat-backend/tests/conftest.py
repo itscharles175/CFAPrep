@@ -144,6 +144,108 @@ def count_queries():
     return counter.measure
 
 
+def seed_test_db(db_path: str) -> dict:
+    """Seed a fresh, file-backed SQLite DB at ``db_path`` exactly the way a real
+    sidecar boot does, in an isolated subprocess, and return its summary.
+
+    Reusable by both the ``seeded_sidecar_db`` fixture below and the QA-2 e2e
+    harness (``scripts/e2e-integration.mjs`` shells out to a tiny equivalent). The
+    seed runs in a CHILD interpreter with ``LSATLAB_DB`` pointed at ``db_path`` so
+    it binds ``app.db``'s engine to the throwaway file from the start — this keeps
+    the in-process shared engine (which the ``client`` / ``db_session`` fixtures
+    reset and rely on) completely untouched, regardless of import order.
+
+    The child runs ``app.seed.seed(reset=True)`` then counts the **due** SRS cards
+    and the seeded PrepTest id, printing a one-line JSON summary on stdout. The
+    seed creates SRS cards with ``due_date = now - 1h`` (see ``app/seed.py``), so a
+    sidecar booted against the resulting file answers ``GET /api/srs/due`` with a
+    non-empty queue immediately — what the Review-Inbox bridge needs to populate.
+
+    Returns a dict ``{"path", "due_count", "preptest_id"}``. Raises with the
+    child's captured output if seeding fails, so callers get an actionable error.
+    """
+    import json
+    import subprocess
+    import sys
+
+    child = (
+        "import json, os\n"
+        "from datetime import datetime, timezone\n"
+        "from sqlmodel import Session, select\n"
+        "from app import seed as seed_mod\n"
+        "from app.db import engine\n"
+        "from app.models import PrepTest, SRSCard\n"
+        "seed_mod.seed(reset=True)\n"
+        "now = datetime.now(timezone.utc)\n"
+        "due = 0\n"
+        "with Session(engine) as s:\n"
+        "    for c in s.exec(select(SRSCard)).all():\n"
+        "        d = c.due_date\n"
+        "        if d.tzinfo is None:\n"
+        "            d = d.replace(tzinfo=timezone.utc)\n"
+        "        if d <= now:\n"
+        "            due += 1\n"
+        "    pt = s.exec(select(PrepTest)).first()\n"
+        "    pid = pt.id if pt is not None else None\n"
+        "print(json.dumps({'due_count': due, 'preptest_id': pid}))\n"
+    )
+    env = dict(os.environ)
+    env["LSATLAB_DB"] = db_path
+    # Mirror the hermetic test env: never start the worker / auto-diagnose, and
+    # keep model probes pointed at a closed port so the child never blocks.
+    env.setdefault("LSATLAB_JOBS_WORKER", "0")
+    env.setdefault("LSATLAB_ERRORLOG_AUTODIAGNOSE", "0")
+    env.setdefault("LSATLAB_OLLAMA_URL", "http://127.0.0.1:1")
+    env.setdefault("LSATLAB_LMSTUDIO_URL", "http://127.0.0.1:1/v1")
+    env.setdefault("LSATLAB_LLM_RETRIES", "0")
+    # Run from the backend root (parent of this tests/ dir) so ``app`` imports.
+    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    proc = subprocess.run(
+        [sys.executable, "-c", child],
+        cwd=backend_root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"seed_test_db: seeding subprocess failed (exit {proc.returncode}).\n"
+            f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
+        )
+    line = (proc.stdout.strip().splitlines() or [""])[-1]
+    try:
+        summary = json.loads(line)
+    except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+        raise RuntimeError(
+            f"seed_test_db: could not parse seed summary from child stdout: {line!r}\n"
+            f"--- full stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
+        ) from exc
+    return {"path": db_path, **summary}
+
+
+@pytest.fixture()
+def seeded_sidecar_db(tmp_path_factory):
+    """QA-2 — a freestanding, file-backed, seeded test DB others can reuse.
+
+    Unlike the shared-engine ``client`` / ``db_session`` fixtures (which reset the
+    *one* process-global engine bound to ``LSATLAB_DB``), this hands back a
+    throwaway SQLite *file* on disk that has been migrated + seeded the same way a
+    real sidecar boot would — without disturbing the shared engine the rest of the
+    suite uses (the seed runs in a child interpreter; see ``seed_test_db``).
+
+    Yields a dict with:
+      * ``path``        — absolute path to the seeded SQLite file (str),
+      * ``due_count``   — number of due SRS cards seeded (int, >= 1),
+      * ``preptest_id`` — the seeded sample PrepTest id (int).
+
+    Intended for the cross-domain e2e + integration harness (QA-2) and any future
+    test that needs to launch the actual sidecar process against a known DB with a
+    non-empty ``GET /api/srs/due`` queue.
+    """
+    db_file = tmp_path_factory.mktemp("seeded-sidecar") / "lsatlab_e2e.db"
+    return seed_test_db(str(db_file))
+
+
 @pytest.fixture(autouse=True)
 def _restore_config():
     """Snapshot/restore the process-global ``config`` attributes that the settings
