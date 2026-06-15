@@ -7,6 +7,8 @@ import EmptyState from './components/EmptyState';
 import KeyboardHelp from './components/KeyboardHelp/KeyboardHelp';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
+import { OfflineProvider } from './context/OfflineContext';
+import OfflineBanner from './components/OfflineBanner';
 import { appRoutes } from './routes/routeManifest';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -138,7 +140,12 @@ export default function App() {
   return (
     <ThemeProvider>
       <ToastProvider>
+        <OfflineProvider>
         <div className="app-layout">
+          {/* BA3: RAG/sidecar-aware offline banner — visible only when degraded,
+              sits above the shell so the user knows AI/search is unavailable
+              rather than silently empty (the Dexie fallback otherwise hides it). */}
+          <OfflineBanner />
           {/* UC1: Skip to main content — first focusable child of the app shell,
               visually hidden until focused (see .skip-to-main in index.css). */}
           <a href="#main" className="skip-to-main">
@@ -200,6 +207,7 @@ export default function App() {
             <PwaInstallPrompt />
           </Suspense>
         </div>
+        </OfflineProvider>
       </ToastProvider>
     </ThemeProvider>
   );
