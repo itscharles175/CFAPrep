@@ -1,0 +1,40 @@
+{
+  "GET /api/bank/sources": [
+    "expected_fields",
+    "hf_dataset",
+    "hf_split",
+    "key",
+    "license",
+    "preptest_name",
+    "question_source",
+    "requires_local_path",
+    "requires_nc_acknowledgement",
+    "section_type"
+  ],
+  "GET /api/bank/stats": [
+    "available_sources",
+    "by_q_type",
+    "by_source",
+    "total"
+  ],
+  "GET /api/preptests": [
+    "completed_sections",
+    "date_admin",
+    "id",
+    "is_official",
+    "name",
+    "section_count",
+    "source"
+  ],
+  "GET /api/sessions": [
+    "br_accuracy",
+    "duration_sec",
+    "ended",
+    "id",
+    "official_only_score",
+    "question_count",
+    "scaled_score",
+    "started",
+    "type"
+  ]
+}

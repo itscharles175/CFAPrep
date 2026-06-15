@@ -225,6 +225,95 @@ jobs:
             dist/reports/a11y-check.json
           retention-days: 14
 
+  # QA-3: PR-gate sidecar smoke + OpenAPI contract drift. The binary smoke in
+  # release.yml only runs on a tag (against the FROZEN PyInstaller binary), so a
+  # PR that breaks the host↔sidecar boundary isn't caught until release. This job
+  # closes that gap WITHOUT freezing a binary (too slow for every PR): it boots
+  # the LSAT backend FROM SOURCE in an isolated `.venv-lsat` (the same venv layout
+  # build-lsat-binary.mjs provisions) and exercises three legs —
+  #   1. the DATA-1 contract drift gate (export-lsat-openapi.mjs --check) against
+  #      services/lsat-backend/openapi-baseline.json — fails on any removed
+  #      path/method/2xx field across the WHOLE spec;
+  #   2. scripts/smoke-sidecar.mjs booting `sidecar_main.py` (the production entry)
+  #      and asserting GET /api/health → {ok:true};
+  #   3. a second smoke boot asserting GET /api/srs/due returns 2xx JSON (the
+  #      host's SRS queue read — the route DATA-1 calls out by name).
+  # The per-route response-schema field-removal snapshot
+  # (services/lsat-backend/tests/schemas-baseline.json) runs inside the backend
+  # pytest gate in this same job. LSATLAB_DATA_DIR points at a runner-temp dir so
+  # the first-run SQLite create + startup backup can't fail on perms; the startup
+  # model probe fails fast (no Ollama in CI) and the app keeps serving. Runs in
+  # parallel with `quality` — no host slowdown. (Roadmap QA-3, DATA-1.)
+  lsat-sidecar-smoke:
+    name: LSAT sidecar — smoke + OpenAPI contract (from source)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      # Provision the isolated backend venv at the repo root exactly where
+      # build-lsat-binary.mjs / export-lsat-openapi.mjs expect it (`.venv-lsat`),
+      # installing the backend from its own pyproject so the runtime deps are the
+      # authoritative set. The drift script resolves `.venv-lsat/bin/python`
+      # itself; the smoke steps reference it explicitly.
+      - name: Provision LSAT backend venv
+        run: |
+          python -m venv .venv-lsat
+          .venv-lsat/bin/python -m pip install --upgrade pip wheel
+          .venv-lsat/bin/python -m pip install "services/lsat-backend"
+
+      # Leg 1 — DATA-1 whole-spec contract drift gate. Imports the FastAPI app
+      # in-process via the backend interpreter and diffs app.openapi() against the
+      # committed baseline; fails on any removed path/method/2xx response field.
+      - name: OpenAPI contract drift check
+        run: node scripts/export-lsat-openapi.mjs --check
+
+      # Per-route response-schema field-removal snapshot (QA-3) runs in the
+      # backend's own pytest gate, alongside the launch-readiness contract asserts.
+      - name: Backend OpenAPI contract tests
+        working-directory: services/lsat-backend
+        run: ../../.venv-lsat/bin/python -m pytest tests/test_openapi_contract.py -q
+
+      # Leg 2 — boot the backend FROM SOURCE (production entry: sidecar_main.py)
+      # and assert GET /api/health → {ok:true}. `app` is installed into the venv,
+      # so the import resolves regardless of cwd. LSATLAB_DATA_DIR keeps the
+      # first-run SQLite/backup writes in a throwaway dir.
+      - name: Smoke — /api/health
+        env:
+          LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-source-smoke
+        run: |
+          node scripts/smoke-sidecar.mjs \
+            --bin .venv-lsat/bin/python \
+            --url http://127.0.0.1:8123/api/health \
+            --expect-ok --timeout 90000 --label lsat-backend-src \
+            -- services/lsat-backend/sidecar_main.py --host 127.0.0.1 --port 8123
+
+      # Leg 3 — second boot, assert GET /api/srs/due returns 2xx JSON (the host's
+      # SRS queue read). No --expect-ok: this route's body isn't the {ok:bool}
+      # health envelope, so a plain 2xx is the contract here.
+      - name: Smoke — /api/srs/due
+        env:
+          LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-source-smoke
+        run: |
+          node scripts/smoke-sidecar.mjs \
+            --bin .venv-lsat/bin/python \
+            --url http://127.0.0.1:8123/api/srs/due \
+            --timeout 90000 --label lsat-srs-due \
+            -- services/lsat-backend/sidecar_main.py --host 127.0.0.1 --port 8123
+
   # The vendored LSAT subtree runs on the host's hoisted toolchain (no separate
   # node_modules) but is excluded from the host's strict tsc + the default
   # `npm test`. This parallel job is its safety net: 251 tests + a strict
