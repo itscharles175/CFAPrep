@@ -73,6 +73,52 @@ jobs:
             !**/*.epub
           retention-days: 14
 
+  # UC2: WCAG AA contrast gate. Builds the production bundle, installs the
+  # Playwright-managed Chromium, then runs scripts/a11y-check.mjs (npm run
+  # a11y:check) — a broad WCAG 2.1 A/AA axe sweep across every screenshot route
+  # in BOTH light and dark themes, plus a focused color-contrast pass over the
+  # UI primitives (the /style gallery), chart SVGs (/analytics, /knowledge-graph),
+  # and the per-domain light-mode accents (/cfa, /excel, /quant in light theme).
+  # The script exits non-zero on any AA violation, so contrast regressions fail
+  # CI. Runs in parallel with `quality` — no host slowdown. (Plan UC2.)
+  a11y:
+    name: Accessibility — WCAG AA contrast (light + dark)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      # a11y:check launches headless Chromium via playwright-core. There is no
+      # system browser on the runner, so install Playwright's managed Chromium
+      # (with its Linux system libs); a11y-helpers.mjs resolves it via
+      # chromium.executablePath().
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: WCAG AA contrast check
+        run: npm run a11y:check
+
+      - name: Upload a11y report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-a11y
+          path: |
+            dist/reports/a11y-check.json
+          retention-days: 14
+
   # The vendored LSAT subtree runs on the host's hoisted toolchain (no separate
   # node_modules) but is excluded from the host's strict tsc + the default
   # `npm test`. This parallel job is its safety net: 251 tests + a strict

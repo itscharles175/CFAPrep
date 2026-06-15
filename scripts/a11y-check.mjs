@@ -5,13 +5,17 @@ import AxeBuilder from '@axe-core/playwright';
 import { screenshotRoutes } from '../src/routes/routeManifest.ts';
 import {
   applySourceState,
-  browserCandidates,
-  firstExistingPath,
   routePathForSourceState,
   routeSourceStates,
   summarizeRouteFailures,
   viewports,
 } from './qa-helpers.mjs';
+import {
+  a11yThemes,
+  contrastMatrix,
+  resolveBrowserExecutable,
+  seedThemeInitScript,
+} from './a11y-helpers.mjs';
 
 /* global document */
 
@@ -38,72 +42,158 @@ const server = await preview({
   },
 });
 
-const executablePath = await firstExistingPath(browserCandidates);
+const executablePath = await resolveBrowserExecutable();
 if (!executablePath) {
   await new Promise((resolve) => server.httpServer.close(resolve));
-  throw new Error('No local Chromium-compatible browser executable found for accessibility checks.');
+  throw new Error(
+    'No Chromium-compatible browser found for accessibility checks. Install a system Chrome/Edge, ' +
+      'set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, or run "npx playwright install chromium" (CI does this).',
+  );
 }
 
 const address = server.resolvedUrls?.local?.[0] || 'http://127.0.0.1:4175/';
 const browser = await chromium.launch({ executablePath, headless: true });
-const context = await browser.newContext({ viewport: viewports.desktop });
-const page = await context.newPage();
 const failures = [];
 const routeResults = [];
+const contrastResults = [];
+
+// A fresh context per theme so the seeded `localStorage['qv-theme']` (and thus
+// the bootstrap's `data-theme`) is isolated and applied before first paint.
+async function withThemeContext(theme, run) {
+  const context = await browser.newContext({ viewport: viewports.desktop });
+  await seedThemeInitScript(context, theme);
+  const page = await context.newPage();
+  try {
+    await run(page);
+  } finally {
+    await context.close();
+  }
+}
 
 try {
-  for (const route of screenshotRoutes) {
-    for (const sourceState of routeSourceStates(route)) {
-      for (const viewportName of route.viewports) {
+  // ── Pass 1: broad WCAG 2.1 A/AA scan across every screenshot route, in BOTH
+  // themes and BOTH viewports. Fails on serious/critical violations (matching
+  // the prior gate's threshold) so existing route coverage is unchanged beyond
+  // now also covering the light palette.
+  for (const theme of a11yThemes) {
+    await withThemeContext(theme, async (page) => {
+      for (const route of screenshotRoutes) {
+        for (const sourceState of routeSourceStates(route)) {
+          for (const viewportName of route.viewports) {
+            const startedAt = Date.now();
+            const path = routePathForSourceState(route, sourceState);
+            const url = new URL(path, address).toString();
+            const scope = `${route.id} ${viewportName} ${sourceState} [${theme}]`;
+            try {
+              await page.setViewportSize(viewports[viewportName]);
+              await applySourceState(page, address, sourceState);
+              await page.goto(url, { waitUntil: 'networkidle' });
+              await waitForBodyText(page, route.expectedText, scope);
+              await page.waitForTimeout(1800);
+              const result = await new AxeBuilder({ page })
+                .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+                .analyze();
+              const violations = result.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact || ''));
+              routeResults.push({
+                routeId: route.id,
+                path,
+                expectedText: route.expectedText,
+                viewport: viewportName,
+                sourceState,
+                theme,
+                status: violations.length ? 'blocked' : 'ok',
+                durationMs: Date.now() - startedAt,
+                url,
+                violations: violations.map((violation) => `${violation.id}: ${violation.help}`),
+              });
+              if (violations.length) {
+                failures.push({
+                  route: scope,
+                  violations: violations.map((violation) => `${violation.id}: ${violation.help}`),
+                });
+              }
+              console.log(`OK a11y scanned ${scope}`);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              failures.push({ route: scope, violations: [message] });
+              routeResults.push({
+                routeId: route.id,
+                path,
+                expectedText: route.expectedText,
+                viewport: viewportName,
+                sourceState,
+                theme,
+                status: 'blocked',
+                durationMs: Date.now() - startedAt,
+                url,
+                violations: [message],
+              });
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // ── Pass 2: focused WCAG AA CONTRAST gate (UC2). For the curated primitives /
+  // chart / per-domain-accent surfaces, run axe restricted to color-contrast and
+  // fail on ANY violation regardless of impact — an AA contrast miss is never
+  // "minor" for this gate. Theme is driven via the seeded `data-theme`; the
+  // per-domain light-mode accents come from App.jsx applying `data-domain` on
+  // the /cfa, /excel, /quant routes under the light palette (see a11y-helpers).
+  for (const entry of contrastMatrix) {
+    for (const theme of entry.themes) {
+      await withThemeContext(theme, async (page) => {
         const startedAt = Date.now();
-        const path = routePathForSourceState(route, sourceState);
-        const url = new URL(path, address).toString();
+        const url = new URL(entry.path, address).toString();
+        const scope = `contrast:${entry.id} [${theme}]`;
         try {
-          await page.setViewportSize(viewports[viewportName]);
-          await applySourceState(page, address, sourceState);
+          await page.setViewportSize(viewports.desktop);
           await page.goto(url, { waitUntil: 'networkidle' });
-          await waitForBodyText(page, route.expectedText, `${route.id} ${viewportName} ${sourceState}`);
           await page.waitForTimeout(1800);
+          // color-contrast IS the WCAG 1.4.3 AA rule; withRules sets runOnly to
+          // exactly this rule (it overrides withTags), so the pass measures only
+          // AA text/background contrast.
           const result = await new AxeBuilder({ page })
-            .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+            .withRules(['color-contrast'])
             .analyze();
-          const violations = result.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact || ''));
-          routeResults.push({
-            routeId: route.id,
-            path,
-            expectedText: route.expectedText,
-            viewport: viewportName,
-            sourceState,
+          const violations = result.violations;
+          contrastResults.push({
+            id: entry.id,
+            label: entry.label,
+            path: entry.path,
+            theme,
             status: violations.length ? 'blocked' : 'ok',
             durationMs: Date.now() - startedAt,
             url,
-            violations: violations.map((violation) => `${violation.id}: ${violation.help}`),
+            violations: violations.flatMap((violation) =>
+              violation.nodes.map((node) => `${violation.id}: ${(node.target || []).join(' ')} — ${(node.failureSummary || violation.help).replace(/\s+/g, ' ').trim()}`),
+            ),
           });
           if (violations.length) {
             failures.push({
-              route: `${route.id} ${viewportName} ${sourceState}`,
-              violations: violations.map((violation) => `${violation.id}: ${violation.help}`),
+              route: scope,
+              violations: violations.flatMap((violation) =>
+                violation.nodes.map((node) => `${violation.id}: ${(node.target || []).join(' ')}`),
+              ),
             });
           }
-          console.log(`OK a11y scanned ${route.id} ${viewportName} ${sourceState}`);
+          console.log(`OK a11y contrast ${scope} (${entry.label})`);
         } catch (error) {
-          failures.push({
-            route: `${route.id} ${viewportName} ${sourceState}`,
-            violations: [error instanceof Error ? error.message : String(error)],
-          });
-          routeResults.push({
-            routeId: route.id,
-            path,
-            expectedText: route.expectedText,
-            viewport: viewportName,
-            sourceState,
+          const message = error instanceof Error ? error.message : String(error);
+          failures.push({ route: scope, violations: [message] });
+          contrastResults.push({
+            id: entry.id,
+            label: entry.label,
+            path: entry.path,
+            theme,
             status: 'blocked',
             durationMs: Date.now() - startedAt,
             url,
-            violations: [error instanceof Error ? error.message : String(error)],
+            violations: [message],
           });
         }
-      }
+      });
     }
   }
 } finally {
@@ -111,14 +201,13 @@ try {
   const routeFailures = summarizeRouteFailures(routeResults);
   await writeFile(
     'dist/reports/a11y-check.json',
-    `${JSON.stringify({ generatedAt: new Date().toISOString(), routeResults, routeFailures }, null, 2)}\n`,
+    `${JSON.stringify({ generatedAt: new Date().toISOString(), themes: a11yThemes, routeResults, routeFailures, contrastResults }, null, 2)}\n`,
   );
-  await context.close();
   await browser.close();
   await new Promise((resolve) => server.httpServer.close(resolve));
 }
 
 if (failures.length) {
   console.error(JSON.stringify(failures, null, 2));
-  throw new Error(`${failures.length} route(s) have serious or critical accessibility violations.`);
+  throw new Error(`${failures.length} accessibility / contrast check(s) failed (WCAG AA, light + dark).`);
 }
