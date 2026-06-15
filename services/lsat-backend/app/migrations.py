@@ -32,6 +32,23 @@ log = logging.getLogger("lsatlab.migrations")
 
 Migration = tuple[int, str, Callable[[object], None]]
 
+# --- DATA-3 cross-domain schema-version handshake ----------------------------
+# The version of the SHARED cross-domain field-semantics contract this backend
+# build speaks (pinned by docs/DATA-DICTIONARY.md + mirrored by the host's
+# ``CROSS_DOMAIN_SCHEMA_VERSION`` in src/lib/dataDictionary.ts). Bumped ONLY when
+# a shared field's MEANING changes — deliberately distinct from the SQLite
+# ``PRAGMA user_version`` (the migration ledger) and the host Dexie
+# ``VAULT_SCHEMA_VERSION``. Recorded in SQLite by migration 22 and exposed at
+# ``GET /api/observability/schema-versions`` so the host can detect an
+# incompatible peer BEFORE attempting a cross-domain write.
+CROSS_DOMAIN_SCHEMA_VERSION = 1
+# The oldest host cross-domain contract this backend will still accept (it speaks
+# v1 and accepts v1). Surfaced to the host so a newer backend can still serve an
+# older-but-supported host read-only-safely.
+CROSS_DOMAIN_HOST_MIN_SUPPORTED = 1
+# The persisted-version key inside the ``schema_meta`` table migration 22 creates.
+CROSS_DOMAIN_SCHEMA_KEY = "cross_domain_schema_version"
+
 
 def _ensure_table(conn) -> None:
     conn.exec_driver_sql(
@@ -709,6 +726,59 @@ def _m021_attempt_rationale_br_note(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 21")
 
 
+def _m022_cross_domain_schema_version(conn) -> None:
+    """DATA-3 — record the cross-domain data-schema version for the host
+    handshake.
+
+    Creates a tiny key/value ``schema_meta`` table (idempotent, ``IF NOT
+    EXISTS``) and upserts ``cross_domain_schema_version`` =
+    ``CROSS_DOMAIN_SCHEMA_VERSION``. ``GET /api/observability/schema-versions``
+    reads it so the host can compare contracts on boot and disable CROSS-DOMAIN
+    writes (local writes are never affected) on a mismatch — the cheapest guard
+    against the highest-severity multi-backend failure (an old SQLite + new Dexie
+    silently losing data on a cross-plane write).
+
+    PRAGMA-guarded like migrations 20/21: the table create + the upsert are both
+    idempotent, so a fresh DB (where ``create_all`` knows nothing of this table)
+    and a re-run are clean no-ops. Bumps ``PRAGMA user_version`` to 22 so the
+    DB-level version tracks the latest recorded migration."""
+    conn.exec_driver_sql(
+        "CREATE TABLE IF NOT EXISTS schema_meta ("
+        "key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    conn.exec_driver_sql(
+        "INSERT INTO schema_meta (key, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+        (
+            CROSS_DOMAIN_SCHEMA_KEY,
+            str(CROSS_DOMAIN_SCHEMA_VERSION),
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    conn.exec_driver_sql("PRAGMA user_version = 22")
+
+
+def read_cross_domain_schema_version(conn) -> int:
+    """Read the recorded cross-domain schema version from ``schema_meta``.
+
+    Returns ``CROSS_DOMAIN_SCHEMA_VERSION`` (the code default) when the row /
+    table is absent — i.e. a DB that pre-dates migration 22 but is running this
+    build still reports a coherent version rather than 0. Never raises."""
+    try:
+        row = conn.exec_driver_sql(
+            "SELECT value FROM schema_meta WHERE key=?",
+            (CROSS_DOMAIN_SCHEMA_KEY,),
+        ).fetchone()
+    except Exception:  # pragma: no cover - table absent on a partial/old DB
+        return CROSS_DOMAIN_SCHEMA_VERSION
+    if row is None or row[0] is None:
+        return CROSS_DOMAIN_SCHEMA_VERSION
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return CROSS_DOMAIN_SCHEMA_VERSION
+
+
 MIGRATIONS: list[Migration] = [
     (1, "hot_path_indexes", _m001_hot_path_indexes),
     (2, "embedding_unique_index", _m002_embedding_unique_index),
@@ -731,6 +801,7 @@ MIGRATIONS: list[Migration] = [
     (19, "notebook_knowledge_fts", _m019_notebook_knowledge_fts),
     (20, "fold_additive_columns", _m020_fold_additive_columns),
     (21, "attempt_rationale_br_note", _m021_attempt_rationale_br_note),
+    (22, "cross_domain_schema_version", _m022_cross_domain_schema_version),
 ]
 
 

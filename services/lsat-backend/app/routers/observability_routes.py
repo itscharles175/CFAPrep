@@ -7,8 +7,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
-from .. import ai, backup, config, jobs, llm, observability, trust
-from ..db import get_session
+from .. import ai, backup, config, jobs, llm, migrations, observability, trust
+from ..db import engine, get_session
 from ..models import CoachSnapshot, EmbeddingVector, GenJob, GenStatus, Question
 
 router = APIRouter()
@@ -258,3 +258,34 @@ def trust_status(
     to recompute. The full manifest stays on /observability/trust.
     """
     return trust.trust_status(session, tier=tier, force_refresh=refresh)
+
+
+@router.get("/observability/schema-versions", response_model=dict[str, Any])
+def schema_versions() -> dict[str, Any]:
+    """DATA-3 — the cross-domain schema-version handshake.
+
+    Reports the version of the SHARED cross-domain field-semantics contract this
+    backend speaks (recorded in SQLite by migration 22, pinned by
+    docs/DATA-DICTIONARY.md), alongside the SQLite ``PRAGMA user_version`` and the
+    latest recorded migration version for diagnostics. The host reads this on boot
+    and disables CROSS-DOMAIN writes (host->LSAT / LSAT->host) — NOT local writes —
+    when the versions are incompatible, surfaced as the "data planes aligned"
+    check on System Health. The cheapest guard against an old SQLite + new Dexie
+    silently losing data on a cross-plane write.
+
+    O(1) and never raises: a DB that pre-dates migration 22 still reports the
+    code-default version rather than erroring."""
+    with engine.begin() as conn:
+        cross_domain_version = migrations.read_cross_domain_schema_version(conn)
+        try:
+            user_version = int(conn.exec_driver_sql("PRAGMA user_version").fetchone()[0] or 0)
+        except Exception:  # pragma: no cover - PRAGMA always available
+            user_version = 0
+    latest_migration = max((m[0] for m in migrations.MIGRATIONS), default=0)
+    return {
+        "cross_domain_schema_version": cross_domain_version,
+        "db_user_version": user_version,
+        "latest_migration_version": latest_migration,
+        "host_min_supported": migrations.CROSS_DOMAIN_HOST_MIN_SUPPORTED,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }

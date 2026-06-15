@@ -4248,7 +4248,7 @@
     "/api/srs/due": {
       "get": {
         "summary": "Due Cards",
-        "description": "Due SRS cards, most-overdue-first AND interleaved by q_type so a single\ntype never dominates a long review run. (Card response shape unchanged.)",
+        "description": "Due SRS cards, most-overdue-first AND interleaved by q_type so a single\ntype never dominates a long review run. Each card additionally carries its\n``origin`` (why it's queued) — answer-key-free, used by the SRS screen to\nbadge the card (incl. LSAT-3's distinct \"Gap\" cloze cards).",
         "operationId": "due_cards_api_srs_due_get",
         "responses": {
           "200": {
@@ -9351,6 +9351,67 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/observability/schema-versions": {
+      "get": {
+        "summary": "Schema Versions",
+        "description": "DATA-3 — the cross-domain schema-version handshake.\n\nReports the version of the SHARED cross-domain field-semantics contract this\nbackend speaks (recorded in SQLite by migration 22, pinned by\ndocs/DATA-DICTIONARY.md), alongside the SQLite ``PRAGMA user_version`` and the\nlatest recorded migration version for diagnostics. The host reads this on boot\nand disables CROSS-DOMAIN writes (host->LSAT / LSAT->host) — NOT local writes —\nwhen the versions are incompatible, surfaced as the \"data planes aligned\"\ncheck on System Health. The cheapest guard against an old SQLite + new Dexie\nsilently losing data on a cross-plane write.\n\nO(1) and never raises: a DB that pre-dates migration 22 still reports the\ncode-default version rather than erroring.",
+        "operationId": "schema_versions_api_observability_schema_versions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Schema Versions Api Observability Schema Versions Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }

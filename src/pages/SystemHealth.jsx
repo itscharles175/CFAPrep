@@ -17,6 +17,7 @@ import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 import { getStorage, getActiveDriverName, cutoverTo, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
 import { checkLsatBackendHealth, getLsatCloudBudget, syncProviderToLsat, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
+import { fetchDataSchemaAlignment } from '../lib/dataDictionary';
 import { getSidecarLogs, getSidecarStatus } from '../lib/systemHealth';
 import { recognizeOnceOffline } from '../lib/voice';
 import { readLastCrash, clearLastCrash } from '../components/ErrorBoundary';
@@ -103,6 +104,11 @@ export default function SystemHealth() {
   // LSAT backend sidecar (:8100) health — probed independently so a down
   // sidecar never blocks the page. null = not yet checked.
   const [lsatHealth, setLsatHealth] = useState(null);
+  // DATA-3: cross-domain schema-version handshake. The host reads the LSAT
+  // sidecar's reported contract version on mount and compares it to the version
+  // this build speaks; on a mismatch, CROSS-DOMAIN writes are disabled (local
+  // Dexie data is unaffected). null = not yet checked.
+  const [dataAlignment, setDataAlignment] = useState(null);
   // OPS-1: unified sidecar console. The desktop shell supervises all four
   // sidecars (SurrealDB :8000, open-notebook API :5055 + worker, LSAT :8100);
   // these mirror the native get_sidecar_status / get_sidecar_logs commands.
@@ -247,6 +253,9 @@ export default function SystemHealth() {
     });
     checkLsatBackendHealth().then((h) => {
       if (active) setLsatHealth(h);
+    });
+    fetchDataSchemaAlignment().then((alignment) => {
+      if (active) setDataAlignment(alignment);
     });
     refreshSidecars(active);
     refreshCloudBudget(active);
@@ -1133,6 +1142,37 @@ export default function SystemHealth() {
                 {lsatHealth.ai.missingModels.length > 1 ? 'them' : 'it'} or change the routing in LSAT model settings.
               </p>
             )}
+            {/* DATA-3: cross-domain schema-version handshake ("data planes
+                aligned"). aligned = both planes speak the same shared-field
+                contract → cross-domain writes are safe. mismatch / unreachable →
+                cross-domain writes disabled (local Dexie data is unaffected). */}
+            {dataAlignment && (
+              <p
+                className={`qv-m-0 qv-mt-2 qv-fs-sm ${
+                  dataAlignment.status === 'aligned'
+                    ? 'qv-text-success'
+                    : dataAlignment.status === 'mismatch'
+                      ? 'qv-text-danger'
+                      : 'qv-text-warning'
+                }`}
+              >
+                Data planes{' '}
+                {dataAlignment.status === 'aligned'
+                  ? 'aligned'
+                  : dataAlignment.status === 'mismatch'
+                    ? 'mismatch'
+                    : 'unverified'}
+                {' · '}
+                <span className="qv-mono">
+                  host v{dataAlignment.hostVersion}
+                  {dataAlignment.backendVersion != null ? ` / LSAT v${dataAlignment.backendVersion}` : ' / LSAT —'}
+                </span>
+                {' · '}
+                cross-domain writes {dataAlignment.crossDomainWritesEnabled ? 'enabled' : 'disabled'}
+                {'. '}
+                {dataAlignment.detail}
+              </p>
+            )}
           </div>
           <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
             <button
@@ -1140,6 +1180,8 @@ export default function SystemHealth() {
               onClick={() => {
                 setLsatHealth(null);
                 checkLsatBackendHealth().then(setLsatHealth);
+                setDataAlignment(null);
+                fetchDataSchemaAlignment().then(setDataAlignment);
               }}
             >
               Re-check

@@ -1,4 +1,9 @@
 import type { MasterySnapshot, QuestionResult, ReviewItem } from '../learningTypes';
+import type {
+  CrossDomainAttempt,
+  CrossDomainMastery,
+  CrossDomainReviewCard,
+} from '../dataDictionary';
 
 export interface StorageSettingRow {
   key: string;
@@ -102,6 +107,33 @@ export interface MasterySnapshotStore {
   toArray(): Promise<MasterySnapshot[]>;
 }
 
+/**
+ * DATA-2 — cross-domain identity / storage bridge.
+ *
+ * A typed common interface that maps a driver's NATIVE host shapes
+ * ({@link ReviewItem}, {@link QuestionResult}, {@link MasterySnapshot}) to/from
+ * the domain-agnostic canonical shapes pinned in `dataDictionary.ts`, so one
+ * caller can read "what's due / how am I doing" across CFA + Quant + Excel +
+ * LSAT without knowing which plane each row came from.
+ *
+ * This is deliberately ADDITIVE and read-first: it sits ALONGSIDE the existing
+ * `reviewItems` / `questionResults` / `masterySnapshots` namespaces (which keep
+ * their native shapes for existing consumers) rather than replacing them. The
+ * LSAT plane is reached over HTTP via `lsatReviewBridge.ts`, NOT through this
+ * driver method — this bridge covers the host side of the seam, exposing the
+ * SAME canonical shapes the LSAT sidecar serializers emit so both halves merge
+ * cleanly. Cross-domain WRITES are gated by the DATA-3 schema-version handshake
+ * (`fetchDataSchemaAlignment` in `dataDictionary.ts`).
+ */
+export interface CrossDomainBridge {
+  /** Read this driver's host review queue as canonical cross-domain cards. */
+  reviewCards(): Promise<CrossDomainReviewCard[]>;
+  /** Read this driver's host attempt log as canonical cross-domain attempts. */
+  attempts(): Promise<CrossDomainAttempt[]>;
+  /** Read this driver's host mastery snapshots as canonical cross-domain mastery. */
+  mastery(): Promise<CrossDomainMastery[]>;
+}
+
 export interface StorageDriver {
   name: 'dexie' | 'surrealdb';
   ready(): Promise<boolean>;
@@ -129,6 +161,13 @@ export interface StorageDriver {
   questionResults?: QuestionResultStore;
   /** Per-objective mastery snapshots.  Optional, provided by both drivers. */
   masterySnapshots?: MasterySnapshotStore;
+  /**
+   * DATA-2 — canonical cross-domain projection of this driver's host review
+   * queue / attempt log / mastery (see {@link CrossDomainBridge}). Optional like
+   * the other namespaces: callers feature-detect it. ADDITIVE — existing
+   * `StorageDriver` consumers are unaffected.
+   */
+  crossDomainBridge?: CrossDomainBridge;
 }
 
 export interface StorageRegistry {

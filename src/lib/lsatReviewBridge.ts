@@ -24,6 +24,11 @@
  * (`scripts/export-lsat-openapi.mjs`) and `tsc` rather than silently at runtime.
  */
 import type { paths } from '@/domains/lsat/lib/api.gen';
+import {
+  lsatSrsCardToCanonical,
+  type CrossDomainReviewCard,
+  type RawLsatSrsCard,
+} from './dataDictionary';
 
 const LSAT_API_BASE = 'http://127.0.0.1:8100';
 /** The contract path the bridge consumes — kept honest against `api.gen.ts`. */
@@ -38,6 +43,13 @@ export interface UnifiedReviewItem {
   /** Where to send the user to actually do this review (hard nav for LSAT). */
   deepLinkPath: string;
   qType?: string;
+  /**
+   * DATA-2 — the same row projected onto the canonical cross-domain shape
+   * (`dataDictionary.ts`), so a unified consumer can rank/merge LSAT cards with
+   * host cards using one vocabulary (bucketed difficulty, namespaced identity).
+   * Additive: existing `UnifiedReviewItem` fields are unchanged.
+   */
+  canonical: CrossDomainReviewCard;
 }
 
 export interface LsatDueResult {
@@ -59,7 +71,7 @@ export const LSAT_REVIEW_PATH = LSAT_SRS_PATH;
  * `app/routers/srs.py::due_cards`. When the backend grows a typed `response_model`
  * for this route, regenerate `api.gen.ts` and swap this for the schema alias.
  */
-interface RawDueCard {
+interface RawDueCard extends RawLsatSrsCard {
   card_id?: number | string;
   question_id?: number | string;
   stem?: string;
@@ -103,6 +115,9 @@ export async function fetchLsatDue(opts: { limit?: number; timeoutMs?: number } 
       title: titleFor(card, i),
       deepLinkPath: LSAT_SRS_PATH,
       qType: card.q_type,
+      // DATA-2: project the same raw row onto the canonical cross-domain shape so
+      // consumers can merge/rank it against host cards with one vocabulary.
+      canonical: lsatSrsCardToCanonical(card),
     }));
     return {
       ok: true,
@@ -115,4 +130,32 @@ export async function fetchLsatDue(opts: { limit?: number; timeoutMs?: number } 
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Result of {@link fetchLsatDueCanonical} — canonical cross-domain cards. */
+export interface LsatDueCanonicalResult {
+  ok: boolean;
+  dueCount: number;
+  cards: CrossDomainReviewCard[];
+  error?: string;
+}
+
+/**
+ * DATA-2 — fetch the LSAT due queue projected entirely onto the canonical
+ * cross-domain shape (`dataDictionary.ts`), so a unified "what's due across all
+ * domains" caller can merge these with the host's `crossDomainBridge.reviewCards()`
+ * output and rank both with one vocabulary (bucketed difficulty, namespaced
+ * identity). Thin wrapper over {@link fetchLsatDue} — same degrading behaviour;
+ * any failure returns `{ ok: false, dueCount: 0, cards: [] }`.
+ */
+export async function fetchLsatDueCanonical(
+  opts: { limit?: number; timeoutMs?: number } = {},
+): Promise<LsatDueCanonicalResult> {
+  const result = await fetchLsatDue(opts);
+  return {
+    ok: result.ok,
+    dueCount: result.dueCount,
+    cards: result.items.map((item) => item.canonical),
+    error: result.error,
+  };
 }
