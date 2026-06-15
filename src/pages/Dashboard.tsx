@@ -29,8 +29,10 @@ import {
   Surface,
 } from '../components/ui/Primitives';
 import { OnboardingWizard } from '../components/Onboarding';
+import { Skeleton } from '../components/feedback';
 import { DashboardKpiBand } from '../components/dashboard/DashboardKpiBand';
 import { DashboardHero } from '../components/dashboard/DashboardHero';
+import { useScrollRestoration } from '../lib/scrollRestore';
 
 type LucideIcon = ComponentType<{ size?: number; 'aria-hidden'?: boolean }>;
 
@@ -209,6 +211,13 @@ export default function Dashboard() {
   const [exportBusy, setExportBusy] = useState(false);
   const [sourceDocCount, setSourceDocCount] = useState<number | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+
+  // UX-1: restore the document scroll position on return to the dashboard,
+  // including after a cross-domain soft-hop (which bypasses native scroll
+  // restoration). The dashboard renders its full structure on first paint
+  // (the progress summary fills in from a stable empty shape), so restoration
+  // is enabled immediately.
+  useScrollRestoration('host:/');
 
   useEffect(() => {
     let active = true;
@@ -404,8 +413,23 @@ export default function Dashboard() {
         masteryScore={summary.masteryScore}
       />
 
-      {sourceDocCount === 0 && (
-        <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+      {/* UX-1: the "Get started" strip is conditional on an async source-doc
+          count. Until that resolves (sourceDocCount === null) reserve its
+          footprint with a fixed min-height skeleton so the strip appearing (or
+          collapsing away) never shifts the domain cards below it (no CLS). */}
+      {sourceDocCount === null ? (
+        <Surface
+          tone="study"
+          status="accent"
+          aria-busy="true"
+          style={{ marginBottom: 'var(--space-6)', minHeight: '7.5rem' }}
+        >
+          <Skeleton variant="text-short" />
+          <Skeleton variant="text-medium" style={{ marginTop: 'var(--space-3)' }} />
+          <Skeleton variant="text" style={{ marginTop: 'var(--space-2)' }} />
+        </Surface>
+      ) : sourceDocCount === 0 ? (
+        <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)', minHeight: '7.5rem' }}>
           <div className="flex-between qv-row-3">
             <div>
               <StatusBadge tone="accent">Get started</StatusBadge>
@@ -417,7 +441,7 @@ export default function Dashboard() {
             <Link to="/system" className="btn btn-primary">Open System Health</Link>
           </div>
         </Surface>
-      )}
+      ) : null}
 
       {(pendingImport || pendingReset) && (
         <Dialog

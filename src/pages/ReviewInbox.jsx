@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, CalendarClock, Gauge, ListChecks, Wrench } from 'lucide-react';
 import { EmptyPanel, MetricCard, PageHeader, ReviewItemCard, SegmentedControl, StatusBadge, Surface } from '../components/ui/Primitives';
+import { SkeletonList } from '../components/feedback';
 import {
   forecastReviewLoad,
   getReadinessByTopic,
@@ -14,6 +15,7 @@ import { getTutorProvider, isTutorEnabledFromEnv } from '../lib/aiTutorContracts
 import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { fetchLsatDue, LSAT_REVIEW_PATH } from '../lib/lsatReviewBridge';
+import { useScrollRestoration } from '../lib/scrollRestore';
 
 const filters = [
   { value: 'all', label: 'All' },
@@ -43,6 +45,12 @@ export default function ReviewInbox() {
   // Phase 4.1 — cross-domain review: LSAT due items come from the LSAT sidecar
   // (:8100) over HTTP, merged into this inbox. null = not yet loaded.
   const [lsatDue, setLsatDue] = useState(null);
+
+  // UX-1: restore the document scroll position on return to the inbox, incl.
+  // after a cross-domain soft-hop (which bypasses native scroll restoration).
+  // Gated on the primary study plan resolving so we only jump once the queue's
+  // real (deterministic-height) content has replaced the loading skeleton.
+  useScrollRestoration('host:/review', { ready: studyPlan != null });
 
   async function refresh() {
     const [nextItems, nextReadiness, nextPlan, nextForecast] = await Promise.all([
@@ -276,8 +284,14 @@ export default function ReviewInbox() {
       <SegmentedControl label="Review inbox filter" options={filters} value={filter} onChange={setFilter} />
       {message && <p className="muted-copy">{message}</p>}
 
-      <div className="review-list">
-        {visibleItems.length ? (
+      {/* UX-1: reserve a deterministic min-height for the queue so the
+          loading → empty/populated transitions don't shift the page (no CLS),
+          and show the shared SkeletonList while the first load resolves. The
+          studyPlan gate doubles as the "primary data loaded" signal. */}
+      <div className="review-list" style={{ minHeight: '12rem' }}>
+        {studyPlan == null ? (
+          <SkeletonList rows={4} />
+        ) : visibleItems.length ? (
           visibleItems.map((item) => <ReviewItemCard key={item.id} item={item} />)
         ) : (
           <EmptyPanel title="No items in this slice yet" description="Complete a lesson or quiz to populate the queue." tone="vault" />

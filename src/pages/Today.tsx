@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { BookOpen, ChevronRight, Clock, Inbox, NotebookPen, RefreshCw, Sparkles, Target, TrendingUp } from 'lucide-react';
 import { PageHeader, StatusBadge, Surface } from '../components/ui/Primitives';
+import { Skeleton } from '../components/feedback';
 import { OnboardingResume, StudySessionCard } from '../components/session';
 import type { StudySessionPanel } from '../components/session';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
@@ -11,6 +12,7 @@ import { generateQuestionsFromCurriculum, getLlmSettings, narrateStudyPlan } fro
 import { getCfaSourceReadingForTopic } from '../lib/cfaSourceVault';
 import { db } from '../lib/progressStore';
 import { getStorage } from '../lib/storage';
+import { useScrollRestoration } from '../lib/scrollRestore';
 
 interface TopicPath {
   level: string;
@@ -141,6 +143,12 @@ export default function Today() {
   const [examCountdown, setExamCountdown] = useState<ExamCountdown | null>(null);
   const [journal, setJournal] = useState<JournalState>({ text: '', savedAt: null, dirty: false });
   const journalKey = `journal:${new Date().toISOString().slice(0, 10)}`;
+
+  // UX-1: restore the document scroll position when returning to /today (incl.
+  // after a cross-domain soft-hop, which bypasses native scroll restoration).
+  // Gated on `plan` so we only jump once the real (deterministic-height) content
+  // has replaced the loading skeleton, keeping the target offset reachable.
+  useScrollRestoration('host:/today', { ready: plan != null });
 
   useEffect(() => {
     let active = true;
@@ -511,9 +519,32 @@ export default function Today() {
       />
 
       {!plan ? (
-        <Surface tone="study" density="compact">
-          <p className="muted-copy qv-m-0">Loading your plan…</p>
-        </Surface>
+        // UX-1: deterministic skeleton that mirrors the loaded layout's vertical
+        // footprint (study-session card → hero action → "then" list) so the page
+        // reserves its height up front and swapping in the real plan doesn't
+        // shift content (no CLS). Reuses the shared feedback Skeleton + the
+        // shipped `.skeleton*` classes; no new tokens.
+        <div role="status" aria-busy="true" aria-label="Loading your plan">
+          <span className="sr-only">Loading your plan…</span>
+          {/* Study-session card */}
+          <Surface tone="study" style={{ marginBottom: 'var(--space-6)' }}>
+            <Skeleton variant="text-medium" />
+            <Skeleton height="6rem" style={{ marginTop: 'var(--space-3)' }} />
+          </Surface>
+          {/* Hero "do this next" action */}
+          <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+            <Skeleton height="6rem" />
+          </Surface>
+          {/* "Then" stack of follow-up actions */}
+          <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-6)' }}>
+            <Skeleton variant="text-short" />
+            <div className="qv-stack-2 qv-mt-3">
+              <Skeleton height="3.5rem" />
+              <Skeleton height="3.5rem" />
+              <Skeleton height="3.5rem" />
+            </div>
+          </Surface>
+        </div>
       ) : (
         <>
           <OnboardingResume onResume={() => navigate('/')} />
