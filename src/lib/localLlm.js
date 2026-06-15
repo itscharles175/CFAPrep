@@ -1,5 +1,6 @@
 import { getStorage } from './storage';
 import { packExcerpts, pickBudget, renderExcerpts } from './contextBudget';
+import { streamSse, isStreamTimeout } from './streamingClient';
 
 // Local-LLM integration. Targets an OpenAI-compatible chat endpoint exposed by a
 // local model server (Ollama at :11434/v1, LM Studio at :1234/v1). No cloud, no
@@ -911,5 +912,132 @@ export async function generateText({
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content || '';
     return { text: String(content) };
+  });
+}
+
+/**
+ * Streaming counterpart to {@link generateText} (BB2).
+ *
+ * The host historically had NO streaming — every helper above awaits the full
+ * completion, so a long generation looks frozen. This gives the CFA/host side
+ * real token-by-token streaming over the SAME OpenAI-compatible endpoint by
+ * setting `stream:true` and consuming the response through the unified
+ * {@link streamSse} client. Tokens arrive via `onToken`; `onDone` fires once
+ * with the full accumulated text; a stalled model surfaces a DISTINCT `onTimeout`
+ * (carrying an `isLlmTimeout` error) instead of a generic CORS-looking failure;
+ * `onError` carries the wrapped CORS/connection/status error, mapped to the
+ * SAME actionable strings the non-streaming path already produces so existing
+ * error-matching (CORS / OLLAMA_ORIGINS / "responded N") is preserved.
+ *
+ * Backward-compatible & additive: this is a NEW export — `generateText` and
+ * every other helper keep their exact signatures and behaviour. Callers that
+ * want streaming opt in; everyone else is untouched.
+ *
+ * @param {Object} params
+ * @param {string} params.prompt
+ * @param {string} [params.system]
+ * @param {number} [params.temperature=0.4]
+ * @param {number} [params.maxTokens]
+ * @param {Object} [params.settings]            - Override settings; default = saved settings
+ * @param {AbortSignal} [params.signal]         - Caller cancellation
+ * @param {(token: string) => void} [params.onToken]
+ * @param {(fullText: string) => void} [params.onDone]
+ * @param {(error: Error) => void} [params.onTimeout] - Distinct stall/timeout path
+ * @param {(error: Error) => void} [params.onError]
+ * @returns {Promise<{ text: string }>} Resolves with the full accumulated text
+ *   when the stream completes cleanly; rejects on a definitive error or timeout
+ *   (so awaiting callers that did NOT pass handlers still see failures).
+ */
+export async function streamText({
+  prompt,
+  system,
+  temperature = 0.4,
+  maxTokens,
+  settings: overrideSettings,
+  signal,
+  onToken,
+  onDone,
+  onTimeout,
+  onError,
+}) {
+  const settings = overrideSettings ?? (await getLlmSettings());
+  const base = normalizeBaseUrl(settings?.baseUrl);
+  const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
+
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: String(prompt ?? '') });
+
+  const body = {
+    model,
+    temperature,
+    stream: true,
+    messages,
+  };
+  if (typeof maxTokens === 'number' && Number.isFinite(maxTokens)) {
+    body.max_tokens = maxTokens;
+  }
+
+  const endpoint = `${base}/chat/completions`;
+
+  let text = '';
+  // The CORS-actionable wrapper the non-streaming path uses, so callers matching
+  // on /CORS|OLLAMA_ORIGINS/ keep working when the stream cannot even connect.
+  const wrapConnectError = (cause) =>
+    new Error(
+      `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set.`,
+      { cause },
+    );
+
+  return new Promise((resolve, reject) => {
+    void streamSse(
+      endpoint,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      {
+        onDelta: (token) => {
+          text += token;
+          onToken?.(token);
+        },
+        onDone: () => {
+          onDone?.(text);
+          resolve({ text });
+        },
+        onTimeout: (error) => {
+          onTimeout?.(error);
+          reject(error);
+        },
+        onError: (error) => {
+          // A non-OK status carries `.status`; mirror the non-streaming message.
+          const wrapped =
+            typeof error?.status === 'number'
+              ? new Error(`Local model server responded ${error.status}.`, { cause: error })
+              // Genuine connection failures (TypeError) → the CORS-actionable hint.
+              : isStreamTimeout(error)
+                ? error
+                : wrapConnectError(error);
+          onError?.(wrapped);
+          reject(wrapped);
+        },
+      },
+      {
+        // Reuse the chat-tier deadline as a total budget, plus the unified
+        // client's default stall watchdog so a wedged model trips `onTimeout`.
+        totalTimeoutMs: LLM_TIMEOUT_GENERATION_MS,
+        signal,
+      },
+    ).then(
+      () => {
+        // streamSse resolves after the terminal handler ran. If the stream ended
+        // with neither done nor error (e.g. a caller abort), settle so awaiting
+        // callers are never left hanging.
+        resolve({ text });
+      },
+      // streamSse never rejects, but guard defensively.
+      (err) => reject(err instanceof Error ? err : new Error(String(err))),
+    );
   });
 }

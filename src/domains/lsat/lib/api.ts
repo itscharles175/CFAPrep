@@ -8,6 +8,10 @@
 // 5.1 — the take → blind-review → explain loop responses are zod-validated at
 // this boundary (see `apiSchemas.ts`); everything else keeps the bare cast.
 import { recordExplainLatency } from "./aiMetrics";
+// BB2 — unified streaming transport shared with the host (src/lib/localLlm.js).
+// `@/` resolves to the host `/src` root (see vite + tsconfig.lsat aliases), so
+// this reaches across the vendored-domain boundary to the one stream reader.
+import { streamEvents, type SseParser } from "@/lib/streamingClient";
 import type { z } from "zod";
 import {
   activityEventSchema,
@@ -1340,102 +1344,140 @@ export async function streamExplain(
   const started = Date.now();
   const signal = handlers.signal;
 
-  // One fetch + read pass. Resolves with how the attempt ended.
+  // BB2 — the SSE wire shape this endpoint speaks. The unified stream reader
+  // (src/lib/streamingClient.ts) handles the `data:`/blank-line framing, the
+  // `[DONE]` sentinel, non-JSON lines, timeouts and cancellation; this parser
+  // only maps a parsed `data:` object onto the four event kinds, carrying the
+  // full object through on `done` so the explain-specific metadata (per_choice,
+  // notebook_context, socratic_context, choice/text) survives. The handler
+  // dispatch below keeps the exact prior semantics (choice → onChoice,
+  // token → onToken, done → onDone with metadata).
+  const parseExplainSse: SseParser = (raw) => {
+    if (typeof raw !== "object" || raw === null) {
+      // A bare non-object JSON value: treat as a raw token (matches the old
+      // "non-JSON data line → token" fallthrough for primitive payloads).
+      return { kind: "delta", text: String(raw) };
+    }
+    const obj = raw as {
+      token?: string;
+      choice?: string;
+      text?: string;
+      done?: boolean;
+      error?: string;
+    };
+    if (obj.error) {
+      // A server-emitted error is a definitive failure, not a network drop.
+      return { kind: "error", message: obj.error };
+    }
+    // A per-choice frame OR a token frame both ride the `delta` event; the
+    // dispatcher decides which handler to call from the carried `data`.
+    if ((obj.choice && obj.text !== undefined) || obj.token) {
+      return { kind: "delta", text: obj.token ?? "", data: obj };
+    }
+    if (obj.done) {
+      return { kind: "done", meta: obj };
+    }
+    // An unrecognised frame: ignore (e.g. a keep-alive / metadata-only line).
+    return null;
+  };
+
+  // One fetch + read pass. Resolves with how the attempt ended. The transport
+  // (fetch + body read + SSE framing + timeout/abort) is the unified client;
+  // this function only classifies the terminal outcome the way the reconnect
+  // loop below expects (done / definitive error / retryable interruption).
   async function runAttempt(): Promise<StreamAttemptResult> {
-    let res: Response;
+    // Track whether we saw a clean terminal so a body that simply ends (no
+    // explicit done sentinel) still counts as complete, mirroring the old path.
+    let settled = false;
+    let outcome: StreamAttemptResult = { kind: "done" };
     try {
-      res = await fetch(`${PREFIX}/api/ai/explain`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
+      for await (const ev of streamEvents(
+        `${PREFIX}/api/ai/explain`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+          },
+          body: JSON.stringify(body),
         },
-        body: JSON.stringify(body),
-        signal,
-      });
-    } catch (err) {
-      // Could not even connect — treat as a retryable interruption.
-      return { kind: "interrupted", error: err as Error };
-    }
-    if (!res.ok || !res.body) {
-      const error = new ApiError(`Explain failed (${res.status})`, res.status);
-      // 5xx / 0 are transient; 4xx are definitive client/logic errors.
-      const retryable = res.status === 0 || res.status >= 500;
-      return retryable
-        ? { kind: "interrupted", error }
-        : { kind: "error", error };
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    // SSE events are separated by a blank line. Parse incrementally.
-    for (;;) {
-      let chunk: ReadableStreamReadResult<Uint8Array>;
-      try {
-        chunk = await reader.read();
-      } catch (err) {
-        // Drop while reading the body — retryable.
-        return { kind: "interrupted", error: err as Error };
-      }
-      const { value, done } = chunk;
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let sep: number;
-      while ((sep = buffer.indexOf("\n\n")) !== -1) {
-        const rawEvent = buffer.slice(0, sep);
-        buffer = buffer.slice(sep + 2);
-        for (const line of rawEvent.split("\n")) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) continue;
-          const payload = trimmed.slice(5).trim();
-          if (!payload || payload === "[DONE]") {
-            handlers.onDone?.();
-            return { kind: "done" };
+        {
+          signal,
+          parseSse: parseExplainSse,
+          // Reconnect/backoff already guards stalls at the loop level; the
+          // unified stall watchdog still trips a wedged model into a DISTINCT
+          // timeout event (handled below) instead of hanging indefinitely.
+        },
+      )) {
+        if (ev.type === "delta") {
+          const obj = ev.data as
+            | { choice?: string; text?: string; token?: string }
+            | undefined;
+          if (obj?.choice && obj.text !== undefined) {
+            handlers.onChoice?.(obj.choice, obj.text);
+          } else if (obj?.token) {
+            handlers.onToken(obj.token);
+          } else if (ev.text) {
+            // Raw token (non-JSON data line) surfaced by the reader.
+            handlers.onToken(ev.text);
           }
-          try {
-            const obj = JSON.parse(payload) as {
-              token?: string;
-              choice?: string;
-              text?: string;
-              done?: boolean;
-              explanation_id?: number;
-              cached?: boolean;
-              per_choice?: Record<string, string>;
-              notebook_context?: NotebookContextMeta;
-              socratic_context?: SocraticExplainMeta;
-              error?: string;
-            };
-            if (obj.error) {
-              // A server-emitted error is a definitive failure, not a drop.
-              return { kind: "error", error: new Error(obj.error) };
-            }
-            if (obj.choice && obj.text !== undefined) {
-              handlers.onChoice?.(obj.choice, obj.text);
-            } else if (obj.token) {
-              handlers.onToken(obj.token);
-            }
-            if (obj.done) {
-              handlers.onDone?.(obj.explanation_id, {
-                cached: obj.cached,
-                per_choice: obj.per_choice,
-                notebook_context: obj.notebook_context,
-                socratic_context: obj.socratic_context,
-              });
-              return { kind: "done" };
-            }
-          } catch {
-            // Non-JSON data line: treat as a raw token.
-            handlers.onToken(payload);
+        } else if (ev.type === "done") {
+          const meta = ev.meta as
+            | {
+                explanation_id?: number;
+                cached?: boolean;
+                per_choice?: Record<string, string>;
+                notebook_context?: NotebookContextMeta;
+                socratic_context?: SocraticExplainMeta;
+              }
+            | undefined;
+          handlers.onDone?.(meta?.explanation_id, {
+            cached: meta?.cached,
+            per_choice: meta?.per_choice,
+            notebook_context: meta?.notebook_context,
+            socratic_context: meta?.socratic_context,
+          });
+          settled = true;
+          outcome = { kind: "done" };
+          break;
+        } else if (ev.type === "timeout") {
+          // A wedged model — definitive (do NOT retry-storm a stuck server).
+          settled = true;
+          outcome = { kind: "error", error: ev.error };
+          break;
+        } else {
+          // ev.type === "error"
+          settled = true;
+          const err = ev.error;
+          const status = (err as { status?: number }).status;
+          if (typeof status === "number") {
+            // Non-OK HTTP. 5xx / 0 are transient; 4xx are definitive.
+            const apiErr = new ApiError(`Explain failed (${status})`, status);
+            const retryable = status === 0 || status >= 500;
+            outcome = retryable
+              ? { kind: "interrupted", error: apiErr }
+              : { kind: "error", error: apiErr };
+          } else {
+            // A connection / mid-read drop — retryable interruption.
+            outcome = { kind: "interrupted", error: err };
           }
+          break;
         }
       }
+    } catch (err) {
+      // streamEvents does not throw for stream outcomes, but a thrown error
+      // here (defensive) is treated as a retryable interruption.
+      return { kind: "interrupted", error: err as Error };
     }
-    // Stream ended without an explicit done sentinel — treat as complete.
-    handlers.onDone?.();
-    return { kind: "done" };
+
+    if (!settled) {
+      // Body ended without an explicit done sentinel (or was aborted silently
+      // mid-stream). The outer loop re-checks `signal` for the abort case; a
+      // natural end is a clean completion.
+      handlers.onDone?.();
+      return { kind: "done" };
+    }
+    return outcome;
   }
 
   for (let attempt = 1; ; attempt++) {
