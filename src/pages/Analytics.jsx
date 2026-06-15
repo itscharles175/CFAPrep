@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Activity, BarChart3, Clock, Gauge, Layers, Target } from 'lucide-react';
 import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts';
-import { PageHeader, MetricCard, Panel } from '../components/ui/Primitives';
+import { PageHeader, MetricCard, Panel, SegmentedControl } from '../components/ui/Primitives';
 import { getAnalyticsSummary } from '../lib/learning';
 import { db, forecastReviewLoad } from '../lib/progressStore';
 import { predictRetention } from '../lib/scheduler';
@@ -9,6 +9,27 @@ import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { projectExamReadiness } from '../lib/examReadiness';
 import { getStorage } from '../lib/storage';
+import { getLsatActivity, getLsatCalibration } from '../lib/lsatAnalyticsBridge';
+
+// ANL-6 — cross-domain color coding. CFA reuses the host accent (blue, the
+// analytics default); LSAT gets a distinct violet so the two series read apart
+// in the heatmap legend, the calibration scatter, and the domain toggle.
+const DOMAIN_COLOR = {
+  cfa: 'var(--accent, #60a5fa)',
+  lsat: 'var(--quant, #c084fc)',
+};
+
+// CFA | LSAT | All toggle options (All = combined per-day activity / both
+// calibration series overlaid).
+const DOMAIN_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'cfa', label: 'CFA' },
+  { value: 'lsat', label: 'LSAT' },
+];
+
+// LSAT confidence bands map to a 0–100 x position for the calibration scatter,
+// parallel to the host's low/medium/high (sure≈high, likely≈medium, guess≈low).
+const LSAT_CONFIDENCE_X = { sure: 75, likely: 50, guess: 25 };
 
 function pct(value) {
   return Number.isFinite(value) ? `${value}%` : '-';
@@ -28,47 +49,50 @@ const GAP = 2; // px
 const COLS = 12; // weeks
 const ROWS = 7; // Mon=0 … Sun=6
 
-function cellColor(count) {
+// Intensity ramp keyed to a base RGB triplet so each domain (CFA blue / LSAT
+// violet) shares the same 5-bucket scale while staying color-coded. `combined`
+// (the "All" view) blends to the CFA accent token so it matches the rest of the
+// analytics charts.
+const DOMAIN_RAMP = {
+  cfa: '96, 165, 250', // accent blue
+  lsat: '192, 132, 252', // quant violet
+};
+
+function cellColor(count, domain) {
   if (count === 0) return 'var(--border)';
-  if (count <= 2) return 'var(--accent-soft, rgba(96,165,250,0.25))';
-  if (count <= 5) return 'rgba(96,165,250,0.50)';
-  if (count <= 10) return 'rgba(96,165,250,0.75)';
-  return 'var(--accent, #60a5fa)';
+  const rgb = DOMAIN_RAMP[domain] || DOMAIN_RAMP.cfa;
+  if (count <= 2) return `rgba(${rgb}, 0.25)`;
+  if (count <= 5) return `rgba(${rgb}, 0.50)`;
+  if (count <= 10) return `rgba(${rgb}, 0.75)`;
+  return `rgba(${rgb}, 1)`;
 }
 
-const LEGEND_BUCKETS = [
-  { label: 'None', color: cellColor(0) },
-  { label: '1–2', color: cellColor(1) },
-  { label: '3–5', color: cellColor(3) },
-  { label: '6–10', color: cellColor(6) },
-  { label: '11+', color: cellColor(11) },
-];
+const LEGEND_LABELS = ['None', '1–2', '3–5', '6–10', '11+'];
+const LEGEND_SAMPLE_COUNT = [0, 1, 3, 6, 11];
 
-function StudyStreakHeatmap() {
-  const [heatData, setHeatData] = useState(null); // null = loading
+/**
+ * ANL-6 — unified study-streak heatmap. The parent (`Analytics`) owns the data
+ * + domain toggle: `cfaCounts` is the host Dexie per-day map; `lsatCounts` is
+ * the LSAT sidecar per-day map (empty when the sidecar is unreachable). `domain`
+ * is "cfa" | "lsat" | "all"; "all" sums both domains per day. Cell color is keyed
+ * to the active domain so CFA reads blue and LSAT reads violet; "all" uses the
+ * CFA accent ramp to match the surrounding analytics charts.
+ */
+function StudyStreakHeatmap({ cfaCounts, lsatCounts, domain, lsatReachable }) {
+  // null counts = still loading the host telemetry.
+  const loading = cfaCounts === null;
+  const cfa = cfaCounts || new Map();
+  const lsat = lsatCounts || new Map();
+  const rampDomain = domain === 'lsat' ? 'lsat' : 'cfa';
 
-  useEffect(() => {
-    let active = true;
-    db.questionResults
-      .toArray()
-      .then((rows) => {
-        if (!active) return;
-        // Build a map: YYYY-MM-DD → count
-        const counts = new Map();
-        for (const row of rows) {
-          if (!row.createdAt) continue;
-          const day = row.createdAt.slice(0, 10);
-          counts.set(day, (counts.get(day) || 0) + 1);
-        }
-        setHeatData(counts);
-      })
-      .catch(() => {
-        if (active) setHeatData(new Map());
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  // Per-day count for a given date under the active domain selection.
+  function countFor(dateStr) {
+    const c = cfa.get(dateStr) || 0;
+    const l = lsat.get(dateStr) || 0;
+    if (domain === 'cfa') return c;
+    if (domain === 'lsat') return l;
+    return c + l; // all
+  }
 
   // Compute "end of current week" so today lands in the last column, last applicable row.
   // We define week as Mon–Sun. "End of this week" = the coming Sunday (or today if Sunday).
@@ -93,14 +117,16 @@ function StudyStreakHeatmap() {
       d.setDate(sunday.getDate() - daysBack);
       const dateStr = d.toISOString().slice(0, 10);
       const isFuture = d.getTime() > today.getTime();
-      const count = (!isFuture && heatData) ? (heatData.get(dateStr) || 0) : 0;
-      cells.push({ col, row, dateStr, count, isFuture });
+      const count = (!isFuture && !loading) ? countFor(dateStr) : 0;
+      const cfaCount = (!isFuture && !loading) ? (cfa.get(dateStr) || 0) : 0;
+      const lsatCount = (!isFuture && !loading) ? (lsat.get(dateStr) || 0) : 0;
+      cells.push({ col, row, dateStr, count, cfaCount, lsatCount, isFuture });
     }
   }
 
-  // Total questions in the 12-week window
+  // Total attempts in the 12-week window under the active domain.
   let total12w = 0;
-  if (heatData) {
+  if (!loading) {
     for (const { count, isFuture } of cells) {
       if (!isFuture) total12w += count;
     }
@@ -109,24 +135,45 @@ function StudyStreakHeatmap() {
   const svgWidth = COLS * (CELL + GAP) - GAP;
   const svgHeight = ROWS * (CELL + GAP) - GAP;
 
+  const domainLabel = domain === 'cfa' ? 'CFA' : domain === 'lsat' ? 'LSAT' : 'all domains';
+
   return (
-    <Panel tone="analytics" title="Study Streak Heatmap">
-      {heatData === null ? (
+    <Panel
+      tone="analytics"
+      title="Study Streak Heatmap"
+      subtitle={
+        domain === 'all'
+          ? 'Combined daily activity across CFA + LSAT (CFA local telemetry + LSAT sidecar).'
+          : domain === 'lsat'
+            ? 'Daily LSAT activity from the LSAT sidecar.'
+            : 'Daily CFA / Quant / Excel activity from local telemetry.'
+      }
+    >
+      {loading ? (
         <p className="muted-copy">Loading heatmap…</p>
       ) : total12w === 0 ? (
-        <p className="muted-copy">No question attempts in the last 12 weeks — answer some questions to see your streak.</p>
+        <p className="muted-copy">
+          {domain === 'lsat' && !lsatReachable
+            ? 'LSAT sidecar unreachable — start StudyVault’s LSAT backend on :8100 to see LSAT activity.'
+            : `No ${domainLabel} attempts in the last 12 weeks — answer some questions to see your streak.`}
+        </p>
       ) : (
         <>
           <p className="qv-fs-sm qv-text-secondary" style={{ marginBottom: 12 }}>
-            <strong>{total12w}</strong> question{total12w !== 1 ? 's' : ''} answered in the last 12 weeks
+            <strong>{total12w}</strong> question{total12w !== 1 ? 's' : ''} answered in the last 12 weeks ({domainLabel})
           </p>
+          {domain !== 'cfa' && !lsatReachable && (
+            <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
+              LSAT sidecar unreachable — showing CFA activity only.
+            </p>
+          )}
           <svg
             width={svgWidth}
             height={svgHeight}
             style={{ display: 'block', overflow: 'visible' }}
-            aria-label="Study streak heatmap"
+            aria-label={`Study streak heatmap (${domainLabel})`}
           >
-            {cells.map(({ col, row, dateStr, count, isFuture }) => (
+            {cells.map(({ col, row, dateStr, count, cfaCount, lsatCount, isFuture }) => (
               <rect
                 key={`${col}-${row}`}
                 x={col * (CELL + GAP)}
@@ -135,11 +182,14 @@ function StudyStreakHeatmap() {
                 height={CELL}
                 rx={2}
                 ry={2}
-                fill={isFuture ? 'transparent' : cellColor(count)}
+                fill={isFuture ? 'transparent' : cellColor(count, rampDomain)}
                 opacity={isFuture ? 0 : 1}
               >
                 {!isFuture && (
-                  <title>{dateStr} · {count} attempt{count !== 1 ? 's' : ''}</title>
+                  <title>
+                    {dateStr} · {count} attempt{count !== 1 ? 's' : ''}
+                    {domain === 'all' ? ` (CFA ${cfaCount} · LSAT ${lsatCount})` : ''}
+                  </title>
                 )}
               </rect>
             ))}
@@ -147,14 +197,14 @@ function StudyStreakHeatmap() {
           {/* Legend */}
           <div className="qv-row-2" style={{ marginTop: 10, flexWrap: 'wrap' }}>
             <span className="qv-text-muted" style={{ fontSize: 11 }}>Less</span>
-            {LEGEND_BUCKETS.map(({ label, color }) => (
+            {LEGEND_LABELS.map((label, i) => (
               <div key={label} className="qv-row-1">
                 <div
                   style={{
                     width: CELL,
                     height: CELL,
                     borderRadius: 2,
-                    background: color,
+                    background: cellColor(LEGEND_SAMPLE_COUNT[i], rampDomain),
                     border: '1px solid var(--border)',
                     flexShrink: 0,
                   }}
@@ -178,6 +228,14 @@ export default function Analytics() {
   const [masteryTrend, setMasteryTrend] = useState([]);
   const [retentionDecay, setRetentionDecay] = useState([]);
   const [readiness, setReadiness] = useState(null);
+  // ANL-6 — cross-domain toggle + data. `domain` drives both the heatmap and
+  // the calibration scatter. CFA counts come from local Dexie telemetry; the
+  // LSAT activity/calibration come from the sidecar (best-effort, degrading).
+  const [domain, setDomain] = useState('all');
+  const [cfaHeatCounts, setCfaHeatCounts] = useState(null); // null = loading
+  const [lsatHeatCounts, setLsatHeatCounts] = useState(new Map());
+  const [lsatCalibration, setLsatCalibration] = useState([]);
+  const [lsatReachable, setLsatReachable] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -235,6 +293,25 @@ export default function Analytics() {
       })
       .catch(() => undefined);
 
+    // CFA streak heatmap: build a YYYY-MM-DD → attempt-count map from local
+    // question results. Owned by the parent (ANL-6) so the domain toggle can
+    // combine it with the LSAT sidecar's per-day activity.
+    db.questionResults
+      .toArray()
+      .then((rows) => {
+        if (!active) return;
+        const counts = new Map();
+        for (const row of rows) {
+          if (!row.createdAt) continue;
+          const day = row.createdAt.slice(0, 10);
+          counts.set(day, (counts.get(day) || 0) + 1);
+        }
+        setCfaHeatCounts(counts);
+      })
+      .catch(() => {
+        if (active) setCfaHeatCounts(new Map());
+      });
+
     // Exam-readiness cockpit: projected mastery curve with confidence band,
     // anchored on the user's target exam date (System Health → Exam Date).
     Promise.all([
@@ -247,6 +324,30 @@ export default function Analytics() {
         const examDate = typeof examRow?.value === 'string' ? examRow.value : null;
         const projection = projectExamReadiness({ snapshots, results, examDate });
         setReadiness(projection);
+      })
+      .catch(() => undefined);
+
+    // ANL-6 — LSAT sidecar activity + calibration (best-effort; the bridge never
+    // throws, returning `reachable: false` + empty data when the sidecar is down,
+    // so the page degrades to a host-only view). Treat reachability as the OR of
+    // the two probes so either signal lights the cross-domain views.
+    getLsatActivity(120)
+      .then((report) => {
+        if (!active) return;
+        const counts = new Map();
+        for (const row of report.days) {
+          if (!row.date) continue;
+          counts.set(row.date, (counts.get(row.date) || 0) + (row.questions || 0));
+        }
+        setLsatHeatCounts(counts);
+        if (report.reachable) setLsatReachable(true);
+      })
+      .catch(() => undefined);
+    getLsatCalibration()
+      .then((report) => {
+        if (!active) return;
+        setLsatCalibration(report.bands || []);
+        if (report.reachable) setLsatReachable(true);
       })
       .catch(() => undefined);
 
@@ -269,6 +370,15 @@ export default function Analytics() {
         badge="ANALYTICS"
         title="Learning Analytics"
         subtitle="Local-only performance telemetry by topic, difficulty, error type, confidence, and recent trend."
+        actions={
+          <SegmentedControl
+            label="Analytics domain"
+            options={DOMAIN_OPTIONS}
+            value={domain}
+            onChange={setDomain}
+            density="compact"
+          />
+        }
       />
 
       <div className="grid-4 page-metrics">
@@ -429,78 +539,119 @@ export default function Analytics() {
         )}
       </Panel>
 
-      {/* Confidence vs Accuracy Calibration scatter */}
+      {/* Confidence vs Accuracy Calibration scatter (ANL-6: CFA + LSAT overlay) */}
       {(() => {
         const CONFIDENCE_X = { low: 25, medium: 50, high: 75 };
-        const calibrationData = (summary?.confidenceCalibration || []).map((row) => ({
-          label: row.confidence,
+        // CFA: host confidence buckets (low/medium/high), accuracy already 0–100.
+        const cfaData = (summary?.confidenceCalibration || []).map((row) => ({
+          label: `CFA · ${row.confidence}`,
           x: CONFIDENCE_X[row.confidence] ?? 50,
           y: row.accuracy ?? 0,
           attempts: row.attempts ?? 0,
         }));
+        // LSAT: sidecar confidence bands (sure/likely/guess). Accuracy is 0–1 here,
+        // so scale to 0–100; skip empty bands (null accuracy). Color-coded violet.
+        const lsatData = lsatCalibration
+          .filter((row) => row.accuracy !== null && row.attempts > 0)
+          .map((row) => ({
+            label: `LSAT · ${row.confidence}`,
+            x: LSAT_CONFIDENCE_X[row.confidence] ?? 50,
+            y: Math.round((row.accuracy ?? 0) * 100),
+            attempts: row.attempts ?? 0,
+          }));
+        const showCfa = domain !== 'lsat';
+        const showLsat = domain !== 'cfa';
+        const hasCfa = showCfa && cfaData.length > 0;
+        const hasLsat = showLsat && lsatData.length > 0;
         const diagonalData = [{ x: 0, y: 0 }, { x: 100, y: 100 }];
         return (
           <Panel
             tone="analytics"
             title="Confidence vs Accuracy Calibration"
-            subtitle="Each marker is a confidence bucket; perfect calibration is a 1:1 diagonal."
+            subtitle={
+              domain === 'all'
+                ? 'Each marker is a confidence bucket — CFA (blue) vs LSAT (violet). Above the 1:1 diagonal = underconfident; below = overconfident.'
+                : domain === 'lsat'
+                  ? 'Each marker is an LSAT confidence band (sure/likely/guess). Perfect calibration is a 1:1 diagonal.'
+                  : 'Each marker is a confidence bucket; perfect calibration is a 1:1 diagonal.'
+            }
           >
-            {calibrationData.length === 0 ? (
-              <p className="muted-copy">No confidence-labeled attempts yet — answer questions with a confidence rating to populate this chart.</p>
+            {!hasCfa && !hasLsat ? (
+              <p className="muted-copy">
+                {domain === 'lsat' && !lsatReachable
+                  ? 'LSAT sidecar unreachable — start StudyVault’s LSAT backend on :8100 to see LSAT calibration.'
+                  : 'No confidence-labeled attempts yet — answer questions with a confidence rating to populate this chart.'}
+              </p>
             ) : (
-              <div style={{ width: '100%', height: 240 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 16, right: 24, bottom: 8, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis
-                      type="number"
-                      dataKey="x"
-                      name="Confidence"
-                      domain={[0, 100]}
-                      stroke="var(--text-muted)"
-                      fontSize={12}
-                      label={{ value: 'Confidence %', position: 'insideBottomRight', offset: -4, fontSize: 11, fill: 'var(--text-muted)' }}
-                    />
-                    <YAxis
-                      type="number"
-                      dataKey="y"
-                      name="Accuracy"
-                      domain={[0, 100]}
-                      stroke="var(--text-muted)"
-                      fontSize={12}
-                      label={{ value: 'Accuracy %', angle: -90, position: 'insideLeft', offset: 8, fontSize: 11, fill: 'var(--text-muted)' }}
-                    />
-                    <Tooltip
-                      cursor={{ strokeDasharray: '3 3' }}
-                      contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
-                      labelStyle={{ color: 'var(--text-secondary)' }}
-                      formatter={(value, name, props) => {
-                        const { payload } = props;
-                        if (name === 'Accuracy') return [`${value}% (${payload.attempts} attempts)`, payload.label];
-                        return [value, name];
-                      }}
-                    />
-                    {/* Perfect-calibration diagonal rendered as a Line series on a separate dataset */}
-                    <Line
-                      data={diagonalData}
-                      type="linear"
-                      dataKey="y"
-                      stroke="var(--text-muted)"
-                      strokeDasharray="6 3"
-                      strokeWidth={1}
-                      dot={false}
-                      legendType="none"
-                      name="Perfect calibration"
-                      isAnimationActive={false}
-                    />
-                    <Scatter
-                      data={calibrationData}
-                      fill="var(--accent, #60a5fa)"
-                      name="Confidence bucket"
-                    />
-                  </ScatterChart>
-                </ResponsiveContainer>
-              </div>
+              <>
+                {showLsat && !lsatReachable && (
+                  <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
+                    LSAT sidecar unreachable — showing CFA calibration only.
+                  </p>
+                )}
+                <div style={{ width: '100%', height: 240 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart margin={{ top: 16, right: 24, bottom: 8, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis
+                        type="number"
+                        dataKey="x"
+                        name="Confidence"
+                        domain={[0, 100]}
+                        stroke="var(--text-muted)"
+                        fontSize={12}
+                        label={{ value: 'Confidence %', position: 'insideBottomRight', offset: -4, fontSize: 11, fill: 'var(--text-muted)' }}
+                      />
+                      <YAxis
+                        type="number"
+                        dataKey="y"
+                        name="Accuracy"
+                        domain={[0, 100]}
+                        stroke="var(--text-muted)"
+                        fontSize={12}
+                        label={{ value: 'Accuracy %', angle: -90, position: 'insideLeft', offset: 8, fontSize: 11, fill: 'var(--text-muted)' }}
+                      />
+                      <Tooltip
+                        cursor={{ strokeDasharray: '3 3' }}
+                        contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
+                        labelStyle={{ color: 'var(--text-secondary)' }}
+                        formatter={(value, name, props) => {
+                          const { payload } = props;
+                          if (name === 'Accuracy') return [`${value}% (${payload.attempts} attempts)`, payload.label];
+                          return [value, name];
+                        }}
+                      />
+                      {/* Perfect-calibration diagonal rendered as a Line series on a separate dataset */}
+                      <Line
+                        data={diagonalData}
+                        type="linear"
+                        dataKey="y"
+                        stroke="var(--text-muted)"
+                        strokeDasharray="6 3"
+                        strokeWidth={1}
+                        dot={false}
+                        legendType="none"
+                        name="Perfect calibration"
+                        isAnimationActive={false}
+                      />
+                      {hasCfa && (
+                        <Scatter
+                          data={cfaData}
+                          fill={DOMAIN_COLOR.cfa}
+                          name="CFA confidence bucket"
+                        />
+                      )}
+                      {hasLsat && (
+                        <Scatter
+                          data={lsatData}
+                          fill={DOMAIN_COLOR.lsat}
+                          name="LSAT confidence band"
+                        />
+                      )}
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
             )}
           </Panel>
         );
@@ -557,7 +708,12 @@ export default function Analytics() {
         );
       })()}
 
-      <StudyStreakHeatmap />
+      <StudyStreakHeatmap
+        cfaCounts={cfaHeatCounts}
+        lsatCounts={lsatHeatCounts}
+        domain={domain}
+        lsatReachable={lsatReachable}
+      />
 
       {topWeakTopics[0] && (
         <SourceRail
