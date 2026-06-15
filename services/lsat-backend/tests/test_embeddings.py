@@ -136,6 +136,47 @@ def test_context_notes_returns_similar_past_note(db_session):
     assert "watch the scope on cat arguments" in notes
 
 
+def test_rank_host_chunks_orders_by_cosine_and_echoes_metadata():
+    # INT-3 — host curriculum chunks ranked against a query for cross-domain
+    # grounding. The BoW embedder makes "cat" chunks score above "math" ones.
+    chunks = [
+        {"id": "h1", "domain": "cfa", "locator": "p.1", "text": "cat cat cat"},
+        {"id": "h2", "domain": "cfa", "locator": "p.2", "text": "math math math"},
+        {"id": "h3", "domain": "cfa", "locator": "p.3", "text": "cat dog"},
+    ]
+    ranked = embeddings.rank_host_chunks("cat cat", chunks, k=3, embedder=_bow)
+    assert [r["id"] for r in ranked][0] == "h1"
+    # The math chunk is orthogonal to the query -> filtered out (score 0).
+    assert "h2" not in [r["id"] for r in ranked]
+    # Metadata is echoed back for citation rendering.
+    top = ranked[0]
+    assert top["domain"] == "cfa" and top["locator"] == "p.1"
+    assert 0.0 < top["score"] <= 1.0
+
+
+def test_rank_host_chunks_empty_inputs_embed_nothing():
+    calls = {"n": 0}
+
+    def counting_embedder(text, model=None):
+        calls["n"] += 1
+        return _bow(text)
+
+    assert embeddings.rank_host_chunks("", [{"text": "cat"}], embedder=counting_embedder) == []
+    assert embeddings.rank_host_chunks("cat", [], embedder=counting_embedder) == []
+    assert embeddings.rank_host_chunks("cat", [{"text": "   "}], embedder=counting_embedder) == []
+    assert calls["n"] == 0  # nothing usable -> never embeds
+
+
+def test_rank_host_chunks_degrades_when_embedder_fails():
+    def broken_embedder(text, model=None):
+        raise RuntimeError("embed backend offline")
+
+    ranked = embeddings.rank_host_chunks(
+        "cat cat", [{"id": "h1", "text": "cat cat"}], embedder=broken_embedder
+    )
+    assert ranked == []  # OPS-5 parity: degrade to empty, never raise
+
+
 def test_embed_and_similar_endpoints(client, monkeypatch):
     import app.llm as llm
     monkeypatch.setattr(llm, "embed_sync", _bow)

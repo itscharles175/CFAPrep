@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from .. import notebook_os
+from .. import embeddings, notebook_os
 from ..db import get_session
 from ..models import NotebookWorkspace, StudyArtifact
 
@@ -155,6 +155,31 @@ class InboxPatchBody(BaseModel):
     status: str | None = Field(default=None, max_length=40)
     priority: int | None = Field(default=None, ge=0, le=100)
     reason: str | None = Field(default=None, max_length=500)
+
+
+class GroundingChunk(BaseModel):
+    """A host curriculum chunk submitted for cross-domain grounding."""
+    id: str | None = Field(default=None, max_length=240)
+    document_id: str | None = Field(default=None, max_length=240, alias="documentId")
+    domain: str | None = Field(default=None, max_length=80)
+    level: str | None = Field(default=None, max_length=80)
+    topic: str | None = Field(default=None, max_length=120)
+    locator: str = Field(default="", max_length=240)
+    text: str = Field(default="", max_length=20000)
+
+    model_config = {"populate_by_name": True}
+
+
+class CrossDomainGroundingBody(BaseModel):
+    """INT-3 — union request: rank the host's curriculum chunks against a query
+    and surface matching local notebook sources, so host material and LSAT/
+    notebook sources share one grounded retrieval set."""
+    query: str = Field(min_length=1, max_length=2000)
+    chunks: list[GroundingChunk] = Field(default_factory=list, max_length=200)
+    k: int = Field(default=6, ge=1, le=50)
+    include_notebook_sources: bool = Field(default=True, alias="includeNotebookSources")
+
+    model_config = {"populate_by_name": True}
 
 
 @router.get("/notebook-capabilities")
@@ -414,6 +439,65 @@ def notebook_search(
     session: Session = Depends(get_session),
 ):
     return notebook_os.search(session, q, limit=limit)
+
+
+@router.post("/notebook-grounding")
+def cross_domain_grounding(
+    body: CrossDomainGroundingBody,
+    session: Session = Depends(get_session),
+):
+    """INT-3 — cross-domain chunk grounding.
+
+    Ranks the host curriculum chunks the caller submits against ``query`` (so
+    host material can be unioned into LSAT/Notebook retrieval) AND, unless
+    ``include_notebook_sources`` is false, surfaces local notebook sources that
+    match the query as chunk-shaped hits. The two streams are merged and
+    re-ranked into one ``hits`` list, mirroring the host-side union in
+    ``localRag.ts`` so both planes ground over the same set.
+
+    Degrades gracefully: when embeddings are unavailable the host-chunk ranking
+    is simply empty and only the notebook full-text matches are returned (and
+    vice-versa), so neither plane being offline breaks the other.
+    """
+    chunk_dicts = [c.model_dump(by_alias=False) for c in body.chunks]
+    host_hits = embeddings.rank_host_chunks(body.query, chunk_dicts, k=body.k)
+    for hit in host_hits:
+        hit["source"] = "host"
+
+    notebook_hits: list[dict[str, Any]] = []
+    if body.include_notebook_sources:
+        try:
+            found = notebook_os.search(session, body.query, limit=body.k)
+        except Exception:  # notebook index offline -> host-only union
+            found = {"sources": []}
+        for src in found.get("sources", []) or []:
+            if src.get("official_firewall"):
+                continue  # never leak firewalled official content cross-domain
+            title = str(src.get("title") or "")
+            notebook_hits.append({
+                "id": str(src.get("id") or ""),
+                "documentId": str(src.get("id") or ""),
+                "domain": "open-notebook",
+                "level": None,
+                "topic": None,
+                "locator": title,
+                "text": title,
+                # Notebook full-text matches carry no cosine score; tag them just
+                # below an exact host match so host semantic hits sort first while
+                # notebook sources still surface ahead of weak host matches.
+                "score": 0.5,
+                "source": "notebook",
+            })
+
+    merged = [*host_hits, *notebook_hits]
+    merged.sort(key=lambda h: float(h.get("score") or 0.0), reverse=True)
+    merged = merged[: body.k]
+    return {
+        "query": body.query,
+        "hits": merged,
+        "host_count": len(host_hits),
+        "notebook_count": len(notebook_hits),
+    }
 
 
 @router.get("/notebook-chat/sessions")

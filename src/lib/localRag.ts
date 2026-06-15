@@ -9,8 +9,16 @@
  *   - After `switchToSurreal()`: the SurrealDB MTREE vector index + BM25
  *     full-text hybrid — same call site, no code change.
  *
+ * INT-3 — shared retrieval:
+ *   Retrieval is the UNION of host curriculum chunks AND the user's embedded
+ *   open-notebook sources (CFA curriculum + LSAT/notebook material reached via
+ *   the same backend). open-notebook is OPTIONAL (OPS-5): when the sidecar is
+ *   disabled or unreachable the union degrades transparently to host-only RAG,
+ *   so this path never requires the :5055 sidecar.
+ *
  * Flow:
- *   1. Retrieve top-K chunks for the question (filtered by domain/level/topic).
+ *   1. Retrieve top-K chunks for the question (filtered by domain/level/topic),
+ *      unioned with matching open-notebook sources when available.
  *   2. Pack them under the model's context budget with [n] citation markers.
  *   3. Ask the local LLM to answer using ONLY the retrieved context, citing
  *      sources by their bracket number.
@@ -24,6 +32,12 @@
 import { getStorage } from './storage';
 import { generateText } from './localLlm';
 import { packExcerpts, pickBudget, renderExcerpts } from './contextBudget';
+import {
+  getOpenNotebookSettings,
+  notebookSourcesAvailable,
+  searchNotebookSources,
+  type NotebookSourceHit,
+} from './openNotebook';
 import type { ChunkSearchResult } from './storage/types';
 
 export interface LocalRagCitation {
@@ -58,6 +72,21 @@ export interface LocalRagOptions {
   signal?: AbortSignal;
   /** Override the generator (tests). */
   generate?: (input: { prompt: string; system?: string; maxTokens?: number; signal?: AbortSignal }) => Promise<{ text: string }>;
+  /**
+   * INT-3 — union the user's embedded open-notebook sources into retrieval when
+   * the sidecar is available (OPS-5: a no-op when it is disabled/unreachable).
+   * Defaults to `true`; pass `false` to force host-curriculum-only retrieval
+   * (the historical behaviour). Backward-compatible: existing callers that omit
+   * this opt into the union but see identical results whenever no notebook is
+   * configured.
+   */
+  includeNotebookSources?: boolean;
+  /**
+   * Override the open-notebook source search (tests). Receives the question +
+   * resolved base URL; returns chunk-shaped notebook hits. Implies the union is
+   * attempted regardless of `notebookSourcesAvailable`, so tests need no sidecar.
+   */
+  searchNotebook?: (input: { baseUrl: string; query: string; signal?: AbortSignal }) => Promise<NotebookSourceHit[]>;
 }
 
 const SYSTEM_PROMPT = [
@@ -73,23 +102,89 @@ function snippetOf(text: string, max = 240): string {
   return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
 }
 
+/** The synthetic domain/documentId tag for notebook-sourced retrieval hits, so
+ * the host's citation packing can tell them apart from curriculum chunks. */
+export const NOTEBOOK_SOURCE_DOMAIN = 'open-notebook';
+
+/** Map an open-notebook source hit onto the canonical {@link ChunkSearchResult}
+ * shape so it can be packed + cited alongside host curriculum chunks. */
+function notebookHitToChunk(hit: NotebookSourceHit): ChunkSearchResult {
+  return {
+    id: hit.id,
+    documentId: hit.id,
+    domain: NOTEBOOK_SOURCE_DOMAIN,
+    text: hit.text,
+    locator: hit.locator,
+    // The lexical-overlap score is already in [0,1]; expose it on both the
+    // unified score and the bm25 channel so mixed sorting stays meaningful.
+    score: hit.score,
+    bm25Score: hit.score,
+  };
+}
+
 /**
- * Retrieve relevant chunks for a question through the active storage driver.
+ * INT-3 — fetch the open-notebook source hits to union into retrieval, guarded
+ * for the sidecar being optional (OPS-5). Returns `[]` (never throws) when the
+ * union is disabled, no notebook is configured/reachable, or nothing matches —
+ * so the caller degrades transparently to host-only retrieval.
+ */
+async function retrieveNotebookHits(opts: LocalRagOptions): Promise<ChunkSearchResult[]> {
+  if (opts.includeNotebookSources === false) return [];
+  try {
+    const settings = await getOpenNotebookSettings();
+    const baseUrl = settings.baseUrl;
+    const search =
+      opts.searchNotebook ??
+      (async (input) => {
+        // Only hit the sidecar when it is actually enabled + reachable.
+        if (!(await notebookSourcesAvailable(settings))) return [];
+        return searchNotebookSources(input);
+      });
+    const hits = await search({ baseUrl, query: opts.question, signal: opts.signal });
+    return hits.map(notebookHitToChunk);
+  } catch {
+    // Any failure in the optional notebook path must not break host retrieval.
+    return [];
+  }
+}
+
+/**
+ * Retrieve relevant chunks for a question through the active storage driver,
+ * unioned with the user's embedded open-notebook sources when available (INT-3).
  * Exposed separately so callers (and tests) can inspect retrieval in isolation.
+ *
+ * The union is deduped by chunk id and re-sorted by score, then truncated to the
+ * caller's `limit`, so notebook sources and curriculum chunks compete fairly for
+ * the same context budget. When no notebook is configured the result is exactly
+ * the historical host-only retrieval.
  */
 export async function retrieveChunks(opts: LocalRagOptions): Promise<ChunkSearchResult[]> {
   const storage = getStorage();
   if (!storage.chunks) {
     throw new Error('The active storage driver does not support chunk search.');
   }
-  return storage.chunks.search({
-    query: opts.question,
-    embedding: opts.embedding,
-    domain: opts.domain,
-    level: opts.level,
-    topic: opts.topic,
-    limit: opts.limit ?? 12,
-  });
+  const limit = opts.limit ?? 12;
+  const [hostChunks, notebookHits] = await Promise.all([
+    storage.chunks.search({
+      query: opts.question,
+      embedding: opts.embedding,
+      domain: opts.domain,
+      level: opts.level,
+      topic: opts.topic,
+      limit,
+    }),
+    retrieveNotebookHits(opts),
+  ]);
+
+  if (notebookHits.length === 0) return hostChunks;
+
+  // Union + dedupe by id (host chunks win on collision), then re-rank by score.
+  const byId = new Map<string, ChunkSearchResult>();
+  for (const hit of notebookHits) byId.set(hit.id, hit);
+  for (const chunk of hostChunks) byId.set(chunk.id, chunk);
+  return Array.from(byId.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
 }
 
 /**

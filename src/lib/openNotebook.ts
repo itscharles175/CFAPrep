@@ -177,6 +177,122 @@ export async function fetchSourceTitleMap(baseUrl: string): Promise<Map<string, 
   return map;
 }
 
+// ---------------------------------------------------------------------------
+// INT-3 — shared retrieval surface.
+//
+// The host curriculum RAG (`localRag.ts`) retrieves over the storage driver's
+// `ChunkSearch` interface. INT-3 unions that with the open-notebook sources the
+// user has embedded, so a grounded answer can cite BOTH the candidate's CFA
+// curriculum AND their notebook sources (incl. LSAT material surfaced through
+// the same backend) behind one call site.
+//
+// open-notebook is OPTIONAL (OPS-5): when the sidecar is disabled/unreachable
+// the helpers below resolve to an empty list rather than throwing, so the union
+// degrades cleanly to host-only retrieval.
+// ---------------------------------------------------------------------------
+
+/** A notebook source surfaced as a curriculum-chunk-shaped retrieval hit. */
+export interface NotebookSourceHit {
+  /** open-notebook source id (e.g. "source:abc"). */
+  id: string;
+  title: string;
+  /** Best-effort excerpt of the matched source text (may be empty). */
+  text: string;
+  /** Human locator for citation chips — the source title by default. */
+  locator: string;
+  /** 0..1 lexical-overlap score against the query — higher is better. */
+  score: number;
+}
+
+interface SearchNotebookSourcesParams {
+  baseUrl: string;
+  query: string;
+  /** Max hits to return. Default 6. */
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+/** Tokenise a query into lowercase word stems for lexical overlap scoring. */
+function queryTokens(query: string): string[] {
+  return (query.toLowerCase().match(/[a-z0-9]{3,}/g) || []).filter(
+    (token, i, all) => all.indexOf(token) === i,
+  );
+}
+
+/**
+ * Score how well a source's searchable text matches the query, in [0,1]. Counts
+ * distinct query tokens that appear in the text over the total token count, so a
+ * source touching every query term scores 1 and an unrelated source scores 0.
+ * Lexical-only on purpose: it is a cheap pre-filter to surface candidate
+ * notebook sources into the union without a second embedding round-trip.
+ */
+function lexicalOverlap(tokens: string[], haystack: string): number {
+  if (tokens.length === 0) return 0;
+  const lower = haystack.toLowerCase();
+  let hits = 0;
+  for (const token of tokens) {
+    if (lower.includes(token)) hits += 1;
+  }
+  return hits / tokens.length;
+}
+
+/**
+ * Search the user's embedded open-notebook sources for ones relevant to
+ * `query`, returned as curriculum-chunk-shaped {@link NotebookSourceHit}s so the
+ * host RAG (`localRag.ts`) can union them with its own chunks.
+ *
+ * DEGRADE-GRACEFULLY (OPS-5): returns `[]` — never throws — when open-notebook
+ * is disabled, unreachable, or returns nothing, so the caller falls back to
+ * host-only retrieval transparently.
+ *
+ * The match is a lightweight lexical-overlap pre-filter over the source titles
+ * (the cheap, network-free signal open-notebook exposes via `/api/sources`).
+ * It deliberately does NOT run open-notebook's heavy `ask/simple` synthesis —
+ * that stays the explicit, user-initiated path in `askGrounded`.
+ */
+export async function searchNotebookSources(
+  params: SearchNotebookSourcesParams,
+): Promise<NotebookSourceHit[]> {
+  const query = (params.query || '').trim();
+  if (!query) return [];
+  const tokens = queryTokens(query);
+  let sources: OnbSource[];
+  try {
+    sources = await listSources({ baseUrl: params.baseUrl });
+  } catch {
+    // Sidecar absent/unreachable (OPS-5) — degrade to host-only retrieval.
+    return [];
+  }
+  if (params.signal?.aborted) return [];
+
+  const limit = Math.max(1, params.limit ?? 6);
+  const scored: NotebookSourceHit[] = [];
+  for (const source of sources) {
+    if (!source?.id) continue;
+    const title = source.title || source.id;
+    const score = lexicalOverlap(tokens, title);
+    if (score <= 0) continue;
+    scored.push({ id: source.id, title, text: title, locator: title, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit);
+}
+
+/**
+ * Whether the host should attempt to union open-notebook sources into retrieval.
+ * True only when the embedded notebook is enabled AND reachable, so callers can
+ * skip the source lookup entirely on the common (notebook-disabled) path.
+ * Never throws — any failure means "treat as unavailable".
+ */
+export async function notebookSourcesAvailable(
+  settings?: Pick<OpenNotebookSettings, 'enabled' | 'baseUrl'>,
+): Promise<boolean> {
+  const resolved = settings ?? (await getOpenNotebookSettings().catch(() => null));
+  if (!resolved || !resolved.enabled) return false;
+  const conn = await checkOpenNotebookConnection({ baseUrl: resolved.baseUrl }).catch(() => null);
+  return Boolean(conn?.ok);
+}
+
 export async function createNotebook(
   baseUrl: string,
   name: string,

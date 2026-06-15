@@ -12,9 +12,11 @@ import {
   getOpenNotebookSettings,
   listSourceInsights,
   listTransformations,
+  notebookSourcesAvailable,
   parseSourceChatStream,
   saveCachedGroundedAnswer,
   saveOpenNotebookSettings,
+  searchNotebookSources,
   triggerSourceInsight,
 } from './openNotebook';
 import { db } from './progressStore';
@@ -370,6 +372,43 @@ describe('open-notebook client', () => {
     expect(result.citationSources).toEqual(['source:abc']);
     // exactly two calls: session create + message post
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('searchNotebookSources ranks sources by query overlap and shapes them as chunk hits', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse([
+        { id: 'source:1', title: 'Duration and convexity' },
+        { id: 'source:2', title: 'Ethics standards' },
+        { id: 'source:3', title: 'Modified duration recap' },
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const hits = await searchNotebookSources({ baseUrl: 'http://localhost:5055', query: 'duration' });
+    // Only the two duration sources match; the ethics one is filtered out.
+    expect(hits.map((h) => h.id).sort()).toEqual(['source:1', 'source:3']);
+    expect(hits.every((h) => h.score > 0)).toBe(true);
+    expect(hits[0].locator).toBeTruthy();
+  });
+
+  it('searchNotebookSources degrades to [] when the sidecar is unreachable (OPS-5)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+    const hits = await searchNotebookSources({ baseUrl: 'http://localhost:5055', query: 'duration' });
+    expect(hits).toEqual([]);
+  });
+
+  it('notebookSourcesAvailable is false when the notebook is disabled (no fetch)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const available = await notebookSourcesAvailable({ enabled: false, baseUrl: 'http://localhost:5055' });
+    expect(available).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('notebookSourcesAvailable is true when enabled and the backend responds', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([{ id: 'm', type: 'language' }])));
+    const available = await notebookSourcesAvailable({ enabled: true, baseUrl: 'http://localhost:5055' });
+    expect(available).toBe(true);
   });
 
   it('caches the last grounded answer per topic so it survives navigation', async () => {

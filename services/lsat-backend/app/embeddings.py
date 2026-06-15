@@ -586,6 +586,77 @@ def nearest_existing(session: Session, text: str, *,
     return {"question_id": best_id, "score": round(best_score, 4)}
 
 
+# INT-3 — cross-domain chunk grounding.
+# The host (CFA/Quant/Excel) ships its curriculum chunks; this function ranks
+# them against an LSAT query so host material can be unioned into LSAT/Notebook
+# retrieval — the mirror of the host-side union in localRag.ts. It is fully
+# self-contained (no DB rows, no caches): the host owns the chunk text, we only
+# embed + cosine-rank. Embeddings reuse the SAME injectable embedder as the rest
+# of this module, so a model switch stays consistent across both planes, and the
+# embedder is injectable so tests never touch the network. Never raises: a flaky
+# or absent embedder degrades to an empty ranking (host-only retrieval upstream),
+# matching the OPS-5 optional-sidecar contract.
+def rank_host_chunks(
+    query: str,
+    chunks: list[dict],
+    *,
+    k: int = 5,
+    min_score: float = 0.0,
+    embedder: Optional[Embedder] = None,
+) -> list[dict]:
+    """Rank externally-supplied host curriculum ``chunks`` against ``query``.
+
+    Each chunk is a mapping with at least ``text``; optional ``id``, ``locator``,
+    ``domain``, ``level``, and ``topic`` are echoed back on the scored record so
+    the caller can render citations. Returns up to ``k`` records sorted by
+    descending cosine similarity, each ``{**chunk_metadata, "score": float}``,
+    dropping any below ``min_score``.
+
+    Returns ``[]`` (and embeds nothing) when there is no query or no chunk text,
+    so the cross-domain union is free when the host sends nothing. The query is
+    embedded once; each chunk is embedded on the fly. Any embedding failure
+    degrades to an empty ranking rather than raising.
+    """
+    text_value = (query or "").strip()
+    usable = [c for c in chunks if isinstance(c, dict) and (c.get("text") or "").strip()]
+    if not text_value or not usable:
+        return []
+    embedder = embedder or _default_embedder
+    try:
+        target = embedder(text_value)
+    except Exception:
+        return []  # degrade to host-only retrieval upstream
+    if not target:
+        return []
+
+    scored: list[tuple[float, dict]] = []
+    for chunk in usable:
+        try:
+            vec = embedder(str(chunk.get("text") or ""))
+        except Exception:
+            continue
+        # B3 parity: only score chunks whose embedding is dimension-comparable to
+        # the query (a different embed model would make cosine meaningless).
+        if not _comparable(target, vec):
+            continue
+        score = cosine(target, vec)
+        if score <= min_score:
+            continue
+        record = {
+            "id": chunk.get("id"),
+            "documentId": chunk.get("documentId") or chunk.get("document_id"),
+            "domain": chunk.get("domain"),
+            "level": chunk.get("level"),
+            "topic": chunk.get("topic"),
+            "locator": chunk.get("locator") or "",
+            "text": str(chunk.get("text") or ""),
+            "score": round(float(score), 4),
+        }
+        scored.append((score, record))
+    scored.sort(key=lambda t: -t[0])
+    return [record for _score, record in scored[: max(1, k)]]
+
+
 def _noted_question_notes(session: Session) -> dict[int, str]:
     """question_id -> the user's most recent error-log note for it."""
     entries = session.exec(

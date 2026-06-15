@@ -36,6 +36,48 @@ describe('retrieveChunks', () => {
     expect(hits.length).toBeGreaterThanOrEqual(1);
     expect(hits[0].text.toLowerCase()).toContain('duration');
   });
+
+  it('returns host-only chunks unchanged when notebook union is disabled', async () => {
+    await getStorage().chunks!.bulkUpsert([
+      chunk('1', 'Duration measures a bond price sensitivity to yield changes.'),
+    ]);
+    const searchNotebook = vi.fn();
+    const hits = await retrieveChunks({
+      question: 'duration',
+      domain: 'cfa',
+      includeNotebookSources: false,
+      searchNotebook,
+    });
+    expect(hits.map((h) => h.id)).toEqual(['1']);
+    expect(searchNotebook).not.toHaveBeenCalled();
+  });
+
+  it('unions open-notebook source hits with host chunks via the injected search', async () => {
+    await getStorage().chunks!.bulkUpsert([
+      chunk('1', 'Duration measures bond price sensitivity to yield.'),
+    ]);
+    const searchNotebook = vi.fn(async () => [
+      { id: 'source:nb', title: 'My duration notes', text: 'notebook duration excerpt', locator: 'My duration notes', score: 0.9 },
+    ]);
+    const hits = await retrieveChunks({ question: 'duration', domain: 'cfa', searchNotebook });
+    expect(searchNotebook).toHaveBeenCalledTimes(1);
+    // The higher-scored notebook hit ranks first; both sources are present.
+    expect(hits.map((h) => h.id)).toContain('source:nb');
+    expect(hits.map((h) => h.id)).toContain('1');
+    const nb = hits.find((h) => h.id === 'source:nb');
+    expect(nb?.domain).toBe('open-notebook');
+  });
+
+  it('degrades to host-only when the notebook search throws', async () => {
+    await getStorage().chunks!.bulkUpsert([
+      chunk('1', 'Duration measures bond price sensitivity to yield.'),
+    ]);
+    const searchNotebook = vi.fn(async () => {
+      throw new Error('sidecar down');
+    });
+    const hits = await retrieveChunks({ question: 'duration', domain: 'cfa', searchNotebook });
+    expect(hits.map((h) => h.id)).toEqual(['1']);
+  });
 });
 
 describe('localGroundedAnswer', () => {
