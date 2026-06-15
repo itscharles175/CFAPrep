@@ -10,6 +10,7 @@ import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { projectExamReadiness } from '../lib/examReadiness';
 import { getStorage } from '../lib/storage';
 import { getLsatActivity, getLsatCalibration } from '../lib/lsatAnalyticsBridge';
+import { getLsatCrossDomain } from '../lib/lsatCrossDomainBridge';
 
 // ANL-6 — cross-domain color coding. CFA reuses the host accent (blue, the
 // analytics default); LSAT gets a distinct violet so the two series read apart
@@ -39,6 +40,43 @@ function seconds(value) {
   if (!value) return '0m';
   const minutes = Math.max(1, Math.round(value / 60));
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+// ANL-1 — host study-minute estimate for the cross-domain merge. The host does
+// not record per-question time locally, so approximate each in-window question
+// attempt at ~1.5 min (a conservative mixed quiz/vignette pace) for a comparable
+// "study time" figure beside the LSAT sidecar's measured minutes.
+const HOST_MINUTES_PER_ATTEMPT = 1.5;
+function summaryStudyMinutes(rows, windowStart) {
+  let n = 0;
+  for (const row of rows || []) {
+    const at = row.createdAt ? Date.parse(row.createdAt) : NaN;
+    if (Number.isFinite(at) && at >= windowStart) n += 1;
+  }
+  return Math.round(n * HOST_MINUTES_PER_ATTEMPT);
+}
+
+// ANL-1 — current host streak: consecutive days (back from today, allowing
+// yesterday when today is empty) with at least one local question attempt.
+function hostStreakFromResults(rows) {
+  const days = new Set();
+  for (const row of rows || []) {
+    if (typeof row.createdAt === 'string') days.add(row.createdAt.slice(0, 10));
+  }
+  if (days.size === 0) return 0;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let cursor = today.getTime();
+  const key = (ms) => new Date(ms).toISOString().slice(0, 10);
+  // Allow the streak to count from yesterday if today has no activity yet.
+  if (!days.has(key(cursor)) && days.has(key(cursor - dayMs))) cursor -= dayMs;
+  let streak = 0;
+  while (days.has(key(cursor))) {
+    streak += 1;
+    cursor -= dayMs;
+  }
+  return streak;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +259,128 @@ function StudyStreakHeatmap({ cfaCounts, lsatCounts, domain, lsatReachable }) {
   );
 }
 
+/**
+ * ANL-1 — combined cross-domain study summary. `report` is the merged rollup
+ * from the LSAT sidecar's `/api/analytics/cross-domain` (study time, accuracy by
+ * domain, merged weakest types, combined streak, 30-day trend), with the host's
+ * own CFA/Quant numbers folded in server-side. `null` = still loading; an
+ * unreachable sidecar resolves to `reachable: false` and the panel degrades to a
+ * host-only message. The CFA / LSAT / All `domain` toggle filters the per-domain
+ * accuracy + weakest-types rows shown.
+ */
+function CrossDomainSummary({ report, domain, lsatReachable }) {
+  const subtitle =
+    'One bidirectional rollup: combined study time, accuracy by domain, the longest active streak, and the weakest types across CFA + LSAT (host numbers merged with the LSAT sidecar).';
+
+  if (report === null) {
+    return (
+      <Panel tone="analytics" title="Cross-Domain Summary" subtitle={subtitle}>
+        <p className="muted-copy">Loading cross-domain summary…</p>
+      </Panel>
+    );
+  }
+
+  const byDomain = report.accuracyByDomain || [];
+  const showLsatRow = domain !== 'cfa';
+  const showHostRow = domain !== 'lsat';
+  const rows = byDomain.filter(
+    (row) => (row.domain === 'lsat' ? showLsatRow : showHostRow),
+  );
+
+  // Weakest types filtered by the active domain toggle ("host" rows read as CFA).
+  const weakest = (report.weakestTypes || [])
+    .filter((row) => (domain === 'all' ? true : (domain === 'lsat' ? row.domain === 'lsat' : row.domain === 'host')))
+    .slice(0, 5);
+
+  const trend30 = (report.trend || []).map((row) => ({
+    day: row.date.slice(5),
+    questions: row.questions,
+  }));
+
+  const domainLabel = (d) => (d === 'lsat' ? 'LSAT' : 'CFA / Quant');
+
+  return (
+    <Panel tone="analytics" title="Cross-Domain Summary" subtitle={subtitle}>
+      {!report.reachable && !lsatReachable && (
+        <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
+          LSAT sidecar unreachable — start StudyVault’s LSAT backend on :8100 to combine LSAT analytics with your CFA telemetry.
+        </p>
+      )}
+      {!report.reachable && lsatReachable && (
+        <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
+          Showing the host (CFA / Quant) summary — the LSAT cross-domain rollup didn’t respond this time.
+        </p>
+      )}
+      <div className="qv-row-2 qv-mb-3" style={{ flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+        <span className="qv-chip qv-text-secondary">Combined study {seconds(report.studyMinutes * 60)}</span>
+        <span className="qv-chip qv-text-success">Longest active streak {report.combinedStreakDays}d</span>
+      </div>
+
+      <div className="analytics-table" style={{ marginBottom: 16 }}>
+        <div className="analytics-row analytics-head">
+          <span>Domain</span>
+          <span>Attempts</span>
+          <span>Accuracy</span>
+          <span>Streak</span>
+        </div>
+        {rows.length ? (
+          rows.map((row) => (
+            <div className="analytics-row" key={row.domain}>
+              <span style={{ color: DOMAIN_COLOR[row.domain === 'lsat' ? 'lsat' : 'cfa'] }}>
+                {domainLabel(row.domain)}
+              </span>
+              <strong>{row.attempts}</strong>
+              <span>{row.accuracy === null ? '-' : `${Math.round(row.accuracy * 100)}%`}</span>
+              <span>{row.streakDays}d</span>
+            </div>
+          ))
+        ) : (
+          <p className="muted-copy">No attempts in the selected domain yet.</p>
+        )}
+      </div>
+
+      {weakest.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <p className="qv-fs-sm qv-text-secondary" style={{ marginBottom: 8 }}>
+            Weakest types (lowest accuracy first)
+          </p>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            {weakest.map((row) => (
+              <span
+                key={`${row.domain}:${row.label}`}
+                className="qv-chip qv-text-muted"
+                title={`${domainLabel(row.domain)} · ${row.attempts} attempts`}
+                style={{ borderColor: DOMAIN_COLOR[row.domain === 'lsat' ? 'lsat' : 'cfa'] }}
+              >
+                {row.label}
+                {row.accuracy !== null && ` · ${Math.round(row.accuracy * 100)}%`}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {trend30.length > 0 && (
+        <div style={{ width: '100%', height: 180 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={trend30} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="day" stroke="var(--text-muted)" fontSize={11} interval={Math.max(1, Math.floor(trend30.length / 8))} />
+              <YAxis stroke="var(--text-muted)" allowDecimals={false} fontSize={12} />
+              <Tooltip
+                contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
+                labelStyle={{ color: 'var(--text-secondary)' }}
+                formatter={(value) => [value, 'Questions']}
+              />
+              <Area type="monotone" dataKey="questions" name="Combined questions" stroke="var(--accent, #60a5fa)" fill="var(--accent-soft, rgba(96,165,250,0.18))" strokeWidth={2} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 export default function Analytics() {
   const [activePathway] = useLevel3Pathway();
   const [summary, setSummary] = useState(null);
@@ -236,6 +396,10 @@ export default function Analytics() {
   const [lsatHeatCounts, setLsatHeatCounts] = useState(new Map());
   const [lsatCalibration, setLsatCalibration] = useState([]);
   const [lsatReachable, setLsatReachable] = useState(false);
+  // ANL-1 — combined cross-domain rollup pulled from the LSAT sidecar
+  // (`/api/analytics/cross-domain`), merged with the host's own CFA/Quant totals
+  // so the page shows one bidirectional study summary. Best-effort + degrading.
+  const [crossDomain, setCrossDomain] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -351,6 +515,43 @@ export default function Analytics() {
       })
       .catch(() => undefined);
 
+    // ANL-1 — combined cross-domain rollup. Derive the host (CFA/Quant/Excel)
+    // numbers over the same 30-day window from local Dexie telemetry, then pull
+    // the LSAT sidecar's `/api/analytics/cross-domain` rollup WITH those numbers
+    // so the backend returns one merged study summary (study time, accuracy by
+    // domain, merged weakest types, combined streak). Best-effort + degrading:
+    // the bridge resolves to `{ reachable: false, ... }` on any failure.
+    db.questionResults
+      .toArray()
+      .then((rows) => {
+        const windowStart = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        let hostAttempts = 0;
+        let hostCorrect = 0;
+        for (const row of rows || []) {
+          const at = row.createdAt ? Date.parse(row.createdAt) : NaN;
+          if (!Number.isFinite(at) || at < windowStart) continue;
+          hostAttempts += 1;
+          if (row.correct) hostCorrect += 1;
+        }
+        // Approximate host study minutes in the window from total study time
+        // (the host doesn't track per-question time locally). Streak comes from
+        // distinct active CFA days in the trailing run.
+        const hostStudyMinutes = summaryStudyMinutes(rows, windowStart);
+        return getLsatCrossDomain({
+          days: 30,
+          hostAttempts,
+          hostCorrect,
+          hostStudyMinutes,
+          hostStreakDays: hostStreakFromResults(rows),
+        });
+      })
+      .then((report) => {
+        if (!active || !report) return;
+        setCrossDomain(report);
+        if (report.reachable) setLsatReachable(true);
+      })
+      .catch(() => undefined);
+
     return () => {
       active = false;
     };
@@ -387,6 +588,8 @@ export default function Analytics() {
         <MetricCard label="Mocks" value={summary?.totals.mockAttempts ?? 0} detail={`${summary?.totals.vignetteAttempts ?? 0} vignettes`} icon={BarChart3} tone="warning" />
         <MetricCard label="Artifacts" value={summary?.totals.artifacts ?? 0} detail="Calculator/lab outputs" icon={Layers} />
       </div>
+
+      <CrossDomainSummary report={crossDomain} domain={domain} lsatReachable={lsatReachable} />
 
       <div className="grid-2 analytics-section-grid">
         <Panel tone="analytics" title="Readiness By Level">

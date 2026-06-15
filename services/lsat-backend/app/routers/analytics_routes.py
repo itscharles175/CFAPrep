@@ -14,27 +14,54 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlmodel import Session
 
 from .. import analytics
 from ..db import get_session
+from ..pagination import LimitQuery, OffsetQuery, paginate
+from ..schemas import (
+    ActivityDay,
+    ByTypeRow,
+    CrossDomainAnalytics,
+    DashboardAnalytics,
+)
 
 router = APIRouter(prefix="/analytics")
 
 _Days = Query(None, ge=1, le=730, description="restrict to the last N days")
 
 
-@router.get("/dashboard")
+def _set_list_meta(response: Response, *, total: int,
+                   limit: Optional[int], offset: Optional[int]) -> None:
+    """BC3 — surface the list-pagination meta envelope on response HEADERS.
+
+    Headers are additive: the JSON body stays the exact bare list the host +
+    existing tests consume (wrapping the list in a ``{data, meta}`` envelope would
+    break that bare-list contract — see ``app.pagination``). ``X-Total-Count`` is
+    the full (pre-slice) length; ``X-Limit``/``X-Offset`` echo the applied window
+    so a paging client can compute "has more" without a separate count call."""
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["X-Offset"] = str(offset or 0)
+    if limit is not None:
+        response.headers["X-Limit"] = str(limit)
+
+
+@router.get("/dashboard", response_model=DashboardAnalytics)
 def dashboard(days: Optional[int] = _Days, session: Session = Depends(get_session)):
     return analytics.dashboard(session, days=days)
 
 
-@router.get("/by-type")
-def by_type(source: str = Query("all", pattern="^(official|all)$"),
+@router.get("/by-type", response_model=list[ByTypeRow])
+def by_type(response: Response,
+            source: str = Query("all", pattern="^(official|all)$"),
             days: Optional[int] = _Days,
+            limit: Optional[int] = LimitQuery,
+            offset: Optional[int] = OffsetQuery,
             session: Session = Depends(get_session)):
-    return analytics.by_type(session, source=source, days=days)
+    rows = analytics.by_type(session, source=source, days=days)
+    _set_list_meta(response, total=len(rows), limit=limit, offset=offset)
+    return paginate(rows, limit=limit, offset=offset)
 
 
 @router.get("/timing/{session_id}")
@@ -68,10 +95,52 @@ def mastery(source: str = Query("all", pattern="^(official|all)$"),
     return analytics.mastery(session, source=source, days=days)
 
 
-@router.get("/activity")
-def activity(days: int = Query(120, ge=1, le=730),
+@router.get("/activity", response_model=list[ActivityDay])
+def activity(response: Response,
+             days: int = Query(120, ge=1, le=730),
+             limit: Optional[int] = LimitQuery,
+             offset: Optional[int] = OffsetQuery,
              session: Session = Depends(get_session)):
-    return analytics.activity(session, days=days)
+    rows = analytics.activity(session, days=days)
+    _set_list_meta(response, total=len(rows), limit=limit, offset=offset)
+    return paginate(rows, limit=limit, offset=offset)
+
+
+@router.get("/cross-domain", response_model=CrossDomainAnalytics)
+def cross_domain(
+    days: int = Query(30, ge=1, le=730,
+                      description="trend / accuracy window (default 30 days)"),
+    host_attempts: Optional[int] = Query(
+        None, ge=0, description="optional host-side (CFA/Quant) attempt count"),
+    host_correct: Optional[int] = Query(
+        None, ge=0, description="optional host-side correct count"),
+    host_study_minutes: Optional[float] = Query(
+        None, ge=0, description="optional host-side study minutes in the window"),
+    host_streak_days: Optional[int] = Query(
+        None, ge=0, description="optional host-side current streak (days)"),
+    weakest_limit: Optional[int] = Query(
+        None, ge=1, le=1000,
+        description="optional: cap the merged weakest-types list (default: all)"),
+    weakest_offset: Optional[int] = Query(
+        None, ge=0, description="optional: skip this many weakest-types rows"),
+    session: Session = Depends(get_session),
+):
+    """ANL-1 — bidirectional cross-domain study rollup the HOST pulls and merges
+    with its own Dexie analytics: combined study time, accuracy by domain, merged
+    weakest types, the longest active streak across domains, and a 30-day activity
+    trend. Host numbers are OPTIONAL (DATA-4a owns the persisted host->backend
+    feed); omit them for the LSAT-only view (``meta.host_provided`` = False) and
+    let the host merge its CFA/Quant numbers client-side."""
+    return analytics.cross_domain(
+        session,
+        days=days,
+        host_attempts=host_attempts,
+        host_correct=host_correct,
+        host_study_minutes=host_study_minutes,
+        host_streak_days=host_streak_days,
+        weakest_limit=weakest_limit,
+        weakest_offset=weakest_offset,
+    )
 
 
 @router.get("/feedback-cohorts")

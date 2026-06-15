@@ -2252,7 +2252,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/DashboardAnalytics"
                 }
               }
             }
@@ -2335,6 +2335,45 @@
               "title": "Days"
             },
             "description": "restrict to the last N days"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional: cap the number of items returned (default: all).",
+              "title": "Limit"
+            },
+            "description": "Optional: cap the number of items returned (default: all)."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional: skip this many items from the start (default: 0).",
+              "title": "Offset"
+            },
+            "description": "Optional: skip this many items from the start (default: 0)."
           }
         ],
         "responses": {
@@ -2343,7 +2382,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ByTypeRow"
+                  },
+                  "title": "Response By Type Api Analytics By Type Get"
                 }
               }
             }
@@ -2819,6 +2862,45 @@
               "default": 120,
               "title": "Days"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional: cap the number of items returned (default: all).",
+              "title": "Limit"
+            },
+            "description": "Optional: cap the number of items returned (default: all)."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional: skip this many items from the start (default: 0).",
+              "title": "Offset"
+            },
+            "description": "Optional: skip this many items from the start (default: 0)."
           }
         ],
         "responses": {
@@ -2827,7 +2909,201 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActivityDay"
+                  },
+                  "title": "Response Activity Api Analytics Activity Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analytics/cross-domain": {
+      "get": {
+        "summary": "Cross Domain",
+        "description": "ANL-1 — bidirectional cross-domain study rollup the HOST pulls and merges\nwith its own Dexie analytics: combined study time, accuracy by domain, merged\nweakest types, the longest active streak across domains, and a 30-day activity\ntrend. Host numbers are OPTIONAL (DATA-4a owns the persisted host->backend\nfeed); omit them for the LSAT-only view (``meta.host_provided`` = False) and\nlet the host merge its CFA/Quant numbers client-side.",
+        "operationId": "cross_domain_api_analytics_cross_domain_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 730,
+              "minimum": 1,
+              "description": "trend / accuracy window (default 30 days)",
+              "default": 30,
+              "title": "Days"
+            },
+            "description": "trend / accuracy window (default 30 days)"
+          },
+          {
+            "name": "host_attempts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "optional host-side (CFA/Quant) attempt count",
+              "title": "Host Attempts"
+            },
+            "description": "optional host-side (CFA/Quant) attempt count"
+          },
+          {
+            "name": "host_correct",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "optional host-side correct count",
+              "title": "Host Correct"
+            },
+            "description": "optional host-side correct count"
+          },
+          {
+            "name": "host_study_minutes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "optional host-side study minutes in the window",
+              "title": "Host Study Minutes"
+            },
+            "description": "optional host-side study minutes in the window"
+          },
+          {
+            "name": "host_streak_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "optional host-side current streak (days)",
+              "title": "Host Streak Days"
+            },
+            "description": "optional host-side current streak (days)"
+          },
+          {
+            "name": "weakest_limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "optional: cap the merged weakest-types list (default: all)",
+              "title": "Weakest Limit"
+            },
+            "description": "optional: cap the merged weakest-types list (default: all)"
+          },
+          {
+            "name": "weakest_offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "optional: skip this many weakest-types rows",
+              "title": "Weakest Offset"
+            },
+            "description": "optional: skip this many weakest-types rows"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrossDomainAnalytics"
                 }
               }
             }
@@ -5362,6 +5638,75 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gen/generation-quality": {
+      "post": {
+        "summary": "Generation Quality Check",
+        "description": "INT-1: validate one candidate against the shared generation rubric.\n\nRuns every gate (trap-metadata, distractor-quality, structural-type,\nself-consistency, permutation-invariance, lexical-leak, CoVe, multi-model\nagreement, RC-authenticity) via ``generation.build_validation_report`` WITHOUT\nenqueuing a job or writing to the DB. The embedding-dedup/novelty gate skips\n(no session) since cross-domain content isn't in the LSAT bank. Fails CLOSED:\na model outage yields ``passed=False`` + ``error`` rather than a 500, so the\ncaller quarantines weak distractors instead of admitting them.",
+        "operationId": "generation_quality_check_api_gen_generation_quality_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenQualityBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenQualityReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -13919,6 +14264,75 @@
         }
       }
     },
+    "/api/notebook-grounding": {
+      "post": {
+        "summary": "Cross Domain Grounding",
+        "description": "INT-3 — cross-domain chunk grounding.\n\nRanks the host curriculum chunks the caller submits against ``query`` (so\nhost material can be unioned into LSAT/Notebook retrieval) AND, unless\n``include_notebook_sources`` is false, surfaces local notebook sources that\nmatch the query as chunk-shaped hits. The two streams are merged and\nre-ranked into one ``hits`` list, mirroring the host-side union in\n``localRag.ts`` so both planes ground over the same set.\n\nDegrades gracefully: when embeddings are unavailable the host-chunk ranking\nis simply empty and only the notebook full-text matches are returned (and\nvice-versa), so neither plane being offline breaks the other.",
+        "operationId": "cross_domain_grounding_api_notebook_grounding_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CrossDomainGroundingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/notebook-chat/sessions": {
       "get": {
         "summary": "List Chat Sessions",
@@ -16301,6 +16715,41 @@
   },
   "components": {
     "schemas": {
+      "ActivityDay": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "questions": {
+            "type": "integer",
+            "title": "Questions"
+          },
+          "minutes": {
+            "type": "number",
+            "title": "Minutes"
+          },
+          "correct": {
+            "type": "integer",
+            "title": "Correct"
+          },
+          "sessions": {
+            "type": "integer",
+            "title": "Sessions"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "questions",
+          "minutes",
+          "correct",
+          "sessions"
+        ],
+        "title": "ActivityDay",
+        "description": "One day of ``GET /api/analytics/activity`` (mirrors ``analytics.activity``)."
+      },
       "AnnotationBody": {
         "properties": {
           "highlights": {
@@ -16920,6 +17369,51 @@
         ],
         "title": "BulkTagBody"
       },
+      "ByTypeRow": {
+        "properties": {
+          "q_type": {
+            "type": "string",
+            "title": "Q Type"
+          },
+          "section_type": {
+            "type": "string",
+            "title": "Section Type"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "accuracy": {
+            "type": "number",
+            "title": "Accuracy"
+          },
+          "avg_time_ms": {
+            "type": "integer",
+            "title": "Avg Time Ms"
+          },
+          "trend": {
+            "type": "string",
+            "title": "Trend"
+          },
+          "efficiency_band": {
+            "type": "string",
+            "title": "Efficiency Band"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "q_type",
+          "section_type",
+          "attempts",
+          "accuracy",
+          "avg_time_ms",
+          "trend",
+          "efficiency_band"
+        ],
+        "title": "ByTypeRow",
+        "description": "One row of ``GET /api/analytics/by-type`` (mirrors ``analytics.by_type``)."
+      },
       "CalibrateBody": {
         "properties": {
           "min_attempts": {
@@ -17415,6 +17909,319 @@
         ],
         "title": "ConversationBody"
       },
+      "CrossDomainAnalytics": {
+        "properties": {
+          "meta": {
+            "$ref": "#/components/schemas/CrossDomainMeta"
+          },
+          "study_minutes": {
+            "type": "number",
+            "title": "Study Minutes"
+          },
+          "combined_streak_days": {
+            "type": "integer",
+            "title": "Combined Streak Days"
+          },
+          "accuracy_by_domain": {
+            "items": {
+              "$ref": "#/components/schemas/CrossDomainDomainStat"
+            },
+            "type": "array",
+            "title": "Accuracy By Domain"
+          },
+          "weakest_types": {
+            "items": {
+              "$ref": "#/components/schemas/CrossDomainWeakType"
+            },
+            "type": "array",
+            "title": "Weakest Types"
+          },
+          "trend_30d": {
+            "items": {
+              "$ref": "#/components/schemas/CrossDomainTrendPoint"
+            },
+            "type": "array",
+            "title": "Trend 30D"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "meta",
+          "study_minutes",
+          "combined_streak_days",
+          "accuracy_by_domain",
+          "weakest_types",
+          "trend_30d"
+        ],
+        "title": "CrossDomainAnalytics",
+        "description": "``GET /api/analytics/cross-domain`` — bidirectional study rollup.\n\nAggregates LSAT-side study time, accuracy-by-domain, merged weakest types,\na combined streak, and a 30-day activity trend. Host-side numbers (CFA/Quant)\ncan be merged in via query params; when omitted the payload is the LSAT-only\nview and ``meta.host_provided`` is False (the host then merges its own Dexie\nanalytics with this payload client-side — DATA-4a owns the persisted feed)."
+      },
+      "CrossDomainDomainStat": {
+        "properties": {
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "correct": {
+            "type": "integer",
+            "title": "Correct"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "study_minutes": {
+            "type": "number",
+            "title": "Study Minutes"
+          },
+          "streak_days": {
+            "type": "integer",
+            "title": "Streak Days"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "domain",
+          "attempts",
+          "correct",
+          "accuracy",
+          "study_minutes",
+          "streak_days"
+        ],
+        "title": "CrossDomainDomainStat",
+        "description": "Per-domain rollup inside ``GET /api/analytics/cross-domain``."
+      },
+      "CrossDomainGroundingBody": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/GroundingChunk"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Chunks"
+          },
+          "k": {
+            "type": "integer",
+            "maximum": 50,
+            "minimum": 1,
+            "title": "K",
+            "default": 6
+          },
+          "includeNotebookSources": {
+            "type": "boolean",
+            "title": "Includenotebooksources",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "CrossDomainGroundingBody",
+        "description": "INT-3 — union request: rank the host's curriculum chunks against a query\nand surface matching local notebook sources, so host material and LSAT/\nnotebook sources share one grounded retrieval set."
+      },
+      "CrossDomainMeta": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "host_provided": {
+            "type": "boolean",
+            "title": "Host Provided"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "weakest_total": {
+            "type": "integer",
+            "title": "Weakest Total"
+          },
+          "weakest_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weakest Limit"
+          },
+          "weakest_offset": {
+            "type": "integer",
+            "title": "Weakest Offset"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "model",
+          "window_days",
+          "host_provided",
+          "generated_at",
+          "weakest_total",
+          "weakest_limit",
+          "weakest_offset"
+        ],
+        "title": "CrossDomainMeta",
+        "description": "BC2/BC3 meta envelope for the cross-domain payload (window + pagination +\nprovenance), kept as a sibling so the data fields stay additive."
+      },
+      "CrossDomainTrendPoint": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "lsat_questions": {
+            "type": "integer",
+            "title": "Lsat Questions"
+          },
+          "host_questions": {
+            "type": "integer",
+            "title": "Host Questions"
+          },
+          "questions": {
+            "type": "integer",
+            "title": "Questions"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "lsat_questions",
+          "host_questions",
+          "questions"
+        ],
+        "title": "CrossDomainTrendPoint",
+        "description": "One day of the combined 30-day activity trend."
+      },
+      "CrossDomainWeakType": {
+        "properties": {
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "domain",
+          "label",
+          "accuracy",
+          "attempts"
+        ],
+        "title": "CrossDomainWeakType",
+        "description": "One merged weakest-type entry across both domains."
+      },
+      "DashboardAnalytics": {
+        "properties": {
+          "predicted_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Predicted Score"
+          },
+          "score_delta_30d": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Delta 30D"
+          },
+          "trend": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Trend"
+          },
+          "weakest_types": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Weakest Types"
+          },
+          "coach": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Coach"
+          },
+          "streak_days": {
+            "type": "integer",
+            "title": "Streak Days"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "predicted_score",
+          "score_delta_30d",
+          "trend",
+          "weakest_types",
+          "coach",
+          "streak_days"
+        ],
+        "title": "DashboardAnalytics",
+        "description": "``GET /api/analytics/dashboard`` (mirrors ``analytics.dashboard``).\n\n``trend``/``weakest_types``/``coach`` are left as open shapes here because\neach is itself an additive analytics sub-dict; pinning only the headline\nscalar keys keeps the schema honest without freezing nested analytics that\nstill evolve. ``extra='allow'`` carries everything else through unchanged."
+      },
       "DatasetSource": {
         "properties": {
           "key": {
@@ -17845,6 +18652,350 @@
           "q_type"
         ],
         "title": "ForTypeBody"
+      },
+      "GenQualityBody": {
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/GenQualityCandidate"
+          },
+          "q_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Type"
+          },
+          "section_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "LR",
+                  "RC"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Type"
+          },
+          "permutation_invariant": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permutation Invariant"
+          },
+          "informativity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Informativity"
+          },
+          "distractor_quality_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distractor Quality Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "candidate"
+        ],
+        "title": "GenQualityBody"
+      },
+      "GenQualityCandidate": {
+        "properties": {
+          "stem": {
+            "type": "string",
+            "title": "Stem",
+            "default": ""
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "default": ""
+          },
+          "passage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passage"
+          },
+          "difficulty": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5,
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Difficulty"
+          },
+          "correct_answer": {
+            "type": "string",
+            "maxLength": 2,
+            "minLength": 1,
+            "title": "Correct Answer"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/GenQualityChoice"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Choices"
+          }
+        },
+        "type": "object",
+        "required": [
+          "correct_answer",
+          "choices"
+        ],
+        "title": "GenQualityCandidate",
+        "description": "A candidate item to gate, in the same shape generation produces.\n\nRC items additionally carry a ``passage``; LR items omit it. The endpoint\nforwards the whole candidate to the gate, so host content just needs to be\nmapped into this envelope (stem + prompt + 5 choices + credited letter)."
+      },
+      "GenQualityChoice": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 2,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "default": ""
+          },
+          "trap_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trap Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "title": "GenQualityChoice",
+        "description": "One answer choice in the LSAT candidate envelope (5 of them, A-E)."
+      },
+      "GenQualityGate": {
+        "properties": {
+          "gate": {
+            "type": "string",
+            "title": "Gate"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "gate"
+        ],
+        "title": "GenQualityGate"
+      },
+      "GenQualityReport": {
+        "properties": {
+          "passed": {
+            "type": "boolean",
+            "title": "Passed"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "gate_confidence": {
+            "type": "number",
+            "title": "Gate Confidence",
+            "default": 0
+          },
+          "score": {
+            "type": "number",
+            "title": "Score",
+            "default": 0
+          },
+          "failure_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Failure Reasons"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GenQualityGate"
+            },
+            "type": "array",
+            "title": "Gates"
+          },
+          "checks": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Checks"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "passed"
+        ],
+        "title": "GenQualityReport",
+        "description": "Typed ValidationReport returned by the generation-quality service."
+      },
+      "GroundingChunk": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 240
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "documentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 240
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Documentid"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "locator": {
+            "type": "string",
+            "maxLength": 240,
+            "title": "Locator",
+            "default": ""
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 20000,
+            "title": "Text",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "GroundingChunk",
+        "description": "A host curriculum chunk submitted for cross-domain grounding."
       },
       "HTTPValidationError": {
         "properties": {

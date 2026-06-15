@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 
 from . import scoring
 from .learning_feedback import feedback_cohort_summary, feedback_outcome_summary
+from .pagination import paginate
 from .models import (
     AnswerChoice,
     Attempt,
@@ -1254,6 +1255,159 @@ def activity(session: Session, days: int = 120) -> list[dict]:
         })
         d += timedelta(days=1)
     return out
+
+
+# --- cross-domain rollup (ANL-1) --------------------------------------------
+def _host_accuracy(host_correct: int | None, host_attempts: int | None) -> float | None:
+    """Accuracy from host-provided counts, or None when no host attempts."""
+    if host_attempts and host_attempts > 0:
+        return round((host_correct or 0) / host_attempts, 4)
+    return None
+
+
+def cross_domain(
+    session: Session,
+    *,
+    days: int = 30,
+    host_attempts: int | None = None,
+    host_correct: int | None = None,
+    host_study_minutes: float | None = None,
+    host_streak_days: int | None = None,
+    host_daily_questions: dict[str, int] | None = None,
+    host_weakest: list[dict] | None = None,
+    weakest_limit: int | None = None,
+    weakest_offset: int | None = None,
+) -> dict:
+    """Bidirectional cross-domain study rollup so the host can pull LSAT analytics
+    and merge them with its own (CFA/Quant/Excel) numbers in ONE call.
+
+    Aggregates, over the trailing ``days`` window:
+    - **study time** (combined minutes: LSAT practice minutes + any host minutes),
+    - **accuracy by domain** (LSAT computed here; host taken from the optional
+      ``host_attempts``/``host_correct``),
+    - **merged weakest types** (LSAT weakest from :func:`mastery`, ranked by the
+      credible-interval lower bound, interleaved with any ``host_weakest`` rows),
+    - **combined streak** (the larger of the LSAT attempt streak and the optional
+      host streak — the user's longest active cross-domain run),
+    - a **30-day activity trend** (per-day LSAT questions, host questions, and the
+      combined total) for a single cross-domain sparkline.
+
+    Host numbers are OPTIONAL (DATA-4a owns the persisted host->backend feed). When
+    none are passed this returns the LSAT-only view and ``meta.host_provided`` is
+    False; the host then merges its local Dexie analytics with this payload
+    client-side. All keys are additive and backward-compatible.
+    """
+    window = max(1, min(int(days or 30), 730))
+
+    # --- LSAT side (computed locally from attempts) --------------------------
+    lsat_practice = _attempts_for(session, days=window, source=None)
+    lsat_attempts = len(lsat_practice)
+    lsat_correct = sum(1 for a in lsat_practice if a.is_correct)
+    lsat_accuracy = round(lsat_correct / lsat_attempts, 4) if lsat_attempts else None
+    lsat_minutes = round(sum(a.time_ms or 0 for a in lsat_practice) / 60000, 1)
+    lsat_streak = _streak_days(session)
+
+    # Per-day LSAT activity over the window (reuse the zero-filled calendar).
+    lsat_activity = activity(session, days=window)
+    lsat_daily = {row["date"]: int(row["questions"]) for row in lsat_activity}
+
+    # --- host side (optional, from query/body) -------------------------------
+    host_provided = any(
+        v is not None
+        for v in (
+            host_attempts, host_correct, host_study_minutes,
+            host_streak_days, host_daily_questions, host_weakest,
+        )
+    )
+    host_acc = _host_accuracy(host_correct, host_attempts)
+    host_minutes = round(float(host_study_minutes), 1) if host_study_minutes else 0.0
+    host_streak = int(host_streak_days) if host_streak_days else 0
+    host_daily = host_daily_questions or {}
+
+    # --- accuracy by domain --------------------------------------------------
+    accuracy_by_domain = [
+        {
+            "domain": "lsat",
+            "attempts": lsat_attempts,
+            "correct": lsat_correct,
+            "accuracy": lsat_accuracy,
+            "study_minutes": lsat_minutes,
+            "streak_days": lsat_streak,
+        },
+        {
+            "domain": "host",
+            "attempts": int(host_attempts) if host_attempts else 0,
+            "correct": int(host_correct) if host_correct else 0,
+            "accuracy": host_acc,
+            "study_minutes": host_minutes,
+            "streak_days": host_streak,
+        },
+    ]
+
+    # --- merged weakest types ------------------------------------------------
+    # LSAT weakest: reuse the mastery ranking (weakest-first by lower bound).
+    lsat_weak = [
+        {
+            "domain": "lsat",
+            "label": m["q_type"],
+            "accuracy": m.get("weighted_accuracy"),
+            "attempts": m["attempts"],
+        }
+        for m in mastery(session, days=window)
+        if m["attempts"] >= 1
+    ]
+    host_weak = [
+        {
+            "domain": "host",
+            "label": str(w.get("label") or w.get("topic") or w.get("q_type") or "?"),
+            "accuracy": (
+                round(float(w["accuracy"]), 4)
+                if isinstance(w.get("accuracy"), (int, float)) else None
+            ),
+            "attempts": int(w.get("attempts") or 0),
+        }
+        for w in (host_weakest or [])
+    ]
+    # Rank the combined list weakest-first (lowest accuracy on top); None accuracy
+    # (no signal) sorts last so it never masquerades as "weakest".
+    merged_weak = sorted(
+        lsat_weak + host_weak,
+        key=lambda r: (r["accuracy"] is None, r["accuracy"] if r["accuracy"] is not None else 1.0),
+    )
+    weakest_total = len(merged_weak)
+    merged_weak = paginate(merged_weak, limit=weakest_limit, offset=weakest_offset)
+
+    # --- combined 30-day trend ----------------------------------------------
+    trend_30d = []
+    for row in lsat_activity:
+        d = row["date"]
+        lq = int(row["questions"])
+        hq = int(host_daily.get(d, 0))
+        trend_30d.append({
+            "date": d,
+            "lsat_questions": lq,
+            "host_questions": hq,
+            "questions": lq + hq,
+        })
+
+    return {
+        "meta": {
+            "model": "cross_domain_analytics_v1",
+            "window_days": window,
+            "host_provided": host_provided,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "weakest_total": weakest_total,
+            "weakest_limit": weakest_limit,
+            "weakest_offset": weakest_offset or 0,
+        },
+        # Combined study time across both domains (minutes).
+        "study_minutes": round(lsat_minutes + host_minutes, 1),
+        # Combined streak = the longest currently-active run across domains.
+        "combined_streak_days": max(lsat_streak, host_streak),
+        "accuracy_by_domain": accuracy_by_domain,
+        "weakest_types": merged_weak,
+        "trend_30d": trend_30d,
+    }
 
 
 # --- consolidated report ----------------------------------------------------

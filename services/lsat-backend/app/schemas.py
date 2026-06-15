@@ -85,3 +85,121 @@ class BankStats(BaseModel):
     by_source: dict[str, int]
     by_q_type: dict[str, int]
     available_sources: list[str]
+
+
+# --- ANL-1 — analytics response models --------------------------------------
+# These mirror the dicts ``app.analytics`` already returns for the high-traffic
+# analytics routes the host reads via the generated client (api.gen.ts ->
+# api.ts: ``dashboard`` / ``byType`` / ``activity``). Attaching them as
+# ``response_model=`` carries a real schema into the OpenAPI spec instead of the
+# ``LegacySuccessResponse`` fallback, WITHOUT changing a byte on the wire. Models
+# are intentionally permissive (``extra='allow'``) so additive analytics keys
+# (e.g. a future ``coach`` signal) never need a schema bump and the response
+# stays byte-identical — FastAPI serializes the route's returned dict, not a
+# narrowed projection of it.
+
+
+class _AdditiveModel(BaseModel):
+    """Base for the analytics response models: allow (and serialize) any extra
+    keys the underlying analytics dict carries, so the wire payload is unchanged
+    and additive analytics fields don't require a schema edit."""
+
+    model_config = {"extra": "allow"}
+
+
+class ByTypeRow(_AdditiveModel):
+    """One row of ``GET /api/analytics/by-type`` (mirrors ``analytics.by_type``)."""
+
+    q_type: str
+    section_type: str
+    attempts: int
+    accuracy: float
+    avg_time_ms: int
+    trend: str
+    efficiency_band: str
+
+
+class ActivityDay(_AdditiveModel):
+    """One day of ``GET /api/analytics/activity`` (mirrors ``analytics.activity``)."""
+
+    date: str
+    questions: int
+    minutes: float
+    correct: int
+    sessions: int
+
+
+class DashboardAnalytics(_AdditiveModel):
+    """``GET /api/analytics/dashboard`` (mirrors ``analytics.dashboard``).
+
+    ``trend``/``weakest_types``/``coach`` are left as open shapes here because
+    each is itself an additive analytics sub-dict; pinning only the headline
+    scalar keys keeps the schema honest without freezing nested analytics that
+    still evolve. ``extra='allow'`` carries everything else through unchanged.
+    """
+
+    predicted_score: int | None
+    score_delta_30d: int | None
+    trend: list[dict]
+    weakest_types: list[dict]
+    coach: dict
+    streak_days: int
+
+
+class CrossDomainDomainStat(_AdditiveModel):
+    """Per-domain rollup inside ``GET /api/analytics/cross-domain``."""
+
+    domain: str
+    attempts: int
+    correct: int
+    accuracy: float | None
+    study_minutes: float
+    streak_days: int
+
+
+class CrossDomainWeakType(_AdditiveModel):
+    """One merged weakest-type entry across both domains."""
+
+    domain: str
+    label: str
+    accuracy: float | None
+    attempts: int
+
+
+class CrossDomainTrendPoint(_AdditiveModel):
+    """One day of the combined 30-day activity trend."""
+
+    date: str
+    lsat_questions: int
+    host_questions: int
+    questions: int
+
+
+class CrossDomainMeta(_AdditiveModel):
+    """BC2/BC3 meta envelope for the cross-domain payload (window + pagination +
+    provenance), kept as a sibling so the data fields stay additive."""
+
+    model: str
+    window_days: int
+    host_provided: bool
+    generated_at: str
+    weakest_total: int
+    weakest_limit: int | None
+    weakest_offset: int
+
+
+class CrossDomainAnalytics(_AdditiveModel):
+    """``GET /api/analytics/cross-domain`` — bidirectional study rollup.
+
+    Aggregates LSAT-side study time, accuracy-by-domain, merged weakest types,
+    a combined streak, and a 30-day activity trend. Host-side numbers (CFA/Quant)
+    can be merged in via query params; when omitted the payload is the LSAT-only
+    view and ``meta.host_provided`` is False (the host then merges its own Dexie
+    analytics with this payload client-side — DATA-4a owns the persisted feed)."""
+
+    meta: CrossDomainMeta
+    study_minutes: float
+    combined_streak_days: int
+    accuracy_by_domain: list[CrossDomainDomainStat]
+    weakest_types: list[CrossDomainWeakType]
+    trend_30d: list[CrossDomainTrendPoint]
