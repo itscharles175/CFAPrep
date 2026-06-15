@@ -13,9 +13,21 @@
  * Fully degrading: any failure (sidecar down, timeout, shape drift) returns
  * `{ ok: false, dueCount: 0, items: [] }` so the inbox simply omits the LSAT
  * section rather than erroring.
+ *
+ * DATA-1 (K1): the `/api/srs/due` endpoint is anchored to the generated OpenAPI
+ * contract (`@/domains/lsat/lib/api.gen` — the same `api.gen.ts` the LSAT app
+ * uses, regenerated from the committed `openapi-baseline.json`). The route still
+ * returns the backend's permissive `LegacySuccessResponse` (an untyped legacy
+ * shape — no narrow `response_model` yet), so the card payload is parsed
+ * defensively below; but binding the path + operation to the contract means a
+ * `/api/srs/due` rename or removal fails the host build via the drift gate
+ * (`scripts/export-lsat-openapi.mjs`) and `tsc` rather than silently at runtime.
  */
+import type { paths } from '@/domains/lsat/lib/api.gen';
 
 const LSAT_API_BASE = 'http://127.0.0.1:8100';
+/** The contract path the bridge consumes — kept honest against `api.gen.ts`. */
+const LSAT_DUE_PATH: keyof paths = '/api/srs/due';
 const LSAT_SRS_PATH = '/lsat/srs'; // deep-link target (host hard-navigates here)
 
 /** A domain-agnostic "due review" row for the unified inbox. */
@@ -39,12 +51,26 @@ export interface LsatDueResult {
 /** Deep-link path into the LSAT SRS review flow. */
 export const LSAT_REVIEW_PATH = LSAT_SRS_PATH;
 
+/**
+ * One card inside the `/api/srs/due` body. The contract still types that route's
+ * 2xx response as `LegacySuccessResponse` (a permissive legacy shape with no
+ * narrow `response_model`), so the per-card fields aren't statically described by
+ * `api.gen.ts` — this mirrors the documented payload from
+ * `app/routers/srs.py::due_cards`. When the backend grows a typed `response_model`
+ * for this route, regenerate `api.gen.ts` and swap this for the schema alias.
+ */
 interface RawDueCard {
   card_id?: number | string;
   question_id?: number | string;
   stem?: string;
   prompt?: string;
   q_type?: string;
+}
+
+/** Documented `/api/srs/due` body shape (still `LegacySuccessResponse` on the wire). */
+interface RawDueResponse {
+  due_count?: number;
+  cards?: RawDueCard[];
 }
 
 function titleFor(card: RawDueCard, index: number): string {
@@ -62,14 +88,14 @@ export async function fetchLsatDue(opts: { limit?: number; timeoutMs?: number } 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${LSAT_API_BASE}/api/srs/due`, {
+    const res = await fetch(`${LSAT_API_BASE}${LSAT_DUE_PATH}`, {
       signal: controller.signal,
       headers: { accept: 'application/json' },
     });
     if (!res.ok) {
       return { ok: false, dueCount: 0, items: [], error: `LSAT backend responded ${res.status}.` };
     }
-    const data = (await res.json()) as { due_count?: number; cards?: RawDueCard[] };
+    const data = (await res.json()) as RawDueResponse;
     const cards = Array.isArray(data.cards) ? data.cards : [];
     const items: UnifiedReviewItem[] = cards.slice(0, limit).map((card, i) => ({
       domain: 'lsat',

@@ -11,9 +11,25 @@
  * any failure (down, timeout, shape drift) returns `{ ok: false, reachable:
  * false, ... }` so the System Health card shows "offline" rather than hanging
  * the page.
+ *
+ * DATA-1 (K1): the wire shapes are sourced from the LSAT domain's generated
+ * OpenAPI types (`@/domains/lsat/lib/api.gen` — the same `api.gen.ts` the LSAT
+ * app consumes, regenerated from the committed `openapi-baseline.json`). Reusing
+ * those types here, rather than re-declaring request/response stubs, means a
+ * contract change (e.g. a renamed `SettingsPatch` field) surfaces at `tsc` time
+ * across both domains. The host keeps its own degrading-fetch transport; only
+ * the typed boundary is shared.
  */
+import type { components, operations } from '@/domains/lsat/lib/api.gen';
 
 const LSAT_API_BASE = 'http://127.0.0.1:8100';
+
+/** Request body for `PUT /api/settings` (generated from the backend contract). */
+type SettingsPatch = components['schemas']['SettingsPatch'];
+/** The `/api/ai/health` 2xx body — an open record in the contract; read defensively. */
+type AiHealthBody = NonNullable<
+  operations['ai_health_api_ai_health_get']['responses'][200]['content']['application/json']
+>;
 /** Deep-link into the LSAT app's AI/model settings (host hard-navigates here). */
 export const LSAT_SETTINGS_PATH = '/lsat/settings';
 
@@ -93,7 +109,9 @@ export async function checkLsatBackendHealth(timeoutMs = 2500): Promise<LsatBack
   let ai: LsatBackendHealth['ai'];
   const aiRes = await fetchJson('/api/ai/health', timeoutMs);
   if ('ok' in aiRes && aiRes.ok && aiRes.data && typeof aiRes.data === 'object') {
-    const d = aiRes.data as Record<string, unknown>;
+    // The contract types this body as an open record (`{ [key: string]: unknown }`),
+    // so read each field defensively rather than trusting a fixed shape.
+    const d = aiRes.data as AiHealthBody;
     const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
     // S5-A: the AI-health payload already carries the effective model routing
     // (explain/gen/diagnose) + any configured ids the provider can't serve, so
@@ -247,14 +265,21 @@ export async function syncProviderToLsat(
   if (!base) return { ok: false, detail: 'No host model server URL is configured to sync.' };
 
   const isOllama = /11434|ollama/i.test(base);
-  const patch: { local_provider: string; lmstudio_url?: string } = {
-    local_provider: isOllama ? 'ollama' : 'lmstudio',
-  };
+  // Build the `PUT /api/settings` body against the generated `SettingsPatch`
+  // contract (DATA-1) — narrowed to the two fields this sync owns. `applied`
+  // keeps its own concrete shape so the public return type is unchanged.
+  const provider: NonNullable<SettingsPatch['local_provider']> = isOllama ? 'ollama' : 'lmstudio';
+  const patch: { local_provider: string; lmstudio_url?: string } = { local_provider: provider };
   if (!isOllama) patch.lmstudio_url = base;
+
+  const settingsPatch: Pick<SettingsPatch, 'local_provider' | 'lmstudio_url'> = {
+    local_provider: provider,
+    ...(isOllama ? {} : { lmstudio_url: base }),
+  };
 
   const res = await fetchJson('/api/settings', timeoutMs, {
     method: 'PUT',
-    body: JSON.stringify(patch),
+    body: JSON.stringify(settingsPatch),
   });
 
   if (!('ok' in res) || !res.ok) {
