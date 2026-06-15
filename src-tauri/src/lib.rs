@@ -34,6 +34,15 @@ struct SupervisedSidecar {
 #[derive(Default)]
 struct Sidecars(Mutex<Vec<SupervisedSidecar>>);
 
+/// Optional sidecars that were SKIPPED at startup because their backing resource
+/// was absent (OPS-5) — e.g. a RAG-less build that omitted `<dir>/open-notebook`.
+/// Retained separately from the launched `Sidecars` so `get_sidecar_status` can
+/// surface them to the UI (as optional + not-present) without ever spawning
+/// them. Populated once by ordered startup; behind a `Mutex` for the same
+/// shared-access reason as `Sidecars`.
+#[derive(Default)]
+struct SkippedSidecars(Mutex<Vec<SidecarSpec>>);
+
 /// Max log lines retained per sidecar in the in-memory ring buffer. Once a
 /// sidecar's buffer reaches this length, each new line evicts the oldest, so
 /// memory stays bounded no matter how chatty (or long-lived) a sidecar is.
@@ -155,8 +164,20 @@ struct SidecarStatus {
     /// the UI can render the dependency chain alongside each row. Empty for
     /// sidecars with no dependencies (SurrealDB, the LSAT backend).
     depends_on: Vec<String>,
-    /// OS process id of the live child, if one is currently tracked.
+    /// OS process id of the live child, if one is currently tracked. `None` for
+    /// a skipped optional sidecar (OPS-5) — it was never launched.
     pid: Option<u32>,
+    /// Whether this sidecar is OPTIONAL (OPS-5). Additive field so a host UI can
+    /// distinguish a down REQUIRED sidecar (a real problem) from an absent
+    /// OPTIONAL one (an expected RAG-less build). `false` for SurrealDB + the
+    /// LSAT backend; `true` for the open-notebook API + worker.
+    optional: bool,
+    /// Whether this sidecar's backing resource is present on disk (OPS-5).
+    /// Additive field. `false` only for an optional sidecar that was skipped
+    /// because its resource was absent (e.g. a build without RAG) — the UI can
+    /// key off `optional && !present` to render "RAG unavailable" rather than an
+    /// error. Always `true` for launched sidecars and for resource-less ones.
+    present: bool,
 }
 
 #[derive(Serialize, Debug)]
@@ -449,6 +470,38 @@ struct SidecarSpec {
     /// independent. A dependency with no readiness port (or one that never came
     /// up) is logged and skipped so a wedged dependency can't hang startup.
     depends_on: Vec<String>,
+    /// Whether this sidecar is OPTIONAL (OPS-5). An optional sidecar whose
+    /// backing resource is absent — its `resource_path` doesn't exist on disk —
+    /// is logged and SKIPPED at startup rather than launched, and the app
+    /// degrades gracefully (e.g. RAG/notebook features unavailable) instead of
+    /// surfacing a failed-to-start error. Required sidecars (`optional: false`,
+    /// the LSAT backend + SurrealDB) gate as before and are always attempted.
+    /// This is the build-time RAG-less story: when `ONB_GIT_URL` was unset the
+    /// release omits the open-notebook resource, so its directory is missing and
+    /// the optional open-notebook sidecars self-skip on a real install.
+    optional: bool,
+    /// Filesystem path whose existence determines whether this sidecar's backing
+    /// resource is present (OPS-5). For the open-notebook API + worker this is
+    /// the `<services_dir>/open-notebook` directory the build bundles only when
+    /// RAG is included; for the worker it is the same directory. `None` means
+    /// "no resource gate" — the sidecar is considered always-present (SurrealDB,
+    /// whose binary path is checked by the launcher itself, and the LSAT backend,
+    /// a required sidecar guaranteed present by the release CI gate). Only
+    /// consulted for `optional` sidecars; required sidecars ignore it.
+    resource_path: Option<PathBuf>,
+}
+
+impl SidecarSpec {
+    /// Whether this sidecar's backing resource is present on disk (OPS-5). A
+    /// spec with no `resource_path` is always considered present (nothing to
+    /// gate on); otherwise the path must exist. Used by the ordered-startup
+    /// skip decision for optional sidecars and surfaced in the status payload.
+    fn resource_present(&self) -> bool {
+        match &self.resource_path {
+            Some(p) => p.exists(),
+            None => true,
+        }
+    }
 }
 
 /// Abstraction over "spawn this child". The production impl shells out via
@@ -514,6 +567,11 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
         ready_port: Some(8000),
         // The storage layer — nothing else can connect until it's up.
         depends_on: vec![],
+        // SurrealDB is the storage backbone the open-notebook stack rides on, so
+        // it's launched whenever a services dir resolves; its binary presence is
+        // checked by the launcher. Not gated as optional here.
+        optional: false,
+        resource_path: None,
     };
 
     let api = SidecarSpec {
@@ -533,6 +591,12 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
         ready_port: Some(5055),
         // The API connects to SurrealDB on boot — wait for :8000 first.
         depends_on: vec!["SurrealDB".into()],
+        // OPS-5: open-notebook (RAG) is OPTIONAL. The release bundles its
+        // resource only when ONB_GIT_URL was set at build time; a RAG-less
+        // build omits `<dir>/open-notebook`, so the supervisor skips this
+        // sidecar and RAG/notebook features are simply unavailable.
+        optional: true,
+        resource_path: Some(onb.clone()),
     };
 
     let worker = SidecarSpec {
@@ -559,6 +623,11 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
         // serves; gate it behind the API (which itself gates behind SurrealDB)
         // so the whole open-notebook stack comes up in order.
         depends_on: vec!["open-notebook API".into()],
+        // OPS-5: the worker is half of the open-notebook (RAG) stack, so it's
+        // optional and gated on the same `<dir>/open-notebook` resource as the
+        // API. A RAG-less build skips both together.
+        optional: true,
+        resource_path: Some(onb.clone()),
     };
 
     // StudyVault's LSAT domain backend — the frozen PyInstaller sidecar built
@@ -588,16 +657,41 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
         // Self-contained: its own SQLite bank, no SurrealDB dependency, so it
         // starts independently (and in parallel with the SurrealDB stack).
         depends_on: vec![],
+        // OPS-5: the LSAT backend is the REQUIRED sidecar — its source is
+        // committed and the release CI gate (`Verify required sidecars are
+        // present`) fails the build if the frozen binary is missing. So it's
+        // never optional and carries no resource gate here.
+        optional: false,
+        resource_path: None,
     };
 
     vec![surreal, api, worker, lsat]
 }
 
+/// Outcome of one ordered-startup pass (OPS-5). Splits the specs into the ones
+/// we actually launched (each paired with its live child) and the OPTIONAL ones
+/// we skipped because their backing resource was absent — so a RAG-less build
+/// can report "open-notebook skipped, RAG unavailable" to the UI without ever
+/// having tried to spawn a non-existent binary.
+struct SpawnOutcome {
+    launched: Vec<SupervisedSidecar>,
+    skipped: Vec<SidecarSpec>,
+}
+
 /// Iterate the given launcher over `build_sidecar_specs(dir)` in dependency
 /// order (BA2), logging successes and failures the same way the prior inline
-/// supervisor did. Returns each spawned child paired with the spec that
+/// supervisor did. Returns the spawned children (each paired with the spec that
 /// produced it, so the Tauri runtime can kill them on exit and the health-poll
-/// task can respawn a crashed one from its retained recipe.
+/// task can respawn a crashed one from its retained recipe) alongside the
+/// optional specs that were skipped for an absent resource (OPS-5).
+///
+/// OPS-5 graceful degrade: before gating + launching, each spec's optionality is
+/// checked. An OPTIONAL sidecar whose `resource_path` is absent on disk (a
+/// RAG-less build that didn't bundle `<dir>/open-notebook`) is logged and
+/// SKIPPED — neither its dependency gate nor its launch runs — and recorded in
+/// `SpawnOutcome::skipped`. The app then degrades gracefully (RAG/notebook
+/// features off) instead of logging a launch error every poll. REQUIRED sidecars
+/// (SurrealDB, the LSAT backend) are never skipped and gate/launch as before.
 ///
 /// Ordering (BA2): the specs are walked front-to-back, and before each is
 /// launched, every dependency named in its `depends_on` that exposes a
@@ -626,7 +720,7 @@ fn spawn_sidecars_with<L: SidecarLauncher>(
     dir: &Path,
     logs: &SidecarLogs,
     readiness_budget: Duration,
-) -> Vec<SupervisedSidecar> {
+) -> SpawnOutcome {
     let specs = build_sidecar_specs(dir);
     // Index every spec's readiness port by name so a dependent can look up the
     // port it must wait on. Specs without a readiness port (the worker) map to
@@ -637,7 +731,27 @@ fn spawn_sidecars_with<L: SidecarLauncher>(
         .collect();
 
     let mut kids = Vec::new();
+    let mut skipped = Vec::new();
     for spec in specs {
+        // OPS-5: graceful degrade for optional sidecars. If an optional sidecar's
+        // backing resource is absent (a RAG-less build with no
+        // `<dir>/open-notebook`), skip it entirely — don't gate on its deps, don't
+        // launch, don't error. Record it so the status payload can show the UI
+        // that RAG is unavailable. Required sidecars never take this branch.
+        if spec.optional && !spec.resource_present() {
+            log::info!(
+                "sidecar: {} is optional and its resource is absent ({}); \
+                 skipping — feature unavailable, app continues degraded",
+                spec.name,
+                spec.resource_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "<none>".into())
+            );
+            skipped.push(spec);
+            continue;
+        }
+
         // BA2: gate this sidecar behind its dependencies. For each named
         // dependency that has a readiness port, block (bounded) until that port
         // is listening. A dependency with no port, or one not in the spec set,
@@ -680,10 +794,13 @@ fn spawn_sidecars_with<L: SidecarLauncher>(
             Err(e) => log::error!("sidecar: {} failed to start: {e}", spec.name),
         }
     }
-    kids
+    SpawnOutcome {
+        launched: kids,
+        skipped,
+    }
 }
 
-fn spawn_sidecars(logs: &SidecarLogs) -> Vec<SupervisedSidecar> {
+fn spawn_sidecars(logs: &SidecarLogs) -> SpawnOutcome {
     let dir = services_dir();
     spawn_sidecars_with(&ProcessLauncher, &dir, logs, READINESS_WAIT_BUDGET)
 }
@@ -786,34 +903,71 @@ fn spawn_health_supervisor(app: AppHandle) {
     });
 }
 
+/// Map one launched sidecar slot to its status row. Pure helper so the command
+/// body (and a unit test) can build a row without a live Tauri State wrapper.
+fn launched_sidecar_status(slot: &SupervisedSidecar) -> SidecarStatus {
+    let healthy = probe_sidecar_healthy(&slot.spec);
+    SidecarStatus {
+        name: slot.spec.name.clone(),
+        port: slot.spec.ready_port,
+        ready_port: slot.spec.ready_port,
+        healthy,
+        // `probe_sidecar_healthy` already encodes the readiness gate:
+        // port listening for socketed sidecars, liveness fallback (true)
+        // for port-less ones. Reuse it so `ready` and `healthy` can't
+        // drift apart.
+        ready: healthy,
+        depends_on: slot.spec.depends_on.clone(),
+        pid: Some(slot.child.id()),
+        optional: slot.spec.optional,
+        // A launched sidecar's resource was present (else it'd have been
+        // skipped) — or it has no resource gate at all.
+        present: true,
+    }
+}
+
+/// Map one SKIPPED optional sidecar spec (OPS-5) to its status row: never
+/// launched, so not healthy / not ready / no pid, and explicitly
+/// `optional: true, present: false` so the UI renders "feature unavailable"
+/// (e.g. RAG) rather than a crash.
+fn skipped_sidecar_status(spec: &SidecarSpec) -> SidecarStatus {
+    SidecarStatus {
+        name: spec.name.clone(),
+        port: spec.ready_port,
+        ready_port: spec.ready_port,
+        healthy: false,
+        ready: false,
+        depends_on: spec.depends_on.clone(),
+        pid: None,
+        optional: spec.optional,
+        present: false,
+    }
+}
+
 /// Tauri command backing the UI health panel. Probes each managed sidecar's
-/// readiness port and reports name / port / healthy / pid. Port-less sidecars
-/// report healthy as long as their process handle is still tracked.
+/// readiness port and reports name / port / ready_port / healthy / ready /
+/// depends_on / pid, plus the OPS-5 `optional` + `present` flags. Port-less
+/// sidecars report healthy as long as their process handle is still tracked.
+/// Skipped optional sidecars (OPS-5) are appended as not-present rows so a host
+/// UI can show, e.g., "RAG unavailable (open-notebook not bundled)".
 #[tauri::command]
-fn get_sidecar_status(state: tauri::State<'_, Sidecars>) -> Vec<SidecarStatus> {
+fn get_sidecar_status(
+    state: tauri::State<'_, Sidecars>,
+    skipped: tauri::State<'_, SkippedSidecars>,
+) -> Vec<SidecarStatus> {
     let guard = match state.0.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    guard
-        .iter()
-        .map(|slot| {
-            let healthy = probe_sidecar_healthy(&slot.spec);
-            SidecarStatus {
-                name: slot.spec.name.clone(),
-                port: slot.spec.ready_port,
-                ready_port: slot.spec.ready_port,
-                healthy,
-                // `probe_sidecar_healthy` already encodes the readiness gate:
-                // port listening for socketed sidecars, liveness fallback (true)
-                // for port-less ones. Reuse it so `ready` and `healthy` can't
-                // drift apart.
-                ready: healthy,
-                depends_on: slot.spec.depends_on.clone(),
-                pid: Some(slot.child.id()),
-            }
-        })
-        .collect()
+    let mut out: Vec<SidecarStatus> = guard.iter().map(launched_sidecar_status).collect();
+    drop(guard);
+
+    let skipped_guard = match skipped.0.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    out.extend(skipped_guard.iter().map(skipped_sidecar_status));
+    out
 }
 
 /// Tauri command backing the UI log viewer (BA8). Returns the most recent
@@ -1225,16 +1379,29 @@ mod tests {
         }
     }
 
+    /// Create a temp services dir whose `open-notebook/` subdir exists, so the
+    /// OPS-5 optional-skip check sees the RAG resource as PRESENT and the full
+    /// four-spec fan-out is exercised (tests of the *absent* path live below).
+    /// Returns the tempdir guard (kept alive by the caller) and its path.
+    fn services_dir_with_onb() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempdir().expect("tempdir");
+        let dir = tmp.path().join("services");
+        fs::create_dir_all(dir.join("open-notebook")).unwrap();
+        (tmp, dir)
+    }
+
     #[test]
     fn spawn_sidecars_with_invokes_launcher_for_every_spec() {
         let launcher = MockLauncher::new(vec![]);
         let logs = SidecarLogs::default();
+        // RAG resource present, so no optional sidecar is skipped — all four
+        // specs are launched.
+        let (_tmp, dir) = services_dir_with_onb();
         // Zero readiness budget: the mock launcher never binds the readiness
         // ports, so each dependency gate probes once and immediately proceeds
         // degraded rather than waiting out the full production budget. The
         // launch order is still dependency order.
-        let mut kids =
-            spawn_sidecars_with(&launcher, Path::new("C:/qv/services"), &logs, Duration::ZERO);
+        let mut outcome = spawn_sidecars_with(&launcher, &dir, &logs, Duration::ZERO);
         let calls = launcher.calls.borrow();
         let names: Vec<_> = calls.iter().map(|s| s.name.clone()).collect();
         assert_eq!(
@@ -1246,12 +1413,13 @@ mod tests {
                 "LSAT backend"
             ]
         );
-        assert_eq!(kids.len(), 4);
+        assert_eq!(outcome.launched.len(), 4);
+        assert!(outcome.skipped.is_empty(), "nothing skipped when RAG present");
         // Each slot retains the spec that produced it (so a crash can be
         // respawned), paired with the live child.
-        assert_eq!(kids[0].spec.name, "SurrealDB");
+        assert_eq!(outcome.launched[0].spec.name, "SurrealDB");
         // Lifecycle: reap the synthesized mock children so they don't linger.
-        for s in kids.iter_mut() {
+        for s in outcome.launched.iter_mut() {
             let _ = s.child.kill();
             let _ = s.child.wait();
         }
@@ -1261,17 +1429,52 @@ mod tests {
     fn spawn_sidecars_with_skips_failed_sidecars_but_continues() {
         let launcher = MockLauncher::new(vec!["SurrealDB"]);
         let logs = SidecarLogs::default();
+        let (_tmp, dir) = services_dir_with_onb();
         // Zero readiness budget for the same reason as the prior test: the mock
         // ports never bind, so the dependency gates degrade immediately. This
         // also exercises that a dependency which *failed to launch* (SurrealDB
         // here) doesn't block its dependents past the budget.
-        let mut kids =
-            spawn_sidecars_with(&launcher, Path::new("C:/qv/services"), &logs, Duration::ZERO);
+        let mut outcome = spawn_sidecars_with(&launcher, &dir, &logs, Duration::ZERO);
         // All four specs were attempted, even though SurrealDB returned Err.
         assert_eq!(launcher.calls.borrow().len(), 4);
         // Only the three successful launches yield Child handles.
-        assert_eq!(kids.len(), 3);
-        for s in kids.iter_mut() {
+        assert_eq!(outcome.launched.len(), 3);
+        assert!(outcome.skipped.is_empty());
+        for s in outcome.launched.iter_mut() {
+            let _ = s.child.kill();
+            let _ = s.child.wait();
+        }
+    }
+
+    #[test]
+    fn spawn_sidecars_with_skips_optional_onb_when_resource_absent() {
+        // OPS-5 graceful degrade: with no `<dir>/open-notebook` resource (a
+        // RAG-less build), the two optional open-notebook sidecars are SKIPPED —
+        // never launched — while the required SurrealDB + LSAT backend still come
+        // up. The skipped specs are returned so the status payload can report it.
+        let launcher = MockLauncher::new(vec![]);
+        let logs = SidecarLogs::default();
+        let tmp = tempdir().expect("tempdir");
+        let dir = tmp.path().join("services-no-rag"); // open-notebook/ absent
+        let mut outcome = spawn_sidecars_with(&launcher, &dir, &logs, Duration::ZERO);
+
+        // Only the required sidecars were launched, in order.
+        let launched_names: Vec<_> =
+            outcome.launched.iter().map(|s| s.spec.name.clone()).collect();
+        assert_eq!(launched_names, vec!["SurrealDB", "LSAT backend"]);
+        // The launcher was never even asked to start the optional pair.
+        let attempted: Vec<_> =
+            launcher.calls.borrow().iter().map(|s| s.name.clone()).collect();
+        assert_eq!(attempted, vec!["SurrealDB", "LSAT backend"]);
+        // The optional open-notebook API + worker were recorded as skipped.
+        let skipped_names: Vec<_> = outcome.skipped.iter().map(|s| s.name.clone()).collect();
+        assert_eq!(
+            skipped_names,
+            vec!["open-notebook API", "open-notebook worker"]
+        );
+        assert!(outcome.skipped.iter().all(|s| s.optional));
+
+        for s in outcome.launched.iter_mut() {
             let _ = s.child.kill();
             let _ = s.child.wait();
         }
@@ -1290,6 +1493,8 @@ mod tests {
             env: vec![],
             ready_port: None,
             depends_on: vec![],
+            optional: false,
+            resource_path: None,
         };
         assert!(probe_sidecar_healthy(&worker));
     }
@@ -1305,6 +1510,8 @@ mod tests {
             env: vec![],
             ready_port: Some(up_port),
             depends_on: vec![],
+            optional: false,
+            resource_path: None,
         };
         assert!(probe_sidecar_healthy(&up), "bound port should read healthy");
         drop(listener);
@@ -1317,6 +1524,8 @@ mod tests {
             env: vec![],
             ready_port: Some(0),
             depends_on: vec![],
+            optional: false,
+            resource_path: None,
         };
         assert!(!probe_sidecar_healthy(&down), "port 0 should read down");
     }
@@ -1335,6 +1544,8 @@ mod tests {
             env: vec![],
             ready_port: None,
             depends_on: vec![],
+            optional: false,
+            resource_path: None,
         };
         // Spawn a trivial child and let it finish so try_wait() reports exited.
         let mut child = launcher.launch(&spec).expect("initial launch");
@@ -1370,6 +1581,8 @@ mod tests {
             env: vec![],
             ready_port: None,
             depends_on: vec![],
+            optional: false,
+            resource_path: None,
         };
         let child = spawn_long_lived_child();
         let state: Mutex<Vec<SupervisedSidecar>> =
@@ -1416,7 +1629,7 @@ mod tests {
     #[test]
     fn sidecar_status_serializes_expected_shape() {
         // Guards the JSON contract the UI consumes: name/port/ready_port/
-        // healthy/ready/depends_on/pid.
+        // healthy/ready/depends_on/pid plus the OPS-5 optional/present flags.
         let status = SidecarStatus {
             name: "open-notebook API".into(),
             port: Some(5055),
@@ -1425,6 +1638,8 @@ mod tests {
             ready: false,
             depends_on: vec!["SurrealDB".into()],
             pid: Some(1234),
+            optional: true,
+            present: true,
         };
         let json = serde_json::to_value(&status).expect("serialize");
         assert_eq!(json["name"], "open-notebook API");
@@ -1434,6 +1649,89 @@ mod tests {
         assert_eq!(json["ready"], false);
         assert_eq!(json["depends_on"][0], "SurrealDB");
         assert_eq!(json["pid"], 1234);
+        assert_eq!(json["optional"], true);
+        assert_eq!(json["present"], true);
+    }
+
+    #[test]
+    fn build_sidecar_specs_marks_onb_optional_and_lsat_required() {
+        // OPS-5: open-notebook API + worker are optional and gated on the
+        // `<dir>/open-notebook` resource; SurrealDB + the LSAT backend are
+        // required with no resource gate.
+        let dir = PathBuf::from("C:/qv/services");
+        let specs = build_sidecar_specs(&dir);
+        let onb = dir.join("open-notebook");
+
+        assert!(!specs[0].optional, "SurrealDB is required");
+        assert_eq!(specs[0].resource_path, None);
+
+        assert!(specs[1].optional, "open-notebook API is optional");
+        assert_eq!(specs[1].resource_path.as_deref(), Some(onb.as_path()));
+
+        assert!(specs[2].optional, "open-notebook worker is optional");
+        assert_eq!(specs[2].resource_path.as_deref(), Some(onb.as_path()));
+
+        assert!(!specs[3].optional, "LSAT backend is required");
+        assert_eq!(specs[3].resource_path, None);
+    }
+
+    #[test]
+    fn resource_present_gates_on_path_existence_only_for_resourced_specs() {
+        // A spec with no resource_path is always present. A spec with a
+        // resource_path is present iff that path exists on disk.
+        let tmp = tempdir().expect("tempdir");
+        let existing = tmp.path().join("open-notebook");
+        fs::create_dir_all(&existing).unwrap();
+        let missing = tmp.path().join("does-not-exist");
+
+        let no_gate = SidecarSpec {
+            name: "SurrealDB".into(),
+            program: PathBuf::from("x"),
+            args: vec![],
+            env: vec![],
+            ready_port: Some(8000),
+            depends_on: vec![],
+            optional: false,
+            resource_path: None,
+        };
+        assert!(no_gate.resource_present());
+
+        let present = SidecarSpec {
+            resource_path: Some(existing),
+            ..no_gate.clone()
+        };
+        assert!(present.resource_present());
+
+        let absent = SidecarSpec {
+            resource_path: Some(missing),
+            ..no_gate.clone()
+        };
+        assert!(!absent.resource_present());
+    }
+
+    #[test]
+    fn skipped_sidecar_status_reports_optional_and_absent() {
+        // OPS-5: a skipped optional sidecar maps to a not-present, not-healthy
+        // row with no pid so the UI can render "feature unavailable".
+        let spec = SidecarSpec {
+            name: "open-notebook API".into(),
+            program: PathBuf::from("uv"),
+            args: vec![],
+            env: vec![],
+            ready_port: Some(5055),
+            depends_on: vec!["SurrealDB".into()],
+            optional: true,
+            resource_path: Some(PathBuf::from("C:/qv/services/open-notebook")),
+        };
+        let status = skipped_sidecar_status(&spec);
+        assert_eq!(status.name, "open-notebook API");
+        assert_eq!(status.ready_port, Some(5055));
+        assert!(!status.healthy);
+        assert!(!status.ready);
+        assert_eq!(status.pid, None);
+        assert!(status.optional);
+        assert!(!status.present);
+        assert_eq!(status.depends_on, vec!["SurrealDB".to_string()]);
     }
 
     #[test]
@@ -1607,6 +1905,7 @@ pub fn run() {
             get_sidecar_logs
         ])
         .manage(Sidecars::default())
+        .manage(SkippedSidecars::default())
         .manage(SidecarLogs::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -1633,9 +1932,25 @@ pub fn run() {
             // the state is still empty, so there's no race in starting it first.
             let startup_handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || {
-                let kids = spawn_sidecars(&logs);
+                let outcome = spawn_sidecars(&logs);
+                // OPS-5: record any optional sidecars that were skipped for an
+                // absent resource so `get_sidecar_status` can report "feature
+                // unavailable" (e.g. RAG-less build) to the UI.
+                if !outcome.skipped.is_empty() {
+                    let names: Vec<&str> =
+                        outcome.skipped.iter().map(|s| s.name.as_str()).collect();
+                    log::info!(
+                        "sidecar: ordered startup skipped {} optional sidecar(s) for absent \
+                         resources: {}",
+                        outcome.skipped.len(),
+                        names.join(", ")
+                    );
+                }
+                if let Some(skipped_state) = startup_handle.try_state::<SkippedSidecars>() {
+                    *skipped_state.0.lock().unwrap() = outcome.skipped;
+                }
                 if let Some(state) = startup_handle.try_state::<Sidecars>() {
-                    *state.0.lock().unwrap() = kids;
+                    *state.0.lock().unwrap() = outcome.launched;
                     log::info!("sidecar: ordered startup complete");
                 }
             });

@@ -1,6 +1,27 @@
 # Release workflow — triggered on v* tag push.
 # Runs the verify gate, then builds signed Tauri bundles on Windows, macOS,
 # and Linux in parallel, and uploads them as Release assets.
+#
+# Sidecar matrix (OPS-5) — required vs optional:
+#
+#   | Sidecar             | Tier      | Source                         | Build gate                          | If absent at runtime                       |
+#   | ------------------- | --------- | ------------------------------ | ----------------------------------- | ------------------------------------------ |
+#   | LSAT backend (8100) | REQUIRED  | committed services/lsat-backend| always built + smoke-tested + bundle-verified | release FAILS the build (never ships broken) |
+#   | SurrealDB (8000)    | REQUIRED* | vendored binary under spike/bin| not frozen here (native binary)     | open-notebook stack can't come up          |
+#   | open-notebook (5055)| OPTIONAL  | external clone via ONB_GIT_URL | built ONLY when ONB_GIT_URL is set  | supervisor SKIPS it; app degrades (RAG off)|
+#   | open-notebook worker| OPTIONAL  | (ships with open-notebook)     | bundled with the open-notebook resource | supervisor SKIPS it (paired with the API)  |
+#
+#   *SurrealDB is required for RAG but is only present when the open-notebook
+#    resource is; a RAG-less build ships neither and the Rust supervisor
+#    (build_sidecar_specs) marks the open-notebook API + worker `optional` so
+#    their absence is a graceful degrade, not an error.
+#
+#   A RAG-less build is therefore a DELIBERATE, LABELLED artifact: when the
+#   ONB_GIT_URL repo variable is unset the open-notebook build step is skipped
+#   with a loud ::warning::, the build summary records "RAG: OFF", and the
+#   uploaded bundle's artifact name is suffixed `-norag` so it's unmistakable
+#   in the Release assets. Set ONB_GIT_URL (and optionally ONB_GIT_REF) to ship
+#   a full RAG-enabled build.
 
 name: Release
 
@@ -122,18 +143,26 @@ jobs:
             -- --host 127.0.0.1 --port 8123
 
       # open-notebook (RAG): an external project living in gitignored spike/, so
-      # there is no committed source to build from. Built only when a clone
-      # source is configured via the ONB_GIT_URL (+ optional ONB_GIT_REF) repo
-      # variables; otherwise the release is built WITHOUT RAG features and says
-      # so loudly. (No HTTP smoke here — its health route isn't pinned in-repo.)
+      # there is no committed source to build from. OPTIONAL sidecar (OPS-5):
+      # built ONLY when a clone source is configured via the ONB_GIT_URL (+
+      # optional ONB_GIT_REF) repo variables; otherwise the release is a
+      # DELIBERATE RAG-less artifact and says so loudly. The Rust supervisor
+      # (build_sidecar_specs) marks the open-notebook API + worker `optional`, so
+      # a bundle without the open-notebook resource degrades gracefully (RAG
+      # off) at runtime instead of erroring. (No HTTP smoke here — its health
+      # route isn't pinned in-repo.) Emits `rag_enabled` for the summary +
+      # artifact-name suffix downstream so the RAG-less build is clearly labelled.
       - name: Build open-notebook sidecar (optional)
+        id: onb
         shell: bash
         env:
           ONB_GIT_URL: ${{ vars.ONB_GIT_URL }}
           ONB_GIT_REF: ${{ vars.ONB_GIT_REF }}
         run: |
           if [ -z "${ONB_GIT_URL}" ]; then
-            echo "::warning::ONB_GIT_URL repo variable is not set — skipping the open-notebook RAG sidecar. This build will NOT include RAG / notebook features. Set ONB_GIT_URL (and optionally ONB_GIT_REF) to include it."
+            echo "::warning title=RAG-less build::ONB_GIT_URL repo variable is not set — skipping the OPTIONAL open-notebook RAG sidecar. This bundle will NOT include RAG / notebook features and is labelled '-norag'. Set ONB_GIT_URL (and optionally ONB_GIT_REF) to ship a full RAG build."
+            echo "rag_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "RAG_ENABLED=false" >> "$GITHUB_ENV"
             exit 0
           fi
           git clone "${ONB_GIT_URL}" spike/open-notebook
@@ -141,22 +170,54 @@ jobs:
             git -C spike/open-notebook checkout "${ONB_GIT_REF}"
           fi
           npm run build:onb-binary
+          echo "rag_enabled=true" >> "$GITHUB_OUTPUT"
+          echo "RAG_ENABLED=true" >> "$GITHUB_ENV"
 
-      # Fail the build NOW (not at user-install time) if a required sidecar is
-      # missing from the bundle staging dir.
+      # Fail the build NOW (not at user-install time) if a REQUIRED sidecar is
+      # missing from the bundle staging dir (OPS-5). Only the LSAT backend is
+      # required, so only it gates the release. The OPTIONAL open-notebook
+      # resource is intentionally NOT checked here — its absence is a labelled
+      # RAG-less build, surfaced in the summary below, not a failure.
       - name: Verify required sidecars are present
         shell: bash
         run: |
           missing=0
           for f in "src-tauri/resources/services/lsat-backend/lsatlab-backend"; do
             if [ -s "$f" ] || [ -s "$f.exe" ]; then
-              echo "ok: $f"
+              echo "ok (required): $f"
             else
               echo "::error::required sidecar binary missing: $f"
               missing=1
             fi
           done
           [ "$missing" = "0" ]
+
+      # OPS-5: record the required-vs-optional outcome in the job summary so the
+      # RAG-less build is a deliberate, visible decision rather than a silent gap.
+      - name: Sidecar bundle summary (required vs optional)
+        if: always()
+        shell: bash
+        env:
+          RAG_ENABLED: ${{ steps.onb.outputs.rag_enabled }}
+        run: |
+          rag="${RAG_ENABLED:-false}"
+          onb_dir="src-tauri/resources/services/open-notebook"
+          {
+            echo "### Sidecar bundle — ${{ matrix.os }}"
+            echo ""
+            echo "| Sidecar | Tier | Bundled |"
+            echo "| ------- | ---- | ------- |"
+            if [ -s "src-tauri/resources/services/lsat-backend/lsatlab-backend" ] || [ -s "src-tauri/resources/services/lsat-backend/lsatlab-backend.exe" ]; then
+              echo "| LSAT backend (8100) | REQUIRED | yes |"
+            else
+              echo "| LSAT backend (8100) | REQUIRED | **MISSING** |"
+            fi
+            if [ "$rag" = "true" ] && [ -d "$onb_dir" ]; then
+              echo "| open-notebook (5055) + worker | OPTIONAL | yes (RAG ON) |"
+            else
+              echo "| open-notebook (5055) + worker | OPTIONAL | no (RAG OFF — degrades gracefully) |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - run: npm run build
 
@@ -198,10 +259,13 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx tauri build ${{ matrix.target-args }}
 
+      # OPS-5: a RAG-less build is labelled `-norag` so the artifact (and the
+      # downstream Release asset) is unmistakably a deliberate, RAG-disabled
+      # bundle. A full build keeps the plain `studyvault-<os>` name.
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
-          name: studyvault-${{ matrix.os }}
+          name: studyvault-${{ matrix.os }}${{ steps.onb.outputs.rag_enabled == 'true' && '' || '-norag' }}
           path: ${{ matrix.artifact-glob }}
           if-no-files-found: warn
           retention-days: 30
