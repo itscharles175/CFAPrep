@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type
 import { Link } from 'react-router-dom';
 import {
   GraduationCap, BrainCircuit, Table2, Calculator,
-  Clock, Target, BookOpen, ChevronRight,
-  Flame, Zap, Trophy, Download, Upload, Trash2, CalendarClock,
+  Target, BookOpen, ChevronRight,
+  Download, Upload, Trash2, CalendarClock,
   Bookmark, StickyNote, ShieldAlert, Inbox, BadgeCheck, ClipboardList, BarChart3, Lock,
 } from 'lucide-react';
 import { domains } from '../data/catalog';
@@ -19,7 +19,6 @@ import {
   IconFrame,
   Dialog,
   InlineCluster,
-  MetricTile,
   PageHeader,
   PageSection,
   Panel,
@@ -30,6 +29,8 @@ import {
   Surface,
 } from '../components/ui/Primitives';
 import { OnboardingWizard } from '../components/Onboarding';
+import { DashboardKpiBand } from '../components/dashboard/DashboardKpiBand';
+import { DashboardHero } from '../components/dashboard/DashboardHero';
 
 type LucideIcon = ComponentType<{ size?: number; 'aria-hidden'?: boolean }>;
 
@@ -396,12 +397,12 @@ export default function Dashboard() {
         }
       />
 
-      <div className="cockpit-grid cockpit-grid-4 dashboard-metrics">
-        <MetricTile label="Study Streak" value={`${summary.streakDays} day${summary.streakDays === 1 ? '' : 's'}`} detail="Current momentum" icon={Flame} tone="warning" />
-        <MetricTile label="Questions" value={summary.questionsAnswered.toLocaleString()} detail="Answered locally" icon={Zap} tone="accent" />
-        <MetricTile label="Study Time" value={formatStudyTime(summary.studyTimeSeconds)} detail="Recorded sessions" icon={Clock} tone="success" />
-        <MetricTile label="Mastery" value={summary.masteryScore === null ? '-' : `${summary.masteryScore}%`} detail="Readiness snapshot" icon={Trophy} tone="exam" />
-      </div>
+      <DashboardKpiBand
+        streakDays={summary.streakDays}
+        questionsAnswered={summary.questionsAnswered}
+        studyTime={formatStudyTime(summary.studyTimeSeconds)}
+        masteryScore={summary.masteryScore}
+      />
 
       {sourceDocCount === 0 && (
         <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
@@ -598,42 +599,11 @@ export default function Dashboard() {
           </Surface>
         )}
 
-        <div className="today-grid">
-          <Panel as={Link} to={summary.todayRecommendation.path} tone="study" status="exam" interactive className="animate-fade today-primary-panel">
-            <StatusBadge tone="accent">{summary.todayRecommendation.label}</StatusBadge>
-            <h3>{summary.todayRecommendation.title}</h3>
-            <p>{summary.todayRecommendation.reason}</p>
-            <InlineCluster className="panel-link">
-              Start session <ChevronRight size={16} />
-            </InlineCluster>
-          </Panel>
-
-          <Panel title="Due Reviews" icon={CalendarClock} tone="vault" status="vault">
-            {summary.dueReviews.length ? (
-              summary.dueReviews.slice(0, 4).map((item) => (
-                <Link key={item.id} to={item.path} className="panel-list-link">
-                  <strong>{item.title}</strong>
-                  <small>Due {new Date(item.dueAt).toLocaleDateString()} · streak {item.correctStreak}</small>
-                </Link>
-              ))
-            ) : (
-              <p className="muted-copy">No reviews are due. Take a quiz to seed the spaced-repetition queue.</p>
-            )}
-          </Panel>
-
-          <Panel title="Weak Objectives" icon={BrainCircuit} tone="analytics" status="warning">
-            {summary.weakObjectives.length ? (
-              summary.weakObjectives.slice(0, 4).map((item) => (
-                <Link key={item.id} to={`/cfa/level1/${item.topic}/quiz?mode=weak-areas&objective=${item.learningObjective}`} className="panel-list-link">
-                  <strong>{item.title}</strong>
-                  <small>{item.score}% mastery · {item.attempts} attempts</small>
-                </Link>
-              ))
-            ) : (
-              <p className="muted-copy">No weak objectives yet. Fresh quiz data will populate this panel.</p>
-            )}
-          </Panel>
-        </div>
+        <DashboardHero
+          recommendation={summary.todayRecommendation}
+          dueReviews={summary.dueReviews}
+          weakObjectives={summary.weakObjectives}
+        />
 
         <Surface density="compact" className="vault-strip">
           <InlineCluster>

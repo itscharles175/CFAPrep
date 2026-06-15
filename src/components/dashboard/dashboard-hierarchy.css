@@ -1,0 +1,201 @@
+/*
+ * UB2 — Dashboard information hierarchy (component-scoped).
+ *
+ * Owns ONLY the new above-the-fold structure: the sticky KPI band and the
+ * dominant "what to study now" hero. Everything here rides the unified token
+ * vocabulary (--space-*, --fs-*, --elevation-*, --radius-*, --ring,
+ * --ease-*, --duration-*) and the existing semantic colors. No new colors.
+ *
+ * Scope note: this file is imported by the two dashboard presentational
+ * components (DashboardKpiBand, DashboardHero) so the global src/index.css
+ * (owned by UB4) stays untouched.
+ */
+
+/* ===== Sticky KPI band =====
+ * The few headline metrics ride along as the page scrolls so the user never
+ * loses sight of streak / volume / time / readiness. Sits just under the
+ * AppShell top bar; --layout-topbar-offset falls back to a sensible value
+ * when the shell hasn't published one. */
+.dashboard-kpi-band {
+  position: sticky;
+  top: var(--layout-topbar-offset, var(--space-4));
+  z-index: 5;
+  margin-bottom: var(--space-6);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  border: 1px solid var(--glass-border, var(--border));
+  box-shadow: var(--elevation-2);
+  /* backdrop blur keeps content below legible as it scrolls under the band */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.dashboard-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+/* The band hosts the existing MetricTile primitive; trim its min-height so the
+ * sticky strip stays slim and a real "band" rather than a row of full cards. */
+.dashboard-kpi-grid .metric-tile {
+  min-height: 0;
+}
+
+/* ===== Dominant next-action hero =====
+ * ONE card that answers "what do I study now?". Two columns on wide viewports:
+ * the headline action (left, dominant) and the most urgent secondary signals
+ * (right). Collapses to a single column when space is tight. */
+.dashboard-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: stretch;
+  margin-bottom: var(--space-7, var(--space-6));
+}
+
+.dashboard-hero-primary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.dashboard-hero-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.dashboard-hero-title {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-3xl);
+  line-height: var(--lh-tight, 1.15);
+  font-weight: var(--fw-bold, 800);
+  text-wrap: balance;
+}
+
+.dashboard-hero-reason {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-lg);
+  line-height: var(--lh-relaxed, 1.6);
+  max-width: 60ch;
+}
+
+.dashboard-hero-cta {
+  margin-top: auto;
+  align-self: flex-start;
+  font-size: var(--fs-md);
+}
+
+/* The signals rail collapses two short lists (due reviews / weak objectives)
+ * into a compact secondary column so the page no longer needs a full extra
+ * viewport of equal-weight panels above the fold. */
+.dashboard-hero-rail {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.dashboard-signal-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dashboard-signal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.dashboard-signal-head svg {
+  flex: 0 0 auto;
+}
+
+.dashboard-signal-title {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold, 800);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dashboard-signal-count {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.dashboard-signal-list {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.dashboard-signal-link {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  text-decoration: none;
+  transition: background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.dashboard-signal-link strong {
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+
+.dashboard-signal-link small {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.dashboard-signal-link:hover {
+  background: var(--surface-hover, rgba(148, 163, 184, 0.08));
+  color: var(--text-primary);
+}
+
+.dashboard-signal-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--ring));
+}
+
+.dashboard-signal-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+/* ===== Responsive reflow =====
+ * UB4 owns the global breakpoints; these are component-local fallbacks that
+ * keep the new structure from breaking before/independent of that pass. */
+@media (max-width: 900px) {
+  .dashboard-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dashboard-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .dashboard-kpi-band {
+    /* On narrow screens the sticky band would eat too much height; let it
+     * scroll away with the content instead. */
+    position: static;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* Reduced-motion: the global damp already zeroes --duration-*; nothing here
+ * animates beyond token-driven transitions, so it inherits that automatically.
+ * The sticky position is layout, not motion, so it is intentionally retained. */
