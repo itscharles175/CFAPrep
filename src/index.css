@@ -2602,6 +2602,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   font-size: var(--fs-sm);
   transition: all var(--duration-fast);
   white-space: nowrap;
+  /* UB4: comfortable ≥44px target on desktop; raised to ≥48px on touch widths
+     in the responsive block below. */
+  min-height: 44px;
 }
 
 .sidebar-link:hover {
@@ -2886,8 +2889,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   transform: translate(8px, -8px);
 }
 
+/* UB4: drawer dimming overlay. Base state is fully hidden; the responsive
+   block below promotes it to a fixed, tappable scrim once the sidebar becomes an
+   off-canvas drawer. Kept as its own rule (not only inside the media query) so
+   the base reset is explicit. */
 .mobile-scrim {
   display: none;
+  border: 0;
+  cursor: pointer;
 }
 
 /* ===== Skeleton Loading (C5) ===== */
@@ -3054,13 +3063,61 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   .study-sidebar { position: static; }
 }
 
-/* ===== Responsive — md (≤900px) ===== */
+/* ===== Responsive — md (≤900px) — mobile drawer breakpoint =====
+   UB4: 900px is the canonical mobile breakpoint. It matches App.jsx's
+   matchMedia('(max-width: 900px)'), which drives `mobileHidden` / the scrim /
+   focus management — so the off-canvas drawer CSS and the JS shell state flip at
+   exactly the same width (previously the drawer only engaged at ≤640px while the
+   shell already treated ≤900px as mobile, leaving a broken 641–900px band). */
 @media (max-width: 900px) {
   :root {
     --fs-4xl: 2rem;
     --fs-3xl: 1.5rem;
     --fs-2xl: 1.25rem;
   }
+
+  /* --- Off-canvas drawer sidebar --- */
+  .sidebar {
+    /* The drawer always renders at full width (never the collapsed rail) and
+       slides off-canvas; an elevated shadow lifts it above the content. */
+    width: var(--sidebar-width);
+    transform: translateX(-100%);
+    box-shadow: var(--elevation-4);
+  }
+  .sidebar.collapsed { width: var(--sidebar-width); }
+  .sidebar.open { transform: translateX(0); }
+  /* The desktop collapse/expand control is meaningless in drawer mode. */
+  .sidebar-header .btn-icon { display: none; }
+
+  /* Content + topbar reclaim the full width — no reserved sidebar gutter. */
+  .main-content,
+  .main-content.collapsed {
+    margin-left: 0;
+    width: 100%;
+    flex-basis: 100%;
+  }
+  .topbar,
+  .topbar.collapsed { left: 0; }
+
+  /* Hamburger menu control + ≥48px touch targets across the chrome. */
+  .mobile-menu-button {
+    display: inline-flex;
+    min-width: 48px;
+    min-height: 48px;
+  }
+  .topbar-actions .btn-icon { min-width: 48px; min-height: 48px; }
+  .sidebar-link { min-height: 48px; }
+
+  /* Tappable dimming scrim behind the open drawer. */
+  .mobile-scrim.open {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.55);
+    z-index: 95;
+    animation: fadeIn var(--duration-fast) var(--ease-out);
+  }
+
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
   .grid-2 { grid-template-columns: 1fr; }
   .page-container { padding: var(--space-4); }
@@ -3072,7 +3129,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   .data-table > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .forecast-strip,
   .coverage-grid { grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); }
-  .confirm-dialog-card { max-width: 90vw; }
   .backup-summary-grid,
   .backup-passphrase-row {
     grid-template-columns: 1fr;
@@ -3100,6 +3156,26 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   .formula-search {
     width: 100%;
   }
+
+  /* --- Full-screen dialog sheet ---
+     UB4: on mobile the centered Dialog becomes an edge-to-edge sheet so forms
+     and confirmations use the full viewport. The overlay drops its padding and
+     the card fills the screen, scrolls internally, and respects safe-area insets.
+     Focus trap / aria-modal / Escape (Primitives.tsx) are untouched. */
+  .confirm-dialog {
+    padding: 0;
+    place-items: stretch;
+  }
+  .confirm-dialog-card {
+    max-width: none;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    overflow-y: auto;
+    padding: max(var(--space-5), env(safe-area-inset-top)) var(--space-5)
+      max(var(--space-6), env(safe-area-inset-bottom));
+  }
 }
 
 /* ===== Responsive — sm (≤640px) ===== */
@@ -3121,17 +3197,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   .today-primary-panel {
     grid-column: auto;
   }
-  .sidebar { transform: translateX(-100%); }
-  .sidebar.open { transform: translateX(0); }
-  .main-content, .main-content.collapsed { margin-left: 0; width: 100%; flex-basis: 100%; }
-  .topbar { left: 0; }
-  .topbar.collapsed { left: 0; }
+  /* UB4: the off-canvas drawer, scrim, full-width content/topbar, hamburger, and
+     ≥48px touch targets are all established at the ≤900px breakpoint above. This
+     block only adds finer chrome tuning for the narrowest phones. */
   .topbar {
     padding: 0 var(--space-3);
     gap: var(--space-2);
-  }
-  .mobile-menu-button {
-    display: inline-flex;
   }
   .topbar-search {
     width: auto;
@@ -3144,13 +3215,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   }
   .topbar-actions {
     gap: var(--space-1);
-  }
-  .mobile-scrim.open {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background: rgba(2,6,23,0.55);
-    z-index: 95;
   }
   .metric-row,
   .metric-grid,

@@ -497,6 +497,9 @@ export function Dialog({ title, description, children, actions, onClose, labelle
     >
       <div
         ref={dialogRef}
+        // UB4: `confirm-dialog-card` carries the desktop centered-card styling and
+        // the small-screen full-screen-sheet treatment (see index.css responsive
+        // block). Focus trap / aria-modal / Escape behaviour is unchanged.
         className={joinClasses('surface surface-default confirm-dialog-card', className)}
         role="dialog"
         aria-modal="true"

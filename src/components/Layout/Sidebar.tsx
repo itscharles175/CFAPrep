@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type SVGProps } from 'react';
+import { useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent, type SVGProps } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   Home, BookOpen, TrendingUp, Table2,
@@ -140,7 +140,19 @@ interface SidebarProps {
   mobileHidden?: boolean;
   onToggle?: () => void;
   onNavigate?: () => void;
+  /**
+   * UB4: dedicated "close the mobile drawer" callback. Defaults to `onNavigate`
+   * when omitted so the existing App shell wiring (which closes the drawer in
+   * `onNavigate`) drives swipe-to-close without any caller change. Public API is
+   * additive — desktop behaviour is unaffected.
+   */
+  onClose?: () => void;
 }
+
+// UB4: a leftward drag of at least this many px (with a dominant horizontal
+// component) dismisses the off-canvas drawer. Tuned to feel intentional without
+// fighting vertical nav scrolling.
+const SWIPE_CLOSE_THRESHOLD = 56;
 
 export default function Sidebar({
   collapsed,
@@ -148,7 +160,33 @@ export default function Sidebar({
   mobileHidden = false,
   onToggle,
   onNavigate,
+  onClose,
 }: SidebarProps) {
+  // UB4: swipe-to-close. We track the pointer-down origin and, on release,
+  // close the drawer when the gesture is a deliberate leftward swipe. Falls back
+  // to `onNavigate` so the current shell (which uses onNavigate to close) works
+  // unchanged. Pointer events cover touch + pen + mouse-drag uniformly.
+  const closeDrawer = onClose ?? onNavigate;
+  const swipeOrigin = useRef<{ x: number; y: number; id: number } | null>(null);
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLElement>) {
+    // Only arm the gesture while the drawer is the active off-canvas overlay.
+    if (!open || event.pointerType === 'mouse') return;
+    swipeOrigin.current = { x: event.clientX, y: event.clientY, id: event.pointerId };
+  }
+
+  function handlePointerEnd(event: ReactPointerEvent<HTMLElement>) {
+    const origin = swipeOrigin.current;
+    swipeOrigin.current = null;
+    if (!origin || origin.id !== event.pointerId) return;
+    const dx = event.clientX - origin.x;
+    const dy = event.clientY - origin.y;
+    // Dominant leftward horizontal travel past the threshold = dismiss.
+    if (dx <= -SWIPE_CLOSE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+      closeDrawer?.();
+    }
+  }
+
   return (
     <aside
       id="main-sidebar"
@@ -157,6 +195,11 @@ export default function Sidebar({
       aria-label="Main navigation sidebar"
       hidden={mobileHidden}
       inert={mobileHidden ? true : undefined}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={() => {
+        swipeOrigin.current = null;
+      }}
     >
       <div className="sidebar-header">
         <div className="sidebar-logo">S</div>
