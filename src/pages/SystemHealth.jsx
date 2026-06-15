@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CloudCog, Database, Download, HardDrive, KeyRound, Mic2, ServerCog, ShieldCheck, Upload, WifiOff, Wrench } from 'lucide-react';
+import { CloudCog, Database, Download, Gauge, HardDrive, KeyRound, Mic2, ServerCog, ShieldCheck, Upload, WifiOff, Wrench } from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
 import { exportVaultData, getVaultHealthReport, importVaultData, previewVaultRepair } from '../lib/learning';
 import { decryptVaultBackup, encryptVaultBackup } from '../lib/encryptedBackup';
@@ -39,6 +39,7 @@ import {
   runTargetedMaterialJob,
 } from '../lib/targetedMaterialQueue';
 import FigureExplainer from '../components/FigureExplainer/FigureExplainer';
+import { useWebVitals, formatWebVital, getWebVitalThresholds } from '../lib/webVitals';
 
 // Cache-management constants — used by refreshCacheBuckets / handleClearBucket.
 const CACHE_PREFIXES = {
@@ -59,8 +60,25 @@ function downloadJson(payload) {
   URL.revokeObjectURL(url);
 }
 
+// UC6: map a web-vital rating to the Surface stat-cell tone classes already in
+// the design system (good→success, needs-improvement→warning, poor→danger).
+const VITAL_TONE = {
+  good: 'qv-text-success',
+  'needs-improvement': 'qv-text-warning',
+  poor: 'qv-text-danger',
+  pending: 'qv-text-muted',
+};
+const VITAL_LABELS = {
+  LCP: 'Largest Contentful Paint',
+  CLS: 'Cumulative Layout Shift',
+  INP: 'Interaction to Next Paint',
+};
+
 export default function SystemHealth() {
   const toast = useToast();
+  // UC6: Core Web Vitals, collected locally via PerformanceObserver — no remote
+  // analytics. Latest values stream in as the page is observed/interacted with.
+  const webVitals = useWebVitals();
   const [storage, setStorage] = useState(null);
   const [cacheNames, setCacheNames] = useState([]);
   const [message, setMessage] = useState('');
@@ -1089,6 +1107,59 @@ export default function SystemHealth() {
               LSAT model settings
             </a>
           </div>
+        </div>
+      </Surface>
+
+      {/* UC6: Core Web Vitals (LCP / CLS / INP), collected in-process via the
+          browser-native PerformanceObserver. LOCAL-ONLY — nothing is sent
+          anywhere; this is a self-diagnostic readout in place of remote RUM.
+          Each value is rated against the published good / needs-improvement /
+          poor thresholds. Values stay "—" until the browser reports an entry
+          (LCP after first paint; CLS/INP after layout shifts / interactions). */}
+      <Surface
+        tone="ops"
+        status={
+          [webVitals.LCP, webVitals.CLS, webVitals.INP].some((m) => m.rating === 'poor')
+            ? 'danger'
+            : [webVitals.LCP, webVitals.CLS, webVitals.INP].some((m) => m.rating === 'needs-improvement')
+              ? 'warning'
+              : [webVitals.LCP, webVitals.CLS, webVitals.INP].some((m) => m.rating !== 'pending')
+                ? 'success'
+                : undefined
+        }
+        className="ops-report-panel"
+      >
+        <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <StatusBadge tone="exam">Performance</StatusBadge>
+            <h3 className="qv-m-0 qv-mt-2">
+              <Gauge size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
+              Core Web Vitals{' '}
+              <span className="qv-mono">{webVitals.supported ? 'observing' : 'unavailable'}</span>
+            </h3>
+            <p className="qv-text-secondary qv-m-0">
+              Render-quality metrics measured in-app with the browser&apos;s PerformanceObserver. Fully local — no
+              remote analytics. Lower is better; each is rated against the standard good / needs-improvement / poor
+              thresholds. Interact with the app to populate INP.
+            </p>
+          </div>
+        </div>
+        <div className="coverage-grid" style={{ marginTop: 'var(--space-4)' }}>
+          {[webVitals.LCP, webVitals.CLS, webVitals.INP].map((metric) => {
+            const thresholds = getWebVitalThresholds(metric.name);
+            return (
+              <div key={metric.name}>
+                <strong className={VITAL_TONE[metric.rating]}>{formatWebVital(metric.name, metric.value)}</strong>
+                <small>
+                  {metric.name} · {VITAL_LABELS[metric.name]}
+                </small>
+                <small className="qv-text-muted">
+                  {metric.rating === 'pending' ? 'awaiting data' : metric.rating} · good ≤{' '}
+                  {thresholds.unit === 'ms' ? `${thresholds.good} ms` : thresholds.good}
+                </small>
+              </div>
+            );
+          })}
         </div>
       </Surface>
 

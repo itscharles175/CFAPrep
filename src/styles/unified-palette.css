@@ -21,8 +21,22 @@
  * vocabulary is unified here so /cfa and /lsat read as one product.
  * See docs/STUDYVAULT-POLISH-PLAN.md S1.
  */
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
+/*
+ * UC6 — font-display: swap (no FOIT).
+ *
+ * Both bundled @fontsource-variable entrypoints below resolve to the package's
+ * `index.css` (its `"main"` / `exports["."]`), and every @font-face that
+ * fontsource emits there already declares `font-display: swap` — verified
+ * against node_modules/@fontsource-variable/{geist,geist-mono}/index.css
+ * (5 Geist faces, 6 Geist-Mono faces, all `font-display: swap`). `swap` means
+ * the browser paints text IMMEDIATELY in the fallback stack (Segoe UI / system
+ * sans, per --font-sans below) and swaps in Geist once its woff2 has loaded —
+ * so there is no flash of invisible text (FOIT) while the variable font fetches.
+ * The `/index.css` suffix is explicit so the swap-carrying stylesheet is pinned
+ * regardless of any future change to the package's default export resolution.
+ */
+@import "@fontsource-variable/geist/index.css";
+@import "@fontsource-variable/geist-mono/index.css";
 
 :root {
   /* Unify both domains on Geist (sans/mono) + Newsreader (serif), matching the
