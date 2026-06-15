@@ -70,3 +70,10 @@ __pycache__/
 services/lsat-backend/backups/
 services/lsat-backend/**/*.db
 services/lsat-backend/data/
+
+# UA7 visual-regression baselines are machine-specific (font hinting / AA differs
+# across OS + headless vs system Chrome), so committing host-captured PNGs would
+# make the CI gate (Linux Chromium) fail on first run. The gate bootstraps a fresh
+# baseline when none exists, so CI self-seeds; commit OS-matched baselines later if
+# durable cross-run regression detection is wanted.
+tests/visual-baselines/

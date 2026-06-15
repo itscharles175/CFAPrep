@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "preview", "--", "--port", "4173"],
       "port": 4173
+    },
+    {
+      "name": "ccpreview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview", "--", "--port", "4317", "--strictPort"],
+      "port": 4317
     }
   ]
 }
