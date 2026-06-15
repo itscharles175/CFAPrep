@@ -12,6 +12,8 @@ import { LoadingState, ErrorState } from "@lsat/components/states";
 import { useSessionResults } from "@lsat/lib/hooks";
 import { useAddErrorLog, useBulkSrsCards } from "@lsat/lib/mutations";
 import { api } from "@lsat/lib/api";
+import { postBlindReviewNote } from "@lsat/lib/gapCards";
+import { toast } from "@lsat/lib/toast";
 import { enqueue } from "@lsat/lib/offlineQueue";
 import { cn } from "@lsat/lib/utils";
 import { OUTCOME_META } from "@lsat/lib/labels";
@@ -105,6 +107,10 @@ export default function BlindReview() {
   const [brAnswers, setBrAnswers] = useState<Record<number, string | null>>({});
   const [confidence, setConfidence] = useState<Record<number, Confidence>>({});
   const [srsAdded, setSrsAdded] = useState<Record<number, boolean>>({});
+  // LSAT-3 — the short reveal-time "why" the user types per question, and which
+  // ones have already been saved to the backend (so the save button reads "Saved").
+  const [brNotes, setBrNotes] = useState<Record<number, string>>({});
+  const [noteSaved, setNoteSaved] = useState<Record<number, boolean>>({});
 
   if (isLoading)
     return (
@@ -141,6 +147,8 @@ export default function BlindReview() {
   const isRevealed = !!revealed[globalIndex];
   const brAnswer = brAnswers[globalIndex] ?? null;
   const conf = confidence[globalIndex] ?? getBrLastConfidence();
+  const brNote = brNotes[globalIndex] ?? "";
+  const isNoteSaved = !!noteSaved[globalIndex];
   const savedNotes = getNotes(q.id);
   const savedHighlights = getQuestionAnnotations(q.id);
 
@@ -184,6 +192,26 @@ export default function BlindReview() {
 
   function commitBrAnswer(label: string) {
     setBrAnswers((b) => ({ ...b, [globalIndex]: label }));
+  }
+
+  // LSAT-3 — persist the reveal-time rationale. Optional + best-effort: the
+  // reveal (br_answer) is already saved by `reveal()`, so a failed note save is
+  // a soft toast, never a blocker, and the captured note also seeds the
+  // auto-cloze "Gap" card pattern line on the backend.
+  async function saveNote() {
+    const note = brNote.trim();
+    if (!note) return;
+    try {
+      await postBlindReviewNote(item.attempt.attempt_id, {
+        br_note: note,
+        answer: brAnswer,
+        confidence: conf,
+      });
+      setNoteSaved((n) => ({ ...n, [globalIndex]: true }));
+      toast.success("Takeaway saved");
+    } catch {
+      toast.error("Could not save takeaway (backend offline)");
+    }
   }
 
   function setConf(c: Confidence) {
@@ -300,24 +328,59 @@ export default function BlindReview() {
               canReveal={!!brAnswer}
             />
           ) : (
-            <RevealedBlock
-              outcome={outcome}
-              qType={q.q_type}
-              metaVariant={meta.variant}
-              metaLabel={meta.label}
-              metaDescription={meta.description}
-              choices={q.choices}
-              chosen={item.attempt.chosen_answer}
-              correctAnswer={q.correct_answer}
-              perChoice={q.explanation?.per_choice}
-              srsAdded={!!srsAdded[globalIndex]}
-              onAddSrs={addToSrs}
-              onExplain={() =>
-                navigate(
-                  `/explanation/${q.id}?attempt=${item.attempt.attempt_id}&session=${id}`,
-                )
-              }
-            />
+            <>
+              <RevealedBlock
+                outcome={outcome}
+                qType={q.q_type}
+                metaVariant={meta.variant}
+                metaLabel={meta.label}
+                metaDescription={meta.description}
+                choices={q.choices}
+                chosen={item.attempt.chosen_answer}
+                correctAnswer={q.correct_answer}
+                perChoice={q.explanation?.per_choice}
+                srsAdded={!!srsAdded[globalIndex]}
+                onAddSrs={addToSrs}
+                onExplain={() =>
+                  navigate(
+                    `/explanation/${q.id}?attempt=${item.attempt.attempt_id}&session=${id}`,
+                  )
+                }
+              />
+              {/* LSAT-3 — reveal-time rationale capture. Optional: a one-line
+                  takeaway in your own words, saved to the backend where it also
+                  seeds the auto-generated "Gap" cloze card's pattern line. */}
+              <div className="space-y-2 rounded-card border bg-surface-1 p-4">
+                <label
+                  htmlFor={`br-note-${globalIndex}`}
+                  className="text-sm font-medium"
+                >
+                  Why was this the answer? (optional)
+                </label>
+                <textarea
+                  id={`br-note-${globalIndex}`}
+                  value={brNote}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setBrNotes((n) => ({ ...n, [globalIndex]: v }));
+                    setNoteSaved((n) => ({ ...n, [globalIndex]: false }));
+                  }}
+                  rows={3}
+                  placeholder="In your own words — the move this question turned on, or the trap you fell for."
+                  className="w-full resize-y rounded-card border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <div className="flex justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void saveNote()}
+                    disabled={!brNote.trim() || isNoteSaved}
+                  >
+                    {isNoteSaved ? "Saved" : "Save takeaway"}
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>

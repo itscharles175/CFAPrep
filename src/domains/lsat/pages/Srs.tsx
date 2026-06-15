@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { m, useReducedMotion } from "motion/react";
-import { BookOpen, Check, Layers, RotateCcw } from "lucide-react";
+import { BookOpen, Check, Layers, RotateCcw, Sparkles } from "lucide-react";
 import { Card, CardContent } from "@lsat/components/ui/card";
 import { Button } from "@lsat/components/ui/button";
 import { Badge } from "@lsat/components/ui/badge";
@@ -12,6 +13,7 @@ import { IllustrationSrsCaughtUp } from "@lsat/components/illustrations";
 import { LoadingState, ErrorState, EmptyState } from "@lsat/components/states";
 import { useSrsDue } from "@lsat/lib/hooks";
 import { api } from "@lsat/lib/api";
+import { generateConceptGapCards, isGapCard } from "@lsat/lib/gapCards";
 import { enqueue } from "@lsat/lib/offlineQueue";
 import { qTypeLabel, srsOriginLabel } from "@lsat/lib/labels";
 import { toast } from "@lsat/lib/toast";
@@ -36,6 +38,7 @@ function fmtInterval(days: number): string {
 export default function Srs() {
   const { data, isLoading, isError, error, refetch } = useSrsDue();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const reduce = useReducedMotion();
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
@@ -44,9 +47,32 @@ export default function Srs() {
   const [lastResult, setLastResult] = useState<string | null>(null);
   // Which grade button is hovered/focused, to preview its interval on the arc.
   const [hoverGrade, setHoverGrade] = useState<1 | 2 | 3 | 4 | null>(null);
+  // LSAT-3 — in-flight guard for the auto-cloze "Gap" card generation action.
+  const [generatingGaps, setGeneratingGaps] = useState(false);
   // R10 A4.1 — monotonic token guarding the optimistic "next due" line so a slow
   // background review response can't overwrite a line a later grade/Undo owns.
   const reviewToken = useRef(0);
+
+  // LSAT-3 — turn the concept-gap queue into cloze/pattern "Gap" SRS cards, then
+  // refresh the due list so the new cards surface immediately.
+  async function generateGapCards() {
+    setGeneratingGaps(true);
+    try {
+      const res = await generateConceptGapCards();
+      if (res.generated > 0) {
+        toast.success(
+          `Built ${res.generated} gap card${res.generated === 1 ? "" : "s"}`,
+        );
+        void qc.invalidateQueries({ queryKey: ["srs-due"] });
+      } else {
+        toast.success("No new concept gaps to turn into cards");
+      }
+    } catch {
+      toast.error("Could not build gap cards (backend offline)");
+    } finally {
+      setGeneratingGaps(false);
+    }
+  }
 
   if (isLoading)
     return (
@@ -75,6 +101,16 @@ export default function Srs() {
           illustration={<IllustrationSrsCaughtUp />}
           title="No cards due"
           description="Nothing to review right now. Missed questions resurface here on the spaced-repetition schedule."
+          action={
+            <Button
+              variant="outline"
+              onClick={() => void generateGapCards()}
+              disabled={generatingGaps}
+            >
+              <Sparkles className="h-4 w-4" />
+              {generatingGaps ? "Building…" : "Build gap cards"}
+            </Button>
+          }
         />
       </PageLayout>
     );
@@ -100,7 +136,10 @@ export default function Srs() {
     );
 
   const card = cards[index];
-  const originLabel = srsOriginLabel(card.origin);
+  // LSAT-3 — an auto-cloze "Gap" card gets its own short badge rather than the
+  // auto-title-cased origin label; the cloze body is rendered below.
+  const isGap = isGapCard(card.origin);
+  const originLabel = isGap ? "Gap" : srsOriginLabel(card.origin);
   // Interval preview comes from the due payload when the backend precomputes it.
   const previews = card.predicted_intervals ?? null;
   const gotItRight = revealed && selected === card.correct_answer;
@@ -211,7 +250,16 @@ export default function Srs() {
                 <div className="flex items-center gap-2">
                   <span className="type-display text-base">{qTypeLabel(card.q_type)}</span>
                   {originLabel && (
-                    <Badge variant="outline" title="Why you're reviewing this">
+                    <Badge
+                      variant={isGap ? "secondary" : "outline"}
+                      className={cn(isGap && "gap-1")}
+                      title={
+                        isGap
+                          ? "Auto-generated from a concept gap — recall the reasoning move"
+                          : "Why you're reviewing this"
+                      }
+                    >
+                      {isGap && <Sparkles className="h-3 w-3" />}
                       {originLabel}
                     </Badge>
                   )}

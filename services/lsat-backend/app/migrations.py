@@ -693,6 +693,22 @@ def _m020_fold_additive_columns(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 20")
 
 
+def _m021_attempt_rationale_br_note(conn) -> None:
+    """LSAT-3 — additive ``attemptrationale.br_note`` (the short reveal-time
+    rationale the Blind Review screen captures) + an index for the auto-cloze
+    "Gap" card queue.
+
+    PRAGMA-guarded like migration 20: ``_add_column_if_missing`` is a clean no-op
+    when ``create_all`` already added the column on a fresh DB, and skips a missing
+    table on a partial/old DB. The ``srscard(origin)`` index already exists
+    (migration 11, ``ix_srscard_origin``); the gap cards reuse it via their
+    ``concept_gap_cloze`` origin, so no new index is needed there."""
+    _add_column_if_missing(
+        conn, "attemptrationale", "br_note", "br_note VARCHAR", mig="migration 21",
+    )
+    conn.exec_driver_sql("PRAGMA user_version = 21")
+
+
 MIGRATIONS: list[Migration] = [
     (1, "hot_path_indexes", _m001_hot_path_indexes),
     (2, "embedding_unique_index", _m002_embedding_unique_index),
@@ -714,6 +730,7 @@ MIGRATIONS: list[Migration] = [
     (18, "notebook_os_contracts", _m018_notebook_os_contracts),
     (19, "notebook_knowledge_fts", _m019_notebook_knowledge_fts),
     (20, "fold_additive_columns", _m020_fold_additive_columns),
+    (21, "attempt_rationale_br_note", _m021_attempt_rationale_br_note),
 ]
 
 

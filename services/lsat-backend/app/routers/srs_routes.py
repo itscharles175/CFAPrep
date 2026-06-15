@@ -1,8 +1,10 @@
 """SRS (FSRS) endpoints."""
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -10,9 +12,16 @@ from sqlmodel import Session, select
 
 from .. import adaptivity, pedagogy, serializers, srs
 from ..db import atomic_batch, get_session
-from ..models import Question, SRSCard
+from ..models import Attempt, AttemptRationale, Confidence, Question, SRSCard
 
 router = APIRouter(prefix="/srs")
+
+# LSAT-3 — the distinct origin for auto-generated cloze/pattern "Gap" cards. Kept
+# separate from the plain ``concept_gap`` origin (which marks a question that
+# resurfaces verbatim) so the UI can badge these as "Gap" and render the
+# generated cloze, and so re-running the generator is idempotent (one Gap card
+# per concept-gap question).
+GAP_CARD_ORIGIN = "concept_gap_cloze"
 
 
 class ReviewBody(BaseModel):
@@ -21,6 +30,20 @@ class ReviewBody(BaseModel):
 
 class BulkCardsBody(BaseModel):
     question_ids: list[int]
+
+
+class BlindReviewNoteBody(BaseModel):
+    """LSAT-3 — the short reveal-time rationale captured in the Blind Review
+    screen. Posted per attempt the moment the answer is revealed."""
+    br_note: str = Field(min_length=1, max_length=4000)
+    answer: Optional[str] = Field(default=None, max_length=5)
+    confidence: Optional[Confidence] = None
+
+
+class ConceptGapCardsBody(BaseModel):
+    """LSAT-3 — bound the auto-cloze generation run (most-recent concept gaps
+    first). Optional; the defaults cover a normal study session's gaps."""
+    limit: int = Field(default=20, ge=1, le=100)
 
 
 @router.post("/cards")
@@ -61,6 +84,153 @@ def concept_gap_queue(session: Session = Depends(get_session)):
     return {"count": len(cards), "cards": cards}
 
 
+@router.post("/attempts/{attempt_id}/blind-review-note")
+def blind_review_note(attempt_id: int, body: BlindReviewNoteBody,
+                      session: Session = Depends(get_session)):
+    """LSAT-3 — capture the short "why" the user writes when revealing a Blind
+    Review item. Stored as an ``AttemptRationale`` (stage="blind_review") with the
+    note in ``br_note``; the longer Socratic ``rationale_text`` stays empty here.
+    The captured note then feeds the auto-cloze "Gap" card generation below.
+
+    Append-only (one row per reveal) — matching how the why-loop records
+    rationales — so re-revealing keeps a small history rather than overwriting."""
+    attempt = session.get(Attempt, attempt_id)
+    if attempt is None:
+        raise HTTPException(404, "Attempt not found")
+    row = AttemptRationale(
+        attempt_id=attempt_id,
+        question_id=attempt.question_id,
+        stage="blind_review",
+        answer=body.answer,
+        confidence=body.confidence,
+        rationale_text="",
+        br_note=body.br_note,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return {
+        "id": row.id,
+        "attempt_id": row.attempt_id,
+        "question_id": row.question_id,
+        "stage": row.stage,
+        "br_note": row.br_note,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+# Tokens we never blank out when auto-clozing a stem: short function words carry
+# no recall value, so deleting them would make a meaningless gap.
+_CLOZE_STOPWORDS = frozenset({
+    "the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "but", "if",
+    "is", "are", "was", "were", "be", "been", "that", "this", "it", "as", "at",
+    "by", "with", "from", "which", "who", "whom", "whose", "than", "then",
+})
+
+
+def _latest_br_note(session: Session, question_id: int) -> str | None:
+    """The most-recent captured Blind Review ``br_note`` for a question, if any.
+    Used to seed the cloze 'pattern' line with the user's own takeaway."""
+    row = session.exec(
+        select(AttemptRationale)
+        .where(AttemptRationale.question_id == question_id)
+        .where(AttemptRationale.br_note.is_not(None))
+        .order_by(AttemptRationale.id.desc())
+    ).first()
+    note = (row.br_note or "").strip() if row is not None else ""
+    return note or None
+
+
+def _build_cloze(q: Question, br_note: str | None) -> dict:
+    """Deterministically derive a cloze/pattern card body from a question.
+
+    The cloze deletes the single most distinctive content word from the stem
+    (longest non-stopword token) so the card tests recall of the load-bearing
+    phrase; ``pattern`` carries the user's own Blind-Review takeaway when present,
+    else a generic q_type prompt. Purely local + deterministic — no model call —
+    so generation is offline-safe and re-runs identically."""
+    stem = (q.stem or q.prompt or "").strip()
+    words = re.findall(r"[A-Za-z][A-Za-z'-]+", stem)
+    candidates = [w for w in words if w.lower() not in _CLOZE_STOPWORDS and len(w) >= 4]
+    target = max(candidates, key=len) if candidates else None
+    if target:
+        # Blank only the first occurrence so the rest of the stem stays readable.
+        cloze = re.sub(rf"\b{re.escape(target)}\b", "______", stem, count=1)
+    else:
+        cloze = stem
+    pattern = br_note or (
+        f"Recall the reasoning move this {q.q_type} question turns on."
+    )
+    return {"cloze": cloze, "answer": target, "pattern": pattern}
+
+
+@router.post("/concept-gap-cards")
+def concept_gap_cards(body: ConceptGapCardsBody | None = None,
+                      session: Session = Depends(get_session)):
+    """LSAT-3 — auto-generate cloze/pattern "Gap" SRS cards from the concept-gap
+    queue. For each concept-gap question (timed AND blind-review both wrong) we
+    ensure one card tagged ``origin="concept_gap_cloze"`` — a distinct "Gap" card
+    type surfaced in the SRS screen — and derive a deterministic cloze + pattern
+    from the stem and the captured Blind Review note (LSAT-3's ``br_note``).
+
+    Idempotent: ``ensure_card`` is one card per question, so re-running creates no
+    duplicates and a question already promoted to a Gap card is skipped. Returns
+    each generated card's id + cloze/pattern preview so the caller can show what
+    was made and the SRS screen can render the Gap card body."""
+    limit = body.limit if body is not None else 20
+    queue = pedagogy.concept_gap_queue(session)[:limit]
+    created: list[dict] = []
+    skipped = 0
+    with atomic_batch(session):
+        for entry in queue:
+            qid = entry["question_id"]
+            q = session.get(Question, qid)
+            if q is None or q.deleted_at is not None:
+                skipped += 1
+                continue
+            existing = srs.get_card(session, qid)
+            # Skip a question already promoted to a Gap card (idempotent re-run).
+            if existing is not None and existing.origin == GAP_CARD_ORIGIN:
+                skipped += 1
+                continue
+            card, was_created = srs.ensure_card(
+                session, qid, origin=GAP_CARD_ORIGIN, commit=False,
+            )
+            # A concept-gap question usually already has a plain ``concept_gap``
+            # card (created by the BR->SRS loop). Promote it to the distinct Gap
+            # type so it badges + renders as a cloze; a manual/lucky/seed card the
+            # user owns keeps its origin (we only promote the auto concept_gap).
+            promoted = False
+            if not was_created and card.origin == "concept_gap":
+                card.origin = GAP_CARD_ORIGIN
+                session.add(card)
+                promoted = True
+            session.flush()
+            session.refresh(card)
+            cloze = _build_cloze(q, _latest_br_note(session, qid))
+            created.append({
+                "card_id": card.id,
+                "question_id": qid,
+                "q_type": q.q_type,
+                "difficulty": q.difficulty,
+                "origin": card.origin,
+                "card_type": "gap",
+                # True = a brand-new card; False = an existing concept_gap card
+                # promoted into the Gap type. Either way it is a Gap card now.
+                "is_new": was_created,
+                **cloze,
+            })
+    return {
+        # Cards that became Gap cards on this run (new + promoted). A re-run finds
+        # no remaining plain concept_gap questions, so it returns generated=0.
+        "generated": len(created),
+        "skipped": skipped,
+        "card_type": "gap",
+        "origin": GAP_CARD_ORIGIN,
+        "cards": created,
+    }
+
+
 def _interleave_by_qtype(items: list[tuple[SRSCard, Question]]) -> list[tuple[SRSCard, Question]]:
     """Round-robin a most-overdue-first list across q_types so the queue never
     serves a long run of the same type. Within each q_type the input order
@@ -86,7 +256,9 @@ def _interleave_by_qtype(items: list[tuple[SRSCard, Question]]) -> list[tuple[SR
 @router.get("/due")
 def due_cards(session: Session = Depends(get_session)):
     """Due SRS cards, most-overdue-first AND interleaved by q_type so a single
-    type never dominates a long review run. (Card response shape unchanged.)"""
+    type never dominates a long review run. Each card additionally carries its
+    ``origin`` (why it's queued) — answer-key-free, used by the SRS screen to
+    badge the card (incl. LSAT-3's distinct "Gap" cloze cards)."""
     selector = adaptivity.ability_selector(session, days=180)
     now = datetime.now(timezone.utc)
     cards = session.exec(select(SRSCard)).all()
@@ -107,6 +279,7 @@ def due_cards(session: Session = Depends(get_session)):
     for card, q in ordered:
         payload = serializers.question_test_mode(session, q, card_id=card.id)
         payload["predicted_intervals"] = srs.predicted_intervals(card.fsrs_state or {})
+        payload["origin"] = card.origin
         cards_out.append(payload)
     return {
         "due_count": len(cards_out),

@@ -551,6 +551,11 @@ class AttemptRationale(SQLModel, table=True):
     confidence: Optional[Confidence] = None
     rationale_text: str = ""
     trap_guess: Optional[str] = None
+    # LSAT-3 — the short "why" note captured at reveal in the Blind Review screen
+    # (the quick takeaway the user types while revealing), kept distinct from the
+    # longer ``rationale_text`` the Socratic why-loop writes. Optional/additive
+    # (migration 21); older rows leave it NULL.
+    br_note: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
