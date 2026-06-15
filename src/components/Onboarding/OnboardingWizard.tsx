@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { saveLlmSettings } from '../../lib/localLlm';
+import { markOnboardingComplete, setOnboardingStep } from '../../lib/onboardingProgress';
 import {
   Dialog,
   InlineCluster,
@@ -211,9 +212,25 @@ export function OnboardingWizard({ open, onClose }: OnboardingWizardProps) {
 
   if (!open) return null;
 
+  // UB7: advance + persist the furthest step reached so a returning user gets a
+  // "resume where you left off" nudge on Today. setOnboardingStep is monotonic,
+  // so re-opening at step 1 never rewinds a previously-recorded high-water mark.
+  function goToStep(next: number) {
+    setOnboardingStep(next);
+    setStep(next);
+  }
+
   function handleClose() {
     setStep(1);
     onClose();
+  }
+
+  // UB7: closing from the final step means the user walked the whole flow —
+  // record completion so Today shows the quiet "you're ready" state instead of a
+  // resume nudge. (Bailing earlier just leaves the partial high-water mark.)
+  function handleFinish() {
+    markOnboardingComplete();
+    handleClose();
   }
 
   return (
@@ -237,14 +254,14 @@ export function OnboardingWizard({ open, onClose }: OnboardingWizardProps) {
         </button>
       </InlineCluster>
 
-      {step === 1 && <Step1 onContinue={() => setStep(2)} />}
+      {step === 1 && <Step1 onContinue={() => goToStep(2)} />}
       {step === 2 && (
         <Step2
-          onPresetChosen={() => setStep(3)}
-          onSkip={() => setStep(3)}
+          onPresetChosen={() => goToStep(3)}
+          onSkip={() => goToStep(3)}
         />
       )}
-      {step === 3 && <Step3 onDone={handleClose} />}
+      {step === 3 && <Step3 onDone={handleFinish} />}
     </Dialog>
   );
 }

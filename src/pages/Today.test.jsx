@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../lib/studyDirector', () => ({
@@ -39,8 +40,13 @@ describe('Today focus-mode landing', () => {
     });
     renderToday();
 
-    expect(await screen.findByText('2 reviews due, 1 weak topic to shore up')).toBeInTheDocument();
-    expect(screen.getByText('Modified duration')).toBeInTheDocument();
+    // The hero top action renders in the always-visible scrolling content.
+    expect(await screen.findByText('Modified duration')).toBeInTheDocument();
+
+    // UB7: the plan headline now lives in the sticky study-session card's "Plan"
+    // tab — activate it before asserting the headline.
+    await userEvent.click(screen.getByRole('tab', { name: /plan/i }));
+    expect(screen.getByText('2 reviews due, 1 weak topic to shore up')).toBeInTheDocument();
     // "Equity Investments" appears in the actions list AND the targeted-drill
     // header (since it's the first weak-topic action) — assert >= 1.
     expect(screen.getAllByText(/Topic readiness is only 58%/).length).toBeGreaterThanOrEqual(1);
@@ -64,7 +70,10 @@ describe('Today focus-mode landing', () => {
       ],
     });
     renderToday();
-    await waitFor(() => expect(screen.getByText('No urgent items — great progress!')).toBeInTheDocument());
-    expect(screen.getByText('Continue studying')).toBeInTheDocument();
+    // The hero "continue" action is in the always-visible scrolling content.
+    await waitFor(() => expect(screen.getByText('Continue studying')).toBeInTheDocument());
+    // The headline lives in the study-session card's Plan tab.
+    await userEvent.click(screen.getByRole('tab', { name: /plan/i }));
+    expect(screen.getByText('No urgent items — great progress!')).toBeInTheDocument();
   });
 });

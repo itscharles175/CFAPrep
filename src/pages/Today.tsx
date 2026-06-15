@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ChevronRight, Inbox, RefreshCw, Sparkles, Target, TrendingUp } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { BookOpen, ChevronRight, Clock, Inbox, NotebookPen, RefreshCw, Sparkles, Target, TrendingUp } from 'lucide-react';
 import { PageHeader, StatusBadge, Surface } from '../components/ui/Primitives';
+import { OnboardingResume, StudySessionCard } from '../components/session';
+import type { StudySessionPanel } from '../components/session';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { buildStudyPlan } from '../lib/studyDirector';
 import type { StudyAction, StudyPlan } from '../lib/studyDirector';
@@ -127,6 +129,7 @@ interface JournalRowValue {
 }
 
 export default function Today() {
+  const navigate = useNavigate();
   const [activePathway] = useLevel3Pathway() as [string, (next: string) => void];
   const [plan, setPlan] = useState<StudyPlan | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -344,6 +347,139 @@ export default function Today() {
   const top = plan?.actions?.[0];
   const rest = (plan?.actions || []).slice(1, 5);
 
+  // UB7 — the three study-session affordances, consolidated behind the sticky
+  // tabbed card below. All logic stays here; the card is a presentational shell.
+  const timerPanel = (
+    <div className="qv-stack-3">
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+        <span
+          className="type-numeric"
+          aria-live="polite"
+          aria-atomic="true"
+          style={{
+            fontFamily: 'var(--font-mono, monospace)',
+            fontSize: 'var(--fs-2xl, 2rem)',
+            fontWeight: 'var(--fw-semibold, 600)',
+            letterSpacing: '0.02em',
+          }}
+        >
+          {formatTimer(displaySeconds)}
+        </span>
+        <StatusBadge tone={timer.state === 'running' ? 'success' : timer.state === 'paused' ? 'warning' : 'accent'}>
+          {timer.state === 'running' ? 'Focusing' : timer.state === 'paused' ? 'Paused' : 'Ready'}
+        </StatusBadge>
+      </div>
+      <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        {timer.state === 'idle' && (
+          <button className="btn btn-primary btn-sm" onClick={startTimer}>Start focus</button>
+        )}
+        {timer.state === 'running' && (
+          <>
+            <button className="btn btn-secondary btn-sm" onClick={pauseTimer}>Pause</button>
+            <button className="btn btn-secondary btn-sm" onClick={stopTimer}>Stop &amp; log</button>
+          </>
+        )}
+        {timer.state === 'paused' && (
+          <>
+            <button className="btn btn-primary btn-sm" onClick={startTimer}>Resume</button>
+            <button className="btn btn-secondary btn-sm" onClick={stopTimer}>Stop &amp; log</button>
+          </>
+        )}
+      </div>
+      <p className="muted-copy qv-fs-sm qv-m-0">
+        Counts elapsed focus time and saves a study session to your local vault when you stop.
+      </p>
+    </div>
+  );
+
+  const planPanel = (
+    <div className="qv-stack-3">
+      <div className="flex-between qv-row-3" style={{ gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+        <p className="muted-copy qv-m-0">{plan?.headline}</p>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={generateNarrative}
+          disabled={!plan || narrative.state === 'loading'}
+          title="Generate a personalized rationale for today's plan via your local model"
+          style={{ flexShrink: 0 }}
+        >
+          {narrative.state === 'loading' ? 'Thinking…' : narrative.text ? 'Regenerate narrative' : '🤖 Why this plan'}
+        </button>
+      </div>
+      {narrative.state === 'done' && narrative.text && (
+        <p className="qv-callout qv-m-0" style={{ whiteSpace: 'pre-line' }}>{narrative.text}</p>
+      )}
+      {narrative.state === 'error' && (
+        <p className="qv-text-danger qv-fs-sm qv-m-0">{narrative.error}</p>
+      )}
+    </div>
+  );
+
+  const journalPanel = (
+    <div className="qv-stack-2">
+      <div className="flex-between qv-row-3-start" style={{ gap: 'var(--space-3)' }}>
+        <p className="muted-copy qv-fs-sm qv-m-0">
+          One-paragraph reflection on today's study session. Stays in your local vault, per-date.
+        </p>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={saveJournal}
+          disabled={!journal.dirty}
+          title={journal.savedAt ? `Last saved ${new Date(journal.savedAt).toLocaleTimeString()}` : 'Save'}
+          style={{ flexShrink: 0 }}
+        >
+          {journal.dirty ? 'Save' : journal.savedAt ? 'Saved' : 'Save'}
+        </button>
+      </div>
+      <textarea
+        className="input"
+        rows={4}
+        style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
+        placeholder="What did I work on? What clicked? What still feels shaky? What is the smallest next step?"
+        value={journal.text}
+        onChange={(event) => setJournal((prev) => ({ ...prev, text: event.target.value, dirty: true }))}
+        onBlur={() => {
+          if (journal.dirty) saveJournal();
+        }}
+      />
+    </div>
+  );
+
+  const sessionPanels: StudySessionPanel[] = [
+    {
+      id: 'timer',
+      label: 'Timer',
+      icon: <Clock size={16} aria-hidden="true" />,
+      trailing:
+        timer.state !== 'idle' ? (
+          <span
+            className="qv-fs-xs"
+            style={{ fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-muted)' }}
+          >
+            {formatTimer(displaySeconds)}
+          </span>
+        ) : undefined,
+      content: timerPanel,
+    },
+    {
+      id: 'plan',
+      label: 'Plan',
+      icon: <BookOpen size={16} aria-hidden="true" />,
+      content: planPanel,
+    },
+    {
+      id: 'journal',
+      label: 'Journal',
+      icon: <NotebookPen size={16} aria-hidden="true" />,
+      trailing: journal.dirty ? (
+        <span className="qv-fs-xs" style={{ color: 'var(--warning)' }} aria-hidden="true">
+          •
+        </span>
+      ) : undefined,
+      content: journalPanel,
+    },
+  ];
+
   return (
     <div className="page-container">
       <PageHeader
@@ -368,43 +504,9 @@ export default function Today() {
           ) : null
         }
         actions={
-          <div className="qv-row-2">
-            <div
-              className="today-timer-pill"
-              style={{
-                display: 'flex',
-                gap: 'var(--space-1)',
-                alignItems: 'center',
-                padding: 'var(--space-1) var(--space-2)',
-                borderRadius: 'var(--radius-md, 8px)',
-                border: '1px solid var(--border)',
-                fontFamily: 'var(--font-mono, monospace)',
-                minWidth: 110,
-                justifyContent: 'center',
-              }}
-              title="Study session timer — counts elapsed focus time; persists to studySessions on Stop"
-            >
-              <span className="qv-fw-semibold">{formatTimer(displaySeconds)}</span>
-              {timer.state === 'idle' && (
-                <button className="btn-icon btn-ghost" onClick={startTimer} aria-label="Start study timer">▶</button>
-              )}
-              {timer.state === 'running' && (
-                <>
-                  <button className="btn-icon btn-ghost" onClick={pauseTimer} aria-label="Pause study timer">⏸</button>
-                  <button className="btn-icon btn-ghost" onClick={stopTimer} aria-label="Stop study timer">⏹</button>
-                </>
-              )}
-              {timer.state === 'paused' && (
-                <>
-                  <button className="btn-icon btn-ghost" onClick={startTimer} aria-label="Resume study timer">▶</button>
-                  <button className="btn-icon btn-ghost" onClick={stopTimer} aria-label="Stop study timer">⏹</button>
-                </>
-              )}
-            </div>
-            <button className="btn btn-secondary" onClick={refresh} disabled={refreshing}>
-              <RefreshCw size={16} /> {refreshing ? 'Refreshing…' : 'Refresh plan'}
-            </button>
-          </div>
+          <button className="btn btn-secondary" onClick={refresh} disabled={refreshing}>
+            <RefreshCw size={16} /> {refreshing ? 'Refreshing…' : 'Refresh plan'}
+          </button>
         }
       />
 
@@ -414,33 +516,12 @@ export default function Today() {
         </Surface>
       ) : (
         <>
-          <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
-            <div className="flex-between qv-row-3">
-              <p className="muted-copy qv-m-0">{plan.headline}</p>
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={generateNarrative}
-                disabled={narrative.state === 'loading'}
-                title="Generate a personalized rationale for today's plan via your local model"
-              >
-                {narrative.state === 'loading' ? 'Thinking…' : narrative.text ? 'Regenerate narrative' : '🤖 Why this plan today'}
-              </button>
-            </div>
+          <OnboardingResume onResume={() => navigate('/')} />
 
-            {narrative.state === 'done' && narrative.text && (
-              <p
-                className="qv-callout qv-mt-3"
-                style={{ whiteSpace: 'pre-line' }}
-              >
-                {narrative.text}
-              </p>
-            )}
-            {narrative.state === 'error' && (
-              <p className="qv-text-danger qv-fs-sm qv-mt-2">
-                {narrative.error}
-              </p>
-            )}
-            {top && (
+          <StudySessionCard panels={sessionPanels} />
+
+          {top && (
+            <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
               <Link
                 to={top.path}
                 className="qv-card-lg"
@@ -448,7 +529,6 @@ export default function Today() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 'var(--space-4)',
-                  marginTop: 'var(--space-4)',
                   background: 'var(--surface-2, rgba(120, 180, 255, 0.06))',
                   textDecoration: 'none',
                   color: 'inherit',
@@ -464,8 +544,8 @@ export default function Today() {
                 </div>
                 <ChevronRight size={28} style={{ flexShrink: 0 }} />
               </Link>
-            )}
-          </Surface>
+            </Surface>
+          )}
 
           {rest.length > 0 && (
             <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-6)' }}>
@@ -616,35 +696,6 @@ export default function Today() {
             </Surface>
           )}
 
-          <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-6)' }}>
-            <div className="flex-between qv-row-3-start">
-              <div>
-                <StatusBadge tone="accent">Daily journal</StatusBadge>
-                <p className="muted-copy qv-mt-1" style={{ marginBottom: 0 }}>
-                  One-paragraph reflection on today's study session. Stays in your local vault, per-date.
-                </p>
-              </div>
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={saveJournal}
-                disabled={!journal.dirty}
-                title={journal.savedAt ? `Last saved ${new Date(journal.savedAt).toLocaleTimeString()}` : 'Save'}
-              >
-                {journal.dirty ? 'Save' : journal.savedAt ? 'Saved' : 'Save'}
-              </button>
-            </div>
-            <textarea
-              className="input qv-mt-2"
-              rows={4}
-              style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
-              placeholder="What did I work on? What clicked? What still feels shaky? What is the smallest next step?"
-              value={journal.text}
-              onChange={(event) => setJournal((prev) => ({ ...prev, text: event.target.value, dirty: true }))}
-              onBlur={() => {
-                if (journal.dirty) saveJournal();
-              }}
-            />
-          </Surface>
         </>
       )}
     </div>
