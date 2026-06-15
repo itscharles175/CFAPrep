@@ -167,6 +167,64 @@ jobs:
             dist/reports/visual-regression.json
           retention-days: 14
 
+  # QA-1 / K4-0: the /lsat/* routes in the visual + a11y gates. The vendored LSAT
+  # domain is served by the SAME production build (src/main.jsx mounts it under a
+  # `<BrowserRouter basename="/lsat">`), so this job builds once, installs the
+  # Playwright-managed Chromium (as `a11y` / `visual` do), then re-runs the SAME
+  # two gate scripts scoped to LSAT via INCLUDE_LSAT_ROUTES=1 + LSAT_ROUTES_ONLY=1
+  # (scripts/qa-helpers.mjs `selectGateRoutes`): the visual gate screenshots each
+  # LSAT route in BOTH themes × BOTH viewports (K4-0) and the a11y gate runs the
+  # WCAG 2.1 A/AA sweep + the LSAT contrast matrix. Baselines under
+  # tests/visual-baselines/ are gitignored, so the first run bootstraps them and
+  # passes; thereafter an in-run drift over tolerance fails the job. Runs in
+  # parallel with `quality` — no host slowdown. (Roadmap QA-1 + K4-0/K4-1.)
+  lsat-qa-gates:
+    name: LSAT routes — visual + a11y (light + dark, desktop + mobile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      INCLUDE_LSAT_ROUTES: '1'
+      LSAT_ROUTES_ONLY: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      # Both gates launch headless Chromium via playwright-core; there is no
+      # system browser on the runner, so install Playwright's managed Chromium
+      # (with its Linux system libs) — a11y-helpers.mjs resolves it via
+      # chromium.executablePath().
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Visual regression check (LSAT routes)
+        run: npm run visual:regression
+
+      - name: WCAG AA contrast check (LSAT routes)
+        run: npm run a11y:check
+
+      - name: Upload LSAT QA reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-lsat-qa
+          path: |
+            dist/reports/visual/
+            dist/reports/visual-regression.json
+            dist/reports/a11y-check.json
+          retention-days: 14
+
   # The vendored LSAT subtree runs on the host's hoisted toolchain (no separate
   # node_modules) but is excluded from the host's strict tsc + the default
   # `npm test`. This parallel job is its safety net: 251 tests + a strict

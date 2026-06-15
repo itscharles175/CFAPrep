@@ -25,6 +25,33 @@ export const viewports = {
   mobile: { width: 390, height: 844 },
 };
 
+// QA-1 / K4-0 — opt-in inclusion of the /lsat/* routes in the QA gates.
+//
+// The vendored LSAT domain is served by the same production build, so the gates
+// CAN crawl /lsat/* — but the host's existing `visual` / `a11y` CI jobs commit
+// only host baselines, so LSAT coverage is gated behind this flag to keep those
+// jobs unchanged. The dedicated `lsat-qa-gates` CI job sets INCLUDE_LSAT_ROUTES=1
+// (and LSAT_ROUTES_ONLY=1) so the LSAT surface is exercised + baselined there.
+export const includeLsatRoutes = process.env.INCLUDE_LSAT_ROUTES === '1';
+// When set, run ONLY the LSAT routes (the dedicated job's mode) so its baselines
+// + reports stay scoped to /lsat/* and don't duplicate the host gate's work.
+export const lsatRoutesOnly = process.env.LSAT_ROUTES_ONLY === '1';
+
+/**
+ * Merge a host route set with the LSAT route set per the env flags above. Both
+ * lists share the same shape (the consumer only reads fields common to both),
+ * so the result is a single array the gate iterates uniformly.
+ *
+ *   - default (no flags): host routes only — host CI jobs are unchanged.
+ *   - INCLUDE_LSAT_ROUTES=1: host ∪ LSAT.
+ *   - INCLUDE_LSAT_ROUTES=1 + LSAT_ROUTES_ONLY=1: LSAT only.
+ */
+export function selectGateRoutes(hostRoutes, lsatRoutes) {
+  if (!includeLsatRoutes) return hostRoutes;
+  if (lsatRoutesOnly) return lsatRoutes;
+  return [...hostRoutes, ...lsatRoutes];
+}
+
 export const sourceStateNames = ['empty-source', 'synthetic-source'];
 
 const artifactRoots = ['dist', 'qa-screenshots', 'playwright-report', 'test-results'];

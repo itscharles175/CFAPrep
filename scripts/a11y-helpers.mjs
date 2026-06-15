@@ -25,7 +25,7 @@
 
 import { access } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { browserCandidates, firstExistingPath } from './qa-helpers.mjs';
+import { browserCandidates, firstExistingPath, includeLsatRoutes, lsatRoutesOnly } from './qa-helpers.mjs';
 
 /* global window */
 
@@ -110,7 +110,7 @@ export async function seedThemeInitScript(context, theme) {
  *   - accents   → /cfa, /excel, /quant in LIGHT theme, where tokens.css applies
  *                 the per-domain light-mode accent overrides this gate protects.
  */
-export const contrastMatrix = [
+const hostContrastMatrix = [
   { id: 'style-primitives', path: '/style', themes: ['dark', 'light'], label: 'UI primitives + Style gallery' },
   { id: 'analytics-charts', path: '/analytics', themes: ['dark', 'light'], label: 'Analytics chart SVGs' },
   { id: 'knowledge-graph-charts', path: '/knowledge-graph', themes: ['dark', 'light'], label: 'Knowledge-graph canvas' },
@@ -118,3 +118,26 @@ export const contrastMatrix = [
   { id: 'accent-excel-light', path: '/excel', themes: ['light'], label: 'Excel light-mode accent' },
   { id: 'accent-quant-light', path: '/quant', themes: ['light'], label: 'Quant light-mode accent' },
 ];
+
+/**
+ * QA-1 / K4-0 — the focused CONTRAST surfaces for the vendored LSAT domain
+ * (served at /lsat/*). Opt-in via INCLUDE_LSAT_ROUTES=1 (the dedicated
+ * `lsat-qa-gates` CI job). These mirror the host curation intent: the richest
+ * primitive surfaces (analytics charts, the question bank's dense form/table
+ * chrome, settings' form-dense panels) in BOTH themes, so an AA contrast miss in
+ * the LSAT shell fails the gate too. Routes are app-relative paths under the
+ * /lsat basename — the same URLs the host serves.
+ */
+const lsatContrastMatrix = [
+  { id: 'lsat-analytics-charts', path: '/lsat/analytics', themes: ['dark', 'light'], label: 'LSAT analytics chart SVGs' },
+  { id: 'lsat-bank-forms', path: '/lsat/bank', themes: ['dark', 'light'], label: 'LSAT question bank forms + tables' },
+  { id: 'lsat-settings-forms', path: '/lsat/settings', themes: ['dark', 'light'], label: 'LSAT settings form-dense panels' },
+];
+
+// Host-only by default; host ∪ LSAT (or LSAT-only) when the flags are set, so the
+// dedicated job's contrast pass is scoped to /lsat/* and never re-checks the host.
+export const contrastMatrix = !includeLsatRoutes
+  ? hostContrastMatrix
+  : lsatRoutesOnly
+    ? lsatContrastMatrix
+    : [...hostContrastMatrix, ...lsatContrastMatrix];

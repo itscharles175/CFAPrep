@@ -2,11 +2,12 @@ import { access, mkdir, writeFile } from 'node:fs/promises';
 import { preview } from 'vite';
 import { chromium } from 'playwright-core';
 import AxeBuilder from '@axe-core/playwright';
-import { screenshotRoutes } from '../src/routes/routeManifest.ts';
+import { lsatScreenshotRoutes, screenshotRoutes } from '../src/routes/routeManifest.ts';
 import {
   applySourceState,
   routePathForSourceState,
   routeSourceStates,
+  selectGateRoutes,
   summarizeRouteFailures,
   viewports,
 } from './qa-helpers.mjs';
@@ -53,6 +54,15 @@ if (!executablePath) {
 
 const address = server.resolvedUrls?.local?.[0] || 'http://127.0.0.1:4175/';
 const browser = await chromium.launch({ executablePath, headless: true });
+
+// QA-1 / K4-0 — the routes Pass 1 sweeps. Host `screenshotRoutes` by default;
+// host ∪ LSAT (or LSAT-only) when INCLUDE_LSAT_ROUTES / LSAT_ROUTES_ONLY are set
+// (the dedicated `lsat-qa-gates` CI job). Both lists share the shape this gate
+// reads (id, path, expectedText, viewports), so the sweep is uniform — LSAT
+// routes get `routeSourceStates(route)` → ['default'] (their ids aren't in the
+// vault/cfa special-cased sets) and both viewports from `route.viewports`.
+const gateRoutes = selectGateRoutes(screenshotRoutes, lsatScreenshotRoutes);
+
 const failures = [];
 const routeResults = [];
 const contrastResults = [];
@@ -77,7 +87,7 @@ try {
   // now also covering the light palette.
   for (const theme of a11yThemes) {
     await withThemeContext(theme, async (page) => {
-      for (const route of screenshotRoutes) {
+      for (const route of gateRoutes) {
         for (const sourceState of routeSourceStates(route)) {
           for (const viewportName of route.viewports) {
             const startedAt = Date.now();

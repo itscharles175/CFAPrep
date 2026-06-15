@@ -1,3 +1,12 @@
+// QA-1 / K4-0: read the vendored LSAT route manifest so the QA gates (visual,
+// a11y, smoke) can crawl the /lsat/* surface, not just host routes. We import the
+// SOURCE OF TRUTH for LSAT paths/labels rather than re-listing them, so a path
+// rename in the LSAT manifest is caught here at build time. The manifest's own
+// imports are inert for the gate (lucide icons + lazy `import()` arrows that are
+// never invoked at module-eval time), so importing it from a plain node script
+// via the TS loader is safe.
+import { routeManifest as lsatRouteManifest } from '../domains/lsat/lib/routeManifest';
+
 export type RouteBoundary = 'page' | 'domain';
 export type RouteDomain = 'home' | 'cfa' | 'quant' | 'excel' | 'vault' | 'analytics' | 'ops' | 'tool';
 export type RouteAccentRole = 'study' | 'exam' | 'quant' | 'excel' | 'vault' | 'analytics' | 'ops' | 'danger';
@@ -382,3 +391,87 @@ export const screenshotRoutes = appRoutes
     preferredLayout: route.preferredLayout,
     viewports: ['desktop', 'mobile'] as const,
   }));
+
+// ──────────────────────────────────────────────────────────────────────────
+// QA-1 / K4-0 — LSAT routes for the QA gates (visual + a11y + smoke).
+//
+// The vendored LSAT domain is served by the SAME production build at /lsat/*
+// (src/main.jsx mounts LsatRoot under a `<BrowserRouter basename="/lsat">`, so
+// the LSAT manifest's app-relative paths map to host URLs by prefixing /lsat:
+// "/" → "/lsat", "/srs" → "/lsat/srs", etc.). These derived arrays let the gate
+// scripts crawl that surface without re-listing routes: paths/labels come from
+// the LSAT manifest (the single source of truth), and only the per-route
+// `expectedText` — a deterministic body-text anchor the gates wait for — lives
+// here, since the LSAT manifest carries no such field.
+//
+// CURATION: we cover the study-mode list/detail/setup pages whose page header
+// renders the same heading across every load/empty/loaded branch (so the frame
+// + axe scan are reproducible offline, with no sidecar). We intentionally skip:
+//   - "/dashboard" — its <PageLayout title> flips between "Welcome back" /
+//     "Dashboard" / "First light" by state, so no single stable anchor exists;
+//   - "/notebook" — an alias whose canonicalPath is "/" (same page as "/lsat");
+//   - the full-bleed exam runners (/take, /exam, /blind-review, /popout) — they
+//     need a started session to render and are the K4-11 high-risk batch.
+const LSAT_ROUTE_PREFIX = '/lsat';
+
+// Deterministic body-text anchor per LSAT manifest path. A path present here is
+// included in the gates; one absent (or that maps to a non-stable heading) is
+// skipped. Keyed by the LSAT-manifest path (app-relative, no /lsat prefix).
+const lsatRouteExpectedText: Record<string, string> = {
+  '/': 'Notebook OS',
+  '/practice': 'Practice',
+  '/preptests': 'PrepTests',
+  '/drills': 'Drills',
+  '/playlists': 'Smart sets',
+  '/srs': 'SRS',
+  '/review': 'Review',
+  '/analytics': 'Analytics',
+  '/tutor': 'Tutor',
+  '/rc-lab': 'RC Lab',
+  '/bank': 'Question bank',
+  '/content-ops': 'Content Ops',
+  '/quarantine': 'Generation quarantine',
+  '/import': 'Import a PrepTest',
+  '/settings': 'Settings',
+};
+
+// Stable, file-safe id for a baseline filename (tests/visual-baselines/<id>-…).
+function lsatRouteId(path: string): string {
+  const slug = path === '/' ? 'home' : path.replace(/^\//, '').replace(/\//g, '-');
+  return `lsat-${slug}`;
+}
+
+// Host URL for an LSAT manifest path (the basename prefix the host serves under).
+function lsatHostPath(path: string): string {
+  return path === '/' ? LSAT_ROUTE_PREFIX : `${LSAT_ROUTE_PREFIX}${path}`;
+}
+
+// Drive both the screenshot + smoke LSAT sets off ONE filtered manifest pass so
+// they never drift, and so a manifest path that loses its `expectedText` anchor
+// drops out of every gate together. `canonicalPath` aliases (e.g. "/notebook")
+// are excluded — only their canonical target ("/") is crawled.
+const lsatGateRoutes = lsatRouteManifest
+  .filter((entry) => !entry.canonicalPath && entry.path in lsatRouteExpectedText)
+  .map((entry) => ({
+    id: lsatRouteId(entry.path),
+    manifestPath: entry.path,
+    path: lsatHostPath(entry.path),
+    expectedText: lsatRouteExpectedText[entry.path],
+    label: entry.label,
+  }));
+
+export const lsatSmokeRoutes: Array<[string, string]> = lsatGateRoutes.map(
+  (route) => [route.path, route.expectedText] as [string, string],
+);
+
+export const lsatScreenshotRoutes = lsatGateRoutes.map((route) => ({
+  id: route.id,
+  path: route.path,
+  expectedText: route.expectedText,
+  domain: 'lsat' as const,
+  // LSAT pages render under their own accent/layout chrome today (pre-K4); the
+  // gate only needs these fields to exist, so we tag them as a tool surface.
+  accentRole: 'study' as const,
+  preferredLayout: 'tool' as const,
+  viewports: ['desktop', 'mobile'] as const,
+}));
