@@ -82,18 +82,24 @@
     --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Monaco,
       Consolas, 'Liberation Mono', 'Courier New', monospace;
 
-    /* Font sizes */
+    /* Font sizes — UA5: this @layer tokens copy now mirrors the LSAT domain's px
+       ramp (src/domains/lsat/_meta/tailwind.config.js `fontSize`), the same values
+       the unlayered host :root in index.css restates (and which win the cascade).
+       Keeping them identical kills the prior self-conflict where this layer carried a
+       larger upper ramp (xl 22 / 2xl 28 / 3xl 36 / 4xl 48) that never applied because
+       index.css's unlayered :root beat it. Now there's one ramp: 12/14/15/17/20/24/30/38. */
     --fs-xs:   0.75rem;    /* 12px */
-    --fs-sm:   0.8125rem;  /* 13px */
-    --fs-base: 0.875rem;   /* 14px */
+    --fs-sm:   0.875rem;   /* 14px */
+    --fs-base: 0.9375rem;  /* 15px — LSAT base */
     --fs-md:   1rem;       /* 16px */
-    --fs-lg:   1.125rem;   /* 18px */
-    --fs-xl:   1.375rem;   /* 22px */
-    --fs-2xl:  1.75rem;    /* 28px */
-    --fs-3xl:  2.25rem;    /* 36px */
-    --fs-4xl:  3rem;       /* 48px */
+    --fs-lg:   1.0625rem;  /* 17px — LSAT reading anchor */
+    --fs-xl:   1.25rem;    /* 20px */
+    --fs-2xl:  1.5rem;     /* 24px */
+    --fs-3xl:  1.875rem;   /* 30px */
+    --fs-4xl:  2.375rem;   /* 38px */
 
-    /* Line heights */
+    /* Line heights — UA5: restated in index.css's unlayered :root too (so they win
+       the cascade); kept here in sync for a reviewer auditing tokens.css. */
     --lh-tight:   1.2;
     --lh-snug:    1.35;
     --lh-normal:  1.55;
@@ -139,25 +145,51 @@
 
     /* ─────────────────────────────────────────────────────────────
      * 5. ELEVATION — progressive box-shadow depth
+     *
+     * UA3: 5-step ramp (--elevation-0..4) matching the LSAT domain's scale
+     * (src/domains/lsat/index.css). The authoritative values live in the
+     * unlayered host :root (index.css) — which wins the cascade over this
+     * @layer tokens block — and are mirrored here so a reviewer reading
+     * tokens.css sees the full intent. --elevation-floating aliases
+     * --elevation-4 (the old "floating" name kept for existing consumers).
      * ───────────────────────────────────────────────────────────── */
 
     --elevation-0:        none;
     --elevation-1:        0 1px 2px rgba(0, 0, 0, 0.28);
     --elevation-2:        0 4px 12px rgba(0, 0, 0, 0.28);
     --elevation-3:        0 8px 22px rgba(0, 0, 0, 0.30);
-    --elevation-floating: 0 18px 44px rgba(0, 0, 0, 0.38),
+    --elevation-4:        0 18px 44px rgba(0, 0, 0, 0.38),
                           0 0 0 1px rgba(148, 163, 184, 0.08);
+    --elevation-floating: var(--elevation-4);
 
     /* ─────────────────────────────────────────────────────────────
-     * 6. MOTION
+     * 6. MOTION — UA3: 3 canonical easing curves + duration scale, unified
+     *    with the LSAT domain's motion tokens (src/domains/lsat/lib/motion.ts:
+     *    standard [0.2,0,0,1], emphasized [0.3,0,0,1], exit [0.4,0,1,1];
+     *    fast 120ms / base 200ms / slow 320ms). The host :root in index.css
+     *    restates these unlayered (winning the cascade); kept here in sync.
+     *    --ease-default is retained as an alias of the standard curve so prior
+     *    consumers of that name keep resolving.
      * ───────────────────────────────────────────────────────────── */
 
-    --ease-default:    cubic-bezier(0.2, 0.8, 0.2, 1);
-    --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+    --ease-standard:   cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+    --ease-exit:       cubic-bezier(0.4, 0, 1, 1);
+    --ease-default:    var(--ease-standard);
 
     --duration-fast:  120ms;
     --duration-base:  200ms;
     --duration-slow:  320ms;
+
+    /* ─────────────────────────────────────────────────────────────
+     * 6b. FOCUS — UA3: ring + ring-offset pair matching the LSAT domain
+     *     (src/domains/lsat/index.css consumes `hsl(var(--ring))` + 2px offset).
+     *     --ring is a BARE HSL triplet (= host --accent); authoritative values
+     *     are in the unlayered host :root (index.css), mirrored here.
+     * ───────────────────────────────────────────────────────────── */
+
+    --ring:        213.1 93.9% 67.8%; /* = host --accent (#60A5FA blue-400) */
+    --ring-offset: 2px;
 
     /* ─────────────────────────────────────────────────────────────
      * 7. Z-INDEX
@@ -369,57 +401,73 @@
  * UTILITY CLASSES — token-aware shorthand for the most common
  * inline-style patterns. Lives outside @layer tokens so callers
  * win against the base layer without ! .
- * ───────────────────────────────────────────────────────────── */
+ *
+ * UA6 — thin Tailwind aliases. The LAYOUT/SPACING/MARGIN utilities below are
+ * now expressed with `@apply` over Tailwind's primitives instead of bespoke
+ * declarations, so the host shares one geometry vocabulary with the LSAT
+ * domain (which is Tailwind-native). This is a ZERO-PIXEL change: Tailwind's
+ * default spacing scale is byte-identical to the host space tokens
+ * (`gap-1`=0.25rem=`--space-1` … `gap-6`=1.5rem=`--space-6`; `mt-2`=0.5rem,
+ * `m-0`=0, `ml-auto`=auto), verified against resolveConfig. `@apply` resolves
+ * at build time against tailwind.config.js even though this file carries no
+ * `@tailwind` directives (Tailwind processes @apply globally via PostCSS).
+ *
+ * The class NAMES are unchanged, so every existing consumer (~450 references
+ * across src/) keeps working with no markup churn. The COLOR / TYPE / RADIUS /
+ * card / callout / chip utilities further down are intentionally NOT migrated:
+ * Tailwind's same-named utilities (text-muted, bg-card, rounded-md, …) resolve
+ * to the LSAT graphite/HSL token values, so `@apply`-ing them would recolour
+ * the host and shrink its radii (breaking the UA1 palette + WCAG gate). Those
+ * keep reading the host's own `--color-*` / `--fs-*` / `--radius-*` tokens
+ * directly. A full inline-style → utility markup sweep remains a follow-up. */
 
-/* Flex stacks */
-.qv-stack-1 { display: flex; flex-direction: column; gap: var(--space-1); }
-.qv-stack-2 { display: flex; flex-direction: column; gap: var(--space-2); }
-.qv-stack-3 { display: flex; flex-direction: column; gap: var(--space-3); }
-.qv-stack-4 { display: flex; flex-direction: column; gap: var(--space-4); }
-.qv-stack-6 { display: flex; flex-direction: column; gap: var(--space-6); }
+/* Flex stacks — Tailwind flex + spacing (gap-N === --space-N). */
+.qv-stack-1 { @apply flex flex-col gap-1; }
+.qv-stack-2 { @apply flex flex-col gap-2; }
+.qv-stack-3 { @apply flex flex-col gap-3; }
 
-/* Flex rows */
-.qv-row-1 { display: flex; gap: var(--space-1); align-items: center; }
-.qv-row-2 { display: flex; gap: var(--space-2); align-items: center; }
-.qv-row-3 { display: flex; gap: var(--space-3); align-items: center; }
-.qv-row-4 { display: flex; gap: var(--space-4); align-items: center; }
-.qv-row-3-start { display: flex; gap: var(--space-3); align-items: flex-start; }
-.qv-row-between { display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; }
+/* Flex rows — Tailwind flex + spacing (gap-N === --space-N). */
+.qv-row-1 { @apply flex items-center gap-1; }
+.qv-row-2 { @apply flex items-center gap-2; }
+.qv-row-3 { @apply flex items-center gap-3; }
+.qv-row-4 { @apply flex items-center gap-4; }
+.qv-row-3-start { @apply flex items-start gap-3; }
+.qv-row-between { @apply flex items-center justify-between gap-3; }
 
-/* Card surfaces — bordered + padded + rounded patterns scattered across pages */
+/* Card surfaces — bordered + padded + rounded patterns scattered across pages.
+   UA6: padding uses Tailwind spacing (p-3=--space-3, p-5=--space-5, identical),
+   but border + radius keep the host tokens (Tailwind's rounded-md/border-border
+   resolve to LSAT's radius/HSL values, which would shrink the corner + recolour
+   the hairline). */
 .qv-card {
-  padding: var(--space-3);
+  @apply p-3;
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
 }
 .qv-card-lg {
-  padding: var(--space-5);
+  @apply p-5;
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
 }
 
-/* The accent-bordered callout pattern used on every grounded-answer + AI panel */
+/* The accent-bordered callout pattern used on every grounded-answer + AI panel.
+   UA6: padding via Tailwind (p-3=--space-3); accent border, surface bg, radius,
+   and reading leading keep host tokens (no Tailwind equivalents that preserve
+   the host values). The -warning/-danger variants were grep-confirmed unused
+   and removed in UA6 — reintroduce from git history if a tinted callout is
+   needed (they mirrored .qv-callout with --color-warning/-danger borders). */
 .qv-callout {
-  padding: var(--space-3);
+  @apply p-3;
   border-left: 3px solid var(--color-accent);
   background: var(--color-bg-surface-2);
   border-radius: var(--radius-md);
   line-height: var(--lh-normal);
 }
-.qv-callout-warning {
-  padding: var(--space-3);
-  border-left: 3px solid var(--color-warning);
-  background: rgba(245, 158, 11, 0.06);
-  border-radius: var(--radius-md);
-}
-.qv-callout-danger {
-  padding: var(--space-3);
-  border-left: 3px solid var(--color-danger);
-  background: rgba(239, 68, 68, 0.06);
-  border-radius: var(--radius-md);
-}
 
-/* Text-color shorthands */
+/* Text-color shorthands. UA6: NOT @apply-migrated — Tailwind's text-muted /
+   text-success / text-danger / text-warning resolve to the LSAT graphite/HSL
+   token values (hsl(var(--muted)) etc.), so aliasing them would recolour the
+   host and break the WCAG gate. These read the host's own semantic colors. */
 .qv-text-muted     { color: var(--color-text-muted); }
 .qv-text-secondary { color: var(--color-text-secondary); }
 .qv-text-primary   { color: var(--color-text-primary); }
@@ -427,24 +475,31 @@
 .qv-text-danger    { color: var(--color-danger); }
 .qv-text-warning   { color: var(--color-warning); }
 
-/* Font-size shorthands */
+/* Font-size shorthands. UA6: kept on the host --fs-* ramp (Tailwind's text-xs
+   /sm/base carry their own line-height + a different px scale, so @apply would
+   shift size AND leading). qv-fs-lg was grep-confirmed unused and removed. */
 .qv-fs-xs   { font-size: var(--fs-xs); }
 .qv-fs-sm   { font-size: var(--fs-sm); }
 .qv-fs-md   { font-size: var(--fs-md); }
-.qv-fs-lg   { font-size: var(--fs-lg); }
 
-/* Font-weight shorthands */
+/* Font-weight shorthands — host --fw-* ramp (= Tailwind numerics, kept on the
+   token so the type-voice stays tunable in one place). */
 .qv-fw-semibold { font-weight: var(--fw-semibold); }
 .qv-fw-bold     { font-weight: var(--fw-bold); }
 
-/* Mono font */
+/* Mono font — host --font-mono (Geist Mono). Tailwind's font-mono resolves to
+   the same family via theme.fontFamily.mono, but the token keeps it single-
+   sourced with the rest of the host type system. */
 .qv-mono { font-family: var(--font-mono); }
 
-/* Compact citation chip — used wherever locators show up */
+/* Compact citation chip — used wherever locators show up. UA6: padding-y/x via
+   Tailwind (px-2=--space-2; py is 1px, no scale step), but font size/weight,
+   the mono family, the accent fill/border, and radius keep host tokens (the
+   accent + radius diverge from Tailwind's resolved values). */
 .qv-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px var(--space-2);
+  @apply inline-flex items-center px-2;
+  padding-top: 1px;
+  padding-bottom: 1px;
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   font-family: var(--font-mono);
@@ -454,14 +509,15 @@
   border-radius: var(--radius-sm);
 }
 
-/* Tight margin resets used inside Surface panels */
-.qv-m-0  { margin: 0; }
-.qv-mt-1 { margin-top: var(--space-1); }
-.qv-mt-2 { margin-top: var(--space-2); }
-.qv-mt-3 { margin-top: var(--space-3); }
-.qv-mb-2 { margin-bottom: var(--space-2); }
-.qv-mb-3 { margin-bottom: var(--space-3); }
-.qv-ml-1 { margin-left: var(--space-1); }
-.qv-ml-2 { margin-left: var(--space-2); }
-.qv-ml-3 { margin-left: var(--space-3); }
-.qv-ml-auto { margin-left: auto; }
+/* Tight margin resets used inside Surface panels. UA6: Tailwind margin scale
+   (mt-N/mb-N/ml-N === --space-N; m-0 === 0; ml-auto === auto). qv-ml-3 was
+   grep-confirmed unused and removed. */
+.qv-m-0  { @apply m-0; }
+.qv-mt-1 { @apply mt-1; }
+.qv-mt-2 { @apply mt-2; }
+.qv-mt-3 { @apply mt-3; }
+.qv-mb-2 { @apply mb-2; }
+.qv-mb-3 { @apply mb-3; }
+.qv-ml-1 { @apply ml-1; }
+.qv-ml-2 { @apply ml-2; }
+.qv-ml-auto { @apply ml-auto; }

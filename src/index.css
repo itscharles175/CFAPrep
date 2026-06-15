@@ -55,20 +55,57 @@
   --focus-ring: rgba(96,165,250,0.26);
   --chart-grid: rgba(148,163,184,0.13);
 
+  /* Focus ring — UA3: ring + ring-offset system matching the LSAT domain
+     (src/domains/lsat/index.css consumes `hsl(var(--ring))` with a 2px offset).
+     --ring is a BARE HSL triplet (= host --accent #60A5FA, identical to the
+     --primary triplet in unified-palette.css) so `hsl(var(--ring))` resolves the
+     accent. --focus-ring (rgba glow) above is retained for its existing
+     box-shadow / outline consumers. */
+  --ring: 213.1 93.9% 67.8%;   /* = host --accent (#60A5FA blue-400) */
+  --ring-offset: 2px;
+
   /* Typography — strict-offline: the Google Fonts CDN that previously
      supplied Inter and JetBrains Mono has been removed. Names retained at the
      head so users who already have the fonts installed still see them;
      otherwise the OS system fonts take over (clean across every platform). */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  --fs-xs: 0.75rem;
-  --fs-sm: 0.8125rem;
-  --fs-base: 0.9375rem;
-  --fs-lg: 1.125rem;
-  --fs-xl: 1.25rem;
-  --fs-2xl: 1.5rem;
-  --fs-3xl: 1.875rem;
-  --fs-4xl: 2.5rem;
+
+  /* Type scale — UA5: converged onto the LSAT domain's px ramp
+     (src/domains/lsat/_meta/tailwind.config.js `fontSize`: 12/14/15/17/20/24/30/38px,
+     the 17px reading anchor at --fs-lg). Stated unlayered in the host :root so these
+     win the cascade over the mirrored @layer tokens copy in tokens.css. Sizes are in
+     rem against the 16px html root, so each comment notes the px equivalent. Most of
+     the host ramp already matched LSAT; the convergence deltas are sm 13→14px,
+     lg 18→17px, 4xl 40→38px, plus the new --fs-md 16px tier (was tokens-only). The
+     companion --lh-* / --fw-* tokens below give headings + type-voices the LSAT
+     line-heights and weights without per-rule literals. */
+  --fs-xs: 0.75rem;     /* 12px */
+  --fs-sm: 0.875rem;    /* 14px */
+  --fs-base: 0.9375rem; /* 15px — LSAT base */
+  --fs-md: 1rem;        /* 16px */
+  --fs-lg: 1.0625rem;   /* 17px — LSAT reading anchor */
+  --fs-xl: 1.25rem;     /* 20px */
+  --fs-2xl: 1.5rem;     /* 24px */
+  --fs-3xl: 1.875rem;   /* 30px */
+  --fs-4xl: 2.375rem;   /* 38px */
+
+  /* Line heights — UA5: mirror tokens.css / the LSAT ramp's leading so headings and
+     body share one vocabulary (tight 1.2 for display headings, snug 1.35 for section
+     heads, normal 1.55 for dense copy, relaxed 1.7 for long-form reading). Stated
+     here unlayered so they're available app-wide regardless of layer order. */
+  --lh-tight: 1.2;
+  --lh-snug: 1.35;
+  --lh-normal: 1.55;
+  --lh-relaxed: 1.7;
+
+  /* Font weights — UA5: named ramp matching tokens.css; headings/type-voices read
+     these instead of bare numerals so the type-voice is tunable in one place. */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-black: 800;
 
   /* Spacing */
   --space-1: 0.25rem;
@@ -86,17 +123,39 @@
   --sidebar-width: 280px;
   --sidebar-collapsed: 64px;
   --topbar-height: 64px;
+
+  /* Radius — UA3: 4-value scale (xs/sm/md/lg) + xl + full, value-aligned with
+     the LSAT domain (src/domains/lsat/index.css: --radius 6px ≙ host --radius-sm,
+     md = radius-2px = 4px ≙ host --radius-xs, etc.). --radius-xs added here so the
+     host root (which wins the cascade over @layer tokens) exposes the full scale.
+     --radius-xl is RETAINED (the StyleGallery token board consumes it). */
+  --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 8px;
   --radius-xl: 10px;
   --radius-full: 9999px;
 
-  /* Shadows */
+  /* Shadows — legacy named ramp (kept for existing consumers). The canonical
+     elevation scale below mirrors these and is the unified vocabulary. */
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.28);
   --shadow-md: 0 8px 22px rgba(0,0,0,0.26);
   --shadow-lg: 0 18px 44px rgba(0,0,0,0.34);
   --shadow-glow: 0 0 0 1px rgba(96,165,250,0.18), 0 18px 44px rgba(0,0,0,0.24);
+
+  /* Elevation — UA3: 5-step shadow ramp matching the LSAT domain's
+     --elevation-0..4 (src/domains/lsat/index.css). Stated in the unlayered host
+     :root so it wins the cascade over the @layer tokens copy in tokens.css and so
+     the host Tailwind `shadow-e0..e4` utilities (tailwind.config.js boxShadow)
+     all resolve. Depths are tuned to the host's darker surfaces (heavier alpha
+     than LSAT's lighter graphite, same 5-rung structure). --elevation-floating is
+     an alias of --elevation-4 so the existing "floating" consumers keep working. */
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(0,0,0,0.28);
+  --elevation-2: 0 4px 12px rgba(0,0,0,0.28);
+  --elevation-3: 0 8px 22px rgba(0,0,0,0.30);
+  --elevation-4: 0 18px 44px rgba(0,0,0,0.38), 0 0 0 1px rgba(148,163,184,0.08);
+  --elevation-floating: var(--elevation-4);
 
   /* Surfaces */
   --glass-bg: rgba(20, 29, 43, 0.92);
@@ -108,12 +167,24 @@
   --surface-data: rgba(148, 163, 184, 0.075);
   --surface-soft: rgba(96, 165, 250, 0.06);
 
-  /* Transitions */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Motion — UA3: the 3 canonical easing curves + duration scale unified with
+     the LSAT domain's motion tokens (src/domains/lsat/lib/motion.ts:
+     standard [0.2,0,0,1], emphasized [0.3,0,0,1], exit [0.4,0,1,1];
+     fast 120ms / base 200ms / slow 320ms). These match the @layer tokens copy in
+     tokens.css; stated here in the unlayered host :root so the values win the
+     cascade. The legacy --ease-out alias now points at the canonical standard
+     curve (so the ~19 existing `var(--ease-out)` consumers adopt the unified feel
+     without per-rule edits); --ease-spring is retained for the toast overshoot
+     (LSAT models its single spring in JS, not as a CSS curve). All durations stay
+     under the existing prefers-reduced-motion damping below. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: var(--ease-standard);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --duration-fast: 150ms;
-  --duration-base: 250ms;
-  --duration-slow: 400ms;
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
 }
 
 :root[data-theme="light"] {
@@ -141,6 +212,9 @@
   --input-bg: #FFFFFF;
   --focus-ring: rgba(37,99,235,0.16);
   --chart-grid: rgba(15,23,42,0.1);
+  /* UA3: light-theme ring tracks the light --accent (#1D4ED8) for AA contrast on
+     white; --ring-offset is theme-agnostic and inherits from the dark :root. */
+  --ring: 224.3 76.3% 48%;     /* = light --accent (#1D4ED8) */
   --glass-bg: rgba(255, 255, 255, 0.94);
   --glass-border: rgba(15, 23, 42, 0.1);
   --surface-raised: rgba(255, 255, 255, 0.98);
@@ -173,6 +247,35 @@ body {
 }
 
 #root { min-height: 100vh; }
+
+/* ===== Headings — UA5 unified scale =====
+   Element-level defaults so any bare h1–h6 (and any markdown/long-form heading that
+   isn't already targeted by a scoped rule) speaks the converged LSAT ramp. The host's
+   existing scoped heading rules (`.page-header h1`, `.page-section h2`,
+   `.module-content h1`, etc.) have higher specificity and keep winning wherever they
+   apply, so this is a SAFETY-NET base — no existing styled heading changes except
+   through the --fs-* / --lh-* tokens it reads (which are the convergence point). The
+   ramp mirrors the LSAT leading: display heads ride --lh-tight, the rest --lh-snug.
+   color: inherit keeps headings on --text-primary unless a scoped rule recolors them. */
+h1, h2, h3, h4, h5, h6 {
+  color: inherit;
+  font-weight: var(--fw-black);
+  line-height: var(--lh-snug);
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+h1 { font-size: var(--fs-3xl); line-height: var(--lh-tight); }
+h2 { font-size: var(--fs-2xl); line-height: var(--lh-tight); font-weight: var(--fw-bold); }
+h3 { font-size: var(--fs-xl); font-weight: var(--fw-bold); }
+h4 { font-size: var(--fs-lg); font-weight: var(--fw-bold); }
+h5 { font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+h6 {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
 
 a { color: var(--accent); text-decoration: none; transition: color var(--duration-fast); }
 a:hover { color: var(--accent-hover); }
@@ -216,6 +319,17 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
+/* UA4: keyboard-focus ring parity with the LSAT input
+   (src/domains/lsat/.../input.tsx `focus-visible:ring-2 ring-offset-2`).
+   :focus-visible fires only for keyboard/programmatic focus, so pointer clicks
+   keep the softer border+glow above; keyboard users get the crisp accent ring
+   with a 2px offset gap. Reads the shared --ring / --ring-offset tokens. */
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 var(--ring-offset) var(--bg-primary),
+    0 0 0 calc(var(--ring-offset) + 2px) hsl(var(--ring));
+}
+
 :focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
@@ -223,10 +337,15 @@ input:focus, select:focus, textarea:focus {
 
 /* UC1: Global accent focus ring for keyboard navigation. Scoped off form
    controls (which keep their own border + box-shadow focus treatment above)
-   so it does not fight existing component focus styles. */
+   so it does not fight existing component focus styles.
+   UA3: the ring now reads the canonical --ring (HSL triplet) + --ring-offset
+   tokens — the same vocabulary as the LSAT domain's :focus-visible rule
+   (src/domains/lsat/index.css). Visually unchanged in the default app (--ring
+   resolves to the accent and --ring-offset is 2px), but the ring is now
+   theme/offset-driven through one shared token pair. */
 *:focus-visible:not(input):not(select):not(textarea) {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: var(--ring-offset);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -874,7 +993,11 @@ input:focus, select:focus, textarea:focus {
 
 .glass-card:hover {
   transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  /* UA4: hover lift rides the UA3 elevation ramp (--elevation-3) so the card's
+     raised state speaks the same depth vocabulary as the LSAT `.card-interactive`
+     lift (src/domains/lsat/index.css). --shadow-md and --elevation-3 are the same
+     depth tier, so this is a vocabulary alignment, not a visual jump. */
+  box-shadow: var(--elevation-3);
   border-color: var(--border-hover);
 }
 
@@ -893,8 +1016,35 @@ input:focus, select:focus, textarea:focus {
   border-radius: var(--radius-md);
   font-weight: 600;
   font-size: var(--fs-sm);
-  transition: all var(--duration-fast) var(--ease-out);
+  /* UA4: tactile parity with the LSAT button (src/domains/lsat/.../button.tsx) —
+     transform is part of the transition so the active press eases, and the
+     transform stays GPU-cheap. `transition: all` already covered transform, but
+     naming it keeps the press behaviour explicit alongside the press scale. */
+  transition: transform var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
   white-space: nowrap;
+}
+
+/* UA4: press feedback (LSAT `active:scale-[0.97]`). Excludes :disabled so a
+   non-interactive button doesn't dip. The global prefers-reduced-motion block
+   pins transition-duration to ~0; the explicit guard at the foot of the UA4
+   block also nulls the scale for reduced-motion users. */
+.btn:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+/* UA4: ring + ring-offset focus (LSAT `focus-visible:ring-2 ring-offset-2`),
+   reading the shared --ring (HSL triplet) + --ring-offset tokens. box-shadow is
+   used (not outline) so the ring sits OUTSIDE the button with a clean offset gap
+   over any background; the inner 0-spread ring paints the offset in the button's
+   own surface colour so the gap reads on gradient/solid buttons alike. */
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 var(--ring-offset) var(--bg-primary),
+    0 0 0 calc(var(--ring-offset) + 2px) hsl(var(--ring));
 }
 
 .btn-primary {
@@ -905,6 +1055,13 @@ input:focus, select:focus, textarea:focus {
 .btn-primary:hover {
   box-shadow: 0 4px 16px rgba(59,130,246,0.4);
   transform: translateY(-1px);
+}
+/* UA4: the primary press should win over its hover lift — drop the -1px lift and
+   apply the shared press scale so the click reads as a deliberate press, not a
+   bounce. Keeps the focus ring (which composes via box-shadow, set above). */
+.btn-primary:not(:disabled):active {
+  transform: scale(0.97);
+  box-shadow: 0 2px 8px rgba(59,130,246,0.3);
 }
 
 .btn-secondary {
@@ -993,11 +1150,32 @@ input:focus, select:focus, textarea:focus {
 .surface-excel { background: var(--surface-panel); }
 .surface-interactive {
   text-decoration: none;
-  transition: border-color var(--duration-fast), background var(--duration-fast), transform var(--duration-fast);
+  /* UA4: interactive surfaces (rendered as <Link>/<button>) gain the LSAT
+     `.card-interactive` tactile feel — a hover lift on the UA3 elevation ramp,
+     an active press, and a keyboard focus ring. box-shadow joins the transition
+     so the lift's depth eases in; transform is named for the press. */
+  transition: border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
 }
 .surface-interactive:hover {
   border-color: var(--border-hover);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: var(--elevation-3);
+}
+/* UA4: press feedback for clickable surfaces — settle the lift back toward the
+   page so the click reads as a press (LSAT `active:scale` analogue, tuned to a
+   translate so large cards don't visibly rescale their contents). */
+.surface-interactive:not(:disabled):active {
+  transform: translateY(0);
+  box-shadow: var(--elevation-1);
+}
+/* UA4: keyboard focus ring for clickable surfaces, matching the shared
+   --ring / --ring-offset vocabulary. Pointer focus stays quiet (:focus-visible). */
+.surface-interactive:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: var(--ring-offset);
 }
 .surface-status-accent,
 .surface-status-study,
@@ -1581,6 +1759,59 @@ input:focus, select:focus, textarea:focus {
   font-weight: 800;
 }
 
+/* ===== Type voices — UA5 =====
+   Host parity with the LSAT domain's three type-voice roles + overline
+   (src/domains/lsat/index.css `.type-display` / `.type-counsel` / `.type-numeric`
+   / `.type-overline`). LSAT binds these via Tailwind `theme("fontFamily.*")`; the
+   host has no Tailwind layer here, so each voice reads the shared font-family token
+   (--font-serif / --font-mono, defined in unified-palette.css and inherited app-wide)
+   for the identical cast. Use `type-display` for hero/section headings that want the
+   Newsreader serif voice, `type-counsel` for long-form serif body, `type-numeric` for
+   aligned tabular figures (timers, scores, metric values), and `type-overline` for
+   the small uppercase eyebrow labels. Additive utilities — nothing adopts them until
+   a component opts in, so this introduces the vocabulary without reflowing anything. */
+.type-display {
+  font-family: var(--font-serif);
+  font-weight: var(--fw-medium);
+  letter-spacing: -0.02em;
+  font-optical-sizing: auto;
+}
+.type-counsel {
+  font-family: var(--font-serif);
+  font-weight: var(--fw-regular);
+  font-optical-sizing: auto;
+}
+.type-numeric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+.type-overline {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+}
+
+/* ===== Reading sizes — UA5 =====
+   The LSAT domain's three reading steps (src/domains/lsat/index.css
+   `.reading-sm/md/lg` = 16/19/22px) for long-form passages. `.reading` sets the
+   relaxed long-form leading + a comfortable measure cap (the host's prose width). */
+.reading {
+  line-height: var(--lh-relaxed);
+  max-width: 72ch;
+}
+.reading p + p {
+  margin-top: 0.85em;
+}
+.reading-serif {
+  font-family: var(--font-serif);
+}
+.reading-sm { font-size: 1rem; }       /* 16px */
+.reading-md { font-size: 1.1875rem; }  /* 19px */
+.reading-lg { font-size: 1.375rem; }   /* 22px */
+
 .today-grid {
   display: grid;
   grid-template-columns: minmax(280px, 1.05fr) repeat(2, minmax(240px, 1fr));
@@ -1978,6 +2209,17 @@ input:focus, select:focus, textarea:focus {
   .drill-correct,
   .drill-incorrect,
   .drill-explanation { animation: none !important; }
+
+  /* UA4: pin the tactile press/lift transforms for reduced-motion users. The
+     global guard near the top of this file already damps transition-duration to
+     ~0; this nulls the transform deltas outright so buttons and interactive
+     cards stay perfectly still on hover/press. Focus rings (box-shadow/outline)
+     are intentionally KEPT — they are an accessibility affordance, not motion. */
+  .btn:not(:disabled):active,
+  .btn-primary:not(:disabled):active { transform: none; }
+  .glass-card:hover,
+  .surface-interactive:hover,
+  .surface-interactive:not(:disabled):active { transform: none; }
 }
 
 .animate-fade { animation: fadeIn var(--duration-base) var(--ease-out); }
@@ -2001,9 +2243,9 @@ input:focus, select:focus, textarea:focus {
 
 .module-content h1 {
   font-size: var(--fs-3xl);
-  font-weight: 800;
+  font-weight: var(--fw-black);
   margin-bottom: var(--space-4);
-  line-height: 1.2;
+  line-height: var(--lh-tight);
 }
 
 .module-content h2 {
