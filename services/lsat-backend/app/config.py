@@ -320,6 +320,44 @@ CLOUD_INPUT_COST_PER_MTOK = float(
 CLOUD_OUTPUT_COST_PER_MTOK = float(
     _env("LSATLAB_CLOUD_OUTPUT_COST_PER_MTOK", "75.0") or "75.0"
 )
+# BB4 — cloud DRY-RUN. When on, the budget endpoint forecasts the cost of the
+# *next* cloud call (priced like a real call) without ever invoking the provider.
+# This is the read-only "what would this cost" affordance the System Health card
+# shows; it never changes the enforcement path (offline_generate still gates on
+# the real worst-case estimate). Off by default — purely a visibility toggle.
+CLOUD_DRY_RUN = _env("LSATLAB_CLOUD_DRY_RUN", "0") not in ("0", "false", "False")
+# BB4 — representative token counts for the NEXT-CALL dry-run cost estimate the
+# budget endpoint returns when the caller doesn't pass explicit input/output
+# token query params. Sized to a typical Tier-B generation call (a few-shot
+# prompt in, a 5-choice candidate out, capped by CLOUD_MAX_TOKENS).
+CLOUD_DRY_RUN_INPUT_TOKENS = int(
+    _env("LSATLAB_CLOUD_DRY_RUN_INPUT_TOKENS", "1500") or "1500"
+)
+CLOUD_DRY_RUN_OUTPUT_TOKENS = int(
+    _env("LSATLAB_CLOUD_DRY_RUN_OUTPUT_TOKENS", "800") or "800"
+)
+
+# --- BB4: local Whisper / voice model cache visibility -----------------------
+# Voice input (offline STT) runs the Whisper-tiny ONNX model in the BROWSER via
+# @huggingface/transformers (see src/lib/voice.js); transformers.js downloads it
+# once and caches it client-side (Cache Storage / IndexedDB). The host is the
+# authoritative place to read that cache, so the backend's role here is to report
+# the *configuration* (which model, where a server-side cache would live) and a
+# best-effort presence check of that optional on-disk cache dir. The browser-STT
+# (Web Speech API) fallback is always available and needs no download. All of
+# this is read-only and best-effort: never raise from the status helper.
+VOICE_MODEL_ID = _env("LSATLAB_VOICE_MODEL_ID", "Xenova/whisper-tiny.en")
+# Optional server-side transformers cache dir (the env var transformers.js / the
+# Python `transformers` lib honour). When unset we fall back to the conventional
+# HuggingFace hub cache so the presence check still has something to look at.
+VOICE_MODEL_CACHE_DIR = Path(
+    _env(
+        "LSATLAB_VOICE_MODEL_CACHE_DIR",
+        _env("TRANSFORMERS_CACHE", "")
+        or _env("HF_HOME", "")
+        or str(DATA_DIR / "voice-models"),
+    )
+)
 
 # --- Background job worker --------------------------------------------------
 # One in-process worker thread drains queued generation jobs sequentially (a

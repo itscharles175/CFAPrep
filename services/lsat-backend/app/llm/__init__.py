@@ -40,6 +40,7 @@ __all__ = [
     "critic_model_name",
     "cloud_enabled",
     "cloud_budget_status",
+    "cloud_budget_dry_run",
     "embed_sync",
     "provider_info",
 ]
@@ -105,6 +106,52 @@ def cloud_budget_status() -> dict:
         "budget_usd": None,
         "within_budget": True,
         "remaining_usd": None,
+    }
+
+
+def cloud_budget_dry_run(
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
+) -> dict:
+    """BB4 — the full cloud-budget picture + a NEXT-CALL dry-run cost estimate.
+
+    Builds on :func:`cloud_budget_status` (month-to-date spend vs budget) and
+    :func:`observability.estimate_cloud_cost_usd` (the SAME pricing the real
+    pre-call guard and ledger use) to forecast what the next cloud call would
+    cost — WITHOUT ever invoking the provider. ``input_tokens``/``output_tokens``
+    default to the representative ``config.CLOUD_DRY_RUN_*`` token counts when not
+    supplied (the endpoint accepts query params to override them).
+
+    ``next_call.would_exceed_budget`` mirrors the real enforcement: it reuses
+    :func:`_cloud_within_budget` with the dry-run estimate so the UI's "this would
+    overshoot" warning matches what ``offline_generate`` would actually refuse.
+    Read-only and best-effort: the underlying spend read degrades to 0.0 on error
+    (the gauge stays visible), exactly like the status path.
+    """
+    in_tok = int(input_tokens) if input_tokens is not None else config.CLOUD_DRY_RUN_INPUT_TOKENS
+    out_tok = int(output_tokens) if output_tokens is not None else config.CLOUD_DRY_RUN_OUTPUT_TOKENS
+    in_tok = max(0, in_tok)
+    out_tok = max(0, out_tok)
+    estimate = observability.estimate_cloud_cost_usd(in_tok, out_tok)
+    status = cloud_budget_status()
+    return {
+        **status,
+        "cloud_enabled": cloud_enabled(),
+        "dry_run": bool(config.CLOUD_DRY_RUN),
+        "pricing": {
+            "input_cost_per_mtok_usd": config.CLOUD_INPUT_COST_PER_MTOK,
+            "output_cost_per_mtok_usd": config.CLOUD_OUTPUT_COST_PER_MTOK,
+        },
+        "next_call": {
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+            "estimated_cost_usd": estimate,
+            # True only when a budget is configured AND admitting this call would
+            # push spend past the cap (matches the real enforcement guard).
+            "would_exceed_budget": (
+                status["budget_usd"] is not None and not _cloud_within_budget(estimate)
+            ),
+        },
     }
 
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Database, Download, HardDrive, KeyRound, ServerCog, ShieldCheck, Upload, WifiOff, Wrench } from 'lucide-react';
+import { CloudCog, Database, Download, HardDrive, KeyRound, Mic2, ServerCog, ShieldCheck, Upload, WifiOff, Wrench } from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
 import { exportVaultData, getVaultHealthReport, importVaultData, previewVaultRepair } from '../lib/learning';
 import { decryptVaultBackup, encryptVaultBackup } from '../lib/encryptedBackup';
@@ -16,7 +16,8 @@ import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop
 import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 import { getStorage, getActiveDriverName, cutoverTo, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
-import { checkLsatBackendHealth, syncProviderToLsat, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
+import { checkLsatBackendHealth, getLsatCloudBudget, syncProviderToLsat, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
+import { recognizeOnceOffline } from '../lib/voice';
 import { readLastCrash, clearLastCrash } from '../components/ErrorBoundary';
 import {
   clearPersistedParameters,
@@ -83,6 +84,19 @@ export default function SystemHealth() {
   // LSAT backend sidecar (:8100) health — probed independently so a down
   // sidecar never blocks the page. null = not yet checked.
   const [lsatHealth, setLsatHealth] = useState(null);
+  // BB4: cloud-budget picture + next-call dry-run estimate from the LSAT sidecar
+  // (read-only; the sidecar is the only thing that talks to the cloud provider).
+  const [cloudBudget, setCloudBudget] = useState(null); // null = not yet checked
+  const [cloudBudgetBusy, setCloudBudgetBusy] = useState(false);
+  // BB4: local Whisper/voice STT model download visibility. The model is cached
+  // in the BROWSER by transformers.js, so the host probes Cache Storage itself;
+  // the sidecar's report (cloudBudget.voice) covers any server-side cache.
+  const [whisperBrowserCached, setWhisperBrowserCached] = useState(null); // null = unknown
+  const [whisperDownloadState, setWhisperDownloadState] = useState('idle'); // idle | downloading | done | error
+  const [whisperDownloadPct, setWhisperDownloadPct] = useState(0);
+  const [whisperError, setWhisperError] = useState('');
+  const browserSttSupported =
+    typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
   // P5: the last render crash the ErrorBoundary persisted (local-first apps
   // have no remote telemetry). Read once on mount; null when there's none.
   const [lastCrash, setLastCrash] = useState(() => readLastCrash());
@@ -202,10 +216,75 @@ export default function SystemHealth() {
     checkLsatBackendHealth().then((h) => {
       if (active) setLsatHealth(h);
     });
+    refreshCloudBudget(active);
+    probeWhisperBrowserCache().then((cached) => {
+      if (active) setWhisperBrowserCached(cached);
+    });
     return () => {
       active = false;
     };
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // BB4: cloud-budget + Whisper/voice model visibility
+  // ---------------------------------------------------------------------------
+  async function refreshCloudBudget(active = true) {
+    setCloudBudgetBusy(true);
+    try {
+      const report = await getLsatCloudBudget();
+      if (active) setCloudBudget(report);
+    } finally {
+      if (active) setCloudBudgetBusy(false);
+    }
+  }
+
+  /**
+   * Best-effort probe of the in-browser transformers.js model cache. The library
+   * caches downloaded ONNX/tokenizer files in a Cache Storage bucket named
+   * "transformers-cache"; if any cached entry's URL references the Whisper model,
+   * it has been downloaded. Returns null when the Cache API is unavailable so the
+   * UI shows "unknown" rather than a false "not downloaded".
+   */
+  async function probeWhisperBrowserCache() {
+    if (typeof caches === 'undefined' || !caches.open) return null;
+    try {
+      const cache = await caches.open('transformers-cache');
+      const keys = await cache.keys();
+      return keys.some((req) => /whisper-tiny/i.test(req.url));
+    } catch {
+      return null;
+    }
+  }
+
+  async function handleWhisperDownload() {
+    setWhisperError('');
+    setWhisperDownloadState('downloading');
+    setWhisperDownloadPct(0);
+    try {
+      // Trigger the one-time model download by running offline STT over a tiny
+      // silent buffer. transformers.js fires `progress_callback` per file while
+      // downloading; we track the highest percent seen so the bar never jumps
+      // backwards as it switches between files. The transcription result is
+      // discarded — we only care that the model is now cached locally.
+      const silent = new Float32Array(16000); // 1s of 16kHz silence
+      await recognizeOnceOffline({
+        audio: silent,
+        onProgress: (event) => {
+          const pct = typeof event?.progress === 'number' ? Math.round(event.progress) : 0;
+          setWhisperDownloadPct((prev) => (pct > prev ? pct : prev));
+        },
+      });
+      setWhisperDownloadPct(100);
+      setWhisperDownloadState('done');
+      setWhisperBrowserCached(await probeWhisperBrowserCache());
+      toast.success('Voice model ready', 'Whisper-tiny is cached locally — offline voice input works without a download next time.');
+    } catch (error) {
+      setWhisperDownloadState('error');
+      const detail = error instanceof Error ? error.message : 'Could not download the voice model.';
+      setWhisperError(detail);
+      toast.error('Voice model download failed', detail);
+    }
+  }
 
   async function handlePsychCompute() {
     setPsychBusy(true);
@@ -1009,6 +1088,178 @@ export default function SystemHealth() {
             <a className="btn btn-secondary btn-sm" href={LSAT_SETTINGS_PATH}>
               LSAT model settings
             </a>
+          </div>
+        </div>
+      </Surface>
+
+      {/* BB4: opt-in cloud spend vs the configured monthly budget, plus a
+          read-only NEXT-CALL dry-run cost estimate. The LSAT sidecar is the only
+          thing that ever talks to a cloud model; realtime/score-affecting paths
+          stay local-only. Card hides when the sidecar is unreachable. */}
+      {cloudBudget?.ok && cloudBudget.cloud && (
+        <Surface
+          tone="ops"
+          status={
+            cloudBudget.cloud.budget_usd != null && !cloudBudget.cloud.within_budget
+              ? 'warning'
+              : 'success'
+          }
+          className="ops-report-panel"
+        >
+          <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <StatusBadge tone="exam">Cloud Budget</StatusBadge>
+              <h3 className="qv-m-0 qv-mt-2">
+                <CloudCog size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
+                Opt-in cloud spend{' '}
+                <span className="qv-mono">
+                  {cloudBudget.cloud.cloud_enabled ? 'enabled' : 'disabled (local-only)'}
+                </span>
+              </h3>
+              <p className="qv-text-secondary qv-m-0">
+                Realtime explanations and all score-affecting content run on local models. Only opt-in Tier-B
+                generation may use a cloud provider, and never past the monthly cap.
+                {cloudBudget.cloud.budget_usd == null
+                  ? ' No monthly budget is set — cloud stays opt-in either way.'
+                  : ''}
+              </p>
+              {cloudBudget.cloud.budget_usd != null && !cloudBudget.cloud.within_budget && (
+                <p className="qv-m-0 qv-mt-2 qv-fs-sm qv-text-warning">
+                  Monthly budget reached — further cloud calls fall back to the local model until next month.
+                </p>
+              )}
+              {cloudBudget.cloud.next_call?.would_exceed_budget && cloudBudget.cloud.within_budget && (
+                <p className="qv-m-0 qv-mt-2 qv-fs-sm qv-text-warning">
+                  A typical next call ({cloudBudget.cloud.next_call.estimated_cost_usd.toFixed(4)} USD) would push
+                  spend past the cap — it would run locally instead.
+                </p>
+              )}
+            </div>
+            <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => refreshCloudBudget(true)}
+                disabled={cloudBudgetBusy}
+              >
+                {cloudBudgetBusy ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+          </div>
+          <div className="coverage-grid" style={{ marginTop: 'var(--space-4)' }}>
+            <div>
+              <strong>${cloudBudget.cloud.spend_usd.toFixed(4)}</strong>
+              <small>Spent this month</small>
+            </div>
+            <div>
+              <strong>{cloudBudget.cloud.budget_usd == null ? 'None' : `$${cloudBudget.cloud.budget_usd.toFixed(2)}`}</strong>
+              <small>Monthly budget</small>
+            </div>
+            <div>
+              <strong>{cloudBudget.cloud.remaining_usd == null ? '∞' : `$${cloudBudget.cloud.remaining_usd.toFixed(4)}`}</strong>
+              <small>Remaining</small>
+            </div>
+            <div>
+              <strong>${cloudBudget.cloud.next_call?.estimated_cost_usd?.toFixed(4) ?? '0.0000'}</strong>
+              <small>Next-call dry-run</small>
+            </div>
+          </div>
+          {cloudBudget.cloud.next_call && (
+            <p className="qv-m-0 qv-mt-3 qv-fs-sm qv-text-muted qv-mono">
+              dry-run priced on {cloudBudget.cloud.next_call.input_tokens} in · {cloudBudget.cloud.next_call.output_tokens} out
+              {' · '}${cloudBudget.cloud.pricing?.input_cost_per_mtok_usd}/Mtok in · ${cloudBudget.cloud.pricing?.output_cost_per_mtok_usd}/Mtok out
+            </p>
+          )}
+        </Surface>
+      )}
+
+      {/* BB4: local Whisper/voice STT model download visibility. The model runs
+          fully offline in-browser via transformers.js once cached; the browser-
+          STT (Web Speech API) fallback is always available and needs no
+          download. The sidecar's voice report covers any server-side cache. */}
+      <Surface
+        tone="ops"
+        status={whisperBrowserCached ? 'success' : whisperDownloadState === 'error' ? 'warning' : undefined}
+        className="ops-report-panel"
+      >
+        <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <StatusBadge tone="exam">Voice Input</StatusBadge>
+            <h3 className="qv-m-0 qv-mt-2">
+              <Mic2 size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
+              Offline Whisper model{' '}
+              <span className="qv-mono">
+                {whisperBrowserCached === null
+                  ? '(checking…)'
+                  : whisperBrowserCached
+                    ? 'downloaded'
+                    : 'not downloaded'}
+              </span>
+            </h3>
+            <p className="qv-text-secondary qv-m-0">
+              Offline voice input runs Whisper-tiny (~40 MB ONNX) entirely in your browser — downloaded once, then
+              cached locally with no cloud round-trip during recognition.
+              {whisperBrowserCached === false
+                ? ' Download it now so the first voice session is instant and works offline.'
+                : ''}
+            </p>
+            <p className="qv-m-0 qv-mt-2 qv-fs-sm qv-text-muted">
+              Fallback:{' '}
+              {browserSttSupported
+                ? 'the browser Web Speech API is available if you skip the download (Chrome uses cloud STT; Safari/Edge are on-device).'
+                : 'the browser Web Speech API is unavailable here, so the Whisper download is required for voice input.'}
+            </p>
+            {cloudBudget?.voice && (
+              <p className="qv-m-0 qv-mt-1 qv-fs-sm qv-text-muted qv-mono">
+                model: {cloudBudget.voice.model_id}
+                {cloudBudget.voice.cache_dir_exists && cloudBudget.voice.downloaded
+                  ? ` · server cache: ${Math.round(cloudBudget.voice.size_bytes / 1024 / 1024)} MB`
+                  : ''}
+              </p>
+            )}
+            {whisperDownloadState === 'downloading' && (
+              <div className="qv-mt-3" aria-live="polite">
+                <div
+                  role="progressbar"
+                  aria-valuenow={whisperDownloadPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="Voice model download progress"
+                  style={{ height: 6, borderRadius: 3, background: 'var(--color-border)', overflow: 'hidden' }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${whisperDownloadPct}%`,
+                      background: 'var(--color-accent, var(--color-primary))',
+                      transition: 'width 0.2s ease',
+                    }}
+                  />
+                </div>
+                <p className="qv-m-0 qv-mt-1 qv-fs-sm qv-text-secondary">Downloading voice model… {whisperDownloadPct}%</p>
+              </div>
+            )}
+            {whisperDownloadState === 'error' && whisperError && (
+              <p className="qv-m-0 qv-mt-2 qv-fs-sm qv-text-warning">{whisperError}</p>
+            )}
+          </div>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleWhisperDownload}
+              disabled={whisperDownloadState === 'downloading'}
+              title={
+                whisperBrowserCached
+                  ? 'Re-download the offline voice model'
+                  : 'Download the offline voice model (~40 MB, one time)'
+              }
+            >
+              <Download size={14} style={{ marginRight: 'var(--space-1)' }} />
+              {whisperDownloadState === 'downloading'
+                ? 'Downloading…'
+                : whisperBrowserCached
+                  ? 'Re-download'
+                  : 'Download voice model'}
+            </button>
           </div>
         </div>
       </Surface>

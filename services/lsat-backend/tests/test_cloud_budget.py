@@ -162,3 +162,130 @@ def test_budget_guard_fails_closed_on_spend_read_error(monkeypatch):
     monkeypatch.setattr(observability, "month_to_date_spend_usd", _explode)
 
     assert llm._cloud_within_budget(0.0001) is False
+
+
+# --- BB4: cloud-budget dry-run + voice cache visibility ----------------------
+def test_cloud_budget_dry_run_defaults_to_config_token_counts(db_session, monkeypatch):
+    """No-arg dry-run prices the representative CLOUD_DRY_RUN_* token counts and
+    NEVER invokes a provider; it just composes spend + a pre-call estimate."""
+    import app.llm as llm
+    from app import observability
+
+    monkeypatch.setattr(config, "CLOUD_INPUT_COST_PER_MTOK", 15.0)
+    monkeypatch.setattr(config, "CLOUD_OUTPUT_COST_PER_MTOK", 75.0)
+    monkeypatch.setattr(config, "CLOUD_DRY_RUN_INPUT_TOKENS", 1500)
+    monkeypatch.setattr(config, "CLOUD_DRY_RUN_OUTPUT_TOKENS", 800)
+    monkeypatch.setattr(config, "CLOUD_MONTHLY_BUDGET_USD", 0.0)  # unlimited
+
+    out = llm.cloud_budget_dry_run()
+    nxt = out["next_call"]
+    assert nxt["input_tokens"] == 1500
+    assert nxt["output_tokens"] == 800
+    # Priced identically to the real ledger/guard estimate.
+    assert nxt["estimated_cost_usd"] == observability.estimate_cloud_cost_usd(1500, 800)
+    # No budget set => the gauge reports unlimited and the call can't "exceed".
+    assert out["budget_usd"] is None
+    assert out["within_budget"] is True
+    assert nxt["would_exceed_budget"] is False
+    assert out["pricing"]["input_cost_per_mtok_usd"] == 15.0
+
+
+def test_cloud_budget_dry_run_accepts_explicit_tokens_and_flags_overshoot(
+    db_session, monkeypatch
+):
+    """Explicit token counts are honoured, and a call that would push spend past
+    the cap is flagged ``would_exceed_budget`` (mirrors the real enforcement)."""
+    import app.llm as llm
+
+    monkeypatch.setattr(config, "CLOUD_INPUT_COST_PER_MTOK", 15.0)
+    monkeypatch.setattr(config, "CLOUD_OUTPUT_COST_PER_MTOK", 75.0)
+    # 1000 in + 2000 out = (1000*15 + 2000*75)/1e6 = 0.165 USD.
+    monkeypatch.setattr(config, "CLOUD_MONTHLY_BUDGET_USD", 0.20)
+    db_session.add(UsageLedger(model="m", cost_usd=0.10,
+                               created_at=datetime.now(timezone.utc)))
+    db_session.commit()
+
+    out = llm.cloud_budget_dry_run(1000, 2000)
+    assert out["next_call"]["input_tokens"] == 1000
+    assert out["next_call"]["output_tokens"] == 2000
+    assert out["next_call"]["estimated_cost_usd"] == pytest.approx(0.165)
+    # spend 0.10 + estimate 0.165 = 0.265 > budget 0.20 => would overshoot.
+    assert out["next_call"]["would_exceed_budget"] is True
+    assert out["budget_usd"] == 0.20
+
+
+def test_cloud_budget_dry_run_within_budget_not_flagged(db_session, monkeypatch):
+    """A dry-run that comfortably fits under the cap is not flagged as overshoot."""
+    import app.llm as llm
+
+    monkeypatch.setattr(config, "CLOUD_INPUT_COST_PER_MTOK", 15.0)
+    monkeypatch.setattr(config, "CLOUD_OUTPUT_COST_PER_MTOK", 75.0)
+    monkeypatch.setattr(config, "CLOUD_MONTHLY_BUDGET_USD", 100.0)
+    db_session.add(UsageLedger(model="m", cost_usd=1.0,
+                               created_at=datetime.now(timezone.utc)))
+    db_session.commit()
+
+    out = llm.cloud_budget_dry_run(1000, 2000)
+    assert out["next_call"]["would_exceed_budget"] is False
+    assert out["within_budget"] is True
+    assert out["remaining_usd"] == pytest.approx(99.0)
+
+
+def test_whisper_cache_status_missing_dir_is_soft(monkeypatch, tmp_path):
+    """A missing voice-model cache dir reports not-downloaded, never raises."""
+    from app import observability
+
+    missing = tmp_path / "nope"
+    monkeypatch.setattr(config, "VOICE_MODEL_CACHE_DIR", missing)
+    monkeypatch.setattr(config, "VOICE_MODEL_ID", "Xenova/whisper-tiny.en")
+
+    status = observability.whisper_cache_status()
+    assert status["model_id"] == "Xenova/whisper-tiny.en"
+    assert status["cache_dir_exists"] is False
+    assert status["downloaded"] is False
+    assert status["file_count"] == 0
+    # The browser-STT path is always available regardless of on-disk cache.
+    assert status["browser_cached"] is True
+
+
+def test_whisper_cache_status_detects_cached_files(monkeypatch, tmp_path):
+    """When matching model files exist on disk the status reports downloaded."""
+    from app import observability
+
+    cache = tmp_path / "voice-models"
+    snapshot = cache / "models--Xenova--whisper-tiny.en" / "onnx"
+    snapshot.mkdir(parents=True)
+    (snapshot / "encoder_model.onnx").write_bytes(b"x" * 1024)
+    (snapshot / "decoder_model.onnx").write_bytes(b"y" * 2048)
+    monkeypatch.setattr(config, "VOICE_MODEL_CACHE_DIR", cache)
+    monkeypatch.setattr(config, "VOICE_MODEL_ID", "Xenova/whisper-tiny.en")
+
+    status = observability.whisper_cache_status()
+    assert status["cache_dir_exists"] is True
+    assert status["downloaded"] is True
+    assert status["file_count"] == 2
+    assert status["size_bytes"] == 1024 + 2048
+
+
+def test_cloud_budget_endpoint_returns_cloud_and_voice(client, monkeypatch):
+    """The /observability/cloud-budget endpoint returns the budget picture + a
+    next-call dry-run estimate and the voice cache status; query params override
+    the dry-run token counts."""
+    monkeypatch.setattr(config, "CLOUD_INPUT_COST_PER_MTOK", 15.0)
+    monkeypatch.setattr(config, "CLOUD_OUTPUT_COST_PER_MTOK", 75.0)
+
+    r = client.get(
+        "/api/observability/cloud-budget",
+        params={"input_tokens": 1000, "output_tokens": 2000},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "cloud" in body and "voice" in body
+    nxt = body["cloud"]["next_call"]
+    assert nxt["input_tokens"] == 1000
+    assert nxt["output_tokens"] == 2000
+    assert nxt["estimated_cost_usd"] == pytest.approx(0.165)
+    assert "spend_usd" in body["cloud"]
+    assert "budget_usd" in body["cloud"]
+    assert body["voice"]["model_id"]
+    assert "downloaded" in body["voice"]

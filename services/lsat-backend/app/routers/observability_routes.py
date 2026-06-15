@@ -201,6 +201,32 @@ def metrics(task: str = "explain_stream", window: int = 200,
     }
 
 
+@router.get("/observability/cloud-budget", response_model=dict[str, Any])
+def cloud_budget(
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+) -> dict[str, Any]:
+    """BB4 — read-only cloud-budget picture + a NEXT-CALL dry-run cost estimate,
+    plus local Whisper/voice model cache status.
+
+    ``cloud`` carries month-to-date spend, the configured monthly budget, the
+    remaining headroom, and a forecast of what the *next* cloud call would cost —
+    priced identically to the real pre-call guard, but WITHOUT invoking any
+    provider. Pass ``input_tokens``/``output_tokens`` to price a specific call;
+    they default to the representative ``CLOUD_DRY_RUN_*`` token counts.
+
+    ``voice`` reports the configured Whisper model id, the on-disk cache dir, and
+    a best-effort presence check so the UI can show "downloaded / not downloaded"
+    (the authoritative in-browser cache check lives on the host). Everything here
+    is best-effort and never raises — a missing budget/metrics store or cache dir
+    degrades softly to a visible-but-empty gauge.
+    """
+    return {
+        "cloud": llm.cloud_budget_dry_run(input_tokens, output_tokens),
+        "voice": observability.whisper_cache_status(),
+    }
+
+
 @router.get("/observability/runtime-evidence")
 def runtime_evidence(session: Session = Depends(get_session)) -> dict[str, Any]:
     """Local log/metric evidence for the native Reliability Console."""

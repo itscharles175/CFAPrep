@@ -126,6 +126,101 @@ export async function checkLsatBackendHealth(timeoutMs = 2500): Promise<LsatBack
   };
 }
 
+/** BB4 — cloud-budget picture + next-call dry-run estimate the sidecar reports. */
+export interface LsatCloudBudget {
+  /** Month-to-date cloud spend in USD (durable; survives a restart). */
+  spend_usd: number;
+  /** Configured monthly budget, or null when unset (0 => unlimited / opt-in). */
+  budget_usd: number | null;
+  /** Whether another cloud call is allowed under the budget. */
+  within_budget: boolean;
+  /** Remaining headroom in USD, or null when no budget is configured. */
+  remaining_usd: number | null;
+  /** Whether cloud generation is configured AND has an API key. */
+  cloud_enabled: boolean;
+  /** Whether the backend's read-only dry-run toggle is on. */
+  dry_run: boolean;
+  pricing: {
+    input_cost_per_mtok_usd: number;
+    output_cost_per_mtok_usd: number;
+  };
+  /** A forecast of the NEXT cloud call — priced like a real call, never invoked. */
+  next_call: {
+    input_tokens: number;
+    output_tokens: number;
+    estimated_cost_usd: number;
+    /** True only when admitting this call would push spend past the cap. */
+    would_exceed_budget: boolean;
+  };
+}
+
+/** BB4 — local Whisper/voice model cache status the sidecar reports (best-effort). */
+export interface LsatVoiceCacheStatus {
+  model_id: string;
+  cache_dir: string;
+  cache_dir_exists: boolean;
+  /** Whether matching model files were found in the server-side cache dir. */
+  downloaded: boolean;
+  file_count: number;
+  size_bytes: number;
+  /** The in-browser STT path is always available regardless of on-disk cache. */
+  browser_cached: boolean;
+  note: string;
+}
+
+export interface LsatCloudBudgetReport {
+  /** True when the sidecar answered a 2xx on /observability/cloud-budget. */
+  ok: boolean;
+  /** Distinguishes "answered but error" from "unreachable". */
+  reachable: boolean;
+  cloud?: LsatCloudBudget;
+  voice?: LsatVoiceCacheStatus;
+  /** Human-readable status for the UI. */
+  detail: string;
+}
+
+/**
+ * BB4: fetch the LSAT sidecar's cloud-budget picture (month-to-date spend vs the
+ * configured monthly budget + a NEXT-CALL dry-run cost estimate) and the local
+ * Whisper/voice model cache status, in one read-only call. Never throws — any
+ * failure degrades to `{ ok: false, reachable: false, ... }` so the System
+ * Health card shows "offline" rather than hanging.
+ *
+ * `inputTokens`/`outputTokens` override the dry-run token counts the estimate is
+ * priced against; omit them to use the backend's representative defaults.
+ */
+export async function getLsatCloudBudget(
+  opts: { inputTokens?: number; outputTokens?: number } = {},
+  timeoutMs = 3000,
+): Promise<LsatCloudBudgetReport> {
+  const params = new URLSearchParams();
+  if (typeof opts.inputTokens === 'number') params.set('input_tokens', String(opts.inputTokens));
+  if (typeof opts.outputTokens === 'number') params.set('output_tokens', String(opts.outputTokens));
+  const query = params.toString();
+  const res = await fetchJson(
+    `/api/observability/cloud-budget${query ? `?${query}` : ''}`,
+    timeoutMs,
+  );
+
+  if (!('ok' in res) || !res.ok || !res.data || typeof res.data !== 'object') {
+    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    return {
+      ok: false,
+      reachable: 'error' in res ? false : true,
+      detail: `Cloud-budget unavailable — ${reason}.`,
+    };
+  }
+
+  const d = res.data as { cloud?: LsatCloudBudget; voice?: LsatVoiceCacheStatus };
+  return {
+    ok: true,
+    reachable: true,
+    cloud: d.cloud,
+    voice: d.voice,
+    detail: 'Cloud-budget report loaded.',
+  };
+}
+
 export interface LsatSyncResult {
   ok: boolean;
   detail: string;

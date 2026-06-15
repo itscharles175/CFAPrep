@@ -139,6 +139,66 @@ def _wal_estimate_bytes() -> Optional[int]:
         return None
 
 
+def whisper_cache_status() -> dict[str, Any]:
+    """BB4 — best-effort presence check of the local Whisper/voice model cache.
+
+    The offline voice-input model (Whisper-tiny ONNX) is downloaded and cached in
+    the *browser* by transformers.js (see src/lib/voice.js), so the host is the
+    authoritative source for "downloaded vs not". The backend can only report the
+    configured model id, the conventional on-disk cache dir, and whether any
+    cached files for that model appear to exist there — useful when transformers
+    is pointed at a server-side cache (``TRANSFORMERS_CACHE``/``HF_HOME``).
+
+    Read-only and side-effect free: a single best-effort directory walk, never
+    raises. ``downloaded`` is ``True`` only when matching cache files are found on
+    disk; ``None`` cache dir state degrades to ``downloaded=False`` so the UI can
+    fall back to its own browser-cache probe / the always-available Web Speech
+    fallback.
+    """
+    model_id = config.VOICE_MODEL_ID
+    cache_dir = config.VOICE_MODEL_CACHE_DIR
+    # HuggingFace hub layout names a snapshot dir "models--<org>--<name>"; the
+    # plain "<org>/<name>" form is also matched so a custom flat cache works.
+    slug = model_id.replace("/", "--")
+    info: dict[str, Any] = {
+        "model_id": model_id,
+        "cache_dir": str(cache_dir),
+        "cache_dir_exists": False,
+        "downloaded": False,
+        "file_count": 0,
+        "size_bytes": 0,
+        # Honest note: the real source of truth is the in-browser cache; the host
+        # confirms/overrides this. Always-available even when not downloaded.
+        "browser_cached": True,
+        "note": (
+            "Whisper-tiny runs in-browser via transformers.js; this on-disk "
+            "check only sees a server-side transformers cache if configured."
+        ),
+    }
+    try:
+        if not cache_dir.exists():
+            return info
+        info["cache_dir_exists"] = True
+        file_count = 0
+        size_bytes = 0
+        for path in cache_dir.rglob("*"):
+            try:
+                parts = "/".join(path.parts).lower()
+                if slug.lower() not in parts and model_id.lower() not in parts:
+                    continue
+                if path.is_file():
+                    file_count += 1
+                    size_bytes += path.stat().st_size
+            except OSError:  # pragma: no cover - skip unreadable entries
+                continue
+        info["file_count"] = file_count
+        info["size_bytes"] = size_bytes
+        info["downloaded"] = file_count > 0
+    except OSError:  # pragma: no cover - diagnostics must degrade softly
+        return info
+    return info
+
+
 def worker_readiness(
     *,
     gen_queued: int | None = None,
