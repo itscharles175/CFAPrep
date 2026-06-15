@@ -21,12 +21,59 @@ const compactGrid = (minWidth = 160) => ({
   gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${minWidth}px), 1fr))`,
 });
 
+/**
+ * Resolve the live computed value of one or more CSS custom properties from the
+ * document root, re-reading whenever the active theme changes. Driving the gallery
+ * from the *resolved* values (rather than hard-coded strings) is what keeps it from
+ * drifting away from src/index.css + tokens.css — if a token changes, this reflects it.
+ */
+function useComputedVars(tokens) {
+  const key = Array.isArray(tokens) ? tokens.join('|') : tokens;
+  const [values, setValues] = useState({});
+
+  useEffect(() => {
+    const list = Array.isArray(tokens) ? tokens : [tokens];
+    const read = () => {
+      const styles = getComputedStyle(document.documentElement);
+      const next = {};
+      for (const token of list) next[token] = styles.getPropertyValue(token).trim();
+      setValues(next);
+    };
+    read();
+    // The theme provider toggles `data-theme` on <html>; re-read so the live
+    // readouts (colors especially) track light ↔ dark without a reload.
+    const observer = new MutationObserver(read);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return values;
+}
 
 function TokenLabel({ name }) {
   return (
     <code className="qv-fs-xs qv-text-muted qv-mono">
       {name}
     </code>
+  );
+}
+
+function ComputedValue({ token }) {
+  const values = useComputedVars(token);
+  const value = values[token];
+  if (!value) return null;
+  return <span className="qv-fs-xs qv-text-muted qv-mono">{value}</span>;
+}
+
+function GroupLabel({ children }) {
+  return (
+    <p
+      className="type-overline"
+      style={{ margin: '0 0 var(--space-3)' }}
+    >
+      {children}
+    </p>
   );
 }
 
@@ -102,15 +149,30 @@ const COLOR_GROUPS = [
   },
 ];
 
-function ColorSwatch({ token }) {
-  const [hex, setHex] = useState('');
-  const ref = useRef(null);
+// The three routes App.jsx re-tints via `data-domain` on <body>. tokens.css
+// rebinds `--color-accent` (and `--accent`) under [data-domain="…"], so wrapping
+// a swatch in the attribute shows the live re-tinted accent.
+const DOMAIN_ACCENTS = [
+  { domain: 'cfa', label: 'CFA — blue (app default)' },
+  { domain: 'excel', label: 'Excel — green' },
+  { domain: 'quant', label: 'Quant — purple/magenta' },
+];
 
+function ColorSwatch({ token }) {
+  const ref = useRef(null);
+  const [resolved, setResolved] = useState('');
+
+  // Read the *rendered* color so the chip shows what the eye actually sees
+  // (the var() can resolve through several aliases; computed backgroundColor is
+  // the final rgb()/rgba()). Re-reads on theme change like the other readouts.
   useEffect(() => {
-    if (ref.current) {
-      const v = getComputedStyle(ref.current).backgroundColor;
-      setHex(v || '');
-    }
+    const read = () => {
+      if (ref.current) setResolved(getComputedStyle(ref.current).backgroundColor || '');
+    };
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
   }, []);
 
   return (
@@ -127,8 +189,8 @@ function ColorSwatch({ token }) {
         }}
       />
       <TokenLabel name={token} />
-      {hex && (
-        <span className="qv-fs-xs qv-text-muted">{hex}</span>
+      {resolved && (
+        <span className="qv-fs-xs qv-text-muted qv-mono">{resolved}</span>
       )}
     </div>
   );
@@ -138,20 +200,10 @@ function ColorsSection() {
   return (
     <GallerySection id="colors">
       <SectionTitle>Colors</SectionTitle>
-      <SectionDesc>Semantic token layer. Values resolve through the existing src/index.css core palette.</SectionDesc>
+      <SectionDesc>Semantic token layer (live computed values). Swatches resolve through the src/index.css core palette and re-read when you toggle the app theme.</SectionDesc>
       {COLOR_GROUPS.map((group) => (
         <div key={group.label} style={{ marginBottom: 'var(--space-8)' }}>
-          <p
-            style={{
-              fontSize: 'var(--fs-xs)',
-              fontWeight: 'var(--fw-black)',
-              textTransform: 'uppercase',
-              color: 'var(--color-text-muted)',
-              marginBottom: 'var(--space-3)',
-            }}
-          >
-            {group.label}
-          </p>
+          <GroupLabel>{group.label}</GroupLabel>
           <div
             style={{
               ...compactGrid(120),
@@ -164,6 +216,32 @@ function ColorsSection() {
           </div>
         </div>
       ))}
+
+      {/* Per-domain accent re-tint — driven by the live `data-domain` override
+          that App.jsx applies on /cfa, /excel, /quant. Wrapping each chip in a
+          [data-domain] element reproduces the same cascade here so the gallery
+          shows the resolved accent per domain without leaving the page. */}
+      <div style={{ marginBottom: 'var(--space-4)' }}>
+        <GroupLabel>Per-domain accent (live re-tint via data-domain)</GroupLabel>
+        <div style={{ ...compactGrid(150), gap: 'var(--space-4)' }}>
+          {DOMAIN_ACCENTS.map(({ domain, label }) => (
+            <div key={domain} data-domain={domain} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', minWidth: 0 }}>
+              <div
+                style={{
+                  width: '100%',
+                  height: 56,
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--color-accent)',
+                  border: '1px solid var(--color-border)',
+                  boxShadow: 'var(--elevation-1)',
+                }}
+              />
+              <code className="qv-fs-xs qv-text-muted qv-mono">data-domain="{domain}"</code>
+              <span className="qv-fs-xs qv-text-muted">{label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </GallerySection>
   );
 }
@@ -190,22 +268,57 @@ const FONT_WEIGHTS = [
   { token: '--fw-black', label: 'Black', value: 800 },
 ];
 
+const LINE_HEIGHTS = [
+  { token: '--lh-tight', label: 'tight' },
+  { token: '--lh-snug', label: 'snug' },
+  { token: '--lh-normal', label: 'normal' },
+  { token: '--lh-relaxed', label: 'relaxed' },
+];
+
+const TYPE_VOICES = [
+  {
+    cls: 'type-display',
+    label: 'Display — Newsreader serif, for hero / section headings',
+    sample: 'Constructed Response',
+    style: { fontSize: 'var(--fs-3xl)', color: 'var(--color-text-primary)' },
+  },
+  {
+    cls: 'type-counsel',
+    label: 'Counsel — serif long-form body',
+    sample: 'A portfolio manager weighing tracking error against expected active return must reconcile the mandate constraints with the client’s risk tolerance.',
+    style: { fontSize: 'var(--fs-lg)', color: 'var(--color-text-secondary)', lineHeight: 'var(--lh-relaxed)' },
+  },
+  {
+    cls: 'type-numeric',
+    label: 'Numeric — tabular figures for timers, scores, metrics',
+    sample: '1,284.50  →  +12.4%  —  00:42:17',
+    style: { fontSize: 'var(--fs-xl)', color: 'var(--color-text-primary)' },
+  },
+  {
+    cls: 'type-overline',
+    label: 'Overline — small uppercase eyebrow labels',
+    sample: 'Quantitative Methods',
+    style: {},
+  },
+];
+
 function TypographySection() {
   return (
     <GallerySection id="typography">
       <SectionTitle>Typography</SectionTitle>
-      <SectionDesc>Font-size ramp (rem) and weight scale. Font stacks are offline-safe system fonts.</SectionDesc>
+      <SectionDesc>Font-size ramp (17px reading anchor at --fs-lg), weight + line-height scales, and the four type-voice utilities. Font stacks are offline-safe (Geist / Newsreader).</SectionDesc>
 
-      <p style={{ fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-black)', textTransform: 'uppercase', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
-        Size ramp
-      </p>
+      <GroupLabel>Size ramp</GroupLabel>
       <div style={{ display: 'grid', gap: 'var(--space-3)', marginBottom: 'var(--space-10)' }}>
         {FONT_SIZES.map(({ token, label }) => (
           <div
             key={token}
-            style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-4)', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--space-2)' }}
+            style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 'var(--space-3)', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--space-2)' }}
           >
-            <TokenLabel name={token} />
+            <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, minWidth: 110 }}>
+              <TokenLabel name={token} />
+              <ComputedValue token={token} />
+            </span>
             <span style={{ fontSize: `var(${token})`, color: 'var(--color-text-primary)', lineHeight: 1.3 }}>
               {label} — The quick brown fox jumps over the lazy dog
             </span>
@@ -213,10 +326,8 @@ function TypographySection() {
         ))}
       </div>
 
-      <p style={{ fontSize: 'var(--fs-xs)', fontWeight: 'var(--fw-black)', textTransform: 'uppercase', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
-        Weight ramp
-      </p>
-      <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+      <GroupLabel>Weight ramp</GroupLabel>
+      <div style={{ display: 'grid', gap: 'var(--space-3)', marginBottom: 'var(--space-10)' }}>
         {FONT_WEIGHTS.map(({ token, label, value }) => (
           <div
             key={token}
@@ -226,6 +337,37 @@ function TypographySection() {
             <span style={{ fontWeight: value, fontSize: 'var(--fs-lg)', color: 'var(--color-text-primary)' }}>
               {label} ({value}) — QuantVault
             </span>
+          </div>
+        ))}
+      </div>
+
+      <GroupLabel>Line-height ramp</GroupLabel>
+      <div style={{ ...compactGrid(220), gap: 'var(--space-4)', marginBottom: 'var(--space-10)' }}>
+        {LINE_HEIGHTS.map(({ token, label }) => (
+          <div key={token} className="qv-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+              <TokenLabel name={token} />
+              <ComputedValue token={token} />
+            </div>
+            <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--color-text-secondary)', lineHeight: `var(${token})` }}>
+              {label} leading. The annualised tracking error scales with the square root of twelve, so monthly active-return dispersion compounds across the year.
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <GroupLabel>Type voices</GroupLabel>
+      <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
+        {TYPE_VOICES.map(({ cls, label, sample, style }) => (
+          <div
+            key={cls}
+            style={{ borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--space-3)' }}
+          >
+            <code className="qv-fs-xs qv-text-muted qv-mono">.{cls}</code>
+            <div className={cls} style={{ marginTop: 'var(--space-2)', ...style }}>
+              {sample}
+            </div>
+            <span className="qv-fs-xs qv-text-muted" style={{ display: 'block', marginTop: 'var(--space-1)' }}>{label}</span>
           </div>
         ))}
       </div>
@@ -252,12 +394,13 @@ function SpacingSection() {
   return (
     <GallerySection id="spacing">
       <SectionTitle>Spacing</SectionTitle>
-      <SectionDesc>8-step modular scale based on 4 px. Each box is sized at the token value.</SectionDesc>
+      <SectionDesc>4 px modular scale (live computed values). Each box is sized at the token value.</SectionDesc>
       <div className="qv-stack-3">
         {SPACE_TOKENS.map((token) => (
           <div key={token} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-6)' }}>
-            <div style={{ width: 140 }}>
+            <div style={{ width: 140, display: 'flex', flexDirection: 'column', gap: 2 }}>
               <TokenLabel name={token} />
+              <ComputedValue token={token} />
             </div>
             <div
               style={{
@@ -310,6 +453,7 @@ function RadiusSection() {
               }}
             />
             <TokenLabel name={token} />
+            <ComputedValue token={token} />
             <span className="qv-fs-xs qv-text-muted">{label}</span>
           </div>
         ))}
@@ -325,14 +469,15 @@ const ELEVATION_TOKENS = [
   { token: '--elevation-1', label: '1 — subtle' },
   { token: '--elevation-2', label: '2 — raised' },
   { token: '--elevation-3', label: '3 — elevated' },
-  { token: '--elevation-floating', label: 'floating — modal / toast' },
+  { token: '--elevation-4', label: '4 — overlay' },
+  { token: '--elevation-floating', label: 'floating — alias of 4' },
 ];
 
 function ElevationSection() {
   return (
     <GallerySection id="elevation">
       <SectionTitle>Elevation</SectionTitle>
-      <SectionDesc>Box-shadow depth scale. Cards are shown against a recessed background to make shadows visible.</SectionDesc>
+      <SectionDesc>5-step box-shadow depth ramp (--elevation-0..4). Cards are shown against a recessed background to make shadows visible.</SectionDesc>
       <div
         style={{
           ...compactGrid(150),
@@ -363,6 +508,7 @@ function ElevationSection() {
               }}
             />
             <TokenLabel name={token} />
+            <ComputedValue token={token} />
             <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-muted)', textAlign: 'center' }}>{label}</span>
           </div>
         ))}
@@ -374,15 +520,22 @@ function ElevationSection() {
 /* ── 6. Motion ───────────────────────────────────────────── */
 
 const MOTION_DURATIONS = [
-  { token: '--duration-fast', label: 'fast — 120ms' },
-  { token: '--duration-base', label: 'base — 200ms' },
-  { token: '--duration-slow', label: 'slow — 320ms' },
+  { token: '--duration-fast', label: 'fast' },
+  { token: '--duration-base', label: 'base' },
+  { token: '--duration-slow', label: 'slow' },
 ];
 
-function MotionBox({ token, label, reducedPreview }) {
+const MOTION_EASES = [
+  { token: '--ease-standard', label: 'standard — most transitions' },
+  { token: '--ease-emphasized', label: 'emphasized — enter / expand' },
+  { token: '--ease-exit', label: 'exit — leave / collapse' },
+];
+
+function MotionBox({ token, label, reducedPreview, easeToken = '--ease-standard', durationToken = '--duration-base' }) {
   const [active, setActive] = useState(false);
 
-  const duration = reducedPreview ? '0ms' : `var(${token})`;
+  const duration = reducedPreview ? '0ms' : `var(${durationToken})`;
+  const ease = `var(${easeToken})`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
@@ -395,12 +548,13 @@ function MotionBox({ token, label, reducedPreview }) {
           background: active ? 'var(--color-accent)' : 'var(--color-accent-soft)',
           borderRadius: `var(${active ? '--radius-full' : '--radius-md'})`,
           border: '1.5px solid var(--color-accent)',
-          transition: `all ${duration} var(--ease-default)`,
+          transition: `all ${duration} ${ease}`,
           cursor: 'default',
           transform: active ? 'scale(1.12)' : 'scale(1)',
         }}
       />
       <TokenLabel name={token} />
+      <ComputedValue token={token} />
       <span className="qv-fs-xs qv-text-muted">{label}</span>
     </div>
   );
@@ -412,7 +566,7 @@ function MotionSection() {
   return (
     <GallerySection id="motion">
       <SectionTitle>Motion</SectionTitle>
-      <SectionDesc>Hover each box to preview the easing + duration. Toggle the checkbox to simulate prefers-reduced-motion.</SectionDesc>
+      <SectionDesc>Hover each box to preview the curve + duration (live computed values). Toggle the checkbox to simulate prefers-reduced-motion — a global damp already zeroes durations when the OS asks.</SectionDesc>
       <label
         style={{
           display: 'inline-flex',
@@ -432,16 +586,104 @@ function MotionSection() {
         />
         Simulate prefers-reduced-motion
       </label>
+
+      <GroupLabel>Durations (eased with --ease-standard)</GroupLabel>
+      <div
+        style={{
+          ...compactGrid(140),
+          gap: 'var(--space-8)',
+          marginBottom: 'var(--space-10)',
+        }}
+      >
+        {MOTION_DURATIONS.map(({ token, label }) => (
+          <MotionBox key={token} token={token} label={label} reducedPreview={reducedPreview} durationToken={token} />
+        ))}
+      </div>
+
+      <GroupLabel>Easing curves (at --duration-slow so the curve is legible)</GroupLabel>
       <div
         style={{
           ...compactGrid(140),
           gap: 'var(--space-8)',
         }}
       >
-        {MOTION_DURATIONS.map(({ token, label }) => (
-          <MotionBox key={token} token={token} label={label} reducedPreview={reducedPreview} />
+        {MOTION_EASES.map(({ token, label }) => (
+          <MotionBox key={token} token={token} label={label} reducedPreview={reducedPreview} easeToken={token} durationToken="--duration-slow" />
         ))}
       </div>
+    </GallerySection>
+  );
+}
+
+/* ── Focus ring ──────────────────────────────────────────── */
+
+function FocusRingSection() {
+  return (
+    <GallerySection id="focus">
+      <SectionTitle>Focus ring</SectionTitle>
+      <SectionDesc>The shared keyboard-focus treatment: an outline reading the canonical --ring (HSL triplet) at --ring-offset. Tab through these controls to see the live ring; pointer focus stays quiet via :focus-visible.</SectionDesc>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', maxWidth: 360, marginBottom: 'var(--space-6)' }}>
+        <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+          <TokenLabel name="--ring" />
+          <ComputedValue token="--ring" />
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+          <TokenLabel name="--ring-offset" />
+          <ComputedValue token="--ring-offset" />
+        </div>
+      </div>
+      <InlineCluster>
+        <button className="btn btn-primary" type="button">Primary button</button>
+        <button className="btn btn-secondary" type="button">Secondary button</button>
+        <button className="surface-interactive" type="button" style={{ padding: 'var(--space-2) var(--space-4)', borderRadius: 'var(--radius-md)' }}>
+          surface-interactive
+        </button>
+        <a
+          href="#focus"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: 'var(--space-2) var(--space-3)',
+            color: 'var(--color-accent)',
+            borderRadius: 'var(--radius-sm)',
+            textDecoration: 'underline',
+          }}
+        >
+          Focusable link
+        </a>
+      </InlineCluster>
+    </GallerySection>
+  );
+}
+
+/* ── Tactile primitives ──────────────────────────────────── */
+
+function TactileSection() {
+  return (
+    <GallerySection id="tactile">
+      <SectionTitle>Tactile surfaces</SectionTitle>
+      <SectionDesc>The shared tactile classes — .glass-card (raised panel with hover lift), .surface-interactive (pressable row), and the .btn family — all wired to the elevation, motion, and focus tokens above.</SectionDesc>
+
+      <GroupLabel>.glass-card (hover to lift)</GroupLabel>
+      <div style={{ ...compactGrid(240), gap: 'var(--space-4)', marginBottom: 'var(--space-8)' }}>
+        <div className="glass-card">
+          <p className="type-overline" style={{ margin: '0 0 var(--space-2)' }}>Readiness</p>
+          <p className="type-numeric" style={{ margin: 0, fontSize: 'var(--fs-2xl)', color: 'var(--color-text-primary)' }}>82%</p>
+        </div>
+        <div className="glass-card no-hover">
+          <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--color-text-secondary)' }}>
+            <code className="qv-fs-xs qv-mono">.glass-card.no-hover</code> — same surface, no lift on hover.
+          </p>
+        </div>
+      </div>
+
+      <GroupLabel>.btn family</GroupLabel>
+      <InlineCluster>
+        <button className="btn btn-primary" type="button">Primary</button>
+        <button className="btn btn-secondary" type="button">Secondary</button>
+        <button className="btn btn-ghost" type="button">Ghost</button>
+        <button className="btn btn-primary" type="button" disabled>Disabled</button>
+      </InlineCluster>
     </GallerySection>
   );
 }
@@ -653,7 +895,9 @@ const TOC_ITEMS = [
   { id: 'spacing', label: 'Spacing' },
   { id: 'radius', label: 'Radius' },
   { id: 'elevation', label: 'Elevation' },
+  { id: 'focus', label: 'Focus ring' },
   { id: 'motion', label: 'Motion' },
+  { id: 'tactile', label: 'Tactile surfaces' },
   { id: 'components', label: 'Components' },
 ];
 
@@ -717,7 +961,9 @@ export default function StyleGallery() {
           <SpacingSection />
           <RadiusSection />
           <ElevationSection />
+          <FocusRingSection />
           <MotionSection />
+          <TactileSection />
           <ComponentsSection />
         </main>
       </div>

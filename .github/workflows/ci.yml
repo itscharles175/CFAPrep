@@ -119,6 +119,54 @@ jobs:
             dist/reports/a11y-check.json
           retention-days: 14
 
+  # UA7: design-token visual-regression net. Builds the production bundle,
+  # installs the Playwright-managed Chromium, then runs scripts/visual-regression.mjs
+  # (npm run visual:regression) — it screenshots a curated set of routes (incl.
+  # the /style token gallery) in BOTH light and dark themes and pixel-diffs each
+  # frame against the committed baselines under tests/visual-baselines/. On the
+  # first run for any route/theme (no baseline) it writes the screenshot as the
+  # new baseline and passes (bootstrap); thereafter a diff over tolerance fails
+  # the job. Screenshots + diffs are uploaded as an artifact for review. Runs in
+  # parallel with `quality` — no host slowdown. (Plan UA7.)
+  visual:
+    name: Visual regression — token gallery + routes (light + dark)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      # visual:regression launches headless Chromium via playwright-core. There is
+      # no system browser on the runner, so install Playwright's managed Chromium
+      # (with its Linux system libs); a11y-helpers.mjs resolves it via
+      # chromium.executablePath().
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Visual regression check
+        run: npm run visual:regression
+
+      - name: Upload visual report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-visual
+          path: |
+            dist/reports/visual/
+            dist/reports/visual-regression.json
+          retention-days: 14
+
   # The vendored LSAT subtree runs on the host's hoisted toolchain (no separate
   # node_modules) but is excluded from the host's strict tsc + the default
   # `npm test`. This parallel job is its safety net: 251 tests + a strict
