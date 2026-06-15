@@ -11,6 +11,7 @@ import { generateQuestionsFromCurriculum } from './localLlm';
 import { getCfaSourceReadingForTopic } from './cfaSourceVault';
 import {
   MOCK_BLUEPRINTS,
+  gateGeneratedQuestion,
   generateMockExam,
   getCachedGeneratedMock,
   saveCachedGeneratedMock,
@@ -22,12 +23,21 @@ function q(text, correct = 0) {
   return { question: text, options: ['A', 'B', 'C'], correct, explanation: 'because' };
 }
 
+/** Stub the global fetch with a single JSON response for the gate endpoint. */
+function stubGateFetch(report, { status = 200 } = {}) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.resolve(new Response(JSON.stringify(report), { status }))),
+  );
+}
+
 describe('mockGenerator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
   afterEach(async () => {
     await db.settings.clear();
+    vi.unstubAllGlobals();
   });
 
   it('exposes a blueprint per level', () => {
@@ -170,5 +180,133 @@ describe('mockGenerator', () => {
         settings: {},
       }),
     ).rejects.toThrow(/Could not reach/);
+  });
+});
+
+describe('gateGeneratedQuestion (INT-1)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('fails closed when the gate reports weak distractors', async () => {
+    stubGateFetch({
+      passed: false,
+      reason: 'weak_distractors',
+      gate_confidence: 1,
+      score: 0.8,
+      failure_reasons: ['weak_distractors'],
+      gates: [{ gate: 'distractor_quality', passed: false, reason: 'weak_distractors' }],
+      checks: {},
+      error: null,
+    });
+    const r = await gateGeneratedQuestion(q('weak one'));
+    expect(r.keep).toBe(false);
+    expect(r.reachable).toBe(true);
+    expect(r.reason).toBe('weak_distractors');
+  });
+
+  it('keeps a question the gate passes', async () => {
+    stubGateFetch({
+      passed: true,
+      reason: null,
+      gate_confidence: 1,
+      score: 1,
+      failure_reasons: [],
+      gates: [],
+      checks: {},
+      error: null,
+    });
+    const r = await gateGeneratedQuestion(q('good one'));
+    expect(r.keep).toBe(true);
+    expect(r.reachable).toBe(true);
+  });
+
+  it('keeps a structurally-mismatched (3-option) question — envelope shape is not a quality fail', async () => {
+    stubGateFetch({
+      passed: false,
+      reason: 'structural',
+      gate_confidence: 0,
+      score: 0,
+      failure_reasons: ['structural'],
+      gates: [{ gate: 'structural', passed: false, reason: 'structural' }],
+      checks: {},
+      error: null,
+    });
+    const r = await gateGeneratedQuestion(q('cfa shape'));
+    expect(r.keep).toBe(true);
+    expect(r.reachable).toBe(true);
+  });
+
+  it('degrades gracefully (keeps) when the gate could not run (error field set)', async () => {
+    stubGateFetch({
+      passed: false,
+      reason: 'solve_mismatch',
+      gate_confidence: 0,
+      score: 0,
+      failure_reasons: ['solve_mismatch'],
+      gates: [],
+      checks: {},
+      error: 'provider unreachable',
+    });
+    const r = await gateGeneratedQuestion(q('unverifiable'));
+    expect(r.keep).toBe(true);
+    expect(r.reachable).toBe(false);
+  });
+
+  it('degrades gracefully (keeps) when the sidecar is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('ECONNREFUSED'))));
+    const r = await gateGeneratedQuestion(q('offline'));
+    expect(r.keep).toBe(true);
+    expect(r.reachable).toBe(false);
+  });
+
+  it('degrades gracefully (keeps) on a non-2xx gate response', async () => {
+    stubGateFetch({}, { status: 503 });
+    const r = await gateGeneratedQuestion(q('boom'));
+    expect(r.keep).toBe(true);
+    expect(r.reachable).toBe(false);
+  });
+
+  it('keeps an unmappable shape without calling the gate', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const r = await gateGeneratedQuestion({ question: '', options: [] });
+    expect(r.keep).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('drops weak questions from a generated mock and keeps ids contiguous', async () => {
+    getCfaSourceReadingForTopic.mockResolvedValue({ chunks: [{ locator: 'p.1', text: 't' }] });
+    generateQuestionsFromCurriculum.mockResolvedValue([q('keep-1'), q('weak'), q('keep-2')]);
+    // Gate verdict keyed off the candidate stem so we can reject just "weak".
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url, init) => {
+        const body = JSON.parse(init.body);
+        const isWeak = body.candidate.stem === 'weak';
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              passed: !isWeak,
+              reason: isWeak ? 'weak_distractors' : null,
+              gate_confidence: 1,
+              score: isWeak ? 0.7 : 1,
+              failure_reasons: isWeak ? ['weak_distractors'] : [],
+              gates: [],
+              checks: {},
+              error: null,
+            }),
+            { status: 200 },
+          ),
+        );
+      }),
+    );
+    const result = await generateMockExam({
+      level: 'level1',
+      topics: [{ topic: 'equity', title: 'Equity' }],
+      settings: {},
+    });
+    expect(result.questions.map((x) => x.question)).toEqual(['keep-1', 'keep-2']);
+    expect(result.questions.map((x) => x.id)).toEqual(['gen-equity-1', 'gen-equity-2']);
   });
 });

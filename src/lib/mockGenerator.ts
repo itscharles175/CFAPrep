@@ -2,6 +2,154 @@ import { getStorage } from './storage';
 import { generateQuestionsFromCurriculum } from './localLlm';
 import { getCfaSourceReadingForTopic } from './cfaSourceVault';
 
+// INT-1 — shared generation-quality gate. The LSAT FastAPI sidecar (:8100)
+// exposes POST /api/gen/generation-quality wrapping the same validate_candidate
+// rubric the LSAT generation pipeline uses (trap-metadata, distractor-quality,
+// single-defensible, self-consistency, …). Routing host CFA mock content through
+// it means generated/imported questions are gated against ONE quality bar across
+// domains. Kept inside this module (a NEW seam this item owns) so DATA-1's
+// lsatBackend.ts is untouched; the degrading-fetch shape mirrors that client.
+const LSAT_API_BASE = 'http://127.0.0.1:8100';
+const LSAT_GEN_QUALITY_PATH = '/api/gen/generation-quality';
+
+const CHOICE_LABELS = ['A', 'B', 'C', 'D', 'E'] as const;
+
+/** One per-gate verdict from the backend ValidationReport. */
+interface GenQualityGate {
+  gate: string;
+  passed: boolean | null;
+  reason: string | null;
+}
+
+/** The typed ValidationReport the generation-quality endpoint returns. */
+interface GenQualityReport {
+  passed: boolean;
+  reason: string | null;
+  gate_confidence: number;
+  score: number;
+  failure_reasons: string[];
+  gates: GenQualityGate[];
+  checks: Record<string, unknown>;
+  error: string | null;
+}
+
+/** Outcome of gating one generated question. */
+export interface QuestionGateResult {
+  /** True when the question should be kept in the mock. */
+  keep: boolean;
+  /** True when the sidecar answered (verdict trusted); false when we degraded. */
+  reachable: boolean;
+  /** The failure reason that caused a reject (when keep === false). */
+  reason?: string;
+  /** The raw report when the sidecar answered (for diagnostics/telemetry). */
+  report?: GenQualityReport;
+}
+
+// Reasons that mean the CFA content itself is unsound (weak distractors, an
+// ambiguous/mis-keyed answer). The host MUST fail-closed on these. A bare
+// "structural" failure is excluded: CFA items legitimately carry 3 options, not
+// the LSAT 5-choice A-E envelope, so an envelope-shape mismatch is not a
+// content-quality signal and must not drop otherwise-good questions.
+const CONTENT_QUALITY_FAILURES = new Set([
+  'weak_distractors',
+  'distractor_quality_unverified',
+  'ambiguous_answer',
+  'solve_mismatch',
+  'cove_disagreement',
+  'lexical_leak',
+]);
+
+interface RawGeneratedQuestion {
+  question?: unknown;
+  options?: unknown;
+  correct?: unknown;
+  explanation?: unknown;
+  [key: string]: unknown;
+}
+
+/**
+ * Map a host CFA question ({ question, options[], correct }) into the LSAT
+ * candidate envelope the gate consumes. Distractors get a generic non-"none"
+ * trap_type and the credited choice "none" so the deterministic trap-metadata
+ * check is satisfied; the substantive signal comes from the distractor-quality
+ * and single-defensible critic gates. Returns null when the shape is unusable.
+ */
+function toCandidate(raw: RawGeneratedQuestion): Record<string, unknown> | null {
+  const stem = typeof raw.question === 'string' ? raw.question.trim() : '';
+  const options = Array.isArray(raw.options) ? raw.options.map((o) => String(o)) : [];
+  if (!stem || options.length < 2) return null;
+  const correctIdx =
+    Number.isInteger(raw.correct) && (raw.correct as number) >= 0 && (raw.correct as number) < options.length
+      ? (raw.correct as number)
+      : 0;
+  const choices = options.slice(0, CHOICE_LABELS.length).map((text, i) => ({
+    label: CHOICE_LABELS[i],
+    text,
+    trap_type: i === correctIdx ? 'none' : 'out_of_scope',
+  }));
+  return {
+    stem,
+    prompt: 'Which of the following is most accurate?',
+    correct_answer: CHOICE_LABELS[correctIdx] ?? 'A',
+    choices,
+  };
+}
+
+/**
+ * Gate one generated CFA question against the shared LSAT rubric. Never throws.
+ *
+ * Fail-closed on content quality: when the sidecar answers and the verdict cites
+ * a content-quality failure (weak distractors, ambiguous/mis-keyed answer), the
+ * question is dropped. Degrade gracefully otherwise: an unreachable sidecar (or
+ * an unmappable shape) keeps the question so a local-only user without the LSAT
+ * backend running still gets a mock — the gate hardens content, it doesn't gate
+ * the whole feature behind an optional sidecar.
+ */
+export async function gateGeneratedQuestion(
+  raw: RawGeneratedQuestion,
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<QuestionGateResult> {
+  const candidate = toCandidate(raw);
+  // Unmappable shape — let the existing runner-side filters handle it rather
+  // than dropping it here on a transport concern.
+  if (!candidate) return { keep: true, reachable: false };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 8000);
+  // Abort the gate call if the caller aborts the whole generation run.
+  const onAbort = () => controller.abort();
+  opts.signal?.addEventListener('abort', onAbort);
+  try {
+    const res = await fetch(`${LSAT_API_BASE}${LSAT_GEN_QUALITY_PATH}`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      // Disable the LSAT-specific model-heavy gates (permutation/informativity):
+      // CFA items aren't LSAT 5-choice A-E, so those probes would false-fire. The
+      // distractor-quality + single-defensible critic gates carry the signal.
+      body: JSON.stringify({
+        candidate,
+        permutation_invariant: false,
+        informativity: false,
+      }),
+    });
+    if (!res.ok) return { keep: true, reachable: false };
+    const report = (await res.json()) as GenQualityReport;
+    // The gate couldn't actually run (model down) — degrade gracefully.
+    if (report.error) return { keep: true, reachable: false, report };
+    const reasons = new Set([report.reason, ...(report.failure_reasons || [])].filter(Boolean) as string[]);
+    const contentFailure = [...reasons].find((r) => CONTENT_QUALITY_FAILURES.has(r));
+    if (contentFailure) return { keep: false, reachable: true, reason: contentFailure, report };
+    return { keep: true, reachable: true, report };
+  } catch {
+    // Sidecar offline / timeout / aborted: degrade gracefully (keep content).
+    return { keep: true, reachable: false };
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 // Generative mock exams. Assembles a fresh, full-length practice exam from the
 // user's *own ingested curriculum* using their local model (Ollama / LM Studio)
 // — fully offline. Each topic's questions are grounded strictly in that topic's
@@ -88,14 +236,24 @@ export async function generateMockExam({
           count: blueprint.perTopic,
           signal,
         });
-        generated.forEach((question, index) => {
+        // INT-1 — gate each generated question against the shared LSAT rubric
+        // before it enters the mock. Fail-closed on weak/ambiguous distractors;
+        // degrade gracefully (keep) when the LSAT sidecar is offline. The index
+        // is preserved off the ORIGINAL position so ids stay stable/contiguous
+        // per the generation order even when a weak question is dropped.
+        let kept = 0;
+        for (const question of generated) {
+          if (signal?.aborted) throw new DOMException('Mock generation aborted', 'AbortError');
+          const gate = await gateGeneratedQuestion(question, { signal });
+          if (!gate.keep) continue;
+          kept += 1;
           questions.push({
             ...question,
-            id: `gen-${topic.topic}-${index + 1}`,
+            id: `gen-${topic.topic}-${kept}`,
             topic: topic.topic,
             topicTitle: topic.title,
           });
-        });
+        }
       } catch (error) {
         if ((error as { name?: string } | null)?.name === 'AbortError') throw error;
         // Surface connection/server failures (CORS, server down, HTTP status)

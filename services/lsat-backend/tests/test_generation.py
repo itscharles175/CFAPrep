@@ -252,6 +252,119 @@ def test_quarantine_endpoints(client):
     assert all(it["id"] != qid for it in items2)
 
 
+def test_build_validation_report_passes_clean_candidate():
+    """INT-1: the shared pure-validation pass flattens a clean verdict and skips
+    the dedup/novelty gate (no session)."""
+    def solver(prompt):
+        return "B"
+
+    def critic(prompt):
+        return json.dumps({"single_defensible": True, "defensible_letters": ["B"]})
+
+    report = generation.build_validation_report(
+        GOOD_CANDIDATE, runs=3, solver=solver, critic=critic
+    )
+    assert report["passed"] is True
+    assert report["reason"] is None
+    assert report["error"] is None
+    assert report["gate_confidence"] == 1.0
+    assert 0.0 < report["score"] <= 1.0
+    assert report["failure_reasons"] == []
+    gates = {g["gate"]: g for g in report["gates"]}
+    assert gates["structural"]["passed"] is True
+    assert gates["single_defensible"]["passed"] is True
+    # No session was passed, so the novelty/dedup gate must skip (passed=None).
+    assert gates["novelty"]["passed"] is None
+
+
+def test_build_validation_report_fails_closed_on_weak_distractors(monkeypatch):
+    """INT-1: a weak-distractor verdict propagates as passed=False + the reason
+    surfaces in failure_reasons so the host can fail-closed."""
+    from app import config
+
+    monkeypatch.setattr(config, "GEN_DISTRACTOR_QUALITY_CHECK", True)
+
+    def solver(prompt):
+        return "B"
+
+    def critic(prompt):
+        if "distractor-quality reviewer" in prompt:
+            return json.dumps({
+                "distractors_plausible": False,
+                "plausible_labels": ["A", "C", "E"],
+                "weak_distractors": [{"label": "D", "reason": "throwaway"}],
+            })
+        return json.dumps({"single_defensible": True, "defensible_letters": ["B"]})
+
+    report = generation.build_validation_report(
+        GOOD_CANDIDATE, runs=3, solver=solver, critic=critic,
+        distractor_quality_enabled=True,
+    )
+    assert report["passed"] is False
+    assert report["reason"] == "weak_distractors"
+    assert "weak_distractors" in report["failure_reasons"]
+    gates = {g["gate"]: g for g in report["gates"]}
+    assert gates["distractor_quality"]["passed"] is False
+    assert gates["distractor_quality"]["reason"] == "weak_distractors"
+
+
+def test_build_validation_report_fails_closed_on_critic_outage():
+    """INT-1: a raised gate (e.g. model down) is caught — passed=False + error
+    set, never propagated. A caller that can't verify quarantines the item."""
+    def boom(_prompt):
+        from app.llm.base import LLMError
+        raise LLMError("provider unreachable")
+
+    report = generation.build_validation_report(
+        GOOD_CANDIDATE, runs=3, solver=boom, critic=boom,
+    )
+    # The deterministic solve catches its own exception (solved=None), so a clean
+    # outage surfaces as a solve_mismatch rather than a raised error — either way
+    # the item must NOT pass.
+    assert report["passed"] is False
+
+
+def test_generation_quality_endpoint(client):
+    """INT-1: the shared endpoint returns a typed ValidationReport without
+    enqueuing a job. A 3-option CFA-shaped item fails the LSAT structural
+    envelope but never 500s — the host treats that as a non-fatal shape
+    mismatch."""
+    body = {
+        "candidate": {
+            "stem": "A bond's yield to maturity exceeds its coupon rate.",
+            "prompt": "Which of the following is most accurate?",
+            "correct_answer": "A",
+            "choices": [
+                {"label": "A", "text": "The bond trades at a discount."},
+                {"label": "B", "text": "The bond trades at a premium."},
+                {"label": "C", "text": "The bond trades at par."},
+            ],
+        },
+        "permutation_invariant": False,
+        "informativity": False,
+    }
+    r = client.post("/api/gen/generation-quality", json=body)
+    assert r.status_code == 200
+    j = r.json()
+    assert set(j) >= {
+        "passed", "reason", "gate_confidence", "score",
+        "failure_reasons", "gates", "checks", "error",
+    }
+    assert j["passed"] is False
+    assert j["reason"] == "structural"
+    assert j["error"] is None
+    assert isinstance(j["gates"], list) and j["gates"]
+    # No GenJob was created by the pure validation pass.
+    jobs_after = client.get("/api/gen/jobs").json()
+    assert jobs_after == []
+
+
+def test_generation_quality_endpoint_rejects_malformed_body(client):
+    # Missing the required correct_answer / choices -> 422 (validation), not 500.
+    r = client.post("/api/gen/generation-quality", json={"candidate": {"stem": "x"}})
+    assert r.status_code == 422
+
+
 def test_generation_api_rejects_invalid_counts_and_bounds(client):
     bad_posts = [
         ("/api/gen/jobs", {"q_type": "Inference", "count": 0}),

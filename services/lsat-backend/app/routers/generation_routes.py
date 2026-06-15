@@ -1,7 +1,7 @@
 """Tier B generation endpoints: jobs, status, quarantine review."""
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, StringConstraints
@@ -178,6 +178,99 @@ def coverage(session: Session = Depends(get_session)):
 def generation_quality(session: Session = Depends(get_session)):
     """Q2: pass rate + failure-reason histogram across generation jobs."""
     return generation.generation_quality(session)
+
+
+# INT-1 — shared generation-quality service. A PURE validation pass: any domain
+# (LSAT, host CFA/Quant/Excel content, an importer) submits a candidate and gets
+# back the same per-gate ValidationReport the generation job path computes, with
+# NO job enqueued and NO DB write. Reuses generation.validate_candidate as-is.
+class GenQualityChoice(BaseModel):
+    """One answer choice in the LSAT candidate envelope (5 of them, A-E)."""
+
+    label: str = Field(..., min_length=1, max_length=2)
+    text: str = Field(default="")
+    # Optional trap taxonomy label (validated by the trap-metadata gate). The
+    # correct choice should use "none"; distractors a recognizable trap type.
+    trap_type: Optional[str] = Field(default=None)
+
+
+class GenQualityCandidate(BaseModel):
+    """A candidate item to gate, in the same shape generation produces.
+
+    RC items additionally carry a ``passage``; LR items omit it. The endpoint
+    forwards the whole candidate to the gate, so host content just needs to be
+    mapped into this envelope (stem + prompt + 5 choices + credited letter).
+    """
+
+    stem: str = Field(default="")
+    prompt: str = Field(default="")
+    passage: Optional[str] = Field(default=None)
+    difficulty: Optional[int] = Field(default=None, ge=1, le=5)
+    correct_answer: str = Field(..., min_length=1, max_length=2)
+    choices: list[GenQualityChoice] = Field(..., min_length=1, max_length=10)
+
+
+class GenQualityBody(BaseModel):
+    candidate: GenQualityCandidate
+    # The LSAT q_type drives the type-aware structural validator + the
+    # lexical-leak scoping. Omit it to skip the per-type structural check.
+    q_type: Optional[QType] = None
+    section_type: Optional[Literal["LR", "RC"]] = None
+    # Cross-domain (non-LSAT) content has no LSAT trap taxonomy / permutation
+    # solver wired up; callers can disable the model-heavy gates explicitly. When
+    # left None each gate uses its configured default (the job-path behavior).
+    permutation_invariant: Optional[bool] = None
+    informativity: Optional[bool] = None
+    distractor_quality_enabled: Optional[bool] = None
+
+
+class GenQualityGate(BaseModel):
+    gate: str
+    # True/False when the gate ran; None when it was skipped or never reached.
+    passed: Optional[bool] = None
+    reason: Optional[str] = None
+
+
+class GenQualityReport(BaseModel):
+    """Typed ValidationReport returned by the generation-quality service."""
+
+    passed: bool
+    reason: Optional[str] = None
+    # BB5 self-consistency agreement ratio (0.0-1.0).
+    gate_confidence: float = 0.0
+    # Fraction of judged gates that passed (0.0-1.0).
+    score: float = 0.0
+    failure_reasons: list[str] = Field(default_factory=list)
+    gates: list[GenQualityGate] = Field(default_factory=list)
+    # The raw per-gate verdict from the gate (open record; read defensively).
+    checks: dict[str, Any] = Field(default_factory=dict)
+    # Set only when the gate raised (e.g. the local critic model was down). The
+    # report still fails closed (passed=False) so weak/unverifiable items are
+    # quarantined rather than admitted.
+    error: Optional[str] = None
+
+
+@router.post("/generation-quality", response_model=GenQualityReport)
+def generation_quality_check(body: GenQualityBody) -> GenQualityReport:
+    """INT-1: validate one candidate against the shared generation rubric.
+
+    Runs every gate (trap-metadata, distractor-quality, structural-type,
+    self-consistency, permutation-invariance, lexical-leak, CoVe, multi-model
+    agreement, RC-authenticity) via ``generation.build_validation_report`` WITHOUT
+    enqueuing a job or writing to the DB. The embedding-dedup/novelty gate skips
+    (no session) since cross-domain content isn't in the LSAT bank. Fails CLOSED:
+    a model outage yields ``passed=False`` + ``error`` rather than a 500, so the
+    caller quarantines weak distractors instead of admitting them.
+    """
+    report = generation.build_validation_report(
+        body.candidate.model_dump(),
+        q_type=body.q_type,
+        section_type=body.section_type,
+        permutation_invariant=body.permutation_invariant,
+        informativity=body.informativity,
+        distractor_quality_enabled=body.distractor_quality_enabled,
+    )
+    return GenQualityReport(**report)
 
 
 class CalibrateBody(BaseModel):

@@ -1228,6 +1228,175 @@ def validate_candidate(cand: dict, runs: int, solver=_generate, critic=_generate
     return report
 
 
+# INT-1 — per-gate verdict order for the shared generation-quality report. The
+# keys mirror ``report["checks"]`` slots that ``validate_candidate`` writes, in
+# the order the gate evaluates them, so a flattened ValidationReport reads like
+# the pipeline. Each entry is (check_key, gate_label) where ``check_key`` indexes
+# into the report and ``gate_label`` is the stable name the cross-domain client
+# keys off (host mockGenerator, INT-5 quality-metrics, the trust cockpit).
+_GENERATION_QUALITY_GATES: tuple[tuple[str, str], ...] = (
+    ("structural", "structural"),
+    ("trap_metadata", "trap_metadata"),
+    ("no_length_tell", "no_length_tell"),
+    ("lexical_leak_ok", "lexical_leak"),
+    ("deterministic_solve", "deterministic_solve"),
+    ("self_consistency_confidence", "self_consistency"),
+    ("permutation_invariant", "permutation_invariance"),
+    ("informativity", "informativity"),
+    ("single_defensible", "single_defensible"),
+    ("distractor_quality", "distractor_quality"),
+    ("cove_verify", "cove_verify"),
+    ("multi_model_agreement", "multi_model_agreement"),
+    ("structural_type", "structural_type"),
+    ("rc_authenticity", "rc_authenticity"),
+    ("novelty", "novelty"),
+)
+
+
+def _gate_pass(check_key: str, report: dict) -> bool | None:
+    """Resolve a gate's pass/fail from a ``validate_candidate`` report.
+
+    Returns True/False when the gate ran, or None when it was skipped or never
+    reached (an earlier gate short-circuited). A skipped gate (``skipped=True``)
+    is reported as ``None`` rather than a pass so the cross-domain consumer can
+    distinguish "didn't run" from "passed".
+    """
+    checks = report.get("checks") or {}
+    if check_key == "self_consistency_confidence":
+        # The continuous score is always present once self-consistency runs; the
+        # PASS bar is the unanimous-agreement flag recorded separately.
+        if "self_consistency_confidence" not in checks:
+            return None
+        return bool(report.get("self_consistency_pass"))
+    if check_key not in checks:
+        return None
+    value = checks.get(check_key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, dict):
+        if value.get("skipped"):
+            return None
+        if "ok" in value:
+            return bool(value.get("ok"))
+        return None
+    return None
+
+
+def _gate_reason(check_key: str, report: dict) -> str | None:
+    """The failure reason for one gate, or None when it passed / didn't run."""
+    if _gate_pass(check_key, report) is not False:
+        return None
+    checks = report.get("checks") or {}
+    detail = checks.get(check_key)
+    fallback = _VALIDATOR_REASON_BY_CHECK.get(check_key, check_key)
+    if check_key == "self_consistency_confidence":
+        return "self_consistency"
+    if isinstance(detail, dict):
+        if check_key == "rc_authenticity":
+            flags = detail.get("flags") or []
+            return f"rc_authenticity:{flags[0]}" if flags else fallback
+        if check_key in ("structural_type", "distractor_quality"):
+            return str(detail.get("reason") or fallback)
+    return fallback
+
+
+def build_validation_report(
+    cand: dict,
+    *,
+    q_type: str | None = None,
+    section_type: str | None = None,
+    runs: int | None = None,
+    solver=None,
+    critic=None,
+    permutation_invariant: Optional[bool] = None,
+    informativity: Optional[bool] = None,
+    distractor_quality_enabled: Optional[bool] = None,
+    multi_model_solver=None,
+) -> dict:
+    """INT-1 — a PURE validation pass over one candidate (no job, no persist).
+
+    Wraps :func:`validate_candidate` so any domain (the LSAT bank itself, host
+    CFA/Quant content, an importer) can be gated against the SAME generation
+    rubric without enqueuing a generation job or writing to the DB. The gate
+    code is reused as-is; this function only flattens the verdict into a typed,
+    transport-friendly ``ValidationReport`` and adds a fail-closed envelope.
+
+    Behavior:
+      * No ``session`` is passed through, so the embedding-dedup / novelty gate
+        skips gracefully (``novelty.skipped=True``) — appropriate for content
+        that isn't (yet) in the LSAT question bank.
+      * Defaults to the LIVE decorrelated models (``_generate`` solver +
+        ``_gate_critic`` critic, distinct + deterministic) exactly like the job
+        path; ``solver``/``critic`` stay injectable for tests.
+      * FAILS CLOSED: any exception raised inside the gate (e.g. the local model
+        is unreachable) is caught and returned as ``passed=False`` with
+        ``error`` set, never propagated as a 500. A caller that can't reach a
+        live critic therefore quarantines the candidate rather than admitting it.
+
+    The returned dict is JSON-serialisable and shaped as::
+
+        {
+          "passed": bool,
+          "reason": str | None,          # first failing gate's reason
+          "gate_confidence": float,      # BB5 self-consistency agreement ratio
+          "score": float,                # fraction of judged gates that passed
+          "failure_reasons": [str, ...], # every failing gate (deduped, ordered)
+          "gates": [                     # per-gate pass/fail + reason, in order
+            {"gate": "structural", "passed": True|False|None, "reason": str|None},
+            ...
+          ],
+          "checks": { ... },             # the raw validate_candidate verdict
+          "error": str | None,           # set only when the gate raised
+        }
+    """
+    solve_fn = solver if solver is not None else _generate
+    critic_fn = critic if critic is not None else _gate_critic
+    sc_runs = runs if runs is not None else config.GEN_SELF_CONSISTENCY_RUNS
+    try:
+        report = validate_candidate(
+            cand,
+            sc_runs,
+            solver=solve_fn,
+            critic=critic_fn,
+            q_type=q_type,
+            section_type=section_type,
+            permutation_invariant=permutation_invariant,
+            informativity=informativity,
+            distractor_quality_enabled=distractor_quality_enabled,
+            multi_model_solver=multi_model_solver,
+            session=None,
+        )
+        error: str | None = None
+    except Exception as exc:  # noqa: BLE001 — never 500 on a model outage
+        log.warning("INT-1: generation-quality pass failed closed", exc_info=True)
+        report = {
+            "checks": {},
+            "passed": False,
+            "reason": "validation_error",
+        }
+        error = str(exc)
+
+    gates: list[dict] = []
+    for check_key, label in _GENERATION_QUALITY_GATES:
+        passed = _gate_pass(check_key, report)
+        gates.append({
+            "gate": label,
+            "passed": passed,
+            "reason": _gate_reason(check_key, report),
+        })
+
+    return {
+        "passed": bool(report.get("passed", False)),
+        "reason": report.get("reason"),
+        "gate_confidence": float(report.get("gate_confidence", 0.0) or 0.0),
+        "score": _validator_score(report),
+        "failure_reasons": _validator_failure_reasons(report),
+        "gates": gates,
+        "checks": report.get("checks") or {},
+        "error": error,
+    }
+
+
 _VALIDATOR_REASON_BY_CHECK = {
     "structural": "structural",
     "rc_requires_passage": "rc_missing_passage",
