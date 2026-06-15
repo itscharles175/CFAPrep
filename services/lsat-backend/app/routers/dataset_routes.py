@@ -26,6 +26,8 @@ from .. import (
 )
 from ..db import get_session
 from ..models import ImportRun, ImportRunStatus, Question, QuestionSource, utcnow
+from ..pagination import LimitQuery, OffsetQuery, paginate
+from ..schemas import BankStats, DatasetSource
 
 router = APIRouter(prefix="/bank")
 
@@ -127,7 +129,7 @@ def list_questions(
     }
 
 
-@router.get("/stats")
+@router.get("/stats", response_model=BankStats)
 def stats(session: Session = Depends(get_session)):
     """Counts by source and q_type; the Bank UI uses this for the headline."""
     s = bank_bootstrap.bank_stats(session)
@@ -139,10 +141,17 @@ def stats(session: Session = Depends(get_session)):
     }
 
 
-@router.get("/sources")
-def sources():
-    """Registry of supported research datasets (key, HF id, expected section)."""
-    return [
+@router.get("/sources", response_model=list[DatasetSource])
+def sources(
+    limit: int | None = LimitQuery,
+    offset: int | None = OffsetQuery,
+):
+    """Registry of supported research datasets (key, HF id, expected section).
+
+    BC2: optional limit/offset slice the (small, fixed) registry in Python; omit
+    both for the full registry exactly as before.
+    """
+    rows = [
         {
             "key": spec.key,
             "hf_dataset": spec.hf_dataset,
@@ -157,6 +166,7 @@ def sources():
         }
         for spec in import_dataset.DATASETS.values()
     ]
+    return paginate(rows, limit=limit, offset=offset)
 
 
 # --- import ---------------------------------------------------------------

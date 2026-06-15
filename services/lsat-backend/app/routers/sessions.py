@@ -12,6 +12,8 @@ from sqlmodel import Session, col, select
 
 from .. import analytics, pedagogy, scoring, serializers
 from ..db import get_session
+from ..pagination import LimitQuery, OffsetQuery, paginate
+from ..schemas import SessionSummary
 from ..models import (
     Attempt,
     AttemptChoiceEvent,
@@ -67,13 +69,20 @@ class BlindReview(BaseModel):
     confidence: Optional[Confidence] = None
 
 
-@router.get("/sessions")
-def list_sessions(session: Session = Depends(get_session)):
+@router.get("/sessions", response_model=list[SessionSummary])
+def list_sessions(
+    session: Session = Depends(get_session),
+    limit: int | None = LimitQuery,
+    offset: int | None = OffsetQuery,
+):
     """Most-recent-first list of study sessions, enriched so SessionHistory and
     the analytics timeline don't have to N+1 per session.
 
     Adds ``duration_sec``, ``br_accuracy`` (over attempts with a BR answer), and
     ``official_only_score`` (scaled estimate over official timed attempts only).
+
+    BC2: optional limit/offset slice the built list in Python (one aggregate
+    query regardless); omit both for the full most-recent-first list as before.
     """
     sessions = session.exec(
         select(StudySession).order_by(StudySession.started.desc())
@@ -166,7 +175,7 @@ def list_sessions(session: Session = Depends(get_session)):
                 if off_total else None
             ),
         })
-    return out
+    return paginate(out, limit=limit, offset=offset)
 
 
 @router.post("/sessions")

@@ -17,6 +17,8 @@ from ..models import (
     Section,
     StudySession,
 )
+from ..pagination import LimitQuery, OffsetQuery, paginate
+from ..schemas import PrepTestSummary
 
 router = APIRouter()
 
@@ -31,12 +33,20 @@ async def ai_health() -> dict[str, Any]:
     return await ai.health()
 
 
-@router.get("/preptests")
-def list_preptests(session: Session = Depends(get_session)):
+@router.get("/preptests", response_model=list[PrepTestSummary])
+def list_preptests(
+    session: Session = Depends(get_session),
+    limit: int | None = LimitQuery,
+    offset: int | None = OffsetQuery,
+):
     # Audit B5 / BC3: a fixed handful of set-based queries (see
     # queries.bulk_preptest_stats) replace the prior O(n) per-preptest loop, so
     # the query count stays flat as the bank grows. Response shape unchanged.
-    return [
+    #
+    # BC2: optional limit/offset slice the already-materialized list in Python
+    # (zero extra queries); when both are omitted the full list is returned
+    # exactly as before, so the host + query-budget gate stay unchanged.
+    rows = [
         {
             "id": stat.preptest.id,
             "name": stat.preptest.name,
@@ -48,6 +58,7 @@ def list_preptests(session: Session = Depends(get_session)):
         }
         for stat in queries.bulk_preptest_stats(session)
     ]
+    return paginate(rows, limit=limit, offset=offset)
 
 
 @router.get("/preptests/{preptest_id}")
