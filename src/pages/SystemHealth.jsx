@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CloudCog, Database, Download, Gauge, HardDrive, KeyRound, Mic2, ServerCog, ShieldCheck, Upload, WifiOff, Wrench } from 'lucide-react';
+import { Boxes, CloudCog, Database, Download, Gauge, HardDrive, KeyRound, Mic2, Network, RefreshCw, ServerCog, ShieldCheck, Terminal, Upload, WifiOff, Wrench } from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
 import { exportVaultData, getVaultHealthReport, importVaultData, previewVaultRepair } from '../lib/learning';
 import { decryptVaultBackup, encryptVaultBackup } from '../lib/encryptedBackup';
@@ -17,6 +17,7 @@ import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 import { getStorage, getActiveDriverName, cutoverTo, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
 import { checkLsatBackendHealth, getLsatCloudBudget, syncProviderToLsat, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
+import { getSidecarLogs, getSidecarStatus } from '../lib/systemHealth';
 import { recognizeOnceOffline } from '../lib/voice';
 import { readLastCrash, clearLastCrash } from '../components/ErrorBoundary';
 import {
@@ -102,6 +103,19 @@ export default function SystemHealth() {
   // LSAT backend sidecar (:8100) health — probed independently so a down
   // sidecar never blocks the page. null = not yet checked.
   const [lsatHealth, setLsatHealth] = useState(null);
+  // OPS-1: unified sidecar console. The desktop shell supervises all four
+  // sidecars (SurrealDB :8000, open-notebook API :5055 + worker, LSAT :8100);
+  // these mirror the native get_sidecar_status / get_sidecar_logs commands.
+  // null = not yet checked (or, after a load, "unavailable outside Tauri").
+  const [sidecars, setSidecars] = useState(null);
+  const [sidecarsBusy, setSidecarsBusy] = useState(false);
+  // Name of the sidecar whose log tail is expanded, or null when collapsed.
+  const [openSidecarLog, setOpenSidecarLog] = useState(null);
+  const [sidecarLogLines, setSidecarLogLines] = useState([]);
+  const [sidecarLogBusy, setSidecarLogBusy] = useState(false);
+  // Tracks whether we are running inside the Tauri shell (where the commands
+  // exist) vs browser dev, so the panel can render an honest "desktop-app only"
+  // note instead of an empty list.
   // BB4: cloud-budget picture + next-call dry-run estimate from the LSAT sidecar
   // (read-only; the sidecar is the only thing that talks to the cloud provider).
   const [cloudBudget, setCloudBudget] = useState(null); // null = not yet checked
@@ -234,6 +248,7 @@ export default function SystemHealth() {
     checkLsatBackendHealth().then((h) => {
       if (active) setLsatHealth(h);
     });
+    refreshSidecars(active);
     refreshCloudBudget(active);
     probeWhisperBrowserCache().then((cached) => {
       if (active) setWhisperBrowserCached(cached);
@@ -241,7 +256,53 @@ export default function SystemHealth() {
     return () => {
       active = false;
     };
+    // Run-once-on-mount loader; the refresh helpers are stable component
+    // functions and intentionally not in the dep array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // OPS-1: unified sidecar console
+  //
+  // Pulls the live supervisor snapshot (all four sidecars) from the native
+  // get_sidecar_status command. Returns null outside Tauri (browser dev / tests)
+  // or on an invoke failure, which the panel renders as a "desktop-app only"
+  // note rather than an empty list.
+  // ---------------------------------------------------------------------------
+  async function refreshSidecars(active = true) {
+    setSidecarsBusy(true);
+    try {
+      const rows = await getSidecarStatus();
+      if (active) setSidecars(rows);
+      // If the currently-expanded sidecar is still present, refresh its tail so
+      // an open log keeps pace with a re-check.
+      if (active && rows && openSidecarLog && rows.some((row) => row.name === openSidecarLog)) {
+        const lines = await getSidecarLogs(openSidecarLog);
+        if (active) setSidecarLogLines(lines ?? []);
+      }
+    } finally {
+      if (active) setSidecarsBusy(false);
+    }
+  }
+
+  // Expand a sidecar's log tail (or collapse it if it's already open). The tail
+  // is fetched lazily so we only pull a buffer for the row the user opens.
+  async function handleToggleSidecarLog(name) {
+    if (openSidecarLog === name) {
+      setOpenSidecarLog(null);
+      setSidecarLogLines([]);
+      return;
+    }
+    setOpenSidecarLog(name);
+    setSidecarLogLines([]);
+    setSidecarLogBusy(true);
+    try {
+      const lines = await getSidecarLogs(name);
+      setSidecarLogLines(lines ?? []);
+    } finally {
+      setSidecarLogBusy(false);
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // BB4: cloud-budget + Whisper/voice model visibility
@@ -1108,6 +1169,140 @@ export default function SystemHealth() {
             </a>
           </div>
         </div>
+      </Surface>
+
+      {/* OPS-1: unified sidecar console. The desktop shell supervises four
+          local sidecars — SurrealDB (:8000), the open-notebook API (:5055) and
+          its job worker, and the LSAT backend (:8100) — auto-restarting any
+          that fall over (BA1) and capturing each one's stdout/stderr into a
+          rolling ring buffer (BA8). This panel reads the native
+          get_sidecar_status / get_sidecar_logs commands; outside the desktop
+          shell (browser dev) those commands don't exist, so it renders a plain
+          "desktop-app only" note rather than an empty list. */}
+      <Surface
+        tone="ops"
+        status={
+          sidecars == null
+            ? undefined
+            : sidecars.some((s) => !s.ready)
+              ? 'warning'
+              : 'success'
+        }
+        className="ops-report-panel"
+      >
+        <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <StatusBadge tone="ops">Sidecars</StatusBadge>
+            <h3 className="qv-m-0 qv-mt-2">
+              <Boxes size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
+              Supervised local services{' '}
+              <span className="qv-mono">
+                {sidecars == null
+                  ? '(desktop only)'
+                  : `${sidecars.filter((s) => s.ready).length}/${sidecars.length} ready`}
+              </span>
+            </h3>
+            <p className="qv-text-secondary qv-m-0">
+              StudyVault&apos;s data, RAG, and LSAT engines run as background sidecars launched by the desktop shell.
+              The supervisor probes each one&apos;s readiness port every few seconds and auto-restarts any that crash;
+              expand a service to tail its captured stdout/stderr.
+            </p>
+            {sidecars == null && (
+              <p className="qv-m-0 qv-mt-2 qv-fs-sm qv-text-muted">
+                Sidecar supervision is a desktop-app feature — the native status/log commands are only available inside
+                the StudyVault desktop shell. In browser dev, start the sidecars manually and use each service&apos;s own
+                health card above.
+              </p>
+            )}
+          </div>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => refreshSidecars(true)}
+              disabled={sidecarsBusy}
+            >
+              <RefreshCw size={14} style={{ marginRight: 'var(--space-1)' }} />
+              {sidecarsBusy ? 'Refreshing…' : 'Re-check'}
+            </button>
+          </div>
+        </div>
+        {sidecars && sidecars.length > 0 && (
+          <div className="qv-stack-3" style={{ marginTop: 'var(--space-4)' }}>
+            {sidecars.map((sidecar) => {
+              const expanded = openSidecarLog === sidecar.name;
+              const port = sidecar.ready_port ?? sidecar.port;
+              return (
+                <div
+                  key={sidecar.name}
+                  className="surface surface-default surface-compact"
+                  style={{ padding: 'var(--space-3)' }}
+                >
+                  <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="qv-row-2" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                        <StatusBadge tone={sidecar.ready ? 'vault' : 'warning'}>
+                          {sidecar.ready ? 'Ready' : 'Down'}
+                        </StatusBadge>
+                        <strong className="qv-fs-sm">{sidecar.name}</strong>
+                        <span className="qv-fs-sm qv-text-muted qv-mono">
+                          <Network size={13} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 2 }} />
+                          {port == null ? 'no socket' : `:${port}`}
+                        </span>
+                      </div>
+                      <p className="qv-m-0 qv-mt-1 qv-fs-sm qv-text-muted qv-mono">
+                        {sidecar.healthy ? 'healthy' : 'unhealthy'}
+                        {' · '}
+                        {sidecar.pid != null ? `pid ${sidecar.pid}` : 'no pid'}
+                        {sidecar.depends_on.length > 0 ? ` · depends on ${sidecar.depends_on.join(', ')}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleToggleSidecarLog(sidecar.name)}
+                      aria-expanded={expanded}
+                    >
+                      <Terminal size={14} style={{ marginRight: 'var(--space-1)' }} />
+                      {expanded ? 'Hide logs' : 'View logs'}
+                    </button>
+                  </div>
+                  {expanded && (
+                    <div className="qv-mt-3">
+                      {sidecarLogBusy ? (
+                        <p className="qv-m-0 qv-fs-sm qv-text-muted">Loading log tail…</p>
+                      ) : sidecarLogLines.length === 0 ? (
+                        <p className="qv-m-0 qv-fs-sm qv-text-muted">
+                          No output captured yet for this sidecar.
+                        </p>
+                      ) : (
+                        <pre
+                          aria-label={`${sidecar.name} log tail`}
+                          className="qv-fs-xs qv-mono qv-m-0"
+                          style={{
+                            maxHeight: 220,
+                            overflow: 'auto',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            padding: 'var(--space-2)',
+                            borderRadius: 'var(--radius-sm)',
+                            background: 'var(--color-bg-canvas)',
+                            border: '1px solid var(--color-border)',
+                          }}
+                        >
+                          {sidecarLogLines.join('\n')}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {sidecars && sidecars.length === 0 && (
+          <p className="qv-text-secondary qv-m-0 qv-mt-3 qv-fs-sm">
+            No sidecars are currently tracked by the supervisor.
+          </p>
+        )}
       </Surface>
 
       {/* UC6: Core Web Vitals (LCP / CLS / INP), collected in-process via the
