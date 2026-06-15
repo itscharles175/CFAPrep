@@ -1,4 +1,5 @@
 import { dexieDriver } from './dexieDriver';
+import { createReadThroughDriver, type ReadThroughDriver } from './fallbackDriver';
 import { migrateData, type MigrationReport } from './migrate';
 import type { StorageDriver, StorageRegistry } from './types';
 
@@ -58,7 +59,38 @@ export const storageRegistry: StorageRegistry = {
       return { ok: false, error: `Driver '${name}' is not ready (sidecar unreachable or init failed).` };
     }
 
-    this.active = driver;
+    // For SurrealDB, install the read-through fallback wrapper so a sidecar
+    // crash keeps reads available off the Dexie cache (roadmap BA4).  Dexie's
+    // raw driver is the cache — never wrap it.  `getStorage()` callers can't
+    // tell the wrapper from the bare driver: it reports name 'surrealdb' and
+    // the full StorageDriver shape.
+    if (name === 'surrealdb') {
+      const surreal = driver;
+      this.active = createReadThroughDriver(surreal, dexieDriver, {
+        // Recovery is best-effort: re-warm the Dexie cache from the now-healthy
+        // SurrealDB so it's primed for the next outage.  Non-blocking — fired
+        // from the recovery probe / a successful read, never awaited by a read.
+        onRecover: () => {
+          void (async () => {
+            // The attempt log is append-only, so a naive re-copy would inflate
+            // the cache with duplicates each resync.  Clear it first so the
+            // re-warm mirrors SurrealDB exactly (settings/reviewItems/mastery
+            // are upsert-keyed and already idempotent under migrateData).
+            try {
+              await dexieDriver.questionResults?.clear();
+            } catch {
+              /* if the cache clear fails we skip the re-warm entirely below */
+            }
+            await migrateData(surreal, dexieDriver);
+          })().catch(() => {
+            /* cache re-warm is best-effort; a failure just leaves a staler
+             * cache until the next successful resync. */
+          });
+        },
+      });
+    } else {
+      this.active = driver;
+    }
     return { ok: true };
   },
 };
@@ -76,6 +108,18 @@ export function getStorage(): StorageDriver {
 /** Name of the currently active storage driver. */
 export function getActiveDriverName(): StorageDriverName {
   return storageRegistry.active.name;
+}
+
+/**
+ * True when the active driver is the SurrealDB read-through wrapper AND it is
+ * currently serving reads from the Dexie cache (i.e. the sidecar is unreachable
+ * and the fallback is engaged).  Always false for the plain Dexie config and
+ * while SurrealDB is healthy.  Read-only inspection helper for the health UI;
+ * does not change the active driver.
+ */
+export function isStorageDegraded(): boolean {
+  const active = storageRegistry.active as Partial<ReadThroughDriver>;
+  return active.isReadThrough === true && active.degraded === true;
 }
 
 /** Attempt to switch to the SurrealDB sidecar driver. */
