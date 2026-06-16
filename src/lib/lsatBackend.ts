@@ -377,3 +377,241 @@ export async function pushModelRoutingToLsat(
   }
   return { ok: true, applied, detail: 'LSAT model routing updated.' };
 }
+
+// ---------------------------------------------------------------------------
+// OPS-4 — local maintenance scheduler bridge
+//
+// Thin, fully-degrading wrappers over the EXISTING (read-only — unchanged)
+// scheduler surfaces the LSAT sidecar already exposes under `/api`:
+//   GET  /api/observability/scheduled-tasks            → { count, tasks: [...] }
+//   POST /api/observability/scheduled-tasks            (upsert one task)
+//   POST /api/observability/scheduled-tasks/defaults   (seed the default registry)
+//   POST /api/observability/scheduled-tasks/run-due    (run all due tasks)
+//   POST /api/observability/scheduled-tasks/{key}/run  (run one task now)
+//   GET  /api/observability/scheduler-runs             → { count, runs: [...] }
+//
+// These routes are legacy untyped LSAT surfaces (no narrow `response_model` in
+// the committed `api.gen.ts` baseline), so the bodies are read defensively
+// against the shapes documented here — same idiom as `useTrustManifest`. Every
+// helper degrades to `{ ok: false, reachable: false, ... }` on any failure
+// (sidecar down, timeout, shape drift) so the Maintenance panel can show
+// "offline" rather than hanging the page.
+// ---------------------------------------------------------------------------
+
+/** One registered local maintenance task (mirrors `jobs.scheduled_task_payload`). */
+export interface LsatScheduledTask {
+  id: number | null;
+  key: string;
+  label: string;
+  task_type: string;
+  /** Cadence in seconds (the backend clamps to a 60s floor). */
+  cadence_s: number;
+  /** Last reported run status, e.g. "idle" | "failed". */
+  status: string;
+  enabled: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  payload: Record<string, unknown>;
+  updated_at: string | null;
+}
+
+/** One recorded scheduler run (mirrors `jobs.scheduler_run_payload`). */
+export interface LsatSchedulerRun {
+  id: number | null;
+  task_key: string;
+  task_type: string;
+  /** "ok" | "failed". */
+  status: string;
+  duration_ms: number | null;
+  result: Record<string, unknown>;
+  error: string | null;
+  created_at: string | null;
+}
+
+/** Report for {@link getLsatScheduledTasks}. */
+export interface LsatScheduledTasksReport {
+  ok: boolean;
+  reachable: boolean;
+  tasks: LsatScheduledTask[];
+  detail: string;
+}
+
+/** Report for {@link getLsatSchedulerRuns}. */
+export interface LsatSchedulerRunsReport {
+  ok: boolean;
+  reachable: boolean;
+  runs: LsatSchedulerRun[];
+  detail: string;
+}
+
+/** Result of a mutating maintenance action (run/toggle/cadence/run-due/defaults). */
+export interface LsatMaintenanceActionResult {
+  ok: boolean;
+  reachable: boolean;
+  detail: string;
+  /** The raw 2xx body, for callers that want the run id / nested result. */
+  data?: unknown;
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+const num = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) ? v : null;
+
+/** Coerce one raw scheduled-task row into {@link LsatScheduledTask}, defensively. */
+function readScheduledTask(raw: unknown): LsatScheduledTask {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    id: num(r.id),
+    key: str(r.key) ?? '',
+    label: str(r.label) ?? str(r.key) ?? 'Untitled task',
+    task_type: str(r.task_type) ?? 'unknown',
+    cadence_s: num(r.cadence_s) ?? 86400,
+    status: str(r.status) ?? 'idle',
+    enabled: typeof r.enabled === 'boolean' ? r.enabled : true,
+    last_run_at: str(r.last_run_at),
+    next_run_at: str(r.next_run_at),
+    payload: isRecord(r.payload) ? r.payload : {},
+    updated_at: str(r.updated_at),
+  };
+}
+
+/** Coerce one raw scheduler-run row into {@link LsatSchedulerRun}, defensively. */
+function readSchedulerRun(raw: unknown): LsatSchedulerRun {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    id: num(r.id),
+    task_key: str(r.task_key) ?? '',
+    task_type: str(r.task_type) ?? 'unknown',
+    status: str(r.status) ?? 'ok',
+    duration_ms: num(r.duration_ms),
+    result: isRecord(r.result) ? r.result : {},
+    error: str(r.error),
+    created_at: str(r.created_at),
+  };
+}
+
+/** OPS-4: list the local maintenance task registry. Never throws. */
+export async function getLsatScheduledTasks(timeoutMs = 3000): Promise<LsatScheduledTasksReport> {
+  const res = await fetchJson('/api/observability/scheduled-tasks', timeoutMs);
+  if (!('ok' in res) || !res.ok || !isRecord(res.data)) {
+    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    return {
+      ok: false,
+      reachable: 'error' in res ? false : true,
+      tasks: [],
+      detail: `Scheduled tasks unavailable — ${reason}.`,
+    };
+  }
+  const rows = Array.isArray(res.data.tasks) ? res.data.tasks : [];
+  return { ok: true, reachable: true, tasks: rows.map(readScheduledTask), detail: 'Scheduled tasks loaded.' };
+}
+
+/** OPS-4: recent maintenance run history (newest first). Never throws. */
+export async function getLsatSchedulerRuns(timeoutMs = 3000): Promise<LsatSchedulerRunsReport> {
+  const res = await fetchJson('/api/observability/scheduler-runs', timeoutMs);
+  if (!('ok' in res) || !res.ok || !isRecord(res.data)) {
+    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    return {
+      ok: false,
+      reachable: 'error' in res ? false : true,
+      runs: [],
+      detail: `Run history unavailable — ${reason}.`,
+    };
+  }
+  const rows = Array.isArray(res.data.runs) ? res.data.runs : [];
+  return { ok: true, reachable: true, runs: rows.map(readSchedulerRun), detail: 'Run history loaded.' };
+}
+
+/** OPS-4: run one registered maintenance task now (`POST .../{key}/run`). Never throws. */
+export async function runLsatScheduledTask(
+  key: string,
+  timeoutMs = 30000,
+): Promise<LsatMaintenanceActionResult> {
+  const safeKey = encodeURIComponent(key);
+  const res = await fetchJson(`/api/observability/scheduled-tasks/${safeKey}/run`, timeoutMs, {
+    method: 'POST',
+  });
+  if (!('ok' in res) || !res.ok) {
+    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    return { ok: false, reachable: 'error' in res ? false : true, detail: `Could not run "${key}" — ${reason}.` };
+  }
+  // The backend returns { ok, run_id, ... } even for a task that failed to
+  // execute; surface that inner verdict so the panel can warn precisely.
+  const inner = isRecord(res.data) && typeof res.data.ok === 'boolean' ? res.data.ok : true;
+  return {
+    ok: inner,
+    reachable: true,
+    detail: inner ? `Ran "${key}".` : `"${key}" ran but reported a failure.`,
+    data: res.data,
+  };
+}
+
+/** OPS-4: run every due maintenance task now (`POST .../run-due`). Never throws. */
+export async function runDueLsatScheduledTasks(
+  timeoutMs = 60000,
+): Promise<LsatMaintenanceActionResult> {
+  const res = await fetchJson('/api/observability/scheduled-tasks/run-due', timeoutMs, {
+    method: 'POST',
+  });
+  if (!('ok' in res) || !res.ok) {
+    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    return { ok: false, reachable: 'error' in res ? false : true, detail: `Could not run due tasks — ${reason}.` };
+  }
+  const ran = isRecord(res.data) ? (num(res.data.ran) ?? 0) : 0;
+  return {
+    ok: true,
+    reachable: true,
+    detail: ran > 0 ? `Ran ${ran} due task${ran === 1 ? '' : 's'}.` : 'No tasks were due.',
+    data: res.data,
+  };
+}
+
+/** OPS-4: seed the default maintenance registry (`POST .../defaults`). Never throws. */
+export async function ensureLsatScheduledDefaults(
+  timeoutMs = 10000,
+): Promise<LsatMaintenanceActionResult> {
+  const res = await fetchJson('/api/observability/scheduled-tasks/defaults', timeoutMs, {
+    method: 'POST',
+  });
+  if (!('ok' in res) || !res.ok) {
+    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    return { ok: false, reachable: 'error' in res ? false : true, detail: `Could not seed defaults — ${reason}.` };
+  }
+  const count = isRecord(res.data) ? (num(res.data.scheduled_tasks) ?? 0) : 0;
+  return {
+    ok: true,
+    reachable: true,
+    detail: count > 0 ? `Seeded ${count} default task${count === 1 ? '' : 's'}.` : 'Defaults already present.',
+    data: res.data,
+  };
+}
+
+/**
+ * OPS-4: upsert one maintenance task — used to TOGGLE `enabled` or change the
+ * `cadence_s`. This is the existing `POST /api/observability/scheduled-tasks`
+ * route (idempotent upsert keyed on `key`); the panel re-sends the task's
+ * current `label`/`task_type`/`payload` with the one edited field so an unset
+ * field is never zeroed. Never throws.
+ */
+export async function upsertLsatScheduledTask(
+  task: { key: string; label: string; task_type: string; cadence_s: number; enabled: boolean; payload?: Record<string, unknown> },
+  timeoutMs = 6000,
+): Promise<LsatMaintenanceActionResult> {
+  const body = JSON.stringify({
+    key: task.key,
+    label: task.label,
+    task_type: task.task_type,
+    cadence_s: Math.max(60, Math.round(task.cadence_s)),
+    enabled: task.enabled,
+    payload: task.payload ?? {},
+  });
+  const res = await fetchJson('/api/observability/scheduled-tasks', timeoutMs, { method: 'POST', body });
+  if (!('ok' in res) || !res.ok) {
+    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    return { ok: false, reachable: 'error' in res ? false : true, detail: `Could not update "${task.key}" — ${reason}.` };
+  }
+  return { ok: true, reachable: true, detail: `Updated "${task.key}".`, data: res.data };
+}

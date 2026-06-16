@@ -24,6 +24,7 @@ import { fetchDataSchemaAlignment } from '../lib/dataDictionary';
 import { getSidecarLogs, getSidecarStatus, getAggregatedSystemHealth } from '../lib/systemHealth';
 import { recordRuntimeSample } from '../lib/runtimeMetricsStore';
 import RuntimeMetricsTab from '../components/SystemHealth/RuntimeMetricsTab';
+import MaintenancePanel from '../components/SystemHealth/MaintenancePanel';
 import { recognizeOnceOffline } from '../lib/voice';
 import { readLastCrash, clearLastCrash } from '../components/ErrorBoundary';
 import {
@@ -57,12 +58,14 @@ const CACHE_PREFIXES = {
 };
 const SKIP_KEYS = new Set(['local-llm', 'open-notebook', 'onboarding-dismissed']);
 
-function downloadJson(payload) {
+function downloadJson(payload, filename) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `studyvault-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  // OPS-4: accept an optional filename (diagnostics export passes a timestamped
+  // name); existing callers omit it and keep the default backup filename.
+  anchor.download = filename || `studyvault-backup-${new Date().toISOString().slice(0, 10)}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -1463,6 +1466,23 @@ export default function SystemHealth() {
         hostChecks={trust.hostChecks}
         fetchedAt={trust.fetchedAt}
         onRefresh={trust.refresh}
+      />
+
+      {/* OPS-4: Maintenance panel. Wires the LSAT backend's local-upkeep
+          scheduler (scheduled tasks: run-now / pause / cadence + recent run
+          history) into the cockpit, surfaces client guardrail banners
+          (cloud-budget pressure, IndexedDB-quota pressure, local-model outage)
+          evaluated from already-loaded page state, and offers a one-click
+          diagnostics export bundling the trust manifest, runtime evidence,
+          sidecar logs, and cloud metrics into a timestamped JSON. Fully
+          degrading — a down sidecar leaves the panel visible with an honest
+          offline note. */}
+      <MaintenancePanel
+        trustManifest={trust.manifest}
+        aggregatedHealth={aggregatedHealth}
+        cloudBudget={cloudBudget}
+        storageEstimate={storage}
+        onDownloadJson={downloadJson}
       />
 
       {/* OPS-3: Runtime Metrics — local runtime-gauge trend sparklines (cloud
