@@ -4237,6 +4237,65 @@
         }
       }
     },
+    "/api/srs/params": {
+      "get": {
+        "summary": "Srs Params",
+        "description": "LEARN-4 — expose the backend's source-of-truth FSRS weights + desired\nretention so the host scheduler can mirror them. Idempotent + side-effect\nfree: ``load_optimized_params`` only reads (and applies to the backend's own\ncached Scheduler) the persisted optimized weights — it never writes — and the\nretention is read straight from config. Returns ``weights=[]`` when no\nper-user optimization has been persisted yet.",
+        "operationId": "srs_params_api_srs_params_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SrsParamsOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/srs/cards": {
       "post": {
         "summary": "Create Cards",
@@ -4309,8 +4368,22 @@
     "/api/srs/concept-gap-queue": {
       "get": {
         "summary": "Concept Gap Queue",
-        "description": "1.1 — the concept-gap remediation queue: SRS cards created because the\ntimed AND blind-review answers were both wrong (origin=\"concept_gap\").",
+        "description": "1.1 — the concept-gap remediation queue: SRS cards created because the\ntimed AND blind-review answers were both wrong (origin=\"concept_gap\").\n\nLEARN-5 — with ``include_host=true`` the cross-domain concept gaps the host\nmirrored (DATA-4a review snapshots whose ``origin`` marks unfinished\nunderstanding) are ALSO appended, already projected onto the canonical\ncross-domain shape (``cross_domain_review_card`` / ``CrossDomainReviewCard``)\nso the unified UI renders both planes with one vocabulary. Read-only on the\nhost mirror. When ``include_host`` is false (the default) nothing host-side is\nread and the response is unchanged.",
         "operationId": "concept_gap_queue_api_srs_concept_gap_queue_get",
+        "parameters": [
+          {
+            "name": "include_host",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "LEARN-5 — also append HOST concept-gap rows (from HostProgressSnapshot review snapshots, DATA-4a) projected onto the canonical CrossDomainReviewCard shape. Default false → the response is byte-for-byte the LSAT-only queue (backward compatible).",
+              "default": false,
+              "title": "Include Host"
+            },
+            "description": "LEARN-5 — also append HOST concept-gap rows (from HostProgressSnapshot review snapshots, DATA-4a) projected onto the canonical CrossDomainReviewCard shape. Default false → the response is byte-for-byte the LSAT-only queue (backward compatible)."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4343,11 +4416,11 @@
             }
           },
           "422": {
-            "description": "Uniform backend error envelope",
+            "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -4583,8 +4656,22 @@
     "/api/srs/leeches": {
       "get": {
         "summary": "Leeches",
-        "description": "3.2 — the leech remediation queue: cards that have lapsed too many times\n(``lapses >= config.SRS_LEECH_THRESHOLD``), most-lapsed first. Served in\ntest mode (no answer leak) with the lapse count + card id attached.",
+        "description": "3.2 — the leech remediation queue: cards that have lapsed too many times\n(``lapses >= config.SRS_LEECH_THRESHOLD``), most-lapsed first. Served in\ntest mode (no answer leak) with the lapse count + card id attached.\n\nLEARN-5 — with ``include_host=true`` the host leeches mirrored cross-domain\n(DATA-4a review snapshots that self-report ``leech`` / enough ``lapses``) are\nALSO appended, already projected onto the canonical cross-domain shape\n(``CrossDomainReviewCard`` + ``lapses`` / ``leech``) and sorted most-lapsed\nfirst, so the unified UI renders both planes with one vocabulary. Read-only on\nthe host mirror. When ``include_host`` is false (the default) nothing host-side\nis read and the response is unchanged.",
         "operationId": "leeches_api_srs_leeches_get",
+        "parameters": [
+          {
+            "name": "include_host",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "LEARN-5 — also append HOST leech rows (from HostProgressSnapshot review snapshots, DATA-4a) projected onto the canonical CrossDomainReviewCard shape. Default false → the response is byte-for-byte the LSAT-only queue (backward compatible).",
+              "default": false,
+              "title": "Include Host"
+            },
+            "description": "LEARN-5 — also append HOST leech rows (from HostProgressSnapshot review snapshots, DATA-4a) projected onto the canonical CrossDomainReviewCard shape. Default false → the response is byte-for-byte the LSAT-only queue (backward compatible)."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4617,11 +4704,11 @@
             }
           },
           "422": {
-            "description": "Uniform backend error envelope",
+            "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -8575,6 +8662,134 @@
         }
       }
     },
+    "/api/study/due-unified": {
+      "get": {
+        "summary": "Due Unified",
+        "description": "LEARN-2 — cross-domain due queue in the canonical ``CrossDomainReviewCard``\nshape, ability-ranked. Sources LSAT due cards the same way ``GET /api/srs/due``\ndoes (every SRS card whose ``due_date`` has passed), then orders them by:\n  1. ``overdueSeconds`` DESC (most overdue first),\n  2. q_type round-robin interleave (no single type dominates a run),\n  3. ability-weighted utility DESC (the shared Ability Engine selector's\n     utility score, so the most productive reviews surface first).\n\nThe host merges its OWN local Dexie review queue with these rows client-side\nand ranks the combined list — the host's local cards never round-trip through\nthe backend, so this projects the LSAT plane only. Strictly read-only.",
+        "operationId": "due_unified_api_study_due_unified_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedDueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync/progress-updates": {
+      "post": {
+        "summary": "Post Progress Updates",
+        "description": "DATA-4a — UPSERT a batch of HOST cross-domain progress snapshots.\n\nIdempotent by ``cross_id`` (the host's namespaced ``<plane>:<kind>:<nativeId>``):\na re-POST of the same logical row updates it in place rather than inserting a\nduplicate (UNIQUE index ``ux_hostprogresssnapshot_cross_id``, migration 23).\nAn unchanged re-POST (same ``dedupe_key``) is a recognised no-op — the row is\nleft untouched, so ``updated_at`` only moves on a genuine change.\n\nStrictly host -> backend: this NEVER writes back into host data and never\nmutates LSAT-native progress. Snapshots whose ``kind`` is unknown or whose\n``domain`` is not a host plane (e.g. a stray ``lsat`` row) are skipped rather\nthan rejected, so a single bad row never fails an offline-replayed batch.",
+        "operationId": "post_progress_updates_api_sync_progress_updates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressUpdatesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings": {
       "get": {
         "summary": "Get Settings",
@@ -10681,6 +10896,29 @@
               "default": false,
               "title": "Persist"
             }
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "cfa",
+                    "quant",
+                    "excel"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "LEARN-1 — cross-domain ability plane. Omit (default) for the current LSAT-only matrix/estimate. A host plane reads that domain's attempt snapshots (DATA-4a) and returns a single unified estimate.",
+              "title": "Domain"
+            },
+            "description": "LEARN-1 — cross-domain ability plane. Omit (default) for the current LSAT-only matrix/estimate. A host plane reads that domain's attempt snapshots (DATA-4a) and returns a single unified estimate."
           }
         ],
         "responses": {
@@ -20060,6 +20298,71 @@
         ],
         "title": "PriorityBody"
       },
+      "ProgressSnapshotIn": {
+        "properties": {
+          "crossId": {
+            "type": "string",
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Crossid"
+          },
+          "domain": {
+            "type": "string",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Domain"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "review",
+              "attempt",
+              "mastery"
+            ],
+            "title": "Kind"
+          },
+          "observedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observedat"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "crossId",
+          "domain",
+          "kind"
+        ],
+        "title": "ProgressSnapshotIn",
+        "description": "One host snapshot in the canonical cross-domain shape.\n\nMirrors the host's ``CrossDomainReviewCard`` / ``CrossDomainAttempt`` /\n``CrossDomainMastery`` (``src/lib/dataDictionary.ts`` §1-§4) — read\npermissively: only the routing fields (``crossId`` / ``domain`` / ``kind``)\nare required; the rest of the canonical record is carried verbatim in\n``payload`` so the engine reads the host's exact vocabulary without lossy\nre-projection here."
+      },
+      "ProgressUpdatesBody": {
+        "properties": {
+          "snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/ProgressSnapshotIn"
+            },
+            "type": "array",
+            "maxItems": 2000,
+            "title": "Snapshots"
+          }
+        },
+        "type": "object",
+        "title": "ProgressUpdatesBody",
+        "description": "A batch of host progress snapshots to UPSERT."
+      },
       "RationaleBody": {
         "properties": {
           "stage": {
@@ -20635,6 +20938,32 @@
         "type": "object",
         "title": "SettingsPatch"
       },
+      "SrsParamsOut": {
+        "properties": {
+          "weights": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Weights"
+          },
+          "desired_retention": {
+            "type": "number",
+            "title": "Desired Retention"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "backend"
+          }
+        },
+        "type": "object",
+        "required": [
+          "desired_retention"
+        ],
+        "title": "SrsParamsOut",
+        "description": "The backend's effective FSRS parameters (py-fsrs). ``weights`` are the\nper-user optimized weights when present, else the empty list (host then keeps\nits ts-fsrs library defaults / local fit). ``source`` always \"backend\" so the\nhost can label where the params came from."
+      },
       "TagBody": {
         "properties": {
           "limit": {
@@ -20862,6 +21191,145 @@
           "content"
         ],
         "title": "TurnBody"
+      },
+      "UnifiedDueCard": {
+        "properties": {
+          "crossId": {
+            "type": "string",
+            "title": "Crossid"
+          },
+          "domain": {
+            "type": "string",
+            "const": "lsat",
+            "title": "Domain",
+            "default": "lsat"
+          },
+          "questionCrossId": {
+            "type": "string",
+            "title": "Questioncrossid"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "foundation",
+              "intermediate",
+              "advanced"
+            ],
+            "title": "Difficulty"
+          },
+          "empiricalDifficulty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Empiricaldifficulty"
+          },
+          "dueAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dueat"
+          },
+          "itemType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Itemtype"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "overdueSeconds": {
+            "type": "number",
+            "title": "Overdueseconds",
+            "default": 0
+          },
+          "utilityScore": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utilityscore"
+          }
+        },
+        "type": "object",
+        "required": [
+          "crossId",
+          "questionCrossId",
+          "title",
+          "difficulty"
+        ],
+        "title": "UnifiedDueCard",
+        "description": "One LSAT due card on the canonical cross-domain shape.\n\nField names + coercion rules mirror the host's ``CrossDomainReviewCard``\n(``src/lib/dataDictionary.ts`` §1-§2) so the host can rank/merge these with\nits own local cards using one vocabulary. ``difficulty`` is the host 3-bucket\nenum (1-2 -> foundation, 3 -> intermediate, 4-5 -> advanced); ``overdueSeconds``\nis the LEARN-2 ranking primary (how long the card has been due)."
+      },
+      "UnifiedDueResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "due_count": {
+            "type": "integer",
+            "title": "Due Count",
+            "default": 0
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UnifiedDueCard"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "utility_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utility Model"
+          },
+          "review_strategy": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Review Strategy"
+          }
+        },
+        "type": "object",
+        "title": "UnifiedDueResponse"
       },
       "ValidationError": {
         "properties": {

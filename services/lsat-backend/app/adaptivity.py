@@ -24,6 +24,7 @@ from .models import (
     AttemptMode,
     AttemptRationale,
     Confidence,
+    HostProgressSnapshot,
     Passage,
     Question,
     QuestionConversation,
@@ -346,6 +347,67 @@ def _attempt_signal(a: Attempt, q: Question) -> tuple[float, float]:
     return signal, _confidence_weight(a.confidence)
 
 
+# LEARN-1 — cross-domain ability. The host (CFA/Quant/Excel) mirrors its
+# attempts onto HostProgressSnapshot (DATA-4a) using the canonical cross-domain
+# vocabulary. These small mappers project that vocabulary back onto the same
+# units _attempt_signal speaks (difficulty 1-5, ms timing, sure/likely/guess
+# weights) so a host attempt feeds the IDENTICAL estimation math.
+_HOST_DOMAINS = {"cfa", "quant", "excel"}
+# Host Difficulty buckets (dataDictionary.ts / serializers.lsat_difficulty_to_host)
+# -> the centre of their LSAT 1-5 band. Inverse of lsat_difficulty_to_host.
+_HOST_DIFFICULTY_TO_LSAT = {"foundation": 2.0, "intermediate": 3.0, "advanced": 4.0}
+# Host Confidence (low|medium|high) -> the same weight scale _confidence_weight
+# applies to LSAT's guess|likely|sure (low~guess, medium~likely, high~sure).
+_HOST_CONFIDENCE_WEIGHT = {"low": 0.84, "medium": 1.0, "high": 1.12}
+
+
+def _host_difficulty_to_lsat(value: Any) -> float:
+    """Project a host attempt's difficulty onto the LSAT 1-5 scale.
+
+    Accepts either a host bucket string (foundation|intermediate|advanced) or a
+    raw number; anything unparseable falls back to the neutral middle (3.0)."""
+    if isinstance(value, str):
+        mapped = _HOST_DIFFICULTY_TO_LSAT.get(value.strip().lower())
+        if mapped is not None:
+            return mapped
+    num = _numeric(value, default=3.0)
+    return _bounded(num, 1.0, 5.0)
+
+
+def _host_confidence_weight(confidence: Any) -> float:
+    value = confidence.value if hasattr(confidence, "value") else confidence
+    return _HOST_CONFIDENCE_WEIGHT.get(str(value or "").strip().lower(), 1.0)
+
+
+def _host_attempt_signal(payload: dict[str, Any]) -> tuple[float, float]:
+    """Return (weighted signal, weight) for one host attempt snapshot payload.
+
+    Mirrors ``_attempt_signal`` exactly, minus the Blind-Review term (host has no
+    BR analogue — we never invent that signal). ``elapsedSeconds`` is converted to
+    ms so the same 105s timing-penalty threshold applies."""
+    result = 1.0 if bool(payload.get("correct")) else 0.0
+    difficulty_bonus = (_host_difficulty_to_lsat(payload.get("difficulty")) - 3.0) * 0.11
+    timing_penalty = 0.0
+    elapsed_s = _numeric(payload.get("elapsedSeconds"), default=0.0)
+    time_ms = elapsed_s * 1000.0
+    if time_ms > 105_000:
+        timing_penalty = min(0.16, (time_ms - 105_000) / 240_000)
+    signal = (result - 0.5) * 2.0 + difficulty_bonus - timing_penalty
+    return signal, _host_confidence_weight(payload.get("confidence"))
+
+
+def _host_attempt_created_at(payload: dict[str, Any]) -> datetime:
+    """Best-effort timestamp for a host attempt (for the learning-velocity curve);
+    falls back to 'now' when the host omitted or malformed ``createdAt``."""
+    raw = payload.get("createdAt")
+    if isinstance(raw, str) and raw:
+        try:
+            return _aware(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+
 def refresh_question_stats(
     session: Session,
     question_id: int,
@@ -402,6 +464,44 @@ def refresh_all_item_stats(session: Session) -> dict[str, int]:
     return {"updated": updated}
 
 
+def _host_ability_evidence(
+    session: Session,
+    *,
+    domain: str,
+    days: int | None,
+) -> tuple[list[float], list[float], list[tuple[datetime, float]], int, list[int]]:
+    """Collect ability signals from host attempt snapshots (DATA-4a) for one
+    host plane. Returns the same (signals, weights, dated_signals, correct, times)
+    tuple shape the LSAT collection loop builds, so the shared estimation math is
+    fed identically. Read-only: never mutates HostProgressSnapshot."""
+    stmt = (
+        select(HostProgressSnapshot)
+        .where(HostProgressSnapshot.plane == domain)
+        .where(HostProgressSnapshot.kind == "attempt")
+    )
+    if days:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        stmt = stmt.where(HostProgressSnapshot.created_at >= cutoff)
+    rows = session.exec(stmt).all()
+
+    signals: list[float] = []
+    weights: list[float] = []
+    dated_signals: list[tuple[datetime, float]] = []
+    correct = 0
+    times: list[int] = []
+    for row in rows:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        sig, weight = _host_attempt_signal(payload)
+        signals.append(sig)
+        weights.append(weight)
+        dated_signals.append((_host_attempt_created_at(payload), sig))
+        correct += 1 if bool(payload.get("correct")) else 0
+        elapsed_s = _numeric(payload.get("elapsedSeconds"), default=0.0)
+        if elapsed_s > 0:
+            times.append(int(round(elapsed_s * 1000.0)))
+    return signals, weights, dated_signals, correct, times
+
+
 def ability_estimate(
     session: Session,
     *,
@@ -409,45 +509,65 @@ def ability_estimate(
     section_type: SectionType | None = None,
     days: int | None = None,
     persist: bool = False,
+    domain: str | None = None,
 ) -> dict[str, Any]:
-    """Compute a transparent local ability estimate for one slice."""
-    stmt = select(Attempt).where(Attempt.mode != AttemptMode.blind_review)
-    if days:
-        stmt = stmt.where(Attempt.created_at >= datetime.now(timezone.utc) - timedelta(days=days))
-    attempts = session.exec(stmt).all()
-    qids = {a.question_id for a in attempts}
-    qmap = {
-        q.id: q for q in session.exec(
-            select(Question).where(Question.id.in_(qids or {-1}))
-        ).all()
-        if q.deleted_at is None
-    }
-    signals: list[float] = []
-    weights: list[float] = []
-    dated_signals: list[tuple[datetime, float]] = []
-    correct = 0
-    times: list[int] = []
-    by_outcome = {"timed_ok": 0, "timing_problem": 0, "concept_gap": 0, "lucky": 0}
+    """Compute a transparent local ability estimate for one slice.
 
-    for a in attempts:
-        q = qmap.get(a.question_id)
-        if q is None:
-            continue
-        if q_type and q.q_type != q_type:
-            continue
-        st = _section_type_for(session, q)
-        if section_type and st != section_type:
-            continue
-        sig, weight = _attempt_signal(a, q)
-        signals.append(sig)
-        weights.append(weight)
-        dated_signals.append((_aware(a.created_at), sig))
-        correct += 1 if a.is_correct else 0
-        if a.time_ms:
-            times.append(a.time_ms)
-        if a.br_answer is not None:
-            outcome = analytics.blind_review_outcome(a.is_correct, a.br_correct)
-            by_outcome[outcome] = by_outcome.get(outcome, 0) + 1
+    ``domain`` (LEARN-1) selects the evidence plane: ``None`` (default) keeps the
+    historical LSAT-only behaviour unchanged; a host plane (``cfa`` | ``quant`` |
+    ``excel``) instead reads the host's attempt snapshots (DATA-4a) and feeds the
+    SAME estimation math. Host planes have no Blind-Review analogue, so the
+    blind_review_outcomes counters stay zeroed (we do not invent that signal). An
+    unknown/unsupported ``domain`` degrades gracefully to an empty estimate."""
+    by_outcome = {"timed_ok": 0, "timing_problem": 0, "concept_gap": 0, "lucky": 0}
+    host_domain = (domain or "").strip().lower() if domain else None
+
+    if host_domain and host_domain in _HOST_DOMAINS:
+        # Host plane: q_type/section_type are LSAT-only filters and don't apply.
+        signals, weights, dated_signals, correct, times = _host_ability_evidence(
+            session, domain=host_domain, days=days,
+        )
+    elif host_domain:
+        # Unknown domain — degrade gracefully to an empty (zeroed) estimate
+        # rather than silently falling back to LSAT evidence.
+        signals, weights, dated_signals, correct, times = [], [], [], 0, []
+    else:
+        stmt = select(Attempt).where(Attempt.mode != AttemptMode.blind_review)
+        if days:
+            stmt = stmt.where(Attempt.created_at >= datetime.now(timezone.utc) - timedelta(days=days))
+        attempts = session.exec(stmt).all()
+        qids = {a.question_id for a in attempts}
+        qmap = {
+            q.id: q for q in session.exec(
+                select(Question).where(Question.id.in_(qids or {-1}))
+            ).all()
+            if q.deleted_at is None
+        }
+        signals = []
+        weights = []
+        dated_signals = []
+        correct = 0
+        times = []
+
+        for a in attempts:
+            q = qmap.get(a.question_id)
+            if q is None:
+                continue
+            if q_type and q.q_type != q_type:
+                continue
+            st = _section_type_for(session, q)
+            if section_type and st != section_type:
+                continue
+            sig, weight = _attempt_signal(a, q)
+            signals.append(sig)
+            weights.append(weight)
+            dated_signals.append((_aware(a.created_at), sig))
+            correct += 1 if a.is_correct else 0
+            if a.time_ms:
+                times.append(a.time_ms)
+            if a.br_answer is not None:
+                outcome = analytics.blind_review_outcome(a.is_correct, a.br_correct)
+                by_outcome[outcome] = by_outcome.get(outcome, 0) + 1
 
     evidence_n = len(signals)
     if evidence_n:
@@ -471,6 +591,9 @@ def ability_estimate(
     payload = {
         "q_type": q_type,
         "section_type": section_type.value if section_type else None,
+        # LEARN-1 — self-describing evidence plane. ``None`` reports the canonical
+        # "lsat" plane (additive key; existing LSAT-only callers are unaffected).
+        "domain": host_domain or "lsat",
         "ability": round(ability, 4),
         "mastery": round(mastery, 4),
         "uncertainty": round(uncertainty, 4),
@@ -488,7 +611,10 @@ def ability_estimate(
             "uses_official_score_anchor_only": True,
         },
     }
-    if persist:
+    # Only persist LSAT-plane estimates into the LSAT AbilitySnapshot history;
+    # host-plane (and unknown-domain) reads stay non-persisting so the LSAT
+    # ability table is never polluted with cross-domain rows (read-only contract).
+    if persist and host_domain is None:
         snap = AbilitySnapshot(
             q_type=q_type,
             section_type=section_type,

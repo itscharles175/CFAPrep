@@ -33,6 +33,9 @@ const SystemHealth = lazy(() => import('./pages/SystemHealth'));
 const Today = lazy(() => import('./pages/Today'));
 const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
 const StyleGallery = lazy(() => import('./pages/StyleGallery'));
+// LEARN-5 — standalone unified leech + concept-gap remediation page. Registered
+// additively below (its own /leeches route); not part of the typed routeManifest.
+const LeechesAndGaps = lazy(() => import('./pages/LeechesAndGaps'));
 const PwaInstallPrompt = lazy(() => import('./components/PwaInstallPrompt'));
 
 /* C5: Skeleton loading state instead of text-only fallback */
@@ -185,6 +188,10 @@ export default function App() {
                       element={routeElementFor(definition, routeElements[definition.id])}
                     />
                   ))}
+                  {/* LEARN-5 — standalone unified leech + concept-gap remediation
+                      page. Registered here additively (its own route) rather than
+                      via the typed routeManifest. */}
+                  <Route path="/leeches" element={<LeechesAndGaps />} />
                   <Route
                     path="*"
                     element={

@@ -58,6 +58,123 @@ export function getActiveScheduler(): FSRS {
   return f;
 }
 
+/**
+ * LEARN-4 — Host-side FSRS parameter parity with the LSAT backend.
+ *
+ * The LSAT FastAPI sidecar (services/lsat-backend/app/srs.py) is the source of
+ * truth for the user's optimized FSRS weights + desired retention. This block
+ * lets the host scheduler adopt those at boot so both domains schedule reviews
+ * identically. Same fully-degrading transport as src/lib/lsatBackend.ts: any
+ * failure (sidecar down, timeout, 404 on an older build, shape drift) resolves
+ * to `null` and the host keeps its ts-fsrs library defaults / local fit — never
+ * throws, never blocks render.
+ */
+const LSAT_API_BASE = 'http://127.0.0.1:8100';
+
+/**
+ * Shape of `GET /api/srs/params` (backend `SrsParamsOut`). Declared inline
+ * rather than imported from `@/domains/lsat/lib/api.gen` because this endpoint
+ * is additive (LEARN-4) and not yet in the committed `openapi-baseline.json`
+ * the generated types are built from; once the baseline is regenerated this can
+ * switch to the generated `operations[...]` type like lsatBackend.ts does.
+ */
+export interface BackendSrsParams {
+  /** py-fsrs weights; empty when no per-user optimization has been persisted. */
+  weights: number[];
+  /** Backend's desired retention target (config.SRS_DESIRED_RETENTION). */
+  desired_retention: number;
+  /** Always "backend" — labels where the params came from. */
+  source: string;
+}
+
+/**
+ * Fetch the backend's FSRS params. Never throws; returns `null` on offline,
+ * timeout, non-2xx (incl. 404 on an older sidecar), or a body that doesn't
+ * match the expected shape.
+ */
+export async function fetchBackendSrsParams(timeoutMs = 2500): Promise<BackendSrsParams | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${LSAT_API_BASE}/api/srs/params`, {
+      signal: controller.signal,
+      headers: { accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const data: unknown = await res.json();
+    if (!data || typeof data !== 'object') return null;
+    const d = data as Partial<BackendSrsParams>;
+    const retention = typeof d.desired_retention === 'number' ? d.desired_retention : null;
+    if (retention === null) return null;
+    const weights = Array.isArray(d.weights)
+      ? d.weights.filter((w): w is number => typeof w === 'number')
+      : [];
+    return {
+      weights,
+      desired_retention: retention,
+      source: typeof d.source === 'string' ? d.source : 'backend',
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Apply backend FSRS params to the active scheduler, mirroring the source of
+ * truth. Backend params take precedence at boot; the local optimizer stays the
+ * fallback (when this no-ops, whatever the local bootstrap already applied
+ * remains in effect). Returns `true` only when weights were actually applied.
+ *
+ * py-fsrs and ts-fsrs can carry different-length weight vectors across versions
+ * (e.g. FSRS-4.5's 19 vs FSRS-6's 21). Feeding a wrong-length array into ts-fsrs
+ * would either throw or silently mis-schedule, so we take the SAFE option: only
+ * apply `weights` when its length exactly matches the active library's
+ * `default_w`. On a length mismatch we log a one-line note and apply only the
+ * retention knob (which is length-independent), leaving the weights on the local
+ * defaults/fit. An empty `weights` (backend has no per-user fit) likewise
+ * applies retention only.
+ */
+export function applyBackendSrsParams(params: BackendSrsParams | null): boolean {
+  if (!params) return false;
+  const expectedLen = default_w.length;
+  const haveWeights = params.weights.length > 0;
+  const lengthMatches = params.weights.length === expectedLen;
+  const applyWeights = haveWeights && lengthMatches;
+
+  if (haveWeights && !lengthMatches) {
+    // One-line note: keep the currently-active weights, still adopt retention.
+    console.info(
+      `[scheduler] backend FSRS weights length ${params.weights.length} != ts-fsrs ${expectedLen}; ` +
+        'applying desired_retention only, keeping local weights.',
+    );
+  }
+
+  // When the backend's weights are usable, adopt them. Otherwise carry the
+  // currently-active weights forward unchanged (the local fit / library
+  // defaults) so a retention-only update never silently resets the weights —
+  // `setSchedulerParameters` is a full replace, so we must pass them through.
+  setSchedulerParameters({
+    request_retention: params.desired_retention,
+    w: applyWeights ? params.weights : Array.from(f.parameters.w),
+  });
+  return applyWeights;
+}
+
+/**
+ * Boot-time parity hook: fetch the backend's params and apply them, preferring
+ * the backend over the local fit. Best-effort + silent — call after the local
+ * `bootstrapFsrsParameters()` so backend params win when the sidecar is up, and
+ * the local fit remains in effect when it's offline. Returns the params that
+ * were applied (or `null` when the sidecar was unreachable / had nothing).
+ */
+export async function syncSchedulerFromBackend(timeoutMs = 2500): Promise<BackendSrsParams | null> {
+  const params = await fetchBackendSrsParams(timeoutMs);
+  applyBackendSrsParams(params);
+  return params;
+}
+
 /** Map QuantVault confidence + correctness to ts-fsrs Grade (1–4, excludes Manual=0) */
 function toRating(correct: boolean, confidence: Confidence): Grade {
   if (!correct) return Rating.Again as Grade; // 1

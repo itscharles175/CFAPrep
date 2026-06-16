@@ -197,6 +197,81 @@ describe('canonical mappers (§1-§4)', () => {
   });
 });
 
+describe('leech + concept-gap fields (LEARN-5, identity coercion)', () => {
+  it('passes lapses/leech/origin through a raw LSAT card verbatim (no bucketing)', () => {
+    const c = lsatSrsCardToCanonical({
+      card_id: 7,
+      question_id: 7,
+      stem: 'Lapsing card',
+      q_type: 'Weaken',
+      difficulty: 4,
+      origin: 'concept_gap',
+      lapses: 11,
+      leech: true,
+    });
+    expect(c.lapses).toBe(11);
+    expect(c.leech).toBe(true);
+    expect(c.origin).toBe('concept_gap');
+  });
+
+  it('leaves lapses/leech undefined when the LSAT card omits them (legacy due card)', () => {
+    const c = lsatSrsCardToCanonical({ card_id: 1, question_id: 1, q_type: 'Strengthen', difficulty: 3 });
+    expect(c.lapses).toBeUndefined();
+    expect(c.leech).toBeUndefined();
+  });
+
+  it('passes host ReviewItem leech fields through to canonical', () => {
+    const item: ReviewItem = {
+      id: 'r9',
+      domain: 'cfa',
+      topic: 'Ethics',
+      learningObjective: 'loi-9',
+      title: 'Sticky card',
+      path: '/cfa/x',
+      intervalDays: 1,
+      ease: 2.1,
+      dueAt: '2026-06-20T00:00:00.000Z',
+      lastResultAt: '2026-06-15T00:00:00.000Z',
+      attempts: 12,
+      correctStreak: 0,
+      lastCorrect: false,
+      lastConfidence: 'low',
+      lastErrorCategory: 'concept',
+      origin: 'missed-question',
+      lapses: 9,
+      leech: true,
+    };
+    const c = reviewItemToCanonical(item);
+    expect(c.origin).toBe('missed-question');
+    expect(c.lapses).toBe(9);
+    expect(c.leech).toBe(true);
+  });
+
+  it('leaves host leech fields undefined when the ReviewItem omits them', () => {
+    const item: ReviewItem = {
+      id: 'r10',
+      domain: 'quant',
+      topic: 'Risk',
+      learningObjective: 'loi-10',
+      title: 'Plain due card',
+      path: '/quant/x',
+      intervalDays: 2,
+      ease: 2.5,
+      dueAt: '2026-06-20T00:00:00.000Z',
+      lastResultAt: '2026-06-15T00:00:00.000Z',
+      attempts: 1,
+      correctStreak: 1,
+      lastCorrect: true,
+      lastConfidence: 'medium',
+      lastErrorCategory: 'none',
+    };
+    const c = reviewItemToCanonical(item);
+    expect(c.lapses).toBeUndefined();
+    expect(c.leech).toBeUndefined();
+    expect(c.origin).toBeUndefined();
+  });
+});
+
 describe('cross-domain bridge factory (DATA-2)', () => {
   it('projects native stores onto canonical shapes', async () => {
     const bridge = createCrossDomainBridge({

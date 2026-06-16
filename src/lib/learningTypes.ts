@@ -171,6 +171,16 @@ export interface ReviewItem {
   lastCorrect: boolean;
   lastConfidence: Confidence;
   lastErrorCategory: ErrorCategory;
+  // LEARN-5 — leech + concept-gap unification (append-only). Identity coercion
+  // (no bucketing): when a host review card mirrors cross-domain
+  // (CrossDomainReviewCard via dataDictionary.ts), these self-describe WHY it is
+  // queued so the unified Leeches/Gaps page can rank it next to LSAT rows.
+  /** Why the card exists, mirroring the host ReviewReason / LSAT origin vocabulary. */
+  origin?: string;
+  /** Number of lapses (Again ratings); drives the leech threshold. */
+  lapses?: number;
+  /** Flagged as a leech (too many lapses) for the remediation queue. */
+  leech?: boolean;
 }
 
 export interface QuizAttempt {
@@ -736,4 +746,47 @@ export interface VaultBookmark {
   title: string;
   path: string;
   createdAt: string;
+}
+
+// LEARN-1 — unified cross-domain ability model. Pure shapes (no I/O) mirroring
+// the LSAT backend's `adaptivity.ability_estimate` payload + `domain`, read from
+// GET /api/adaptivity/ability?domain=<plane>. The `domain` plane can be a host
+// domain OR the LSAT plane ('lsat'), so it widens DomainId.
+export type AbilityDomain = DomainId | 'lsat';
+
+export interface UnifiedAbilityEstimate {
+  domain: AbilityDomain;
+  q_type: string | null;
+  section_type: string | null;
+  ability: number;
+  mastery: number;
+  uncertainty: number;
+  evidence_n: number;
+  accuracy: number | null;
+  avg_time_ms: number | null;
+  model: string;
+  learning_velocity: {
+    slope_per_week: number;
+    window: string;
+    early_signal: number | null;
+    recent_signal: number | null;
+    days?: number;
+  };
+  plateau: boolean;
+  mastery_eta_days: number | null;
+  components: {
+    blind_review_outcomes: Record<string, number>;
+    days: number | null;
+    model: string;
+    uses_official_score_anchor_only: boolean;
+  };
+}
+
+export interface PerDomainAbilitySnapshot {
+  domain: AbilityDomain;
+  theta: number;
+  mastery: number;
+  uncertainty: number;
+  slope: number;
+  evidence_n: number;
 }

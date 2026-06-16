@@ -178,6 +178,14 @@ export interface CrossDomainReviewCard {
   itemType?: string;
   /** Why the card exists (LSAT `origin`: concept_gap | gap | manual | seed). */
   origin?: string;
+  // LEARN-5 — leech + concept-gap unification. Identity coercion (no bucketing):
+  // both planes count lapses on the same integer scale and flag a leech the same
+  // way (lapses >= threshold), so these pass through verbatim. Optional — a plane
+  // that doesn't track them (or a legacy row) leaves them undefined.
+  /** Lapse count (Again ratings) for this card; same integer scale on both planes. */
+  lapses?: number;
+  /** Flagged as a leech (too many lapses) for the remediation queue. */
+  leech?: boolean;
 }
 
 /** A domain-agnostic attempt (host `QuestionResult` ⇄ LSAT `Attempt`). */
@@ -221,6 +229,11 @@ export function reviewItemToCanonical(item: ReviewItem): CrossDomainReviewCard {
     difficulty: 'intermediate',
     dueAt: item.dueAt,
     itemType: item.topic,
+    // LEARN-5 — identity coercion (no bucketing): pass leech/lapse/origin through
+    // verbatim when the host row tracks them, else leave undefined.
+    origin: item.origin,
+    lapses: typeof item.lapses === 'number' ? item.lapses : undefined,
+    leech: typeof item.leech === 'boolean' ? item.leech : undefined,
   };
 }
 
@@ -270,6 +283,10 @@ export interface RawLsatSrsCard {
   empirical_difficulty?: number | null;
   origin?: string | null;
   due_date?: string;
+  // LEARN-5 — leech + concept-gap unification (the `/leeches` rows carry `lapses`;
+  // the SRSCard also tracks `leech`). Optional — absent on a plain due card.
+  lapses?: number;
+  leech?: boolean;
 }
 
 /** Raw LSAT attempt row (subset of `models.Attempt`). */
@@ -304,6 +321,9 @@ export function lsatSrsCardToCanonical(card: RawLsatSrsCard): CrossDomainReviewC
     dueAt: typeof card.due_date === 'string' ? card.due_date : undefined,
     itemType: card.q_type,
     origin: card.origin ?? undefined,
+    // LEARN-5 — identity coercion: pass leech/lapse through verbatim when present.
+    lapses: typeof card.lapses === 'number' ? card.lapses : undefined,
+    leech: typeof card.leech === 'boolean' ? card.leech : undefined,
   };
 }
 

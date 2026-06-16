@@ -6,15 +6,44 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from .. import adaptivity, pedagogy, serializers, srs
+from .. import adaptivity, config, pedagogy, serializers, srs
 from ..db import atomic_batch, get_session
 from ..models import Attempt, AttemptRationale, Confidence, Question, SRSCard
 
 router = APIRouter(prefix="/srs")
+
+
+# LEARN-4 — Host-side FSRS parameter parity. The host (src/lib/scheduler.ts) runs
+# its own ts-fsrs scheduler; this read-only endpoint lets it adopt the backend's
+# source-of-truth FSRS weights + desired retention at boot so both domains
+# schedule identically. ``srs.py`` owns the weights (``load_optimized_params``)
+# and ``config.SRS_DESIRED_RETENTION`` owns the retention target; we are a pure
+# read-only consumer of those — no side effects, no mutation of either.
+class SrsParamsOut(BaseModel):
+    """The backend's effective FSRS parameters (py-fsrs). ``weights`` are the
+    per-user optimized weights when present, else the empty list (host then keeps
+    its ts-fsrs library defaults / local fit). ``source`` always "backend" so the
+    host can label where the params came from."""
+    weights: list[float] = Field(default_factory=list)
+    desired_retention: float
+    source: str = "backend"
+
+
+@router.get("/params", response_model=SrsParamsOut)
+def srs_params(session: Session = Depends(get_session)) -> SrsParamsOut:
+    """LEARN-4 — expose the backend's source-of-truth FSRS weights + desired
+    retention so the host scheduler can mirror them. Idempotent + side-effect
+    free: ``load_optimized_params`` only reads (and applies to the backend's own
+    cached Scheduler) the persisted optimized weights — it never writes — and the
+    retention is read straight from config. Returns ``weights=[]`` when no
+    per-user optimization has been persisted yet."""
+    weights = srs.load_optimized_params(session) or []
+    retention = float(getattr(config, "SRS_DESIRED_RETENTION", 0.9) or 0.9)
+    return SrsParamsOut(weights=list(weights), desired_retention=retention)
 
 # LSAT-3 — the distinct origin for auto-generated cloze/pattern "Gap" cards. Kept
 # separate from the plain ``concept_gap`` origin (which marks a question that
@@ -77,11 +106,39 @@ def create_cards(body: BulkCardsBody, session: Session = Depends(get_session)):
 
 
 @router.get("/concept-gap-queue")
-def concept_gap_queue(session: Session = Depends(get_session)):
+def concept_gap_queue(
+    session: Session = Depends(get_session),
+    include_host: bool = Query(
+        False,
+        description="LEARN-5 — also append HOST concept-gap rows (from "
+        "HostProgressSnapshot review snapshots, DATA-4a) projected onto the "
+        "canonical CrossDomainReviewCard shape. Default false → the response is "
+        "byte-for-byte the LSAT-only queue (backward compatible).",
+    ),
+):
     """1.1 — the concept-gap remediation queue: SRS cards created because the
-    timed AND blind-review answers were both wrong (origin="concept_gap")."""
+    timed AND blind-review answers were both wrong (origin="concept_gap").
+
+    LEARN-5 — with ``include_host=true`` the cross-domain concept gaps the host
+    mirrored (DATA-4a review snapshots whose ``origin`` marks unfinished
+    understanding) are ALSO appended, already projected onto the canonical
+    cross-domain shape (``cross_domain_review_card`` / ``CrossDomainReviewCard``)
+    so the unified UI renders both planes with one vocabulary. Read-only on the
+    host mirror. When ``include_host`` is false (the default) nothing host-side is
+    read and the response is unchanged."""
     cards = pedagogy.concept_gap_queue(session)
-    return {"count": len(cards), "cards": cards}
+    if not include_host:
+        return {"count": len(cards), "cards": cards}
+    _leech_rows, host_gaps = srs.host_leech_and_gap_rows(session)
+    return {
+        "count": len(cards) + len(host_gaps),
+        "cards": cards,
+        # Host rows are kept in their own array (already-canonical shape) so the
+        # LSAT-native ``cards`` payload stays exactly as before — a consumer that
+        # ignores ``host_cards`` sees the unchanged queue.
+        "host_cards": host_gaps,
+        "include_host": True,
+    }
 
 
 @router.post("/attempts/{attempt_id}/blind-review-note")
@@ -302,10 +359,27 @@ def due_cards(session: Session = Depends(get_session)):
 
 
 @router.get("/leeches")
-def leeches(session: Session = Depends(get_session)):
+def leeches(
+    session: Session = Depends(get_session),
+    include_host: bool = Query(
+        False,
+        description="LEARN-5 — also append HOST leech rows (from "
+        "HostProgressSnapshot review snapshots, DATA-4a) projected onto the "
+        "canonical CrossDomainReviewCard shape. Default false → the response is "
+        "byte-for-byte the LSAT-only queue (backward compatible).",
+    ),
+):
     """3.2 — the leech remediation queue: cards that have lapsed too many times
     (``lapses >= config.SRS_LEECH_THRESHOLD``), most-lapsed first. Served in
-    test mode (no answer leak) with the lapse count + card id attached."""
+    test mode (no answer leak) with the lapse count + card id attached.
+
+    LEARN-5 — with ``include_host=true`` the host leeches mirrored cross-domain
+    (DATA-4a review snapshots that self-report ``leech`` / enough ``lapses``) are
+    ALSO appended, already projected onto the canonical cross-domain shape
+    (``CrossDomainReviewCard`` + ``lapses`` / ``leech``) and sorted most-lapsed
+    first, so the unified UI renders both planes with one vocabulary. Read-only on
+    the host mirror. When ``include_host`` is false (the default) nothing host-side
+    is read and the response is unchanged."""
     out = []
     for card in srs.leeches(session):
         q = session.get(Question, card.question_id)
@@ -314,7 +388,17 @@ def leeches(session: Session = Depends(get_session)):
         payload = serializers.question_test_mode(session, q, card_id=card.id)
         payload["lapses"] = card.lapses
         out.append(payload)
-    return {"count": len(out), "cards": out}
+    if not include_host:
+        return {"count": len(out), "cards": out}
+    host_leeches, _gaps = srs.host_leech_and_gap_rows(session)
+    return {
+        "count": len(out) + len(host_leeches),
+        "cards": out,
+        # Host rows kept in their own array (already-canonical shape) so the
+        # LSAT-native ``cards`` payload stays exactly as before.
+        "host_cards": host_leeches,
+        "include_host": True,
+    }
 
 
 @router.post("/optimize")

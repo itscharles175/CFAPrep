@@ -1,10 +1,10 @@
 """vNext adaptive ability, readiness, and Socratic tutor endpoints."""
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlmodel import Session, select
 
 from .. import adaptivity
@@ -21,6 +21,33 @@ router = APIRouter()
 ShortText = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)
 ]
+
+
+class UnifiedAbilityEstimate(BaseModel):
+    """LEARN-1 — inline typed shape of a unified cross-domain ability estimate
+    (BC2 style; mirrors ``adaptivity.ability_estimate``'s payload + ``domain``).
+
+    Returned for the host-plane read (``GET /api/adaptivity/ability?domain=…``).
+    ``model_config`` allows extra keys so future estimate fields surface without
+    a contract break, and so the existing LSAT-only matrix/estimate branches keep
+    returning their own (un-narrowed) shapes through this same route."""
+
+    model_config = ConfigDict(extra="allow")
+
+    domain: str
+    q_type: str | None = None
+    section_type: str | None = None
+    ability: float
+    mastery: float
+    uncertainty: float
+    evidence_n: int
+    accuracy: float | None = None
+    avg_time_ms: float | None = None
+    model: str
+    learning_velocity: dict[str, Any]
+    plateau: bool
+    mastery_eta_days: int | None = None
+    components: dict[str, Any]
 
 
 class NextBody(BaseModel):
@@ -66,8 +93,27 @@ def ability(
     section_type: SectionType | None = Query(None),
     days: int | None = Query(default=180, ge=1, le=730),
     persist: bool = Query(default=False),
+    domain: Literal["cfa", "quant", "excel"] | None = Query(
+        default=None,
+        description=(
+            "LEARN-1 — cross-domain ability plane. Omit (default) for the "
+            "current LSAT-only matrix/estimate. A host plane reads that domain's "
+            "attempt snapshots (DATA-4a) and returns a single unified estimate."
+        ),
+    ),
     session: Session = Depends(get_session),
 ):
+    # LEARN-1 — host-plane read. The LSAT-only q_type/section_type/matrix path
+    # below is unchanged when ``domain`` is omitted (backward compat). A host
+    # plane has no LSAT selector/matrix, so we return its unified estimate alone,
+    # validated through the inline typed shape (extra keys preserved).
+    if domain is not None:
+        estimate = adaptivity.ability_estimate(
+            session,
+            days=days,
+            domain=domain,
+        )
+        return UnifiedAbilityEstimate.model_validate(estimate)
     if q_type or section_type:
         payload = adaptivity.ability_estimate(
             session,

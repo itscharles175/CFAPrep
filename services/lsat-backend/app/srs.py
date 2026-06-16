@@ -27,7 +27,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from . import config
-from .models import Setting, SRSCard, SRSReviewLog
+from .models import HostProgressSnapshot, Setting, SRSCard, SRSReviewLog
 
 try:
     from fsrs import Card, Rating, Scheduler
@@ -266,6 +266,77 @@ def leeches(session: Session) -> list[SRSCard]:
     """All cards currently flagged as leeches, most-lapsed first."""
     rows = session.exec(select(SRSCard).where(SRSCard.leech == True)).all()  # noqa: E712
     return sorted(rows, key=lambda c: (-c.lapses, c.id or 0))
+
+
+# --- LEARN-5 leech + concept-gap unification (host projection) --------------
+# The host (CFA/Quant/Excel) mirrors its review cards onto HostProgressSnapshot
+# (kind="review") using the canonical cross-domain vocabulary (CrossDomainReviewCard;
+# src/lib/dataDictionary.ts / serializers.cross_domain_review_card). LEARN-5 appends
+# the optional ``origin`` / ``lapses`` / ``leech`` fields to that shape, so a host
+# review snapshot can self-describe as a leech (too many lapses) or a concept gap
+# (an origin reason that marks unfinished understanding). These helpers read those
+# snapshots back — READ-ONLY, never mutating HostProgressSnapshot — and project them
+# onto the SAME canonical shape the LSAT ``/leeches`` and ``/concept-gap-queue`` rows
+# carry, so the unified UI merges both planes with one vocabulary.
+
+# Host review-card origins that mark a concept gap (vs. a routine due review). These
+# mirror the host ReviewReason vocabulary (src/lib/learningTypes.ts) plus the LSAT
+# native "concept_gap" origin; anything else (e.g. "due-review") is not a gap.
+_HOST_GAP_ORIGINS = frozenset({
+    "concept_gap",
+    "concept_gap_cloze",
+    "weak-objective",
+    "missed-question",
+    "rubric-miss",
+    "skill-lab-gap",
+})
+
+
+def _coerce_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _host_review_snapshot_payload(row: HostProgressSnapshot) -> dict:
+    """The verbatim canonical CrossDomainReviewCard the host POSTed, with the
+    LEARN-5 leech fields coerced to sane types (a drifted/partial row degrades to
+    safe defaults rather than raising). Read-only — never mutates the row."""
+    payload = dict(row.payload) if isinstance(row.payload, dict) else {}
+    payload["lapses"] = _coerce_int(payload.get("lapses"), 0)
+    payload["leech"] = bool(payload.get("leech"))
+    # Keep the canonical identity/domain honest even when the host omitted them.
+    payload.setdefault("crossId", row.cross_id)
+    payload.setdefault("domain", row.plane)
+    return payload
+
+
+def host_leech_and_gap_rows(session: Session) -> tuple[list[dict], list[dict]]:
+    """Read host review snapshots (DATA-4a, kind="review") and split them into the
+    canonical leech + concept-gap rows the unified queues append when
+    ``include_host=true``.
+
+    A host row is a LEECH when it self-reports ``leech=true`` OR its ``lapses``
+    reach ``config.SRS_LEECH_THRESHOLD`` (identical rule to
+    ``flag_leech_if_needed``); it is a GAP when its ``origin`` is one of
+    ``_HOST_GAP_ORIGINS``. The two sets overlap freely (a leech can also be a
+    concept gap). Leeches are sorted most-lapsed first to match the LSAT order.
+    Returns ``([], [])`` when there is no host review data."""
+    threshold = int(getattr(config, "SRS_LEECH_THRESHOLD", 8))
+    rows = session.exec(
+        select(HostProgressSnapshot).where(HostProgressSnapshot.kind == "review")
+    ).all()
+    leech_rows: list[dict] = []
+    gap_rows: list[dict] = []
+    for row in rows:
+        payload = _host_review_snapshot_payload(row)
+        if payload["leech"] or payload["lapses"] >= threshold:
+            leech_rows.append(payload)
+        if str(payload.get("origin") or "") in _HOST_GAP_ORIGINS:
+            gap_rows.append(payload)
+    leech_rows.sort(key=lambda p: -_coerce_int(p.get("lapses"), 0))
+    return leech_rows, gap_rows
 
 
 # --- 3.2 weight optimization ------------------------------------------------
