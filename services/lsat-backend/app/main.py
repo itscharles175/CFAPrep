@@ -42,6 +42,7 @@ from .routers import (
     sessions,
     settings_routes,
     srs_routes,
+    study_artifacts_routes,
     study_routes,
     trust_routes,
 )
@@ -392,6 +393,8 @@ for r in (
     study_routes.router,
     # DATA-4a — host -> backend cross-domain progress feed (POST /api/sync/...).
     study_routes.sync_router,
+    # INT-4 — shared study-artifact store (CRUD under /api/study-artifacts).
+    study_artifacts_routes.router,
     settings_routes.router,
     annotation_routes.router,
     observability_routes.router,
