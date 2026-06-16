@@ -6,14 +6,25 @@ the throwaway file. We reset by dropping/recreating tables on the shared engine
 """
 from __future__ import annotations
 
+import atexit
 import contextlib
 import os
+import shutil
 import tempfile
 
 import pytest
 
 # Set env before app modules import config/db.
-_TMP_DB = os.path.join(tempfile.gettempdir(), "lsatlab_test.db")
+# Per-PROCESS DB + backup dir so concurrent pytest interpreters (e.g. parallel
+# swarm agents, or two suites launched at once) never share the one SQLite file.
+# A shared fixed path was the source of transient "no such table" / SQLITE_BUSY
+# failures when two suites ran simultaneously: both bound app.db's engine to the
+# same file and one's drop_all/init_db raced the other's queries. Keying on the
+# pid gives each interpreter its OWN throwaway file; a single serial run is
+# unchanged (one pid, one file). The seed subprocess + seeded_sidecar_db fixture
+# already use their own tmp_path files, so only this engine-bound path matters.
+_PID = os.getpid()
+_TMP_DB = os.path.join(tempfile.gettempdir(), f"lsatlab_test_{_PID}.db")
 os.environ["LSATLAB_DB"] = _TMP_DB
 # Never run the background generation worker in tests: queued jobs must not
 # auto-invoke the model. Tests call generation.run_job directly when needed.
@@ -23,9 +34,10 @@ os.environ["LSATLAB_JOBS_WORKER"] = "0"
 os.environ["LSATLAB_SQLITE_FK"] = "0"
 # Don't auto-diagnose error-log saves in tests (would call the model).
 os.environ["LSATLAB_ERRORLOG_AUTODIAGNOSE"] = "0"
-# Keep DB snapshots out of the repo dir during tests (D4).
+# Keep DB snapshots out of the repo dir during tests (D4). Per-PID for the same
+# concurrency-isolation reason as the DB above.
 os.environ["LSATLAB_BACKUP_DIR"] = os.path.join(
-    tempfile.gettempdir(), "lsatlab_test_backups"
+    tempfile.gettempdir(), f"lsatlab_test_backups_{_PID}"
 )
 # Bank-expansion plan Wave 2.1 / 2.2 — the permutation-invariant SC and
 # Säuberli-style informativity gates require a real solver. Most unit tests
@@ -48,6 +60,19 @@ os.environ.setdefault("LSATLAB_IMPORT_EMBED_ON_COMMIT", "0")
 os.environ.setdefault("LSATLAB_OLLAMA_URL", "http://127.0.0.1:1")
 os.environ.setdefault("LSATLAB_LMSTUDIO_URL", "http://127.0.0.1:1/v1")
 os.environ.setdefault("LSATLAB_LLM_RETRIES", "0")
+
+
+@atexit.register
+def _cleanup_tmp_db() -> None:
+    """Best-effort removal of this process's throwaway DB + backup dir at exit.
+
+    Per-PID paths would otherwise accumulate in the temp dir across many runs.
+    Never raises (the interpreter is already exiting); the engine still holds the
+    file on Windows in rare cases, so missing/locked files are ignored."""
+    for suffix in ("", "-wal", "-shm"):
+        with contextlib.suppress(OSError):
+            os.remove(_TMP_DB + suffix)
+    shutil.rmtree(os.environ.get("LSATLAB_BACKUP_DIR", ""), ignore_errors=True)
 
 
 def _reset_and_seed():
