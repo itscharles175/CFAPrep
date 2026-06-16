@@ -88,6 +88,10 @@ type QuestionResultRow = QuestionResult & {
   level?: string;
   itemType?: string;
   createdAt: string;
+  // ANL-3 — blind-review capture (append-only, optional; see `QuestionResult`).
+  brAnswer?: number;
+  brConfidence?: Confidence;
+  brCorrect?: boolean;
 };
 
 type QuizAttemptRow = Omit<QuizAttempt, 'answers'> & {
@@ -542,6 +546,17 @@ function normalizeQuestionResult(
   const questionId = result.questionId || `${result.topic}:question`;
   const learningObjective = result.learningObjective || `${result.topic}:general`;
 
+  // ANL-3 — persist the blind-review pass when one was captured. `brCorrect` is
+  // taken verbatim when given, else derived from the BR answer vs the correct
+  // index (the 2x2's br_correct axis), so a caller can supply just `brAnswer`.
+  const hasBr = typeof result.brAnswer === 'number';
+  const brCorrect =
+    typeof result.brCorrect === 'boolean'
+      ? result.brCorrect
+      : hasBr && typeof result.correctIndex === 'number'
+        ? result.brAnswer === result.correctIndex
+        : undefined;
+
   return {
     domain: result.domain,
     topic: result.topic,
@@ -561,6 +576,10 @@ function normalizeQuestionResult(
     level: result.level,
     itemType: result.itemType,
     createdAt: result.createdAt || timestamp,
+    // ANL-3 — blind-review capture (omitted when no BR pass).
+    brAnswer: hasBr ? result.brAnswer : undefined,
+    brConfidence: result.brConfidence ? normalizeConfidence(result.brConfidence) : undefined,
+    brCorrect,
   };
 }
 
@@ -652,6 +671,10 @@ function buildReviewItem(result: QuestionResultRow, previous?: ReviewItem): Revi
     lastCorrect: result.correct,
     lastConfidence: result.confidence,
     lastErrorCategory: result.errorCategory,
+    // ANL-3 — surface the latest blind-review pass on the card (append-only).
+    brAnswer: result.brAnswer,
+    brConfidence: result.brConfidence,
+    brCorrect: result.brCorrect,
   };
 }
 

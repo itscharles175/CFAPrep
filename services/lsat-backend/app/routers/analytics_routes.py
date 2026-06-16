@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Response
+from pydantic import BaseModel
 from sqlmodel import Session
 
 from .. import analytics
@@ -28,6 +29,27 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/analytics")
+
+
+# ANL-3 — inline response_model for the cross-domain blind-review gap. Every field
+# is Optional so the BACKWARD-COMPATIBLE default branch (no ``?domain=`` ->
+# ``analytics.blind_review_gap``, which has no ``meta``/``by_domain``) is not
+# stripped, while the cross-domain branch's extra fields validate cleanly. The
+# nested blocks stay open dicts (the per-domain ``_br_block`` shape) so adding a
+# diagnostic key later doesn't require a schema bump.
+class BlindReviewGapResponse(BaseModel):
+    timed_accuracy: float
+    br_accuracy: float
+    gap: float
+    by_type: list[dict]
+    lucky_rate_by_type: dict[str, float]
+    # Cross-domain-only additions (present only when ``?domain=`` is supplied).
+    meta: Optional[dict] = None
+    outcomes: Optional[dict] = None
+    careless_rate: Optional[float] = None
+    concept_gap_rate: Optional[float] = None
+    lucky_rate: Optional[float] = None
+    by_domain: Optional[dict] = None
 
 _Days = Query(None, ge=1, le=730, description="restrict to the last N days")
 
@@ -69,10 +91,30 @@ def timing(session_id: int, session: Session = Depends(get_session)):
     return analytics.timing(session, session_id)
 
 
-@router.get("/blind-review-gap")
-def blind_review_gap(days: Optional[int] = _Days,
-                     session: Session = Depends(get_session)):
-    return analytics.blind_review_gap(session, days=days)
+@router.get("/blind-review-gap", response_model=BlindReviewGapResponse)
+def blind_review_gap(
+    days: Optional[int] = _Days,
+    domain: Optional[str] = Query(
+        None,
+        pattern="^(lsat|host|all|cfa|quant|excel)$",
+        description=(
+            "ANL-3 — evidence plane for the careless-vs-concept blind-review gap. "
+            "Omit (or 'lsat') for the unchanged LSAT-only view; 'host' for the host "
+            "planes; 'all' to merge both; or a specific host plane (cfa|quant|excel)."
+        ),
+    ),
+    session: Session = Depends(get_session),
+):
+    """Blind-review gap (timed vs Blind-Review accuracy).
+
+    BACKWARD-COMPATIBLE: with no ``?domain=`` this returns the LSAT-native
+    ``analytics.blind_review_gap`` exactly as before. Supplying ``?domain=`` opts
+    into the ANL-3 cross-domain merge (LSAT `Attempt` BR data + host BR attempts
+    mirrored via DATA-4a's `HostProgressSnapshot`), adding the 2x2 outcome
+    distribution, careless/concept/lucky rates, and per-domain blocks."""
+    if domain is None:
+        return analytics.blind_review_gap(session, days=days)
+    return analytics.blind_review_gap_cross_domain(session, domain=domain, days=days)
 
 
 @router.get("/traps")

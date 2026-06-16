@@ -23,6 +23,7 @@ from .models import (
     AttemptChoiceEvent,
     AttemptMode,
     ErrorLogEntry,
+    HostProgressSnapshot,
     Question,
     QuestionSource,
     Section,
@@ -1130,6 +1131,211 @@ def blind_review_gap(session: Session, *, days: int | None = None) -> dict:
         "by_type": sorted(by_t, key=lambda r: -r["gap"]),
         # C4 — lucky rate (timed-right / BR-wrong fraction) per type with >=3 BR attempts.
         "lucky_rate_by_type": lucky_rate_by_type,
+    }
+
+
+# --- cross-domain blind-review gap (ANL-3) ----------------------------------
+# The 2x2 blind-review outcome (`blind_review_outcome`) and the gap analytic
+# above are LSAT-native. ANL-3 lifts them to a CROSS-DOMAIN read so the host
+# (CFA/Quant/Excel) can see careless-vs-concept signal next to LSAT's. Host
+# attempts arrive via DATA-4a's read-only `HostProgressSnapshot` mirror; the host
+# blind-review capture (optional `brAnswer`/`brCorrect` on the canonical
+# `CrossDomainAttempt`) rides in each attempt snapshot's verbatim payload, so this
+# stays additive — a snapshot with no BR fields simply doesn't contribute.
+
+# The 2x2 routing labels (mirrors `blind_review_outcome`), so the cross-domain
+# distribution and the LSAT ability `blind_review_outcomes` describe outcomes
+# with one shared vocabulary.
+_BR_OUTCOMES = ("timed_ok", "timing_problem", "concept_gap", "lucky")
+
+
+def _host_br_attempts(
+    session: Session, *, plane: str | None, days: int | None,
+) -> list[dict]:
+    """Host blind-review attempts from the DATA-4a snapshot mirror.
+
+    Reads `HostProgressSnapshot` attempt rows whose verbatim `CrossDomainAttempt`
+    payload carries a host blind-review answer (`brAnswer`), pairing the timed
+    correctness (`correct`) with the BR correctness (`brCorrect`). Read-only — it
+    never mutates the host mirror. ``plane`` restricts to one host plane
+    (cfa|quant|excel) or all of them when None. Returns rows shaped like the LSAT
+    side: ``{q_type, timed_correct, br_correct}`` (br_correct may be None when the
+    host logged a BR answer without grading it)."""
+    stmt = select(HostProgressSnapshot).where(HostProgressSnapshot.kind == "attempt")
+    if plane:
+        stmt = stmt.where(HostProgressSnapshot.plane == plane)
+    cutoff = _cutoff(days)
+    if cutoff is not None:
+        stmt = stmt.where(HostProgressSnapshot.created_at >= cutoff)
+    rows = session.exec(stmt).all()
+
+    out: list[dict] = []
+    for row in rows:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        # Only attempts that actually captured a host BR answer contribute (mirrors
+        # the LSAT-side `a.br_answer is not None` gate).
+        if payload.get("brAnswer") is None:
+            continue
+        br_correct = payload.get("brCorrect")
+        out.append({
+            # The host canonical attempt has no q_type; group by plane so the host
+            # "type" axis is the domain (cfa/quant/excel) rather than inventing one.
+            "q_type": row.plane,
+            "timed_correct": bool(payload.get("correct")),
+            "br_correct": (bool(br_correct) if br_correct is not None else None),
+        })
+    return out
+
+
+def _lsat_br_rows(session: Session, *, days: int | None) -> list[dict]:
+    """LSAT attempts that carry a BR answer, shaped like the host rows above so the
+    cross-domain merge feeds one uniform list. ``q_type`` is the LSAT question
+    type (falls back to "LSAT" when the question can't be resolved)."""
+    attempts = _all_attempts(session, days=days)
+    qmap = _question_map(session, {a.question_id for a in attempts})
+    rows: list[dict] = []
+    for a in attempts:
+        if a.br_answer is None:
+            continue
+        q = qmap.get(a.question_id)
+        rows.append({
+            "q_type": q.q_type if q else "LSAT",
+            "timed_correct": bool(a.is_correct),
+            "br_correct": a.br_correct,
+        })
+    return rows
+
+
+def _br_rate(items: list[dict], key) -> float:
+    if not items:
+        return 0.0
+    return round(sum(1 for it in items if key(it)) / len(items), 4)
+
+
+def _br_block(items: list[dict]) -> dict:
+    """The shared per-bucket BR block: timed/BR accuracy, gap, the 2x2 outcome
+    distribution, plus careless-rate (timed-wrong but BR-right where the timed slip
+    looks careless rather than a true concept gap) and lucky-rate (timed-right but
+    BR-wrong) — the careless-vs-concept split this analytic exists to surface."""
+    n = len(items)
+    timed_acc = _br_rate(items, lambda it: it["timed_correct"])
+    br_acc = _br_rate(items, lambda it: bool(it["br_correct"]))
+
+    outcomes = {k: 0 for k in _BR_OUTCOMES}
+    for it in items:
+        outcomes[blind_review_outcome(it["timed_correct"], it["br_correct"])] += 1
+
+    # careless = timed-wrong / BR-right ("timing_problem" in the 2x2): you knew it,
+    # so the miss was a careless/timing slip, not a concept gap. concept = both wrong.
+    careless = outcomes["timing_problem"]
+    concept = outcomes["concept_gap"]
+    lucky = outcomes["lucky"]
+    return {
+        "attempts": n,
+        "timed_accuracy": timed_acc,
+        "br_accuracy": br_acc,
+        "gap": round(br_acc - timed_acc, 4),
+        "outcomes": outcomes,
+        "careless_rate": round(careless / n, 4) if n else 0.0,
+        "concept_gap_rate": round(concept / n, 4) if n else 0.0,
+        "lucky_rate": round(lucky / n, 4) if n else 0.0,
+    }
+
+
+def blind_review_gap_cross_domain(
+    session: Session,
+    *,
+    domain: str | None = None,
+    days: int | None = None,
+) -> dict:
+    """ANL-3 — cross-domain blind-review gap (careless vs concept).
+
+    Merges LSAT `Attempt(br_answer/br_correct)` with HOST blind-review attempts
+    (the optional `brAnswer`/`brCorrect` fields the host now captures on its
+    canonical `CrossDomainAttempt`, mirrored read-only via DATA-4a's
+    `HostProgressSnapshot`). For the combined pool and per-domain it reports the
+    2x2 outcome distribution (timed_ok / timing_problem / concept_gap / lucky),
+    accuracy-by-type, the BR gap, and the careless-vs-concept rates.
+
+    ``domain`` selects the evidence plane and is BACKWARD-COMPATIBLE:
+    - ``None`` / ``"lsat"`` -> LSAT-only (the default).
+    - ``"host"`` -> host planes only (all of cfa/quant/excel).
+    - ``"all"`` -> both planes merged.
+    - a specific host plane (``"cfa"`` | ``"quant"`` | ``"excel"``) -> that plane.
+    """
+    plane = (domain or "").strip().lower() or None
+
+    include_lsat = plane in (None, "lsat", "all")
+    include_host = plane in ("host", "all", "cfa", "quant", "excel")
+    host_plane = plane if plane in ("cfa", "quant", "excel") else None
+
+    lsat_rows = _lsat_br_rows(session, days=days) if include_lsat else []
+    host_rows = (
+        _host_br_attempts(session, plane=host_plane, days=days) if include_host else []
+    )
+
+    all_rows = lsat_rows + host_rows
+
+    # Per-type accuracy + gap over the combined pool (q_type = LSAT type or host
+    # plane), ranked widest-gap first like the LSAT-native `blind_review_gap`.
+    by_type_groups: dict[str, list[dict]] = defaultdict(list)
+    for it in all_rows:
+        by_type_groups[it["q_type"]].append(it)
+    by_type = sorted(
+        [
+            {
+                "q_type": t,
+                "timed_accuracy": _br_rate(items, lambda it: it["timed_correct"]),
+                "br_accuracy": _br_rate(items, lambda it: bool(it["br_correct"])),
+                "gap": round(
+                    _br_rate(items, lambda it: bool(it["br_correct"]))
+                    - _br_rate(items, lambda it: it["timed_correct"]),
+                    4,
+                ),
+                "attempts": len(items),
+            }
+            for t, items in by_type_groups.items()
+        ],
+        key=lambda r: -r["gap"],
+    )
+
+    # Lucky-rate surveillance per type with enough BR data (reuses the LSAT-side
+    # _LUCKY_MIN_BR_SAMPLE floor so a single lucky answer can't dominate).
+    lucky_rate_by_type: dict[str, float] = {}
+    for t, items in by_type_groups.items():
+        if len(items) < _LUCKY_MIN_BR_SAMPLE:
+            continue
+        lucky = sum(
+            1 for it in items
+            if it["timed_correct"] and it["br_correct"] is not None and not it["br_correct"]
+        )
+        lucky_rate_by_type[t] = round(lucky / len(items), 4)
+
+    combined = _br_block(all_rows)
+    return {
+        "meta": {
+            "model": "cross_domain_blind_review_v1",
+            "domain": plane or "lsat",
+            "window_days": days,
+            "lsat_attempts": len(lsat_rows),
+            "host_attempts": len(host_rows),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        # Combined-pool top-line (back-compatible keys mirror `blind_review_gap`).
+        "timed_accuracy": combined["timed_accuracy"],
+        "br_accuracy": combined["br_accuracy"],
+        "gap": combined["gap"],
+        "outcomes": combined["outcomes"],
+        "careless_rate": combined["careless_rate"],
+        "concept_gap_rate": combined["concept_gap_rate"],
+        "lucky_rate": combined["lucky_rate"],
+        "by_type": by_type,
+        "lucky_rate_by_type": lucky_rate_by_type,
+        # Per-domain blocks so the UI can show LSAT vs host side by side.
+        "by_domain": {
+            "lsat": _br_block(lsat_rows),
+            "host": _br_block(host_rows),
+        },
     }
 
 

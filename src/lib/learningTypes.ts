@@ -152,6 +152,16 @@ export interface QuestionResult {
   difficulty: Difficulty;
   elapsedSeconds?: number;
   createdAt?: string;
+  // ANL-3 — blind-review capture (append-only, optional). Mirrors the LSAT
+  // `Attempt.br_answer`/`br_correct` 2x2 inputs so a host attempt can carry the
+  // SAME careless-vs-concept signal. All absent on a row without a BR pass, which
+  // simply doesn't contribute to the cross-domain BR gap.
+  /** Index chosen on the untimed Blind-Review pass (host index scheme). */
+  brAnswer?: number;
+  /** Confidence stated on the Blind-Review pass. */
+  brConfidence?: Confidence;
+  /** Whether the Blind-Review answer was correct — the 2x2's `br_correct` axis. */
+  brCorrect?: boolean;
 }
 
 export interface ReviewItem {
@@ -181,6 +191,16 @@ export interface ReviewItem {
   lapses?: number;
   /** Flagged as a leech (too many lapses) for the remediation queue. */
   leech?: boolean;
+  // ANL-3 — blind-review capture (append-only, optional). Carries the most-recent
+  // Blind-Review pass on the card's underlying question so the unified
+  // careless-vs-concept blind-review analytic (`blindReviewBridge.ts`) can read it
+  // alongside LSAT BR data. Absent on a card with no BR pass.
+  /** Index chosen on the untimed Blind-Review pass (host index scheme). */
+  brAnswer?: number;
+  /** Confidence stated on the Blind-Review pass. */
+  brConfidence?: Confidence;
+  /** Whether the Blind-Review answer was correct — the 2x2's `br_correct` axis. */
+  brCorrect?: boolean;
 }
 
 export interface QuizAttempt {

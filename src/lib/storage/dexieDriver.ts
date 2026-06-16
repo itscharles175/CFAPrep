@@ -245,11 +245,18 @@ const reviewItems: ReviewItemStore = {
 // ---------------------------------------------------------------------------
 // questionResults — append-only attempt log (wraps db.questionResults).
 // `id` is auto-increment in Dexie, so `add` lets Dexie assign it.
+//
+// ANL-3 — the optional blind-review fields (`brAnswer`/`brConfidence`/`brCorrect`
+// on `QuestionResult`) are NOT indexed but ride along verbatim: Dexie stores the
+// whole row object and we pass it through unmodified here, so the BR capture
+// reaches both `toArray()` reads and the `crossDomainBridge` projection (which
+// re-exports them via `questionResultToCanonical`) without a schema change.
 // ---------------------------------------------------------------------------
 const questionResults: QuestionResultStore = {
   async add(result: QuestionResult): Promise<void> {
     // Cast away the auto-increment `id` (number) the Dexie row type carries —
-    // QuestionResult has no `id`, and Dexie assigns one on insert.
+    // QuestionResult has no `id`, and Dexie assigns one on insert. The full row
+    // (including any ANL-3 BR fields) is stored verbatim.
     await db.questionResults.add(result as Parameters<typeof db.questionResults.add>[0]);
   },
 

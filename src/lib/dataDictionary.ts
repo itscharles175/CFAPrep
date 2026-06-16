@@ -201,6 +201,19 @@ export interface CrossDomainAttempt {
   elapsedSeconds?: number;
   /** ISO 8601 timestamp. */
   createdAt?: string;
+  // ANL-3 — blind-review capture (additive, optional). The 2x2 careless-vs-concept
+  // inputs pass through verbatim (no coercion): `brAnswer` is the Blind-Review
+  // answer (host index stringified / LSAT letter), `brCorrect` whether it was
+  // right (the `br_correct` axis). The backend's cross-domain blind-review gap
+  // (`analytics.blind_review_gap_cross_domain`) reads `brAnswer`/`brCorrect` from
+  // the mirrored attempt payload (DATA-4a `HostProgressSnapshot`). Absent on an
+  // attempt with no BR pass, which simply doesn't contribute to the BR gap.
+  /** Verbatim Blind-Review answer (host stringified index / LSAT letter); NOT coerced (§4). */
+  brAnswer?: string;
+  /** Confidence stated on the Blind-Review pass. */
+  brConfidence?: Confidence;
+  /** Whether the Blind-Review answer was correct — the 2x2's `br_correct` axis. */
+  brCorrect?: boolean;
 }
 
 /** A domain-agnostic mastery reading (host `MasterySnapshot` ⇄ LSAT `mastery()`). */
@@ -251,6 +264,12 @@ export function questionResultToCanonical(
     confidence: result.confidence,
     elapsedSeconds: result.elapsedSeconds,
     createdAt: result.createdAt,
+    // ANL-3 — carry the blind-review capture through verbatim (no coercion). The
+    // host stores `brAnswer` as a numeric index; stringify it like `chosenAnswer`
+    // so the cross-scheme contract (§4) holds. Omit when there was no BR pass.
+    brAnswer: typeof result.brAnswer === 'number' ? String(result.brAnswer) : undefined,
+    brConfidence: result.brConfidence,
+    brCorrect: typeof result.brCorrect === 'boolean' ? result.brCorrect : undefined,
   };
 }
 
@@ -298,6 +317,10 @@ export interface RawLsatAttempt {
   confidence?: Confidence | null;
   time_ms?: number;
   created_at?: string;
+  // ANL-3 — the LSAT 2x2 blind-review inputs (`models.Attempt.br_answer` /
+  // `br_correct`). Optional — absent on an attempt with no Blind-Review pass.
+  br_answer?: string | null;
+  br_correct?: boolean | null;
 }
 
 function lsatTitleFrom(card: RawLsatSrsCard): string {
@@ -343,6 +366,9 @@ export function lsatAttemptToCanonical(attempt: RawLsatAttempt): CrossDomainAtte
         ? Math.round(attempt.time_ms / 1000)
         : undefined,
     createdAt: typeof attempt.created_at === 'string' ? attempt.created_at : undefined,
+    // ANL-3 — pass the LSAT blind-review 2x2 inputs through verbatim.
+    brAnswer: attempt.br_answer ?? undefined,
+    brCorrect: typeof attempt.br_correct === 'boolean' ? attempt.br_correct : undefined,
   };
 }
 
