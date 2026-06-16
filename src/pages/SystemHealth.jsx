@@ -17,6 +17,9 @@ import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
 import { getStorage, getActiveDriverName, cutoverTo, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
 import { checkLsatBackendHealth, getLsatCloudBudget, syncProviderToLsat, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
+import EditModelRoutingModal from '../components/SystemHealth/EditModelRoutingModal';
+import { TrustReleasePanel } from '../components/ui/TrustReleasePanel';
+import { useTrustManifest } from '../hooks/useTrustManifest';
 import { fetchDataSchemaAlignment } from '../lib/dataDictionary';
 import { getSidecarLogs, getSidecarStatus } from '../lib/systemHealth';
 import { recognizeOnceOffline } from '../lib/voice';
@@ -76,11 +79,24 @@ const VITAL_LABELS = {
   INP: 'Interaction to Next Paint',
 };
 
+// OPS-2: host-side probes the Trust & Release cockpit folds into the backend
+// manifest. Defined at module scope so the object reference is stable across
+// renders — useTrustManifest keys its load effect on it, and a fresh literal
+// each render would re-run the gate every commit.
+const TRUST_HOST_DEPS = {
+  getOfflineReadinessReport,
+  checkLsatBackendHealth,
+};
+
 export default function SystemHealth() {
   const toast = useToast();
   // UC6: Core Web Vitals, collected locally via PerformanceObserver — no remote
   // analytics. Latest values stream in as the page is observed/interacted with.
   const webVitals = useWebVitals();
+  // OPS-2: release-trust cockpit. Loads the backend manifest (cached, refreshable)
+  // and the always-available host-side checks; fully degrading when the LSAT
+  // sidecar is slow or absent so it never blocks this page's render.
+  const trust = useTrustManifest({ hostDeps: TRUST_HOST_DEPS });
   const [storage, setStorage] = useState(null);
   const [cacheNames, setCacheNames] = useState([]);
   const [message, setMessage] = useState('');
@@ -109,6 +125,8 @@ export default function SystemHealth() {
   // this build speaks; on a mismatch, CROSS-DOMAIN writes are disabled (local
   // Dexie data is unaffected). null = not yet checked.
   const [dataAlignment, setDataAlignment] = useState(null);
+  // INT-2: model-routing edit modal visibility (LSAT Backend panel).
+  const [routingModalOpen, setRoutingModalOpen] = useState(false);
   // OPS-1: unified sidecar console. The desktop shell supervises all four
   // sidecars (SurrealDB :8000, open-notebook API :5055 + worker, LSAT :8100);
   // these mirror the native get_sidecar_status / get_sidecar_logs commands.
@@ -1206,12 +1224,39 @@ export default function SystemHealth() {
             >
               Match host provider
             </button>
+            {/* INT-2: full model-routing editor (per-role ids + provider) —
+                writes PUT /api/settings then re-probes both health checks. */}
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={!lsatHealth?.ok}
+              title={lsatHealth?.ok ? 'Edit the LSAT model routing' : 'LSAT sidecar must be reachable'}
+              onClick={() => setRoutingModalOpen(true)}
+            >
+              Edit routing
+            </button>
             <a className="btn btn-secondary btn-sm" href={LSAT_SETTINGS_PATH}>
               LSAT model settings
             </a>
           </div>
         </div>
       </Surface>
+
+      {/* INT-2: model-routing edit modal. Seeded from the host Local-AI settings
+          and the LSAT AI-health probe; the schema-version stamp is read from the
+          DATA-3 schema-version handshake already surfaced above. On save it
+          refreshes the read-only routing display via setLsatHealth. */}
+      <EditModelRoutingModal
+        open={routingModalOpen}
+        onClose={() => setRoutingModalOpen(false)}
+        host={llm ? { baseUrl: llm.baseUrl, model: llm.model } : null}
+        lsat={lsatHealth?.ai ?? null}
+        schemaVersion={dataAlignment?.backendVersion ?? null}
+        onSaved={(health) => {
+          setLsatHealth(health);
+          setRoutingModalOpen(false);
+        }}
+        onMessage={setMessage}
+      />
 
       {/* OPS-1: unified sidecar console. The desktop shell supervises four
           local sidecars — SurrealDB (:8000), the open-notebook API (:5055) and
@@ -1346,6 +1391,21 @@ export default function SystemHealth() {
           </p>
         )}
       </Surface>
+
+      {/* OPS-2: Trust & Release cockpit. Rolls the LSAT backend's release-trust
+          manifest (GET /api/observability/trust) into one ok/warning/blocked
+          status with an expandable per-check tree + next-actions, and folds in
+          host-side checks (offline readiness, Dexie quota, SurrealDB/LSAT
+          health) so it stays useful even with the sidecar down. */}
+      <TrustReleasePanel
+        manifest={trust.manifest}
+        loading={trust.loading}
+        refreshing={trust.refreshing}
+        reachable={trust.reachable}
+        hostChecks={trust.hostChecks}
+        fetchedAt={trust.fetchedAt}
+        onRefresh={trust.refresh}
+      />
 
       {/* UC6: Core Web Vitals (LCP / CLS / INP), collected in-process via the
           browser-native PerformanceObserver. LOCAL-ONLY — nothing is sent

@@ -292,3 +292,88 @@ export async function syncProviderToLsat(
     detail: `LSAT now set to provider "${patch.local_provider}"${patch.lmstudio_url ? ` (${patch.lmstudio_url})` : ''}.`,
   };
 }
+
+/**
+ * INT-2: the editable subset of the backend `SettingsPatch` the System Health
+ * model-routing modal owns. A superset of what {@link syncProviderToLsat} writes
+ * (which only owns provider + URL): the modal also lets the user retarget the
+ * per-role model ids (explain/gen/diagnose) and the generation provider
+ * (ollama|cloud). Every field is optional — only the keys actually present in a
+ * given patch are sent, so an unset field is never zeroed out on the backend.
+ */
+export interface LsatModelRoutingPatch {
+  explain_model?: string;
+  gen_model?: string;
+  diagnose_model?: string;
+  gen_provider?: 'ollama' | 'cloud';
+  local_provider?: 'ollama' | 'lmstudio';
+  lmstudio_url?: string;
+}
+
+/** Result of {@link pushModelRoutingToLsat} — the applied patch echoed back. */
+export interface LsatModelRoutingResult {
+  ok: boolean;
+  detail: string;
+  /** The patch that was pushed (when ok) — only the keys actually sent. */
+  applied?: LsatModelRoutingPatch;
+}
+
+/**
+ * INT-2: push an explicit model-routing patch to the LSAT backend
+ * (`PUT /api/settings`). This is the write side of the model-routing edit modal
+ * — broader than {@link syncProviderToLsat} (which only matches the host's
+ * provider/endpoint): here the user edits the per-role model ids and providers
+ * directly. Backward-compatible and additive — `syncProviderToLsat` keeps its
+ * exact signature/behaviour for the "Match host provider" quick action.
+ *
+ * Only the keys present on `patch` are sent (a missing key leaves that backend
+ * setting untouched); empty-string model ids are dropped so the modal can clear
+ * a field locally without nulling the backend. Never throws — any failure
+ * degrades to `{ ok: false, ... }` so the modal can surface a message instead of
+ * crashing the page.
+ */
+export async function pushModelRoutingToLsat(
+  patch: LsatModelRoutingPatch,
+  timeoutMs = 4000,
+): Promise<LsatModelRoutingResult> {
+  // Build the request body against the generated `SettingsPatch` contract
+  // (DATA-1) — narrowed to the fields this modal owns. Drop empty-string model
+  // ids and undefined keys so an unedited/cleared field is never sent.
+  const trimmed = (v: string | undefined) => (typeof v === 'string' ? v.trim() : undefined);
+  const candidate: LsatModelRoutingPatch = {
+    explain_model: trimmed(patch.explain_model) || undefined,
+    gen_model: trimmed(patch.gen_model) || undefined,
+    diagnose_model: trimmed(patch.diagnose_model) || undefined,
+    gen_provider: patch.gen_provider,
+    local_provider: patch.local_provider,
+    lmstudio_url: trimmed(patch.lmstudio_url) || undefined,
+  };
+  const applied: LsatModelRoutingPatch = {};
+  const settingsPatch: Pick<
+    SettingsPatch,
+    'explain_model' | 'gen_model' | 'diagnose_model' | 'gen_provider' | 'local_provider' | 'lmstudio_url'
+  > = {};
+  (Object.keys(candidate) as Array<keyof LsatModelRoutingPatch>).forEach((key) => {
+    const value = candidate[key];
+    if (value === undefined) return;
+    // `applied` and `settingsPatch` share the same narrowed keys; the cast keeps
+    // the contract type for the wire body while echoing the concrete patch back.
+    (applied as Record<string, unknown>)[key] = value;
+    (settingsPatch as Record<string, unknown>)[key] = value;
+  });
+
+  if (Object.keys(settingsPatch).length === 0) {
+    return { ok: false, detail: 'No model-routing fields to update.' };
+  }
+
+  const res = await fetchJson('/api/settings', timeoutMs, {
+    method: 'PUT',
+    body: JSON.stringify(settingsPatch),
+  });
+
+  if (!('ok' in res) || !res.ok) {
+    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    return { ok: false, detail: `Could not update LSAT model routing — ${reason}.` };
+  }
+  return { ok: true, applied, detail: 'LSAT model routing updated.' };
+}
