@@ -758,6 +758,44 @@ def _m022_cross_domain_schema_version(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 22")
 
 
+def _m023_host_progress_snapshot(conn) -> None:
+    """DATA-4a — indexes for the host -> backend cross-domain progress feed.
+
+    The ``hostprogresssnapshot`` table itself is created by ``SQLModel.create_all``
+    (``models.HostProgressSnapshot``); this migration adds the constraints/indexes
+    ``create_all`` can't express:
+
+    - A UNIQUE index on ``cross_id`` so ``POST /api/sync/progress-updates`` can
+      UPSERT idempotently (``ON CONFLICT(cross_id) DO UPDATE``): a re-POST of the
+      same host row updates in place instead of duplicating — the read-only feed's
+      idempotency contract.
+    - A ``(plane, kind)`` lookup index for the engine's "host progress by plane /
+      kind" reads (LEARN-1/LEARN-3, later).
+
+    PRAGMA-guarded exactly like migrations 20/21/22: every statement is
+    ``IF NOT EXISTS`` / tolerant, so a fresh DB (where ``create_all`` already made
+    the table) and a re-run are clean no-ops. The UNIQUE index create is wrapped
+    so a pre-existing DB that somehow holds duplicate ``cross_id`` values logs and
+    keeps the app-level upsert guard rather than breaking boot. Bumps
+    ``PRAGMA user_version`` to 23 so the DB-level version tracks the latest
+    recorded migration."""
+    try:
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_hostprogresssnapshot_cross_id "
+            "ON hostprogresssnapshot (cross_id)"
+        )
+    except Exception as exc:  # pre-existing duplicates — keep app-level upsert
+        log.warning("migration 23: skipped ux_hostprogresssnapshot_cross_id (%s)", exc)
+    try:
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_hostprogresssnapshot_plane_kind "
+            "ON hostprogresssnapshot (plane, kind)"
+        )
+    except Exception as exc:
+        log.warning("migration 23: skipped ix_hostprogresssnapshot_plane_kind (%s)", exc)
+    conn.exec_driver_sql("PRAGMA user_version = 23")
+
+
 def read_cross_domain_schema_version(conn) -> int:
     """Read the recorded cross-domain schema version from ``schema_meta``.
 
@@ -802,6 +840,7 @@ MIGRATIONS: list[Migration] = [
     (20, "fold_additive_columns", _m020_fold_additive_columns),
     (21, "attempt_rationale_br_note", _m021_attempt_rationale_br_note),
     (22, "cross_domain_schema_version", _m022_cross_domain_schema_version),
+    (23, "host_progress_snapshot", _m023_host_progress_snapshot),
 ]
 
 

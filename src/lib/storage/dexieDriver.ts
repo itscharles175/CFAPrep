@@ -1,4 +1,5 @@
 import { db } from '../progressStore';
+import { createCrossDomainBridge } from '../dataDictionary';
 import type { MasterySnapshot, QuestionResult, ReviewItem } from '../learningTypes';
 import type {
   ChunkSearchOptions,
@@ -336,4 +337,9 @@ export const dexieDriver: StorageDriver = {
   reviewItems,
   questionResults,
   masterySnapshots,
+  // DATA-2 / DATA-4a — canonical cross-domain projection of this driver's host
+  // review queue / attempt log / mastery (read-only; never writes through the
+  // native stores). The DATA-4a `useSyncProgress` hook reads these to push host
+  // snapshots to the LSAT sidecar; existing consumers feature-detect the member.
+  crossDomainBridge: createCrossDomainBridge({ reviewItems, questionResults, masterySnapshots }),
 };

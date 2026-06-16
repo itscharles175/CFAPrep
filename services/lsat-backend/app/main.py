@@ -390,6 +390,8 @@ for r in (
     error_log.router,
     exam_routes.router,
     study_routes.router,
+    # DATA-4a — host -> backend cross-domain progress feed (POST /api/sync/...).
+    study_routes.sync_router,
     settings_routes.router,
     annotation_routes.router,
     observability_routes.router,

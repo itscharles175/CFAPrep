@@ -922,3 +922,45 @@ class ActivityEvent(SQLModel, table=True):
     progress_pct: float = Field(default=100.0, index=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class HostProgressSnapshot(SQLModel, table=True):
+    """DATA-4a — read-only mirror of the HOST data plane's cross-domain progress.
+
+    The host (CFA/Quant/Excel, Dexie) periodically POSTs its review/attempt/
+    mastery snapshots — already projected onto the canonical cross-domain shapes
+    (``src/lib/dataDictionary.ts`` / ``serializers.py`` ``cross_domain_*``) — to
+    ``POST /api/sync/progress-updates``. This table is where they land so the
+    LSAT ability/plan engine (LEARN-1/LEARN-3, later) can read host progress
+    WITHOUT reaching back into the host's Dexie store.
+
+    Strictly host -> backend: the backend NEVER mutates host data and never
+    writes back through this row (that bidirectional per-card FSRS sync is the
+    HIGH-risk DATA-4b, deferred to Wave 8). Rows are UPSERTED by ``cross_id``
+    (the host's namespaced ``<plane>:<kind>:<nativeId>``), so a re-POST of the
+    same logical row updates in place rather than duplicating — the idempotency
+    contract. ``dedupe_key`` additionally fingerprints the payload so an
+    unchanged re-POST can be recognised as a no-op without a row read.
+
+    ``payload`` keeps the verbatim canonical record (CrossDomainReviewCard /
+    CrossDomainAttempt / CrossDomainMastery) so a future engine reads exactly
+    the host's vocabulary without lossy re-projection here.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # The host's namespaced cross-domain id "<plane>:<kind>:<nativeId>" — the
+    # UPSERT key (UNIQUE index added in migration 23). Idempotent by construction.
+    cross_id: str = Field(index=True)
+    # Snapshot kind discriminator: "review" | "attempt" | "mastery".
+    kind: str = Field(index=True)
+    # Originating host plane: "cfa" | "quant" | "excel" (never "lsat" here).
+    plane: str = Field(index=True)
+    # Stable content fingerprint of the payload (idempotency / dedupe): an
+    # unchanged re-POST yields the same dedupe_key, so the upsert is a no-op.
+    dedupe_key: str = Field(default="", index=True)
+    # Verbatim canonical record as the host sent it (CrossDomainReviewCard /
+    # CrossDomainAttempt / CrossDomainMastery). Read by the ability/plan engine.
+    payload: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    # When the host observed this snapshot (ISO 8601, as reported); optional.
+    observed_at: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
