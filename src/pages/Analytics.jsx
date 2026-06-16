@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Activity, BarChart3, Clock, Gauge, Layers, Target } from 'lucide-react';
-import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts';
+// ANL-5 — migrated off bare recharts onto the shared, host-styled @visx viz
+// barrel (src/domains/shared/components/viz). The recharts dep is intentionally
+// retained in package.json for now (other host code may still import it);
+// dropping the dependency is a follow-up once all host charts are migrated.
+import {
+  LineTrend,
+  BandTrend,
+  BarSeriesChart,
+  CalibrationScatter,
+} from '../domains/shared/components/viz';
 import { PageHeader, MetricCard, Panel, SegmentedControl } from '../components/ui/Primitives';
 import { getAnalyticsSummary } from '../lib/learning';
 import { db, forecastReviewLoad } from '../lib/progressStore';
@@ -361,21 +370,14 @@ function CrossDomainSummary({ report, domain, lsatReachable }) {
       )}
 
       {trend30.length > 0 && (
-        <div style={{ width: '100%', height: 180 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={trend30} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="day" stroke="var(--text-muted)" fontSize={11} interval={Math.max(1, Math.floor(trend30.length / 8))} />
-              <YAxis stroke="var(--text-muted)" allowDecimals={false} fontSize={12} />
-              <Tooltip
-                contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
-                labelStyle={{ color: 'var(--text-secondary)' }}
-                formatter={(value) => [value, 'Questions']}
-              />
-              <Area type="monotone" dataKey="questions" name="Combined questions" stroke="var(--accent, #60a5fa)" fill="var(--accent-soft, rgba(96,165,250,0.18))" strokeWidth={2} />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
+        <LineTrend
+          data={trend30}
+          xKey="day"
+          height={180}
+          series={[
+            { dataKey: 'questions', name: 'Combined questions', color: 'var(--accent, #60a5fa)', area: true },
+          ]}
+        />
       )}
     </Panel>
   );
@@ -643,25 +645,17 @@ export default function Analytics() {
               <span className="qv-chip qv-text-muted">Accuracy {Math.round(readiness.averageAccuracy * 100)}%</span>
               <span className="qv-chip qv-text-muted">Per-attempt lift +{readiness.perAttemptLift} pts</span>
             </div>
-            <div style={{ width: '100%', height: 280 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={readiness.points} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="date" stroke="var(--text-muted)" fontSize={11} interval={Math.max(1, Math.floor(readiness.points.length / 8))} />
-                  <YAxis stroke="var(--text-muted)" domain={[0, 100]} fontSize={12} />
-                  <Tooltip
-                    contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
-                    labelStyle={{ color: 'var(--text-secondary)' }}
-                  />
-                  <Area type="monotone" dataKey="upper" stroke="none" fill="var(--accent-soft, rgba(96,165,250,0.18))" fillOpacity={0.6} />
-                  <Area type="monotone" dataKey="lower" stroke="none" fill="var(--surface, #0f172a)" fillOpacity={1} />
-                  <Line type="monotone" dataKey="projected" name="Projected mastery" stroke="var(--accent, #60a5fa)" strokeWidth={2.5} dot={false} />
-                  {readiness.examDate && (
-                    <ReferenceLine x={readiness.examDate} stroke="var(--danger, #f87171)" strokeDasharray="4 4" label={{ value: 'Exam', position: 'top', fill: 'var(--danger)' }} />
-                  )}
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
+            <BandTrend
+              data={readiness.points}
+              xKey="date"
+              lineKey="projected"
+              upperKey="upper"
+              lowerKey="lower"
+              yDomain={[0, 100]}
+              referenceX={readiness.examDate || null}
+              referenceLabel="Exam"
+              height={280}
+            />
           </>
         )}
       </Panel>
@@ -674,20 +668,14 @@ export default function Analytics() {
         {masteryTrend.length === 0 ? (
           <p className="muted-copy">No mastery snapshots yet — answer a few quiz questions to populate the trend.</p>
         ) : (
-          <div style={{ width: '100%', height: 240 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={masteryTrend} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="day" stroke="var(--text-muted)" fontSize={12} />
-                <YAxis stroke="var(--text-muted)" domain={[0, 100]} fontSize={12} />
-                <Tooltip
-                  contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
-                  labelStyle={{ color: 'var(--text-secondary)' }}
-                />
-                <Line type="monotone" dataKey="score" name="Mastery %" stroke="var(--success, #34d399)" strokeWidth={2} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <LineTrend
+            data={masteryTrend}
+            xKey="day"
+            yDomain={[0, 100]}
+            yTickFormat={(v) => `${v}%`}
+            height={240}
+            series={[{ dataKey: 'score', name: 'Mastery %', color: 'var(--success, #34d399)', dots: true }]}
+          />
         )}
       </Panel>
 
@@ -699,20 +687,15 @@ export default function Analytics() {
         {retentionDecay.length === 0 ? (
           <p className="muted-copy">No active review items yet — answer some quiz questions to populate the FSRS state.</p>
         ) : (
-          <div style={{ width: '100%', height: 240 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={retentionDecay} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="day" stroke="var(--text-muted)" fontSize={12} interval={4} />
-                <YAxis stroke="var(--text-muted)" domain={[0, 100]} fontSize={12} />
-                <Tooltip
-                  contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
-                  labelStyle={{ color: 'var(--text-secondary)' }}
-                />
-                <Line type="monotone" dataKey="retention" name="Avg retention %" stroke="var(--warning, #f59e0b)" strokeWidth={2} dot={{ r: 2 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <LineTrend
+            data={retentionDecay}
+            xKey="day"
+            yDomain={[0, 100]}
+            yTickFormat={(v) => `${v}%`}
+            maxXTicks={6}
+            height={240}
+            series={[{ dataKey: 'retention', name: 'Avg retention %', color: 'var(--warning, #f59e0b)', dots: true }]}
+          />
         )}
       </Panel>
 
@@ -724,21 +707,15 @@ export default function Analytics() {
         {forecastChartData.length === 0 ? (
           <p className="muted-copy">No upcoming reviews yet — record some quiz attempts to populate the scheduler.</p>
         ) : (
-          <div style={{ width: '100%', height: 240 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={forecastChartData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="day" stroke="var(--text-muted)" fontSize={12} />
-                <YAxis stroke="var(--text-muted)" allowDecimals={false} fontSize={12} />
-                <Tooltip
-                  contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
-                  labelStyle={{ color: 'var(--text-secondary)' }}
-                />
-                <Bar dataKey="due" name="Due" fill="var(--accent, #60a5fa)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="atRisk" name="At risk" fill="var(--warning, #f59e0b)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <BarSeriesChart
+            data={forecastChartData.map((row) => ({ name: row.day, due: row.due, atRisk: row.atRisk }))}
+            layout="vertical"
+            height={240}
+            series={[
+              { dataKey: 'due', name: 'Due', color: 'var(--accent, #60a5fa)' },
+              { dataKey: 'atRisk', name: 'At risk', color: 'var(--warning, #f59e0b)' },
+            ]}
+          />
         )}
       </Panel>
 
@@ -766,7 +743,10 @@ export default function Analytics() {
         const showLsat = domain !== 'cfa';
         const hasCfa = showCfa && cfaData.length > 0;
         const hasLsat = showLsat && lsatData.length > 0;
-        const diagonalData = [{ x: 0, y: 0 }, { x: 100, y: 100 }];
+        const scatterSeries = [
+          hasCfa && { name: 'CFA confidence bucket', color: DOMAIN_COLOR.cfa, points: cfaData },
+          hasLsat && { name: 'LSAT confidence band', color: DOMAIN_COLOR.lsat, points: lsatData },
+        ].filter(Boolean);
         return (
           <Panel
             tone="analytics"
@@ -792,68 +772,12 @@ export default function Analytics() {
                     LSAT sidecar unreachable — showing CFA calibration only.
                   </p>
                 )}
-                <div style={{ width: '100%', height: 240 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ScatterChart margin={{ top: 16, right: 24, bottom: 8, left: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                      <XAxis
-                        type="number"
-                        dataKey="x"
-                        name="Confidence"
-                        domain={[0, 100]}
-                        stroke="var(--text-muted)"
-                        fontSize={12}
-                        label={{ value: 'Confidence %', position: 'insideBottomRight', offset: -4, fontSize: 11, fill: 'var(--text-muted)' }}
-                      />
-                      <YAxis
-                        type="number"
-                        dataKey="y"
-                        name="Accuracy"
-                        domain={[0, 100]}
-                        stroke="var(--text-muted)"
-                        fontSize={12}
-                        label={{ value: 'Accuracy %', angle: -90, position: 'insideLeft', offset: 8, fontSize: 11, fill: 'var(--text-muted)' }}
-                      />
-                      <Tooltip
-                        cursor={{ strokeDasharray: '3 3' }}
-                        contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
-                        labelStyle={{ color: 'var(--text-secondary)' }}
-                        formatter={(value, name, props) => {
-                          const { payload } = props;
-                          if (name === 'Accuracy') return [`${value}% (${payload.attempts} attempts)`, payload.label];
-                          return [value, name];
-                        }}
-                      />
-                      {/* Perfect-calibration diagonal rendered as a Line series on a separate dataset */}
-                      <Line
-                        data={diagonalData}
-                        type="linear"
-                        dataKey="y"
-                        stroke="var(--text-muted)"
-                        strokeDasharray="6 3"
-                        strokeWidth={1}
-                        dot={false}
-                        legendType="none"
-                        name="Perfect calibration"
-                        isAnimationActive={false}
-                      />
-                      {hasCfa && (
-                        <Scatter
-                          data={cfaData}
-                          fill={DOMAIN_COLOR.cfa}
-                          name="CFA confidence bucket"
-                        />
-                      )}
-                      {hasLsat && (
-                        <Scatter
-                          data={lsatData}
-                          fill={DOMAIN_COLOR.lsat}
-                          name="LSAT confidence band"
-                        />
-                      )}
-                    </ScatterChart>
-                  </ResponsiveContainer>
-                </div>
+                <CalibrationScatter
+                  series={scatterSeries}
+                  xLabel="Confidence %"
+                  yLabel="Accuracy %"
+                  height={240}
+                />
               </>
             )}
           </Panel>
@@ -875,37 +799,15 @@ export default function Analytics() {
             {itemTypeData.length === 0 ? (
               <p className="muted-copy">No item-type data yet — quiz, vignette, mock, and skill-lab attempts will appear here.</p>
             ) : (
-              <div style={{ width: '100%', height: 240 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    layout="vertical"
-                    data={itemTypeData}
-                    margin={{ top: 8, right: 24, bottom: 0, left: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis
-                      type="number"
-                      domain={[0, 100]}
-                      stroke="var(--text-muted)"
-                      fontSize={12}
-                      tickFormatter={(v) => `${v}%`}
-                    />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      stroke="var(--text-muted)"
-                      fontSize={12}
-                      width={90}
-                    />
-                    <Tooltip
-                      contentStyle={{ background: 'var(--surface, #1e293b)', border: '1px solid var(--border)', borderRadius: 8 }}
-                      labelStyle={{ color: 'var(--text-secondary)' }}
-                      formatter={(value) => [`${value}%`, 'Accuracy']}
-                    />
-                    <Bar dataKey="accuracy" name="Accuracy %" fill="var(--success, #34d399)" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <BarSeriesChart
+                data={itemTypeData}
+                layout="horizontal"
+                yDomain={[0, 100]}
+                valueTickFormat={(v) => `${v}%`}
+                categoryWidth={96}
+                height={240}
+                series={[{ dataKey: 'accuracy', name: 'Accuracy %', color: 'var(--success, #34d399)' }]}
+              />
             )}
           </Panel>
         );
