@@ -64,6 +64,11 @@ import type {
   CfaSourceVaultStores,
 } from './cfaSourceTypes';
 import { level3PathwayForTopic, level3TopicBelongsToPathway } from '../domains/cfa/cfaLevel3Pathways';
+import {
+  DEFAULT_SHARED_STUDY_PROFILE,
+  type SharedStudyProfile,
+  type StudyProfilePatch,
+} from './types/StudyProfile';
 
 export const PROGRESS_EVENT = 'quantvault:progress';
 const PROGRESS_CHANNEL = 'quantvault:progress-channel';
@@ -2607,6 +2612,51 @@ export async function saveStudyPlanSettings({
   await db.studyPlanSettings.put(settings);
   emitProgressChange();
   return settings;
+}
+
+/**
+ * DATA-6 — map the host's `StudyPlanSettings` onto the cross-domain
+ * {@link SharedStudyProfile} shape (used by `studyProfileBridge.ts` as the local
+ * Dexie fallback). The host owns `targetLevel` / `dailyTargetMinutes` /
+ * `examDate` / `restDays` / `mockCadenceDays` / `topicWeights`; it has no LSAT
+ * `targetScore`, so that scalar keeps the shared default until the backend
+ * arbiter (or the LSAT side) supplies one. `lastWriter` is `"host"` because this
+ * projection represents a host-local view.
+ */
+export function studyPlanSettingsToProfile(settings: StudyPlanSettings): SharedStudyProfile {
+  return {
+    ...DEFAULT_SHARED_STUDY_PROFILE,
+    targetLevel: settings.targetLevel ?? null,
+    dailyMinutes: settings.dailyTargetMinutes ?? DEFAULT_SHARED_STUDY_PROFILE.dailyMinutes,
+    examDate: settings.examDate ?? null,
+    restDays: Array.isArray(settings.restDays) ? settings.restDays : [],
+    mockCadenceDays: settings.mockCadenceDays ?? null,
+    topicWeights: settings.topicWeights ?? {},
+    lastWriter: 'host',
+    updatedAt: settings.updatedAt || null,
+  };
+}
+
+/**
+ * DATA-6 — map a cross-domain {@link StudyProfilePatch} onto the host
+ * `saveStudyPlanSettings` argument shape (the inverse of
+ * {@link studyPlanSettingsToProfile}). Only the host-owned fields are carried
+ * over; the LSAT-only `targetScore` is intentionally dropped (the host does not
+ * store it). Used by `studyProfileBridge.ts` to dual-write a profile edit to
+ * Dexie. Only keys present on the patch are forwarded so unset fields are not
+ * overwritten.
+ */
+export function studyProfileToPlanSettingsPatch(
+  patch: StudyProfilePatch,
+): Partial<Omit<StudyPlanSettings, 'id' | 'updatedAt'>> {
+  const out: Partial<Omit<StudyPlanSettings, 'id' | 'updatedAt'>> = {};
+  if (patch.targetLevel !== undefined) out.targetLevel = patch.targetLevel ?? undefined;
+  if (patch.dailyMinutes !== undefined) out.dailyTargetMinutes = patch.dailyMinutes;
+  if (patch.examDate !== undefined) out.examDate = patch.examDate;
+  if (patch.restDays !== undefined) out.restDays = patch.restDays;
+  if (patch.mockCadenceDays !== undefined) out.mockCadenceDays = patch.mockCadenceDays ?? undefined;
+  if (patch.topicWeights !== undefined) out.topicWeights = patch.topicWeights;
+  return out;
 }
 
 export async function getStudyPlan({

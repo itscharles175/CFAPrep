@@ -640,3 +640,57 @@ export function isAiPrereqDismissed(): boolean {
 export function setAiPrereqDismissed(dismissed: boolean): void {
   set(K_AI_PREREQ, dismissed);
 }
+
+// ---------------------------------------------------------------------------
+// DATA-6 — shared study-profile scalars (LSAT side)
+//
+// The shared cross-domain study profile arbitrated by the backend
+// (`GET/PUT /api/study/profile`) is keyed on three scalars: target score, exam
+// date, and a daily-minutes budget. On the LSAT side these already live in
+// localStorage as the `Goal` (target score + exam date; read by Dashboard &
+// Analytics) and the plan budget (`getPlanBudgetMin`). These thin accessors
+// project those existing prefs onto the shared scalar shape and write them back,
+// so the LSAT UI can read/produce the shared profile WITHOUT duplicating storage
+// keys — the on-disk `Goal` / plan-budget contracts are unchanged (additive).
+// ---------------------------------------------------------------------------
+export interface StudyProfileScalars {
+  /** LSAT target scaled score (120-180), or null when no goal is set. */
+  targetScore: number | null;
+  /** ISO yyyy-mm-dd exam date, or null when unset. */
+  examDate: string | null;
+  /** Daily study budget in minutes. */
+  dailyMinutes: number;
+}
+
+/** Read the LSAT-side shared-profile scalars from the persisted Goal + plan
+ * budget. A missing goal yields null target/exam (the budget always has a
+ * default), so a consumer can tell "no LSAT goal yet" from "target 0". */
+export function getStudyProfileScalars(): StudyProfileScalars {
+  const goal = getGoal();
+  return {
+    targetScore: goal ? goal.targetScore : null,
+    examDate: goal && goal.examDate ? goal.examDate : null,
+    dailyMinutes: getPlanBudgetMin(),
+  };
+}
+
+/** Write the LSAT-side shared-profile scalars back to the Goal + plan budget.
+ * Only the provided fields change; target/exam are merged into the existing Goal
+ * (preserving its band), and the budget is clamped by `setPlanBudgetMin`. */
+export function setStudyProfileScalars(patch: Partial<StudyProfileScalars>): void {
+  if (patch.targetScore != null || patch.examDate != null) {
+    const existing = getGoal();
+    const targetScore = patch.targetScore ?? existing?.targetScore ?? 165;
+    const examDate = patch.examDate ?? existing?.examDate ?? "";
+    setGoal({
+      targetScore,
+      examDate,
+      bandLow: existing?.bandLow,
+      bandHigh: existing?.bandHigh,
+      band: existing?.band ?? [targetScore - 2, targetScore + 2],
+    });
+  }
+  if (patch.dailyMinutes != null) {
+    setPlanBudgetMin(patch.dailyMinutes);
+  }
+}

@@ -362,6 +362,51 @@ class StudyPlan(SQLModel, table=True):
     daily_minutes: int = 60
     active: bool = True
     created_at: datetime = Field(default_factory=utcnow)
+    # DATA-6 — last-write timestamp for the shared study-profile arbiter's
+    # last-write-wins conflict policy. Additive/optional (migration 24 backfills
+    # pre-existing rows from ``created_at``); ``upsert_plan`` keeps its existing
+    # signature and simply stamps this on insert via the default_factory.
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SharedStudyProfile(SQLModel, table=True):
+    """DATA-6 — the single reconciled study profile shared across domains.
+
+    Reconciles the LSAT ``StudyPlan`` (target_score / exam_date / daily_minutes)
+    with the host's ``StudyPlanSettings`` (targetLevel / dailyTargetMinutes /
+    examDate, persisted in Dexie). ``GET /api/study/profile`` returns the
+    reconciled view; ``PUT`` writes it (updating the active LSAT ``StudyPlan`` row
+    AND mirroring the host-owned fields here). The host side persists via the
+    degrading-fetch bridge to Dexie.
+
+    Conflict policy is last-write-wins by ``updated_at``: a writer stamps
+    ``updated_at`` and the most recent write across either side wins. This row
+    holds the HOST-owned fields the LSAT ``StudyPlan`` has no column for
+    (``target_level``, ``rest_days``, ``mock_cadence_days``) plus a mirror of the
+    reconciled scalars, so the profile survives even when only one side wrote.
+
+    Single-user app: there is one row, keyed by a stable string (``default``).
+    This is the source of truth LEARN-3 (daily plan) and ANL-4 (readiness) read.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # Stable single-user key; a UNIQUE index (migration 24) enforces one row.
+    profile_key: str = Field(default="default", index=True)
+    # Reconciled scalars (mirror the LSAT StudyPlan; host maps targetLevel/
+    # dailyTargetMinutes/examDate onto these via the bridge).
+    target_score: int = 165
+    exam_date: Optional[str] = None        # ISO date "YYYY-MM-DD"
+    daily_minutes: int = 60
+    # Host-owned fields the LSAT StudyPlan cannot store. Carried verbatim so a
+    # host write round-trips losslessly through this single source of truth.
+    target_level: Optional[str] = None     # host StudyPlanSettings.targetLevel
+    rest_days: list = Field(default_factory=list, sa_column=Column(JSON))
+    mock_cadence_days: Optional[int] = None
+    topic_weights: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    # Who wrote last ("lsat" | "host" | "merge"): provenance for the
+    # last-write-wins arbitration (informational; the timestamp decides).
+    last_writer: str = Field(default="merge")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 class Setting(SQLModel, table=True):

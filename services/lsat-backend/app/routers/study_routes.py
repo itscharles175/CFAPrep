@@ -22,7 +22,15 @@ from sqlmodel import Session, select
 
 from .. import adaptivity, study_plan
 from ..db import get_session
-from ..models import ActivityEvent, HostProgressSnapshot, Question, SRSCard, utcnow
+from ..models import (
+    ActivityEvent,
+    HostProgressSnapshot,
+    Question,
+    SharedStudyProfile,
+    SRSCard,
+    StudyPlan,
+    utcnow,
+)
 
 router = APIRouter(prefix="/study")
 
@@ -88,6 +96,251 @@ def put_plan(body: PlanBody, session: Session = Depends(get_session)):
 def today(session: Session = Depends(get_session)):
     """Today's concrete plan: due reviews + drills on weakest types + forecast."""
     return study_plan.daily_plan(session)
+
+
+# --- DATA-6 shared study-profile arbiter ------------------------------------
+#
+# Reconciles the LSAT ``StudyPlan`` (target_score / exam_date / daily_minutes)
+# and the host's ``StudyPlanSettings`` (targetLevel / dailyTargetMinutes /
+# examDate, in Dexie) into ONE ``SharedStudyProfile`` — the single source of
+# truth LEARN-3 (daily plan) and ANL-4 (readiness) consume next.
+#
+# - ``GET /api/study/profile`` returns the reconciled profile (idempotent; never
+#   mutates). It merges the active LSAT ``StudyPlan`` with the persisted
+#   ``SharedStudyProfile`` row (host-owned fields), most-recent ``updated_at``
+#   winning per scalar — last-write-wins.
+# - ``PUT /api/study/profile`` writes it: updates the LSAT ``StudyPlan`` row with
+#   the reconciled scalars AND mirrors the full profile (incl. host-owned fields)
+#   into the single ``SharedStudyProfile`` row. The host persists its own Dexie
+#   copy via the degrading-fetch bridge (``src/lib/studyProfileBridge.ts``).
+#
+# Conflict policy: last-write-wins by ``updated_at``. The writer stamps a fresh
+# ``updated_at``; a GET that reconciles two sides keeps whichever scalar was
+# touched most recently. Single-user app: one ``SharedStudyProfile`` row keyed by
+# ``"default"`` (UNIQUE index ``ux_sharedstudyprofile_key``, migration 24).
+
+_PROFILE_KEY = "default"
+# Sane bounds mirroring the host's ``saveStudyPlanSettings`` clamps so a bad
+# write from either side can't poison the shared source of truth.
+_DAILY_MIN_MIN = 5
+_DAILY_MIN_MAX = 600
+_TARGET_SCORE_MIN = 120
+_TARGET_SCORE_MAX = 180
+
+
+class StudyProfileBody(BaseModel):
+    """A write to the shared study profile (``PUT /api/study/profile``).
+
+    Every field is optional so either side can write only what it owns: the LSAT
+    UI sends the scalars (``target_score`` / ``exam_date`` / ``daily_minutes``);
+    the host bridge can additionally send the host-owned ``target_level`` /
+    ``rest_days`` / ``mock_cadence_days`` / ``topic_weights``. Unsent fields keep
+    their current reconciled value rather than being zeroed.
+    """
+    target_score: Optional[int] = None
+    exam_date: Optional[str] = None          # ISO date "YYYY-MM-DD"
+    daily_minutes: Optional[int] = None
+    target_level: Optional[str] = None
+    rest_days: Optional[list[int]] = None
+    mock_cadence_days: Optional[int] = None
+    topic_weights: Optional[dict[str, float]] = None
+    # Provenance hint for last-write-wins arbitration ("lsat" | "host" | "merge").
+    # Informational only — the timestamp decides; defaults to "host" because the
+    # bridge is the primary PUT caller.
+    last_writer: Optional[str] = None
+
+
+class SharedStudyProfileOut(BaseModel):
+    """The reconciled shared study profile (inline ``response_model``).
+
+    Mirrors the host's ``SharedStudyProfile`` TS type
+    (``src/lib/types/StudyProfile.ts``): the reconciled scalars plus the
+    host-owned fields, the winning side, and the timestamp the arbiter ordered
+    by. ``has_plan`` stays true when an active LSAT ``StudyPlan`` exists (parity
+    with ``GET /api/study/plan``)."""
+    has_plan: bool = False
+    target_score: int = 165
+    exam_date: Optional[str] = None
+    daily_minutes: int = 60
+    target_level: Optional[str] = None
+    rest_days: list[int] = Field(default_factory=list)
+    mock_cadence_days: Optional[int] = None
+    topic_weights: dict[str, float] = Field(default_factory=dict)
+    last_writer: str = "merge"
+    updated_at: Optional[str] = None
+
+
+def _as_aware(dt: Optional[datetime]) -> Optional[datetime]:
+    """Coerce a naive DB timestamp to UTC-aware for safe comparison."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _get_profile_row(session: Session) -> Optional[SharedStudyProfile]:
+    return session.exec(
+        select(SharedStudyProfile).where(
+            SharedStudyProfile.profile_key == _PROFILE_KEY
+        )
+    ).first()
+
+
+def _reconcile_profile(
+    plan: Optional[StudyPlan], row: Optional[SharedStudyProfile]
+) -> SharedStudyProfileOut:
+    """Last-write-wins reconciliation of the LSAT ``StudyPlan`` scalars with the
+    persisted ``SharedStudyProfile`` row (host-owned fields + mirrored scalars).
+
+    For the three shared scalars, whichever side carries the more recent
+    ``updated_at`` wins; host-only fields come from the row. When only one side
+    exists, that side is returned verbatim. Pure / read-only — used by both GET
+    (idempotent) and PUT (to echo the merged result)."""
+    plan_at = _as_aware(getattr(plan, "updated_at", None)) if plan else None
+    row_at = _as_aware(getattr(row, "updated_at", None)) if row else None
+    # Prefer the side with the newer timestamp for the shared scalars; a missing
+    # timestamp loses to a present one. With neither timestamp, the LSAT plan
+    # (the historical source) wins for scalars.
+    row_wins_scalars = (
+        row is not None
+        and row_at is not None
+        and (plan is None or plan_at is None or row_at >= plan_at)
+    )
+    if plan is not None and not row_wins_scalars:
+        target_score = plan.target_score
+        exam_date = plan.exam_date
+        daily_minutes = plan.daily_minutes
+    elif row is not None:
+        target_score = row.target_score
+        exam_date = row.exam_date
+        daily_minutes = row.daily_minutes
+    else:
+        target_score, exam_date, daily_minutes = 165, None, 60
+
+    latest = max([t for t in (plan_at, row_at) if t is not None], default=None)
+    last_writer = "merge"
+    if row is not None and (plan is None or (row_at is not None and (plan_at is None or row_at >= plan_at))):
+        last_writer = row.last_writer or "merge"
+    elif plan is not None:
+        last_writer = "lsat"
+
+    return SharedStudyProfileOut(
+        has_plan=plan is not None,
+        target_score=target_score,
+        exam_date=exam_date,
+        daily_minutes=daily_minutes,
+        target_level=row.target_level if row else None,
+        rest_days=list(row.rest_days) if row and isinstance(row.rest_days, list) else [],
+        mock_cadence_days=row.mock_cadence_days if row else None,
+        topic_weights=(
+            dict(row.topic_weights) if row and isinstance(row.topic_weights, dict) else {}
+        ),
+        last_writer=last_writer,
+        updated_at=latest.isoformat() if latest is not None else None,
+    )
+
+
+@router.get("/profile", response_model=SharedStudyProfileOut)
+def get_profile(session: Session = Depends(get_session)) -> SharedStudyProfileOut:
+    """DATA-6 — the reconciled shared study profile (idempotent, read-only).
+
+    Merges the active LSAT ``StudyPlan`` with the persisted ``SharedStudyProfile``
+    row by last-write-wins (most recent ``updated_at`` wins per shared scalar);
+    host-owned fields (target_level / rest_days / mock_cadence_days /
+    topic_weights) come from the profile row. Never mutates — two consecutive GETs
+    return the identical body. This is the single source of truth LEARN-3 (daily
+    plan) and ANL-4 (readiness) read."""
+    plan = study_plan.get_active_plan(session)
+    row = _get_profile_row(session)
+    return _reconcile_profile(plan, row)
+
+
+@router.put("/profile", response_model=SharedStudyProfileOut)
+def put_profile(
+    body: StudyProfileBody, session: Session = Depends(get_session)
+) -> SharedStudyProfileOut:
+    """DATA-6 — write the shared study profile (last-write-wins).
+
+    Updates the active LSAT ``StudyPlan`` row with the reconciled scalars (reusing
+    ``study_plan.upsert_plan`` so the single-active-plan invariant holds) AND
+    upserts the single ``SharedStudyProfile`` row with the full profile — incl. the
+    host-owned fields the ``StudyPlan`` has no column for. The writer stamps a
+    fresh ``updated_at`` on both, so a later GET resolves this as the winning
+    write. Unsent fields keep their current reconciled value (no zeroing).
+
+    The host persists its own Dexie copy via the degrading-fetch bridge; this PUT
+    is the backend half of the dual-write. Backward-compatible: the existing
+    ``GET/PUT /api/study/plan`` routes are untouched and keep working."""
+    plan = study_plan.get_active_plan(session)
+    row = _get_profile_row(session)
+    current = _reconcile_profile(plan, row)
+
+    # Merge the patch over the current reconciled view (only sent keys change).
+    def _clamp(value: int, lo: int, hi: int) -> int:
+        return max(lo, min(hi, value))
+
+    target_score = (
+        _clamp(int(body.target_score), _TARGET_SCORE_MIN, _TARGET_SCORE_MAX)
+        if body.target_score is not None
+        else current.target_score
+    )
+    daily_minutes = (
+        _clamp(int(body.daily_minutes), _DAILY_MIN_MIN, _DAILY_MIN_MAX)
+        if body.daily_minutes is not None
+        else current.daily_minutes
+    )
+    exam_date = body.exam_date if body.exam_date is not None else current.exam_date
+    target_level = (
+        body.target_level if body.target_level is not None else current.target_level
+    )
+    rest_days = (
+        [int(d) for d in body.rest_days if 0 <= int(d) <= 6]
+        if body.rest_days is not None
+        else current.rest_days
+    )
+    mock_cadence_days = (
+        _clamp(int(body.mock_cadence_days), 1, 90)
+        if body.mock_cadence_days is not None
+        else current.mock_cadence_days
+    )
+    topic_weights = (
+        {str(k): float(v) for k, v in body.topic_weights.items()}
+        if body.topic_weights is not None
+        else current.topic_weights
+    )
+    last_writer = (body.last_writer or "host").strip().lower()
+    if last_writer not in {"lsat", "host", "merge"}:
+        last_writer = "host"
+
+    now = utcnow()
+    # 1) Update the LSAT StudyPlan (single active row) with the reconciled
+    # scalars, then stamp its updated_at so the arbiter sees this write.
+    plan = study_plan.upsert_plan(
+        session,
+        target_score=target_score,
+        exam_date=exam_date,
+        daily_minutes=daily_minutes,
+    )
+    plan.updated_at = now
+    session.add(plan)
+
+    # 2) Upsert the single SharedStudyProfile row (host-owned fields + mirror).
+    if row is None:
+        row = SharedStudyProfile(profile_key=_PROFILE_KEY, created_at=now)
+    row.target_score = target_score
+    row.exam_date = exam_date
+    row.daily_minutes = daily_minutes
+    row.target_level = target_level
+    row.rest_days = rest_days
+    row.mock_cadence_days = mock_cadence_days
+    row.topic_weights = topic_weights
+    row.last_writer = last_writer
+    row.updated_at = now
+    session.add(row)
+    session.commit()
+    session.refresh(plan)
+    session.refresh(row)
+
+    return _reconcile_profile(plan, row)
 
 
 def _activity_payload(row: ActivityEvent) -> dict:

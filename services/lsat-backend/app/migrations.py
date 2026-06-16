@@ -796,6 +796,51 @@ def _m023_host_progress_snapshot(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 23")
 
 
+def _m024_shared_study_profile(conn) -> None:
+    """DATA-6 — shared study-profile arbiter schema.
+
+    Two additive, PRAGMA-guarded changes, both expressible only outside
+    ``create_all``:
+
+    - ``studyplan.updated_at``: the last-write-wins timestamp the arbiter
+      compares. ``create_all`` adds it on a fresh DB; on a PRE-EXISTING DB this
+      ALTERs it in (guarded by ``_add_column_if_missing``, a clean no-op when the
+      column already exists) and backfills it from ``created_at`` so older plan
+      rows have a coherent (non-NULL) timestamp the arbiter can order by.
+    - ``ux_sharedstudyprofile_key``: a UNIQUE index on
+      ``sharedstudyprofile.profile_key`` so ``PUT /api/study/profile`` can UPSERT
+      the single-user row idempotently. The ``sharedstudyprofile`` table itself is
+      created by ``SQLModel.create_all`` (``models.SharedStudyProfile``); this
+      adds the constraint ``create_all`` cannot express. Wrapped so a pre-existing
+      DB that somehow holds duplicate keys logs and keeps the app-level upsert
+      guard rather than breaking boot.
+
+    PRAGMA-guarded exactly like migrations 20-23: every statement is idempotent /
+    tolerant, so a fresh DB and a re-run are clean no-ops. Bumps
+    ``PRAGMA user_version`` to 24 so the DB-level version tracks the latest
+    recorded migration."""
+    _add_column_if_missing(
+        conn, "studyplan", "updated_at", "updated_at DATETIME", mig="migration 24",
+    )
+    # Backfill the new timestamp from created_at where it landed NULL (the ADD
+    # COLUMN above gives existing rows NULL; the arbiter orders by updated_at).
+    try:
+        conn.exec_driver_sql(
+            "UPDATE studyplan SET updated_at = created_at "
+            "WHERE updated_at IS NULL AND created_at IS NOT NULL"
+        )
+    except Exception as exc:  # pragma: no cover - missing table on a partial DB
+        log.warning("migration 24: skipped studyplan.updated_at backfill (%s)", exc)
+    try:
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_sharedstudyprofile_key "
+            "ON sharedstudyprofile (profile_key)"
+        )
+    except Exception as exc:  # pre-existing duplicates — keep app-level upsert
+        log.warning("migration 24: skipped ux_sharedstudyprofile_key (%s)", exc)
+    conn.exec_driver_sql("PRAGMA user_version = 24")
+
+
 def read_cross_domain_schema_version(conn) -> int:
     """Read the recorded cross-domain schema version from ``schema_meta``.
 
@@ -841,6 +886,7 @@ MIGRATIONS: list[Migration] = [
     (21, "attempt_rationale_br_note", _m021_attempt_rationale_br_note),
     (22, "cross_domain_schema_version", _m022_cross_domain_schema_version),
     (23, "host_progress_snapshot", _m023_host_progress_snapshot),
+    (24, "shared_study_profile", _m024_shared_study_profile),
 ]
 
 
