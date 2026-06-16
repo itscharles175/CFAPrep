@@ -9,6 +9,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useProgressSummary } from '../../hooks/useProgress';
 import { exportVaultData, repairVaultData } from '../../lib/learning';
 import { searchCfaSourceVault } from '../../lib/cfaSourceVault';
+import { searchAllContent, type ContentHit } from '../../lib/contentSearch';
 import { commandRoutes } from '../../routes/routeManifest';
 import { KEYBOARD_HELP_EVENT } from '../KeyboardHelp/KeyboardHelp';
 
@@ -98,6 +99,24 @@ function commandResultDomId(id: string): string {
   return `command-result-${String(id).replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
 }
 
+// UX-2 — project a unified content hit onto the palette's shared
+// SearchResultItem shape so it renders through the same row + badge + keyboard
+// path as routes/sources. `external` carries through so LSAT question hits
+// soft-navigate cross-domain (navigateDomain) instead of using the host router.
+function contentHitToResult(hit: ContentHit): SearchResultItem {
+  const typeLabel =
+    hit.source === 'lsat-question' ? 'Question' : hit.source === 'notebook' ? 'Notebook' : 'Content';
+  return {
+    id: hit.id,
+    title: hit.title,
+    subtitle: hit.subtitle,
+    type: typeLabel,
+    path: hit.deepLink,
+    keywords: [],
+    external: hit.external,
+  };
+}
+
 function downloadJson(payload: unknown): void {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -130,6 +149,11 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
   const [applyUpdate, setApplyUpdate] = useState<(() => void) | null>(null);
   const [commandMessage, setCommandMessage] = useState('');
   const [sourceResults, setSourceResults] = useState<SearchResultItem[]>([]);
+  // UX-2 — unified content hits (host curriculum + LSAT questions + notebook
+  // sources), unioned + active-domain-weighted by `searchAllContent`. Mapped onto
+  // the shared SearchResultItem shape so they flow through the same row renderer,
+  // keyboard cursor, and goToResult() (LSAT hits carry `external` → soft-nav).
+  const [contentResults, setContentResults] = useState<SearchResultItem[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLDivElement | null>(null);
   const searchItems = useMemo(() => buildSearchItems({ level3Pathway: activePathway }), [activePathway]);
@@ -170,8 +194,11 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
       })
       .map((row) => row.item)
       .slice(0, 6);
-    return [...sourceResults, ...routeResults].slice(0, 8);
-  }, [commandItems, query, sourceResults, activeDomain]);
+    // UX-2: surface CONTENT hits (curriculum / LSAT questions / notebook sources)
+    // alongside the private source matches and route results — content is already
+    // active-domain-weighted by searchAllContent, so it leads the route rows.
+    return [...sourceResults, ...contentResults, ...routeResults].slice(0, 8);
+  }, [commandItems, query, sourceResults, contentResults, activeDomain]);
 
   // UB6: "jump to domain" quick hops — always exclude the domain the user is
   // already in so the section only offers cross-domain moves.
@@ -223,6 +250,37 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
       active = false;
     };
   }, [activePathway, query]);
+
+  // UX-2 — unified content search. Same debounce gate (>=3 chars) + active-flag
+  // teardown as the source-vault effect above. `searchAllContent` unions host
+  // curriculum chunks, LSAT questions, and open-notebook sources, weighting the
+  // active domain (derived from the URL). Fully degrading: any source failing
+  // contributes no rows, so the union resolves to whatever is reachable.
+  useEffect(() => {
+    let active = true;
+    const normalized = normalizeSearch(query);
+    if (normalized.length < 3) {
+      Promise.resolve().then(() => {
+        if (active) setContentResults([]);
+      });
+      return () => {
+        active = false;
+      };
+    }
+    const controller = new AbortController();
+    searchAllContent({ query, pathname: location.pathname, limit: 5, signal: controller.signal })
+      .then((hits) => {
+        if (!active) return;
+        setContentResults(hits.map(contentHitToResult));
+      })
+      .catch(() => {
+        if (active) setContentResults([]);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [location.pathname, query]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
