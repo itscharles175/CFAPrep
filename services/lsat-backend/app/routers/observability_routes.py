@@ -260,6 +260,85 @@ def trust_status(
     return trust.trust_status(session, tier=tier, force_refresh=refresh)
 
 
+@router.get("/observability/health-aggregated", response_model=dict[str, Any])
+def health_aggregated(session: Session = Depends(get_session)) -> dict[str, Any]:
+    """OPS-3 — one consolidated System-Health roll-up for the host header badge
+    and Runtime Metrics tab.
+
+    Folds the *backend-local* signals already exposed piecemeal across this
+    router — backend_readiness (DB integrity / worker liveness / backup
+    freshness), sqlite_health (PRAGMA / WAL / SQLITE_BUSY contention), the
+    in-RAM cloud token counters, the gen-queue depth, and the live LLM explain
+    p50 — into a single ``ok`` | ``degraded`` | ``error`` verdict so the host
+    doesn't have to fan out four requests just to draw a header badge.
+
+    ADDITIVE: every underlying read already has its own endpoint; this one only
+    reuses them. The verdict mirrors the readiness convention used by ``/ready``
+    (``error`` when the backend isn't ready, ``degraded`` when it's ready but has
+    warnings, ``ok`` otherwise). The host's own sidecar roll-up (the native
+    ``get_system_health_aggregated`` Tauri command) layers process supervision on
+    top of this; this endpoint speaks only for the LSAT backend's own health.
+
+    O(1)-ish and never raises: each component read degrades softly on its own, so
+    a missing WAL file or an unstarted worker yields a visible-but-degraded badge
+    rather than a 500.
+    """
+    gen_jobs = session.exec(select(GenJob)).all()
+    gen_queued = sum(1 for j in gen_jobs if j.status == GenStatus.queued)
+    gen_running = sum(1 for j in gen_jobs if j.status == GenStatus.running)
+
+    integrity = backup.integrity_report()
+    readiness = observability.backend_readiness(
+        integrity_report=integrity,
+        gen_queued=gen_queued,
+        gen_running=gen_running,
+    )
+    db_health = observability.sqlite_health()
+    tokens = observability.cloud_token_totals()
+    budget = config.CLOUD_MONTHLY_BUDGET_USD
+    budget_status = llm.cloud_budget_status()
+
+    # Single rolled-up verdict. backend_readiness already classifies itself as
+    # ok/warning/error; map "warning" → "degraded" for the host badge vocabulary
+    # and fold an over-budget cloud spend into "degraded" too (a soft signal —
+    # local study is unaffected, but the operator should see it).
+    over_budget = bool(budget and budget > 0 and not budget_status["within_budget"])
+    if not readiness["ok"]:
+        verdict = "error"
+    elif readiness["status"] == "warning" or over_budget:
+        verdict = "degraded"
+    else:
+        verdict = "ok"
+
+    reasons = list(readiness["errors"]) + list(readiness["warnings"])
+    if over_budget:
+        reasons.append("cloud_over_budget")
+
+    return {
+        "status": verdict,
+        "ok": readiness["ok"],
+        "generated_at": readiness["generated_at"],
+        "reasons": reasons,
+        # Component roll-ups (each already individually exposed elsewhere).
+        "backend_ready": readiness["ok"],
+        "db_ready": readiness["db"]["ready"],
+        "worker_ready": readiness["worker"]["ready"],
+        "backup_status": readiness["backup"]["status"],
+        "gen_queued": gen_queued,
+        "gen_running": gen_running,
+        "explain_p50_ms": observability.latency_p50("explain_stream"),
+        # Runtime-metric trends source: live cloud token counters + MTD spend.
+        "cloud_tokens": tokens,
+        "cloud_monthly_budget_usd": budget if budget > 0 else None,
+        "cloud_spend_mtd_usd": budget_status["spend_usd"],
+        "cloud_budget_within": budget_status["within_budget"],
+        # DB health: PRAGMA / WAL / SQLITE_BUSY contention snapshot.
+        "sqlite_health": db_health,
+        # Full nested readiness for drill-down (same shape as /observability/status).
+        "readiness": readiness,
+    }
+
+
 @router.get("/observability/schema-versions", response_model=dict[str, Any])
 def schema_versions() -> dict[str, Any]:
     """DATA-3 — the cross-domain schema-version handshake.

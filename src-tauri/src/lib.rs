@@ -980,6 +980,90 @@ fn get_sidecar_logs(name: String, logs: tauri::State<'_, SidecarLogs>) -> Vec<St
     logs.snapshot(&name)
 }
 
+/// OPS-3 — one consolidated System-Health verdict over every supervised sidecar,
+/// returned by `get_system_health_aggregated` so the host can draw a single
+/// header badge without iterating the per-sidecar rows itself.
+///
+/// Serde field names are snake_case on the wire (matching the rest of the
+/// supervisor payloads). The `status` is an ok/degraded/error roll-up; the
+/// per-bucket counts let the host render a "n/m ready" sub-label. This speaks
+/// only to PROCESS supervision — the LSAT backend's own internal health
+/// (DB/worker/cloud) is layered in by the host from the backend's
+/// `/observability/health-aggregated` endpoint.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+struct SystemHealthAggregate {
+    /// Rolled-up verdict: "ok" (all required sidecars ready), "degraded" (an
+    /// OPTIONAL sidecar is down/absent but every REQUIRED one is ready), or
+    /// "error" (at least one REQUIRED sidecar is down).
+    status: String,
+    /// Number of sidecars whose readiness gate is currently satisfied.
+    ready: usize,
+    /// Number of REQUIRED sidecars that are not ready (drives the "error" verdict).
+    required_down: usize,
+    /// Number of OPTIONAL sidecars that are down or were skipped for an absent
+    /// resource (drives the "degraded" verdict; never an error on its own).
+    optional_down: usize,
+    /// Total number of sidecars tracked (launched + skipped-optional).
+    total: usize,
+    /// Names of the not-ready REQUIRED sidecars, for a precise host message.
+    required_down_names: Vec<String>,
+}
+
+/// Roll a slice of sidecar status rows into a single verdict. Pure helper so the
+/// command body and a unit test can classify rows without a live Tauri State.
+fn aggregate_sidecar_health(rows: &[SidecarStatus]) -> SystemHealthAggregate {
+    let total = rows.len();
+    let ready = rows.iter().filter(|r| r.ready).count();
+    let required_down_names: Vec<String> = rows
+        .iter()
+        .filter(|r| !r.ready && !r.optional)
+        .map(|r| r.name.clone())
+        .collect();
+    let required_down = required_down_names.len();
+    let optional_down = rows.iter().filter(|r| !r.ready && r.optional).count();
+    let status = if required_down > 0 {
+        "error"
+    } else if optional_down > 0 {
+        "degraded"
+    } else {
+        "ok"
+    };
+    SystemHealthAggregate {
+        status: status.to_string(),
+        ready,
+        required_down,
+        optional_down,
+        total,
+        required_down_names,
+    }
+}
+
+/// Tauri command backing the OPS-3 System-Health header badge. Builds the same
+/// per-sidecar rows as `get_sidecar_status` (launched + skipped-optional) and
+/// rolls them into one ok/degraded/error verdict. Additive — leaves
+/// `get_sidecar_status` untouched for the detailed table.
+#[tauri::command]
+fn get_system_health_aggregated(
+    state: tauri::State<'_, Sidecars>,
+    skipped: tauri::State<'_, SkippedSidecars>,
+) -> SystemHealthAggregate {
+    let guard = match state.0.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let mut rows: Vec<SidecarStatus> = guard.iter().map(launched_sidecar_status).collect();
+    drop(guard);
+
+    let skipped_guard = match skipped.0.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    rows.extend(skipped_guard.iter().map(skipped_sidecar_status));
+    drop(skipped_guard);
+
+    aggregate_sidecar_health(&rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1653,6 +1737,76 @@ mod tests {
         assert_eq!(json["present"], true);
     }
 
+    // ---- aggregate_sidecar_health (OPS-3) ----
+
+    fn status_row(name: &str, ready: bool, optional: bool) -> SidecarStatus {
+        SidecarStatus {
+            name: name.into(),
+            port: Some(8000),
+            ready_port: Some(8000),
+            healthy: ready,
+            ready,
+            depends_on: vec![],
+            pid: if ready { Some(1) } else { None },
+            optional,
+            present: ready,
+        }
+    }
+
+    #[test]
+    fn aggregate_health_is_ok_when_all_ready() {
+        let rows = vec![
+            status_row("SurrealDB", true, false),
+            status_row("LSAT backend", true, false),
+            status_row("open-notebook API", true, true),
+        ];
+        let agg = aggregate_sidecar_health(&rows);
+        assert_eq!(agg.status, "ok");
+        assert_eq!(agg.ready, 3);
+        assert_eq!(agg.total, 3);
+        assert_eq!(agg.required_down, 0);
+        assert_eq!(agg.optional_down, 0);
+        assert!(agg.required_down_names.is_empty());
+    }
+
+    #[test]
+    fn aggregate_health_is_degraded_when_only_optional_down() {
+        // An absent/optional sidecar (e.g. a RAG-less build) must NOT escalate to
+        // "error" — required sidecars are all up.
+        let rows = vec![
+            status_row("SurrealDB", true, false),
+            status_row("LSAT backend", true, false),
+            status_row("open-notebook API", false, true),
+        ];
+        let agg = aggregate_sidecar_health(&rows);
+        assert_eq!(agg.status, "degraded");
+        assert_eq!(agg.optional_down, 1);
+        assert_eq!(agg.required_down, 0);
+    }
+
+    #[test]
+    fn aggregate_health_is_error_when_a_required_sidecar_is_down() {
+        let rows = vec![
+            status_row("SurrealDB", true, false),
+            status_row("LSAT backend", false, false),
+            status_row("open-notebook API", false, true),
+        ];
+        let agg = aggregate_sidecar_health(&rows);
+        assert_eq!(agg.status, "error");
+        assert_eq!(agg.required_down, 1);
+        assert_eq!(agg.required_down_names, vec!["LSAT backend".to_string()]);
+        // Optional-down still counted, but the verdict is driven by the required one.
+        assert_eq!(agg.optional_down, 1);
+    }
+
+    #[test]
+    fn aggregate_health_empty_is_ok() {
+        let agg = aggregate_sidecar_health(&[]);
+        assert_eq!(agg.status, "ok");
+        assert_eq!(agg.total, 0);
+        assert_eq!(agg.ready, 0);
+    }
+
     #[test]
     fn build_sidecar_specs_marks_onb_optional_and_lsat_required() {
         // OPS-5: open-notebook API + worker are optional and gated on the
@@ -1902,7 +2056,8 @@ pub fn run() {
             cfa_pick_folder,
             cfa_read_pdf_bytes,
             get_sidecar_status,
-            get_sidecar_logs
+            get_sidecar_logs,
+            get_system_health_aggregated
         ])
         .manage(Sidecars::default())
         .manage(SkippedSidecars::default())

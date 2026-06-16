@@ -8593,6 +8593,132 @@
         }
       }
     },
+    "/api/study/profile": {
+      "get": {
+        "summary": "Get Profile",
+        "description": "DATA-6 — the reconciled shared study profile (idempotent, read-only).\n\nMerges the active LSAT ``StudyPlan`` with the persisted ``SharedStudyProfile``\nrow by last-write-wins (most recent ``updated_at`` wins per shared scalar);\nhost-owned fields (target_level / rest_days / mock_cadence_days /\ntopic_weights) come from the profile row. Never mutates — two consecutive GETs\nreturn the identical body. This is the single source of truth LEARN-3 (daily\nplan) and ANL-4 (readiness) read.",
+        "operationId": "get_profile_api_study_profile_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedStudyProfileOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Put Profile",
+        "description": "DATA-6 — write the shared study profile (last-write-wins).\n\nUpdates the active LSAT ``StudyPlan`` row with the reconciled scalars (reusing\n``study_plan.upsert_plan`` so the single-active-plan invariant holds) AND\nupserts the single ``SharedStudyProfile`` row with the full profile — incl. the\nhost-owned fields the ``StudyPlan`` has no column for. The writer stamps a\nfresh ``updated_at`` on both, so a later GET resolves this as the winning\nwrite. Unsent fields keep their current reconciled value (no zeroing).\n\nThe host persists its own Dexie copy via the degrading-fetch bridge; this PUT\nis the backend half of the dual-write. Backward-compatible: the existing\n``GET/PUT /api/study/plan`` routes are untouched and keep working.",
+        "operationId": "put_profile_api_study_profile_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudyProfileBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedStudyProfileOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/study/today/feedback": {
       "post": {
         "summary": "Today Feedback",
@@ -9911,6 +10037,67 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/observability/health-aggregated": {
+      "get": {
+        "summary": "Health Aggregated",
+        "description": "OPS-3 — one consolidated System-Health roll-up for the host header badge\nand Runtime Metrics tab.\n\nFolds the *backend-local* signals already exposed piecemeal across this\nrouter — backend_readiness (DB integrity / worker liveness / backup\nfreshness), sqlite_health (PRAGMA / WAL / SQLITE_BUSY contention), the\nin-RAM cloud token counters, the gen-queue depth, and the live LLM explain\np50 — into a single ``ok`` | ``degraded`` | ``error`` verdict so the host\ndoesn't have to fan out four requests just to draw a header badge.\n\nADDITIVE: every underlying read already has its own endpoint; this one only\nreuses them. The verdict mirrors the readiness convention used by ``/ready``\n(``error`` when the backend isn't ready, ``degraded`` when it's ready but has\nwarnings, ``ok`` otherwise). The host's own sidecar roll-up (the native\n``get_system_health_aggregated`` Tauri command) layers process supervision on\ntop of this; this endpoint speaks only for the LSAT backend's own health.\n\nO(1)-ish and never raises: each component read degrades softly on its own, so\na missing WAL file or an unstarted worker yields a visible-but-degraded badge\nrather than a 500.",
+        "operationId": "health_aggregated_api_observability_health_aggregated_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health Aggregated Api Observability Health Aggregated Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -20938,6 +21125,91 @@
         "type": "object",
         "title": "SettingsPatch"
       },
+      "SharedStudyProfileOut": {
+        "properties": {
+          "has_plan": {
+            "type": "boolean",
+            "title": "Has Plan",
+            "default": false
+          },
+          "target_score": {
+            "type": "integer",
+            "title": "Target Score",
+            "default": 165
+          },
+          "exam_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exam Date"
+          },
+          "daily_minutes": {
+            "type": "integer",
+            "title": "Daily Minutes",
+            "default": 60
+          },
+          "target_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Level"
+          },
+          "rest_days": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Rest Days"
+          },
+          "mock_cadence_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mock Cadence Days"
+          },
+          "topic_weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Topic Weights"
+          },
+          "last_writer": {
+            "type": "string",
+            "title": "Last Writer",
+            "default": "merge"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "title": "SharedStudyProfileOut",
+        "description": "The reconciled shared study profile (inline ``response_model``).\n\nMirrors the host's ``SharedStudyProfile`` TS type\n(``src/lib/types/StudyProfile.ts``): the reconciled scalars plus the\nhost-owned fields, the winning side, and the timestamp the arbiter ordered\nby. ``has_plan`` stays true when an active LSAT ``StudyPlan`` exists (parity\nwith ``GET /api/study/plan``)."
+      },
       "SrsParamsOut": {
         "properties": {
           "weights": {
@@ -20963,6 +21235,107 @@
         ],
         "title": "SrsParamsOut",
         "description": "The backend's effective FSRS parameters (py-fsrs). ``weights`` are the\nper-user optimized weights when present, else the empty list (host then keeps\nits ts-fsrs library defaults / local fit). ``source`` always \"backend\" so the\nhost can label where the params came from."
+      },
+      "StudyProfileBody": {
+        "properties": {
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Score"
+          },
+          "exam_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exam Date"
+          },
+          "daily_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Minutes"
+          },
+          "target_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Level"
+          },
+          "rest_days": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rest Days"
+          },
+          "mock_cadence_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mock Cadence Days"
+          },
+          "topic_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Weights"
+          },
+          "last_writer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Writer"
+          }
+        },
+        "type": "object",
+        "title": "StudyProfileBody",
+        "description": "A write to the shared study profile (``PUT /api/study/profile``).\n\nEvery field is optional so either side can write only what it owns: the LSAT\nUI sends the scalars (``target_score`` / ``exam_date`` / ``daily_minutes``);\nthe host bridge can additionally send the host-owned ``target_level`` /\n``rest_days`` / ``mock_cadence_days`` / ``topic_weights``. Unsent fields keep\ntheir current reconciled value rather than being zeroed."
       },
       "TagBody": {
         "properties": {

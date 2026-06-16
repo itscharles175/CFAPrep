@@ -21,7 +21,9 @@ import EditModelRoutingModal from '../components/SystemHealth/EditModelRoutingMo
 import { TrustReleasePanel } from '../components/ui/TrustReleasePanel';
 import { useTrustManifest } from '../hooks/useTrustManifest';
 import { fetchDataSchemaAlignment } from '../lib/dataDictionary';
-import { getSidecarLogs, getSidecarStatus } from '../lib/systemHealth';
+import { getSidecarLogs, getSidecarStatus, getAggregatedSystemHealth } from '../lib/systemHealth';
+import { recordRuntimeSample } from '../lib/runtimeMetricsStore';
+import RuntimeMetricsTab from '../components/SystemHealth/RuntimeMetricsTab';
 import { recognizeOnceOffline } from '../lib/voice';
 import { readLastCrash, clearLastCrash } from '../components/ErrorBoundary';
 import {
@@ -120,6 +122,12 @@ export default function SystemHealth() {
   // LSAT backend sidecar (:8100) health — probed independently so a down
   // sidecar never blocks the page. null = not yet checked.
   const [lsatHealth, setLsatHealth] = useState(null);
+  // OPS-3: one rolled-up ok/degraded/error verdict for the header badge,
+  // folding the native sidecar-supervision roll-up (get_system_health_aggregated)
+  // with the LSAT backend's own internal health (/observability/health-aggregated).
+  // Polled on an interval; each poll also feeds the Runtime Metrics trend store.
+  // null = not yet checked.
+  const [aggregatedHealth, setAggregatedHealth] = useState(null);
   // DATA-3: cross-domain schema-version handshake. The host reads the LSAT
   // sidecar's reported contract version on mount and compares it to the version
   // this build speaks; on a mismatch, CROSS-DOMAIN writes are disabled (local
@@ -286,6 +294,29 @@ export default function SystemHealth() {
     // Run-once-on-mount loader; the refresh helpers are stable component
     // functions and intentionally not in the dep array.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // OPS-3: aggregated System-Health verdict + Runtime Metrics sampling. Polls
+  // the rolled-up health (sidecar supervision + LSAT backend internal health)
+  // every ~10s and records each backend report into the local runtime-metrics
+  // trend store so the Runtime Metrics tab can draw sparklines. Fully degrading:
+  // both sources may be null (browser dev / sidecar down) without throwing.
+  useEffect(() => {
+    let active = true;
+    async function pollHealth() {
+      const report = await getAggregatedSystemHealth();
+      if (!active) return;
+      setAggregatedHealth(report);
+      // Feed the runtime trend store from the backend report (null still records
+      // a gap sample so the series shows the outage rather than silently pausing).
+      recordRuntimeSample(report.backend);
+    }
+    pollHealth();
+    const timer = setInterval(pollHealth, 10000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -1039,6 +1070,16 @@ export default function SystemHealth() {
     }
   }
 
+  // OPS-3: map the aggregated ok/degraded/error verdict to a StatusBadge tone +
+  // label for the header badge. Neutral ("checking") until the first poll lands.
+  const healthVerdict = aggregatedHealth?.verdict ?? null;
+  const HEALTH_BADGE = {
+    ok: { tone: 'vault', label: 'All systems OK' },
+    degraded: { tone: 'warning', label: 'Degraded' },
+    error: { tone: 'danger', label: 'Service down' },
+  };
+  const healthBadge = healthVerdict ? HEALTH_BADGE[healthVerdict] : null;
+
   const usageMb = storage?.usage ? Math.round(storage.usage / 1024 / 1024) : 0;
   const quotaMb = storage?.quota ? Math.round(storage.quota / 1024 / 1024) : 0;
   const usagePct = quotaMb ? Math.round((usageMb / quotaMb) * 100) : 0;
@@ -1050,7 +1091,24 @@ export default function SystemHealth() {
         title="Offline & Data Safety"
         subtitle="Inspect local storage, cache state, service-worker availability, and backup readiness."
         actions={
-          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* OPS-3: single rolled-up health verdict (sidecar supervision +
+                LSAT backend internal health). Neutral "checking…" until the
+                first poll completes. */}
+            <StatusBadge
+              tone={healthBadge?.tone ?? 'muted'}
+              title={
+                aggregatedHealth?.sidecars
+                  ? `${aggregatedHealth.sidecars.ready}/${aggregatedHealth.sidecars.total} sidecars ready${
+                      aggregatedHealth.sidecars.required_down_names.length
+                        ? ` · down: ${aggregatedHealth.sidecars.required_down_names.join(', ')}`
+                        : ''
+                    }`
+                  : 'Aggregated readiness across all local services'
+              }
+            >
+              <Gauge size={12} aria-hidden="true" /> {healthBadge?.label ?? 'Checking…'}
+            </StatusBadge>
             <input
               className="input"
               type="password"
@@ -1406,6 +1464,15 @@ export default function SystemHealth() {
         fetchedAt={trust.fetchedAt}
         onRefresh={trust.refresh}
       />
+
+      {/* OPS-3: Runtime Metrics — local runtime-gauge trend sparklines (cloud
+          spend, LLM p50, gen queue depth, SQLite contention), the live web-vitals
+          readout, and the LSAT backend's SQLite-health PRAGMA/WAL snapshot. The
+          parent polls the aggregated health every ~10s and feeds the trend store;
+          this tab subscribes to it and re-renders as samples arrive. Charts are
+          self-contained inline SVG sparklines — dependency-free, no shared viz
+          barrel. */}
+      <RuntimeMetricsTab backend={aggregatedHealth?.backend ?? null} webVitals={webVitals} />
 
       {/* UC6: Core Web Vitals (LCP / CLS / INP), collected in-process via the
           browser-native PerformanceObserver. LOCAL-ONLY — nothing is sent
