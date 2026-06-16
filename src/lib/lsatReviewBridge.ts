@@ -33,6 +33,11 @@ import {
 const LSAT_API_BASE = 'http://127.0.0.1:8100';
 /** The contract path the bridge consumes — kept honest against `api.gen.ts`. */
 const LSAT_DUE_PATH: keyof paths = '/api/srs/due';
+// LEARN-2 — the unified, ability-ranked cross-domain due queue. NOT yet bound to
+// `keyof paths`: the route ships ahead of the next `api.gen.ts` regeneration, so
+// it's a string literal for now (same as the legacy `/api/srs/due` body fields).
+// Swap to `keyof paths` once the contract is regenerated with this path.
+const LSAT_UNIFIED_DUE_PATH = '/api/study/due-unified';
 const LSAT_SRS_PATH = '/lsat/srs'; // deep-link target (host hard-navigates here)
 
 /** A domain-agnostic "due review" row for the unified inbox. */
@@ -130,6 +135,108 @@ export async function fetchLsatDue(opts: { limit?: number; timeoutMs?: number } 
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * One card inside the LEARN-2 `/api/study/due-unified` body. The backend emits
+ * the canonical `CrossDomainReviewCard` shape directly (mirrors
+ * `dataDictionary.ts` §1 / `lsatSrsCardToCanonical`), plus the two LEARN-2
+ * ranking signals (`overdueSeconds`, `utilityScore`). Read permissively: a
+ * shape drift just degrades a row rather than throwing.
+ */
+interface RawUnifiedDueCard
+  extends Omit<Partial<CrossDomainReviewCard>, 'crossId' | 'questionCrossId'> {
+  // Read the branded id fields permissively off the wire as plain strings: the
+  // canonical `CrossDomainId` template-literal type is validated/coerced
+  // downstream (`unifiedItemFromCanonical`), so we must NOT inherit the strict
+  // branded type here (that drift would throw instead of degrading a row).
+  crossId?: string;
+  questionCrossId?: string;
+  overdueSeconds?: number;
+  utilityScore?: number | null;
+}
+
+/** Documented `/api/study/due-unified` body shape. */
+interface RawUnifiedDueResponse {
+  ok?: boolean;
+  due_count?: number;
+  items?: RawUnifiedDueCard[];
+}
+
+/**
+ * LEARN-2 — fetch the unified, ability-ranked due queue from the sidecar
+ * (`GET /api/study/due-unified`). The backend already projects LSAT due cards
+ * onto the canonical {@link CrossDomainReviewCard} shape and ranks them
+ * (overdue DESC, q_type interleave, ability-weighted utility), so the host can
+ * merge these with its OWN local Dexie queue into one ranked list. Parallel to
+ * {@link fetchLsatDue}: same degrading-fetch pattern — any failure (sidecar
+ * down, timeout, shape drift) returns `{ ok: false, dueCount: 0, items: [] }`
+ * so the inbox simply omits the LSAT rows rather than erroring.
+ *
+ * Returns the same {@link UnifiedReviewItem} shape `fetchLsatDue` does (so the
+ * inbox renders both identically), carrying the canonical card the backend
+ * sent so a consumer can rank/merge with one vocabulary.
+ */
+export async function fetchUnifiedDue(
+  opts: { limit?: number; timeoutMs?: number } = {},
+): Promise<LsatDueResult> {
+  const { limit = 5, timeoutMs = 2500 } = opts;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${LSAT_API_BASE}${LSAT_UNIFIED_DUE_PATH}`, {
+      signal: controller.signal,
+      headers: { accept: 'application/json' },
+    });
+    if (!res.ok) {
+      return { ok: false, dueCount: 0, items: [], error: `LSAT backend responded ${res.status}.` };
+    }
+    const data = (await res.json()) as RawUnifiedDueResponse;
+    const cards = Array.isArray(data.items) ? data.items : [];
+    const items: UnifiedReviewItem[] = cards.slice(0, limit).map((card, i) =>
+      unifiedItemFromCanonical(card, i),
+    );
+    return {
+      ok: true,
+      dueCount: typeof data.due_count === 'number' ? data.due_count : cards.length,
+      items,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, dueCount: 0, items: [], error: msg };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Project a canonical due card (from `/api/study/due-unified`) onto the inbox's
+ * {@link UnifiedReviewItem} shape. The backend already sent the canonical record,
+ * so this just fills the missing `crossId`/`questionCrossId`/`difficulty`
+ * defaults defensively (a drifted/partial row degrades rather than throwing). */
+function unifiedItemFromCanonical(card: RawUnifiedDueCard, index: number): UnifiedReviewItem {
+  const crossId = card.crossId || `lsat:review:${index}`;
+  const nativeId = crossId.split(':').at(-1) || String(index);
+  const canonical: CrossDomainReviewCard = {
+    crossId: crossId as CrossDomainReviewCard['crossId'],
+    domain: 'lsat',
+    questionCrossId: (card.questionCrossId ||
+      `lsat:question:${nativeId}`) as CrossDomainReviewCard['questionCrossId'],
+    title: card.title || `LSAT item ${nativeId}`,
+    difficulty: card.difficulty || 'intermediate',
+    empiricalDifficulty:
+      typeof card.empiricalDifficulty === 'number' ? card.empiricalDifficulty : undefined,
+    dueAt: typeof card.dueAt === 'string' ? card.dueAt : undefined,
+    itemType: card.itemType,
+    origin: card.origin,
+  };
+  return {
+    domain: 'lsat',
+    id: nativeId,
+    title: canonical.title,
+    deepLinkPath: LSAT_SRS_PATH,
+    qType: canonical.itemType,
+    canonical,
+  };
 }
 
 /** Result of {@link fetchLsatDueCanonical} — canonical cross-domain cards. */

@@ -14,7 +14,7 @@ import {
 import { getTutorProvider, isTutorEnabledFromEnv } from '../lib/aiTutorContracts';
 import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
-import { fetchLsatDue, LSAT_REVIEW_PATH } from '../lib/lsatReviewBridge';
+import { fetchUnifiedDue, LSAT_REVIEW_PATH } from '../lib/lsatReviewBridge';
 import { useScrollRestoration } from '../lib/scrollRestore';
 
 const filters = [
@@ -42,8 +42,10 @@ export default function ReviewInbox() {
   const [dailyTarget, setDailyTarget] = useState('45');
   const [examDate, setExamDate] = useState('');
   const [mockCadence, setMockCadence] = useState('14');
-  // Phase 4.1 — cross-domain review: LSAT due items come from the LSAT sidecar
-  // (:8100) over HTTP, merged into this inbox. null = not yet loaded.
+  // LEARN-2 — cross-domain due queue: the LSAT sidecar (:8100) returns its due
+  // cards already ability-ranked (overdue DESC, q_type interleave, utility-
+  // weighted) on the canonical shape; this inbox merges them with the host's own
+  // local Dexie queue into one combined "due today" count. null = not yet loaded.
   const [lsatDue, setLsatDue] = useState(null);
 
   // UX-1: restore the document scroll position on return to the inbox, incl.
@@ -53,6 +55,10 @@ export default function ReviewInbox() {
   useScrollRestoration('host:/review', { ready: studyPlan != null });
 
   async function refresh() {
+    // LEARN-2: re-pull the unified LSAT due queue alongside the local queue so
+    // the combined count stays in sync after a repair / plan save (degrades
+    // silently when the sidecar is offline).
+    fetchUnifiedDue().then((result) => setLsatDue(result));
     const [nextItems, nextReadiness, nextPlan, nextForecast] = await Promise.all([
       getReviewInbox({ level3Pathway: activePathway }),
       getReadinessByTopic({ level3Pathway: activePathway }),
@@ -83,9 +89,10 @@ export default function ReviewInbox() {
 
   useEffect(() => {
     let active = true;
-    // Cross-domain: pull the LSAT due queue from the sidecar (non-blocking;
-    // silently omitted when the backend is offline).
-    fetchLsatDue().then((result) => {
+    // LEARN-2: pull the unified, ability-ranked LSAT due queue from the sidecar
+    // (non-blocking; silently omitted when the backend is offline). Merged with
+    // the host's local queue below into one combined due count.
+    fetchUnifiedDue().then((result) => {
       if (active) setLsatDue(result);
     });
     Promise.all([
@@ -143,6 +150,11 @@ export default function ReviewInbox() {
 
   const visibleItems = filter === 'all' ? items : items.filter((item) => item.type === filter);
   const weakest = readiness[0];
+  // LEARN-2: one combined "due today" count across planes — the host's local
+  // queue plus the LSAT sidecar's ability-ranked due cards (0 when the sidecar
+  // is offline / unreachable, so the count gracefully reflects host-only).
+  const lsatDueCount = lsatDue?.ok ? lsatDue.dueCount : 0;
+  const combinedQueueCount = items.length + lsatDueCount;
 
   return (
     <div className="page-container">
@@ -157,7 +169,7 @@ export default function ReviewInbox() {
         <MetricCard label="Due Today" value={studyPlan?.dueToday ?? 0} detail="Scheduled review items" icon={CalendarClock} />
         <MetricCard label="Forecast" value={studyPlan?.forecastReviewCount ?? 0} detail="Next 14 days" icon={Activity} tone="warning" />
         <MetricCard label="Weakest Topic" value={weakest ? `${weakest.readinessScore}%` : '-'} detail={weakest?.topic || 'No attempts yet'} icon={Gauge} tone="success" />
-        <MetricCard label="Queue" value={items.length} detail="Total actionable items" icon={ListChecks} tone="accent" />
+        <MetricCard label="Queue" value={combinedQueueCount} detail={lsatDueCount > 0 ? `${items.length} local + ${lsatDueCount} LSAT` : 'Total actionable items'} icon={ListChecks} tone="accent" />
       </div>
 
       {/* Phase 4.1 — cross-domain: LSAT reviews from the sidecar, merged in.

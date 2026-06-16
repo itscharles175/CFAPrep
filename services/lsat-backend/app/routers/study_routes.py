@@ -12,16 +12,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from collections import defaultdict
+from datetime import date, datetime, timezone
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from .. import study_plan
+from .. import adaptivity, study_plan
 from ..db import get_session
-from ..models import ActivityEvent, HostProgressSnapshot, utcnow
+from ..models import ActivityEvent, HostProgressSnapshot, Question, SRSCard, utcnow
 
 router = APIRouter(prefix="/study")
 
@@ -123,6 +124,172 @@ def today_feedback(body: TodayFeedbackBody, session: Session = Depends(get_sessi
     session.commit()
     session.refresh(row)
     return _activity_payload(row)
+
+
+# --- LEARN-2 unified due-today queue (ability-ranked, read-only) ------------
+#
+# A cross-domain "what's due right now" feed in the canonical
+# ``CrossDomainReviewCard`` shape (mirrors ``src/lib/dataDictionary.ts`` §1 /
+# ``lsatSrsCardToCanonical``). Server-side this projects the LSAT plane only:
+# the host merges its OWN local Dexie queue with these rows client-side (the
+# host's local review items never round-trip through the backend), then ranks
+# the combined list with one vocabulary. Strictly read-only — no mutations.
+
+
+class UnifiedDueCard(BaseModel):
+    """One LSAT due card on the canonical cross-domain shape.
+
+    Field names + coercion rules mirror the host's ``CrossDomainReviewCard``
+    (``src/lib/dataDictionary.ts`` §1-§2) so the host can rank/merge these with
+    its own local cards using one vocabulary. ``difficulty`` is the host 3-bucket
+    enum (1-2 -> foundation, 3 -> intermediate, 4-5 -> advanced); ``overdueSeconds``
+    is the LEARN-2 ranking primary (how long the card has been due).
+    """
+    crossId: str
+    domain: Literal["lsat"] = "lsat"
+    questionCrossId: str
+    title: str
+    difficulty: Literal["foundation", "intermediate", "advanced"]
+    empiricalDifficulty: Optional[float] = None
+    dueAt: Optional[str] = None
+    itemType: Optional[str] = None
+    origin: Optional[str] = None
+    # LEARN-2 ranking signals (additive to the canonical card; the host can sort
+    # by these or fall back to its own when merging the local queue).
+    overdueSeconds: float = 0.0
+    utilityScore: Optional[float] = None
+
+
+class UnifiedDueResponse(BaseModel):
+    ok: bool = True
+    due_count: int = 0
+    items: list[UnifiedDueCard] = Field(default_factory=list)
+    utility_model: Optional[str] = None
+    review_strategy: dict[str, Any] = Field(default_factory=dict)
+
+
+def _lsat_difficulty_to_host(
+    difficulty: float | None,
+) -> Literal["foundation", "intermediate", "advanced"]:
+    """LSAT int difficulty (1-5) -> host 3-bucket enum.
+
+    Mirrors ``lsatDifficultyToHost`` in ``src/lib/dataDictionary.ts`` §2 exactly:
+    out-of-range / non-numeric collapses to the neutral middle; 1-2 -> foundation,
+    3 -> intermediate, 4-5 -> advanced (so the host and backend project an LSAT
+    card to the same bucket whether it crosses via the sidecar or this route).
+    """
+    if difficulty is None:
+        return "intermediate"
+    try:
+        d = round(float(difficulty))
+    except (TypeError, ValueError):
+        return "intermediate"
+    d = max(1, min(5, d))
+    if d <= 2:
+        return "foundation"
+    if d >= 4:
+        return "advanced"
+    return "intermediate"
+
+
+def _qtype_interleave(
+    items: list[tuple[SRSCard, Question, float]],
+) -> list[tuple[SRSCard, Question, float]]:
+    """Round-robin a most-overdue-first list across q_types so the queue never
+    serves a long run of one type. Mirrors ``srs_routes._interleave_by_qtype``:
+    each q_type's first appearance fixes its slot (its head is its most-overdue
+    card, so leading types are the most urgent) and ties break by urgency."""
+    buckets: dict[str, list[tuple[SRSCard, Question, float]]] = defaultdict(list)
+    order: list[str] = []
+    for triple in items:
+        qt = triple[1].q_type or "?"
+        if qt not in buckets:
+            order.append(qt)
+        buckets[qt].append(triple)
+    out: list[tuple[SRSCard, Question, float]] = []
+    while any(buckets[qt] for qt in order):
+        for qt in order:
+            if buckets[qt]:
+                out.append(buckets[qt].pop(0))
+    return out
+
+
+@router.get("/due-unified", response_model=UnifiedDueResponse)
+def due_unified(session: Session = Depends(get_session)) -> UnifiedDueResponse:
+    """LEARN-2 — cross-domain due queue in the canonical ``CrossDomainReviewCard``
+    shape, ability-ranked. Sources LSAT due cards the same way ``GET /api/srs/due``
+    does (every SRS card whose ``due_date`` has passed), then orders them by:
+      1. ``overdueSeconds`` DESC (most overdue first),
+      2. q_type round-robin interleave (no single type dominates a run),
+      3. ability-weighted utility DESC (the shared Ability Engine selector's
+         utility score, so the most productive reviews surface first).
+
+    The host merges its OWN local Dexie review queue with these rows client-side
+    and ranks the combined list — the host's local cards never round-trip through
+    the backend, so this projects the LSAT plane only. Strictly read-only."""
+    selector = adaptivity.ability_selector(session, days=180)
+    utility_score = (selector.get("utility") or {}).get("score")
+    now = datetime.now(timezone.utc)
+    due_triples: list[tuple[SRSCard, Question, float]] = []
+    for card in session.exec(select(SRSCard)).all():
+        cd = card.due_date
+        if cd.tzinfo is None:
+            cd = cd.replace(tzinfo=timezone.utc)
+        if cd <= now:
+            q = session.get(Question, card.question_id)
+            if q is not None and q.deleted_at is None:
+                due_triples.append((card, q, (now - cd).total_seconds()))
+    # 1. most-overdue first, then 2. interleave across q_types. The ability-
+    # weighted utility (3) is a single global selector score this run, so it
+    # tie-breaks the whole queue uniformly without disturbing the overdue/qtype
+    # ordering; it rides on each row as ``utilityScore`` for the host's merge.
+    due_triples.sort(key=lambda t: -t[2])
+    ordered = _qtype_interleave(due_triples)
+    items: list[UnifiedDueCard] = []
+    for card, q, overdue_s in ordered:
+        native_id = card.id if card.id is not None else q.id
+        items.append(
+            UnifiedDueCard(
+                crossId=f"lsat:review:{native_id}",
+                questionCrossId=f"lsat:question:{q.id}",
+                title=_unified_title(q),
+                difficulty=_lsat_difficulty_to_host(q.difficulty),
+                empiricalDifficulty=(
+                    float(q.empirical_difficulty)
+                    if q.empirical_difficulty is not None
+                    else None
+                ),
+                dueAt=card.due_date.isoformat() if card.due_date else None,
+                itemType=q.q_type,
+                origin=card.origin,
+                overdueSeconds=round(overdue_s, 3),
+                utilityScore=utility_score,
+            )
+        )
+    return UnifiedDueResponse(
+        ok=True,
+        due_count=len(items),
+        items=items,
+        utility_model=selector.get("utility_model"),
+        review_strategy={
+            "ordering": "overdue_interleaved_by_qtype_ability_weighted",
+            "selector_strategy": selector.get("strategy"),
+            "utility_model": selector.get("utility_model"),
+            "utility_score": utility_score,
+            "planes": ["lsat"],
+            "host_merges_local_queue": True,
+        },
+    )
+
+
+def _unified_title(q: Question) -> str:
+    """A compact, answer-key-free title for a due card (mirrors the host bridge's
+    ``titleFor`` / ``lsatTitleFrom``: collapse whitespace, cap at 80 chars with an
+    ellipsis, else a stable ``LSAT item <id>`` fallback)."""
+    raw = " ".join((q.stem or q.prompt or "").split()).strip()
+    if raw:
+        return raw if len(raw) <= 80 else f"{raw[:79]}…"
+    return f"LSAT item {q.id}"
 
 
 # --- DATA-4a cross-domain progress feed (host -> backend, read-only) --------
