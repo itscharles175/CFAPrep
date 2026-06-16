@@ -5,6 +5,7 @@ import { PageHeader, StatusBadge, Surface } from '../components/ui/Primitives';
 import { Skeleton } from '../components/feedback';
 import { OnboardingResume, StudySessionCard } from '../components/session';
 import type { StudySessionPanel } from '../components/session';
+import UnifiedPlanSection from '../components/today/UnifiedPlanSection';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { buildStudyPlan } from '../lib/studyDirector';
 import type { StudyAction, StudyPlan } from '../lib/studyDirector';
@@ -608,6 +609,12 @@ export default function Today() {
               </ul>
             </Surface>
           )}
+
+          {/* LEARN-3 — the merged cross-domain plan from the LSAT sidecar (LSAT +
+              host CFA/Quant/Excel, reranked by one utility). Self-fetching and
+              fully degrading: renders nothing when the sidecar is offline or has
+              no host evidence to merge, so the local plan above is never blocked. */}
+          <UnifiedPlanSection variant="full" />
 
           {weakAction && (
             <Surface tone="study" status="warning" style={{ marginBottom: 'var(--space-6)' }}>

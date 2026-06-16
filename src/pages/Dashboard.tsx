@@ -32,6 +32,7 @@ import { OnboardingWizard } from '../components/Onboarding';
 import { Skeleton } from '../components/feedback';
 import { DashboardKpiBand } from '../components/dashboard/DashboardKpiBand';
 import { DashboardHero } from '../components/dashboard/DashboardHero';
+import UnifiedPlanSection from '../components/today/UnifiedPlanSection';
 import { useScrollRestoration } from '../lib/scrollRestore';
 
 type LucideIcon = ComponentType<{ size?: number; 'aria-hidden'?: boolean }>;
@@ -628,6 +629,12 @@ export default function Dashboard() {
           dueReviews={summary.dueReviews}
           weakObjectives={summary.weakObjectives}
         />
+
+        {/* LEARN-3 — a compact subset of the merged cross-domain daily plan
+            (LSAT + host CFA/Quant/Excel) from the LSAT sidecar. Self-fetching and
+            fully degrading: renders nothing when the sidecar is offline or has no
+            host evidence to merge, so the local dashboard is never blocked. */}
+        <UnifiedPlanSection variant="compact" maxTasks={4} />
 
         <Surface density="compact" className="vault-strip">
           <InlineCluster>

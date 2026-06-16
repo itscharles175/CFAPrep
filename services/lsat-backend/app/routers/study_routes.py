@@ -93,9 +93,20 @@ def put_plan(body: PlanBody, session: Session = Depends(get_session)):
 
 
 @router.get("/today")
-def today(session: Session = Depends(get_session)):
-    """Today's concrete plan: due reviews + drills on weakest types + forecast."""
-    return study_plan.daily_plan(session)
+def today(
+    include_host: bool = False,
+    session: Session = Depends(get_session),
+):
+    """Today's concrete plan: due reviews + drills on weakest types + forecast.
+
+    LEARN-3 — ``include_host=true`` ALSO folds in the host's weakest-by-ability
+    planes (CFA/Quant/Excel, via ``adaptivity.ability_estimate(domain=...)``) as
+    ``host_drill`` tasks, reranks the WHOLE list (LSAT + host) by one cross-domain
+    utility score, and packs to the merged DATA-6 ``SharedStudyProfile`` budget;
+    the response then carries the additive ``include_host`` / ``planes_merged`` /
+    ``host_task_count`` / ``budget_source`` / ``cross_domain`` keys. The default
+    (``include_host=false``) returns the unchanged LSAT-only body."""
+    return study_plan.daily_plan(session, include_host=include_host)
 
 
 # --- DATA-6 shared study-profile arbiter ------------------------------------

@@ -149,6 +149,127 @@ def test_weighted_targets_use_longer_horizon_feedback_cohorts(db_session):
     assert row["feedback_cohort"]["sequencing_hint"] == "sequence_forward"
 
 
+# --- LEARN-3 — unified daily plan spanning domains --------------------------
+#
+# When ``?include_host=true`` the /study/today plan folds the host's
+# weakest-by-ability planes (CFA/Quant/Excel, via DATA-4a attempt snapshots) in
+# as ``host_drill`` tasks, reranks the WHOLE list by one cross-domain utility,
+# and packs to the merged DATA-6 SharedStudyProfile budget. The default path
+# (no flag) must be byte-for-byte the historical LSAT-only plan.
+
+
+def _seed_host_attempts(client, *, plane: str, n: int, correct: bool, topic: str) -> None:
+    """Push ``n`` host attempt snapshots (DATA-4a) so ``ability_estimate(domain=
+    plane)`` has evidence, plus one mastery snapshot so the drill names a topic."""
+    snapshots = [
+        {
+            "crossId": f"{plane}:attempt:{i}",
+            "domain": plane,
+            "kind": "attempt",
+            "payload": {
+                "crossId": f"{plane}:attempt:{i}",
+                "domain": plane,
+                "questionCrossId": f"{plane}:question:{i}",
+                "correct": correct,
+                "elapsedSeconds": 40,
+            },
+        }
+        for i in range(n)
+    ]
+    snapshots.append(
+        {
+            "crossId": f"{plane}:question:{topic}",
+            "domain": plane,
+            "kind": "mastery",
+            "payload": {
+                "crossId": f"{plane}:question:{topic}",
+                "domain": plane,
+                "masteryFraction": 0.2 if not correct else 0.9,
+                "key": topic,
+                "attempts": n,
+            },
+        }
+    )
+    r = client.post("/api/sync/progress-updates", json={"snapshots": snapshots})
+    assert r.status_code == 200
+
+
+def test_today_default_is_lsat_only_and_unchanged(client):
+    """Default (no include_host) carries NO cross-domain keys and no host tasks."""
+    # Even with host evidence present, the default plan ignores it entirely.
+    _seed_host_attempts(client, plane="cfa", n=6, correct=False, topic="time-value")
+    body = client.get("/api/study/today").json()
+    # Additive LEARN-3 keys are absent on the LSAT-only path.
+    assert "include_host" not in body
+    assert "planes_merged" not in body
+    assert "cross_domain" not in body
+    assert "budget_source" not in body
+    # No host_drill tasks leaked into the LSAT-only plan.
+    assert all(task["type"] != "host_drill" for task in body["tasks"])
+
+
+def test_today_include_host_merges_host_tasks(client):
+    """include_host=true folds in weakest host planes as host_drill tasks and
+    reranks the merged list by one cross-domain utility."""
+    client.put("/api/study/plan", json={"target_score": 170, "daily_minutes": 180})
+    # A weak CFA plane (low accuracy) and a strong Quant plane (high accuracy):
+    # the weaker plane must outrank the stronger in the merged plan.
+    _seed_host_attempts(client, plane="cfa", n=8, correct=False, topic="ethics")
+    _seed_host_attempts(client, plane="quant", n=8, correct=True, topic="probability")
+
+    body = client.get("/api/study/today?include_host=true").json()
+
+    assert body["include_host"] is True
+    # Both evidenced planes are merged in.
+    assert set(body["planes_merged"]) >= {"cfa", "quant"}
+    assert body["cross_domain"]["ranking"] == "cross_domain_utility_desc"
+    assert body["cross_domain"]["utility_model"] == "ability_engine_v2"
+    assert body["cross_domain"]["host_candidate_count"] >= 2
+
+    host_tasks = [t for t in body["tasks"] if t["type"] == "host_drill"]
+    assert host_tasks, "expected at least one host_drill task in the merged plan"
+    assert body["host_task_count"] == len(host_tasks)
+    # Each host task carries the SAME utility vocabulary the LSAT tasks do, plus
+    # its plane + a concrete topic label and host weakness.
+    cfa_task = next(t for t in host_tasks if t["domain"] == "cfa")
+    assert cfa_task["utility_model"] == "ability_engine_v2"
+    assert cfa_task["utility_score"] is not None
+    assert cfa_task["host_evidence_n"] >= 1
+    assert "ethics" in cfa_task["label"]
+    # The whole merged list is sorted by cross-domain utility (DESC).
+    scores = [float(t.get("utility_score") or 0.0) for t in body["tasks"]]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_today_include_host_packs_to_shared_profile_budget(client):
+    """The merged plan sizes to the DATA-6 SharedStudyProfile daily_minutes when
+    that budget decided the number (newer / different from the plan's own)."""
+    # Plan starts small; the shared profile then sets a larger merged budget.
+    client.put("/api/study/plan", json={"target_score": 170, "daily_minutes": 30})
+    _seed_host_attempts(client, plane="cfa", n=6, correct=False, topic="derivatives")
+
+    small = client.get("/api/study/today?include_host=true").json()
+    assert small["cross_domain"]["base_minutes"] == 30
+
+    # Raise the shared budget via the DATA-6 arbiter; the merged plan picks it up.
+    client.put("/api/study/profile", json={"daily_minutes": 240})
+    big = client.get("/api/study/today?include_host=true").json()
+    assert big["cross_domain"]["base_minutes"] == 240
+    assert big["budget_source"] == "shared_profile"
+    # A bigger budget never produces a SMALLER packed day.
+    assert big["estimated_minutes"] >= small["estimated_minutes"]
+
+
+def test_today_include_host_no_host_evidence_is_lsat_subset(client):
+    """With no host evidence, include_host=true returns the LSAT plan plus the
+    (empty) cross-domain summary — never invents host tasks."""
+    body = client.get("/api/study/today?include_host=true").json()
+    assert body["include_host"] is True
+    assert body["planes_merged"] == []
+    assert body["host_task_count"] == 0
+    assert all(task["type"] != "host_drill" for task in body["tasks"])
+
+
 def test_forecast_endpoint_shape(client):
     r = client.get("/api/analytics/forecast?target_score=170")
     assert r.status_code == 200

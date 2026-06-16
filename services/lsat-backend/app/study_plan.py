@@ -17,7 +17,16 @@ from sqlmodel import select
 from sqlmodel import Session
 
 from . import adaptivity, analytics, learning_feedback, notebook_os, pedagogy, srs
-from .models import SRSCard, StudyPlan
+from .models import HostProgressSnapshot, SharedStudyProfile, SRSCard, StudyPlan
+
+# LEARN-3 — the host study planes whose ability the unified plan folds in. Mirrors
+# ``adaptivity._HOST_DOMAINS`` (cfa | quant | excel); host evidence is the DATA-4a
+# read-only snapshot mirror, never the host's live Dexie store.
+_HOST_PLANES = ("cfa", "quant", "excel")
+_PROFILE_KEY = "default"
+# A host topic drill is a focused block, same size as an LSAT type drill so the
+# merged budget packs uniformly.
+_HOST_DRILL_BLOCK_MIN = 12.0
 
 
 def get_active_plan(session: Session) -> Optional[StudyPlan]:
@@ -267,14 +276,143 @@ def _plan_task_utility(
     return round(max(0.0, min(1.2, score)), 3)
 
 
-def daily_plan(session: Session) -> dict:
+def _profile_row_exists(session: Session) -> bool:
+    """LEARN-3 — whether a DATA-6 ``SharedStudyProfile`` row has been written.
+
+    Pure / read-only. When present, the merged daily plan treats that row as the
+    reconciled budget source (``budget_source == "shared_profile"``); otherwise the
+    plan's own ``daily_minutes`` drove the budget."""
+    return session.exec(
+        select(SharedStudyProfile).where(
+            SharedStudyProfile.profile_key == _PROFILE_KEY
+        )
+    ).first() is not None
+
+
+def _shared_daily_minutes(session: Session, plan: Optional[StudyPlan]) -> Optional[int]:
+    """LEARN-3 — the merged daily-minutes budget from the DATA-6 SharedStudyProfile.
+
+    Returns the reconciled budget the host + LSAT agreed on (the
+    ``SharedStudyProfile`` row written by ``PUT /api/study/profile``) when it is
+    newer than the active LSAT plan, else the plan's own ``daily_minutes``. Pure /
+    read-only; falls back to None so the caller keeps the historical default."""
+    row = session.exec(
+        select(SharedStudyProfile).where(
+            SharedStudyProfile.profile_key == _PROFILE_KEY
+        )
+    ).first()
+    if row is None:
+        return plan.daily_minutes if plan else None
+    plan_at = getattr(plan, "updated_at", None) if plan else None
+    row_at = getattr(row, "updated_at", None)
+    # Last-write-wins on the shared scalar (parity with the profile arbiter's
+    # reconciliation): the row wins when it carries the newer timestamp, or when
+    # there is no active plan to compare against.
+    if plan is None or plan_at is None or (row_at is not None and row_at >= plan_at):
+        return row.daily_minutes
+    return plan.daily_minutes
+
+
+def _host_weakest_topic(session: Session, *, plane: str) -> Optional[dict]:
+    """The weakest host topic for one plane, from the DATA-4a mastery snapshots.
+
+    Reads the read-only ``HostProgressSnapshot`` mirror (kind ``"mastery"``, the
+    canonical ``CrossDomainMastery`` shape: ``key`` = objective/topic,
+    ``masteryFraction`` 0..1). Returns the lowest-mastery topic (weakest-first) with
+    a concrete label so a host drill task can name the objective, or None when the
+    host has pushed no mastery rows for this plane. Never mutates."""
+    rows = session.exec(
+        select(HostProgressSnapshot)
+        .where(HostProgressSnapshot.plane == plane)
+        .where(HostProgressSnapshot.kind == "mastery")
+    ).all()
+    weakest: Optional[dict] = None
+    for row in rows:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        key = str(payload.get("key") or "").strip()
+        if not key:
+            continue
+        try:
+            mastery = float(payload.get("masteryFraction"))
+        except (TypeError, ValueError):
+            continue
+        attempts = payload.get("attempts")
+        try:
+            attempts = int(attempts) if attempts is not None else None
+        except (TypeError, ValueError):
+            attempts = None
+        if weakest is None or mastery < weakest["mastery"]:
+            weakest = {"key": key, "mastery": mastery, "attempts": attempts}
+    return weakest
+
+
+def _host_drill_candidates(
+    session: Session, selector: dict, *, max_planes: int = 3,
+) -> list[tuple[dict, float]]:
+    """LEARN-3 — host weakest-by-ability drill candidates, one per evidenced plane.
+
+    For each host plane (cfa | quant | excel) calls
+    ``adaptivity.ability_estimate(domain=plane)`` (LEARN-1) to score the plane's
+    weakness (``1 - mastery``); skips planes with no host evidence. The weakest
+    host topic (from the DATA-4a mastery mirror) names the drill when available.
+    Each candidate carries the SAME ``utility_score`` vocabulary the LSAT drills do
+    (``_plan_task_utility`` with the drill kind, weighted by host weakness) so the
+    merged plan can rerank LSAT + host tasks by ONE cross-domain utility. The
+    candidates are returned weakest-plane-first with a uniform block estimate; the
+    caller reranks the merged list and packs to the budget. Read-only."""
+    scored: list[tuple[dict, float, float]] = []  # (task, est_minutes, weakness)
+    for plane in _HOST_PLANES:
+        ability = adaptivity.ability_estimate(session, domain=plane)
+        if int(ability.get("evidence_n") or 0) < 1:
+            continue  # no host evidence for this plane — nothing to fold in
+        mastery = float(ability.get("mastery") or 0.5)
+        weakness = round(1.0 - mastery, 4)
+        topic = _host_weakest_topic(session, plane=plane)
+        topic_key = topic["key"] if topic else None
+        if topic_key:
+            label = f"Drill {plane.upper()} · {topic_key}"
+        else:
+            label = f"Drill weakest {plane.upper()} topic"
+        task = {
+            "type": "host_drill",
+            "domain": plane,
+            "label": label,
+            "topic": topic_key,
+            "host_mastery": round(mastery, 4),
+            "host_weakness": weakness,
+            "host_evidence_n": int(ability.get("evidence_n") or 0),
+            "accuracy": ability.get("accuracy"),
+            "target_difficulty": (selector.get("zpd") or {}).get("target_difficulty"),
+            "selector_strategy": selector.get("strategy"),
+            "utility_model": "ability_engine_v2",
+            "selector_utility_model": selector.get("utility_model"),
+            # Reuse the LSAT drill utility math, weighting by host weakness so a
+            # weaker host plane outranks a stronger one in the merged rerank.
+            "utility_score": _plan_task_utility(selector, "drill", weakness),
+        }
+        scored.append((task, _HOST_DRILL_BLOCK_MIN, weakness))
+    # Weakest plane first (most productive to drill); the merged rerank below uses
+    # utility, but this keeps a stable, intuitive order among equal-utility hosts.
+    scored.sort(key=lambda t: -t[2])
+    return [(task, est) for task, est, _ in scored[:max_planes]]
+
+
+def daily_plan(session: Session, *, include_host: bool = False) -> dict:
     """Today's adaptive, closed-loop plan.
 
     3.6 — reads the forecast to scale intensity, sizes tasks to the plan's
     ``daily_minutes`` budget, weights type targeting by (weakness x frequency), and
     folds in SRS-due, leech remediation, the concept-gap queue, and a pacing item
     when pacing is weak. Existing keys are preserved; ``intensity``,
-    ``minutes_budget`` and ``rationale`` are added."""
+    ``minutes_budget`` and ``rationale`` are added.
+
+    LEARN-3 — when ``include_host`` is True the plan ALSO folds in the host's
+    weakest-by-ability topics (``adaptivity.ability_estimate(domain=cfa|quant|excel)``,
+    LEARN-1) as ``host_drill`` candidates, reranks the WHOLE candidate list
+    (LSAT + host) by the one cross-domain utility score, and packs to the merged
+    ``daily_minutes`` budget read from the DATA-6 ``SharedStudyProfile``. The
+    default (``include_host=False``) is byte-for-byte the historical LSAT-only
+    plan — no new caller behaviour unless the flag is set."""
     plan = get_active_plan(session)
     dash = analytics.dashboard(session)
     forecast = analytics.forecast(session, exam_date=plan.exam_date if plan else None,
@@ -299,7 +437,21 @@ def daily_plan(session: Session) -> dict:
 
     intensity, mult, rationale_bits = _intensity(forecast, pacing_weak)
 
-    base_minutes = (plan.daily_minutes if plan else 60) or 60
+    # LEARN-3 — when merging the host plane, size the day to the merged
+    # daily_minutes budget from the DATA-6 SharedStudyProfile (the host + LSAT
+    # agreed budget); the LSAT-only path keeps the plan's own daily_minutes.
+    budget_source = "study_plan"
+    if include_host:
+        shared_minutes = _shared_daily_minutes(session, plan)
+        base_minutes = shared_minutes or (plan.daily_minutes if plan else 60) or 60
+        # The shared profile is the budget source whenever a DATA-6 row exists —
+        # it is the reconciled single source of truth the merged plan reads (the
+        # PUT keeps it and the plan in sync, so a value match isn't a meaningful
+        # discriminator). With no row, the plan's own minutes drove the budget.
+        if _profile_row_exists(session):
+            budget_source = "shared_profile"
+    else:
+        base_minutes = (plan.daily_minutes if plan else 60) or 60
     minutes_budget = int(round(base_minutes * mult))
 
     # Build candidate tasks in priority order, each with a rough minute estimate,
@@ -381,6 +533,25 @@ def daily_plan(session: Session) -> dict:
             _PACING_BLOCK_MIN,
         ))
 
+    # LEARN-3 — fold in the host's weakest-by-ability planes when asked. Each host
+    # candidate already carries the SAME ``utility_score`` vocabulary the LSAT
+    # tasks do (``_plan_task_utility`` with the drill kind, weighted by host
+    # weakness), so after appending them we rerank the WHOLE candidate list by
+    # that one cross-domain utility — the most productive task across LSAT + host
+    # surfaces first regardless of which domain it came from. ``include_host=False``
+    # skips both the merge and the rerank, so the insertion-ordered LSAT-only path
+    # below stays byte-for-byte identical to the historical plan.
+    host_candidates: list[tuple[dict, float]] = []
+    planes_merged: list[str] = []
+    if include_host:
+        host_candidates = _host_drill_candidates(session, selector)
+        planes_merged = [str(task.get("domain")) for task, _ in host_candidates]
+        candidates.extend(host_candidates)
+        # Stable rerank by cross-domain utility DESC. ``sorted`` is stable, so
+        # equal-utility tasks keep their original insertion order (SRS/leech still
+        # lead on ties, host drills keep their weakest-plane-first ordering).
+        candidates.sort(key=lambda c: -float(c[0].get("utility_score") or 0.0))
+
     # Pack to the minutes budget (always keep at least the first/most-urgent task
     # so a tiny budget still produces an actionable plan).
     tasks: list[dict] = []
@@ -438,7 +609,7 @@ def daily_plan(session: Session) -> dict:
         + f". Budget {minutes_budget} min."
     )
 
-    return {
+    result = {
         "has_plan": plan is not None,
         "target_score": plan.target_score if plan else None,
         "exam_date": plan.exam_date if plan else None,
@@ -469,3 +640,25 @@ def daily_plan(session: Session) -> dict:
             "feedback": ((selector.get("utility") or {}).get("feedback") or None),
         },
     }
+
+    # LEARN-3 — only attach the cross-domain summary when the host plane was
+    # merged. ``include_host=False`` returns the historical body untouched (no new
+    # keys), so existing LSAT-only callers see no change at all.
+    if include_host:
+        packed_host = [t for t in tasks if t.get("type") == "host_drill"]
+        result["include_host"] = True
+        result["planes_merged"] = planes_merged
+        result["host_task_count"] = len(packed_host)
+        # The cross-domain budget source actually used to size the day (the DATA-6
+        # SharedStudyProfile budget when it decided the number, else the LSAT plan).
+        result["budget_source"] = budget_source
+        result["cross_domain"] = {
+            "planes": planes_merged,
+            "host_candidate_count": len(host_candidates),
+            "host_task_count": len(packed_host),
+            "ranking": "cross_domain_utility_desc",
+            "utility_model": "ability_engine_v2",
+            "base_minutes": int(round(base_minutes)),
+        }
+
+    return result
