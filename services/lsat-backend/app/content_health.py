@@ -141,6 +141,11 @@ def health_report(session: Session) -> dict[str, Any]:
         known_types=known_types,
     )
     revalidation = revalidation_report(session, limit=20)
+    # LSAT-7 — cockpit additions: a compact audit-log summary (recent content
+    # edits + per-field/entity tallies) and a lexical-leak heatmap (per-source
+    # answer-length tells). Both are additive keys on the health dict.
+    audit_log_summary = _audit_log_summary(session, limit=20)
+    lexical_leak = _lexical_leak_heatmap(session, questions)
 
     warnings = []
     from . import notebook_os
@@ -235,6 +240,8 @@ def health_report(session: Session) -> dict[str, Any]:
             ],
         },
         "provenance_score": provenance_score,
+        "audit_log_summary": audit_log_summary,
+        "lexical_leak": lexical_leak,
         "validator_runs": {
             "recent_count": len(validator_runs),
             "failure_reasons": dict(validator_failures),
@@ -1114,6 +1121,74 @@ def _source_score(row: dict[str, Any], quality: dict[str, int]) -> tuple[int, st
     else:
         status = "blocked"
     return score, status, reasons
+
+
+def _audit_log_summary(session: Session, *, limit: int = 20) -> dict[str, Any]:
+    """LSAT-7 — compact audit-log summary for the cockpit's audit-log viewer.
+
+    Wraps :func:`audit.recent_edits` (the existing AuditLog feed) and adds tallies
+    by entity and by field so the cockpit can show "what changed recently" without
+    a second query path. Best-effort: never raises (the cockpit degrades to empty).
+    """
+    from . import audit
+
+    try:
+        recent = audit.recent_edits(session, limit=max(1, min(limit, 200)))
+    except Exception:
+        recent = []
+    by_entity: Counter = Counter()
+    by_field: Counter = Counter()
+    for row in recent:
+        by_entity[str(row.get("entity") or "unknown")] += 1
+        by_field[str(row.get("field") or "unknown")] += 1
+    return {
+        "total_recent": len(recent),
+        "by_entity": dict(by_entity),
+        "by_field": dict(by_field),
+        "recent": recent[:limit],
+    }
+
+
+def _lexical_leak_heatmap(
+    session: Session, questions: list[Question]
+) -> dict[str, Any]:
+    """LSAT-7 — lexical-leak heatmap: per-source answer-length tells.
+
+    A length tell (the credited choice being the uniquely longest/shortest option)
+    is the classic verbatim/format leak the generation validators screen for. This
+    aggregates it per source so the cockpit can render a heatmap of where leaks
+    concentrate. Reuses :func:`audit._has_length_tell` for the exact same rule.
+    """
+    from . import audit
+
+    choices_by_q: dict[int, list[AnswerChoice]] = defaultdict(list)
+    for c in session.exec(select(AnswerChoice)).all():
+        choices_by_q[c.question_id].append(c)
+    leak_counts: Counter = Counter()
+    totals: Counter = Counter()
+    for q in questions:
+        key = _question_source_key(q)
+        totals[key] += 1
+        cs = choices_by_q.get(q.id or -1, [])
+        if cs and audit._has_length_tell(cs, q.correct_answer):
+            leak_counts[key] += 1
+    cells = sorted(
+        (
+            {
+                "source": key,
+                "length_tell": leak_counts[key],
+                "total": totals[key],
+                "rate": round(leak_counts[key] / totals[key], 3) if totals[key] else 0.0,
+            }
+            for key in totals
+        ),
+        key=lambda row: (-row["length_tell"], -row["rate"], row["source"]),
+    )
+    return {
+        "total_length_tells": sum(leak_counts.values()),
+        "sources_with_leaks": len([c for c in cells if c["length_tell"]]),
+        "cells": cells,
+    }
 
 
 def _provenance_score(

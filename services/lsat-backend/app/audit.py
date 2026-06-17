@@ -175,6 +175,104 @@ def duplicate_clusters(session: Session, *, threshold: float = 0.95,
     return clusters[:max_clusters] if max_clusters else clusters
 
 
+# LSAT-7 — content-trust cockpit: a dict-shaped near-duplicate report.
+#
+# Why a NEW function (not a changed return type): ``duplicate_clusters`` above is
+# locked to a *list* by GET /api/bank/duplicates (the frontend ``DuplicateCluster[]``
+# shape) and two unit tests. This report wraps the same union-find clustering and
+# *adds* the two cockpit signals — lexical-leak sources (which sources contribute
+# answer-length / verbatim tells) and coverage-by-type (per q_type cluster pressure)
+# — without disturbing any existing caller. Backward-compatible dict expansion: the
+# ``clusters`` key carries the exact same per-cluster payload as before.
+def near_duplicate_report(session: Session, *, threshold: float = 0.93,
+                          max_clusters: Optional[int] = 50) -> dict:
+    """Cockpit near-duplicate report: union-find clusters (cosine >= ``threshold``,
+    default 0.93) plus lexical-leak sources and per-type coverage pressure.
+
+    Returns a dict::
+
+        {
+          "threshold": float,
+          "clusters": [ {question_ids, size, sample_stem, q_type_mix, source_mix}, ... ],
+          "cluster_count": int,
+          "clustered_question_count": int,
+          "lexical_leak_sources": [ {source, length_tell, total, rate}, ... ],
+          "coverage_by_type": [ {q_type, total, clustered, clustered_pct}, ... ],
+        }
+
+    The ``clusters`` payload is a superset of ``duplicate_clusters`` (same keys plus
+    a mix breakdown), so any list-consumer can read it unchanged.
+    """
+    clusters = duplicate_clusters(session, threshold=threshold, max_clusters=max_clusters)
+    questions = session.exec(select(Question)).all()
+    choices_by_q: dict[int, list[AnswerChoice]] = defaultdict(list)
+    for c in session.exec(select(AnswerChoice)).all():
+        choices_by_q[c.question_id].append(c)
+
+    def _src(q: Question) -> str:
+        return q.source.value if hasattr(q.source, "value") else str(q.source)
+
+    # Lexical-leak heatmap source: per-source count of answer-length tells (the
+    # classic verbatim/format leak the validators screen for), with the rate.
+    leak_counts: Counter = Counter()
+    source_totals: Counter = Counter()
+    for q in questions:
+        src = _src(q)
+        source_totals[src] += 1
+        cs = choices_by_q.get(q.id, [])
+        if cs and _has_length_tell(cs, q.correct_answer):
+            leak_counts[src] += 1
+    lexical_leak_sources = sorted(
+        (
+            {
+                "source": src,
+                "length_tell": leak_counts[src],
+                "total": source_totals[src],
+                "rate": round(leak_counts[src] / source_totals[src], 3)
+                if source_totals[src] else 0.0,
+            }
+            for src in source_totals
+            if leak_counts[src]
+        ),
+        key=lambda row: (-row["length_tell"], row["source"]),
+    )
+
+    # Coverage matrix: per q_type, how many items exist and how many sit inside a
+    # near-duplicate cluster (cluster pressure concentrates on a few types).
+    clustered_ids = {
+        qid for cluster in clusters for qid in (cluster.get("question_ids") or [])
+    }
+    by_type_total: Counter = Counter()
+    by_type_clustered: Counter = Counter()
+    for q in questions:
+        qt = q.q_type or "unknown"
+        by_type_total[qt] += 1
+        if q.id in clustered_ids:
+            by_type_clustered[qt] += 1
+    coverage_by_type = sorted(
+        (
+            {
+                "q_type": qt,
+                "total": by_type_total[qt],
+                "clustered": by_type_clustered[qt],
+                "clustered_pct": round(by_type_clustered[qt] / by_type_total[qt], 3)
+                if by_type_total[qt] else 0.0,
+            }
+            for qt in by_type_total
+        ),
+        key=lambda row: (-row["clustered"], -row["total"], row["q_type"]),
+    )
+
+    return {
+        "threshold": threshold,
+        "clusters": clusters,
+        "cluster_count": len(clusters),
+        "clustered_question_count": len(clustered_ids),
+        "lexical_leak_sources": lexical_leak_sources,
+        "coverage_by_type": coverage_by_type,
+    }
+
+
 # --- 2.8 empirical difficulty calibration -----------------------------------
 def accuracy_to_difficulty(accuracy: float) -> float:
     """Map observed live accuracy (0-1) to a difficulty on the 1-5 scale.

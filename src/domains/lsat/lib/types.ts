@@ -399,6 +399,12 @@ export interface DrillConfig {
   count: number;
   source: "real" | "ai" | "any";
   timed: boolean;
+  /** 1.1 — target an SRS card origin (e.g. "concept_gap"). */
+  origin?: string;
+  /** Q3 — assemble from questions near recent misses. */
+  near_misses?: boolean;
+  /** LSAT-7 — bias selection toward the weakest type when no q_type is set. */
+  weak_type_remediation?: boolean;
 }
 
 export interface DrillResult {
@@ -890,6 +896,116 @@ export interface ContentHealth {
     }[];
   };
   revalidation?: ContentRevalidationReport;
+  // LSAT-7 — content-trust cockpit additions (additive, backward-compatible).
+  lexical_leak?: LexicalLeakHeatmap;
+  audit_log_summary?: AuditLogSummary;
+}
+
+// LSAT-7 — lexical-leak heatmap: per-source answer-length tells.
+export interface LexicalLeakCell {
+  source: string;
+  length_tell: number;
+  total: number;
+  rate: number;
+}
+
+export interface LexicalLeakHeatmap {
+  total_length_tells: number;
+  sources_with_leaks: number;
+  cells: LexicalLeakCell[];
+}
+
+// LSAT-7 — audit-log feed + tallies (also the GET /api/content/audit-log shape).
+export interface AuditLogEntry {
+  id: number;
+  entity: string;
+  entity_id: number;
+  field: string;
+  old_value: string | null;
+  new_value: string | null;
+  created_at: string | null;
+}
+
+export interface AuditLogSummary {
+  total_recent: number;
+  by_entity: Record<string, number>;
+  by_field: Record<string, number>;
+  recent: AuditLogEntry[];
+}
+
+export interface AuditLogFeed {
+  count: number;
+  by_entity: Record<string, number>;
+  by_field: Record<string, number>;
+  edits: AuditLogEntry[];
+}
+
+// LSAT-7 — dict-shaped near-duplicate report (clusters + leak + coverage).
+export interface NearDuplicateReport {
+  threshold: number;
+  clusters: ContentHealth["duplicates"]["clusters"];
+  cluster_count: number;
+  clustered_question_count: number;
+  lexical_leak_sources: LexicalLeakCell[];
+  coverage_by_type: CoverageByTypeRow[];
+}
+
+export interface CoverageByTypeRow {
+  q_type: string;
+  total: number;
+  clustered: number;
+  clustered_pct: number;
+}
+
+// LSAT-7 — per-type pacing budgets.
+export interface PacingBudgetRow {
+  q_type: string;
+  section_type: string;
+  benchmark_ms: number;
+  override_ms: number | null;
+  budget_ms: number;
+  avg_time_ms: number | null;
+  attempts: number;
+  accuracy: number | null;
+  efficiency_band: string | null;
+  over_budget: boolean;
+}
+
+export interface PacingBudgetReport {
+  source: "official" | "all" | string;
+  benchmarks_ms: Record<string, number>;
+  over_budget_count: number;
+  budgets: PacingBudgetRow[];
+}
+
+export interface PacingBudgetUpdateResult {
+  ok: boolean;
+  q_type: string;
+  override_ms: number | null;
+  budgets: PacingBudgetRow[];
+}
+
+// LSAT-7 — smart weak-type drill suggestions.
+export interface WeakTypeSuggestion {
+  q_type: string;
+  section_type: string;
+  mastery: number | null;
+  accuracy: number | null;
+  evidence_n: number | null;
+  avg_time_ms: number | null;
+  drill: {
+    q_type: string;
+    section_type: string;
+    count: number;
+    source: "any" | "real" | "ai" | string;
+    timed: boolean;
+    weak_type_remediation: boolean;
+  };
+}
+
+export interface WeakTypeSuggestionsReport {
+  count: number;
+  suggestions: WeakTypeSuggestion[];
 }
 
 export interface ReleaseTrustCheck {

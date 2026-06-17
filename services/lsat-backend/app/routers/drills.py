@@ -47,6 +47,10 @@ class DrillBody(BaseModel):
     # 1.1: target questions whose SRS card has this origin (e.g. "concept_gap"),
     # so a drill can directly remediate the Blind-Review concept-gap queue.
     origin: Optional[ShortText] = None
+    # LSAT-7: when true, bias selection toward the student's weakest type (lowest
+    # recent accuracy) when no explicit q_type was given. Additive + default False
+    # so existing drill requests are byte-for-byte unchanged.
+    weak_type_remediation: bool = False
 
 
 class IntentBody(BaseModel):
@@ -311,8 +315,42 @@ def _spread_select(
     return pool[:count]
 
 
+def _weakest_q_type(
+    session: Session, *, section_type: Optional[SectionType]
+) -> Optional[str]:
+    """LSAT-7 — the student's weakest q_type (lowest mastery, most evidence) for a
+    weak-type-remediation drill. Best-effort + offline: returns None when no
+    analytics snapshot is available so drill creation never fails on it. Honors a
+    requested section by restricting to that section's type universe."""
+    try:
+        matrix = adaptivity.ability_matrix(session, days=180)
+    except Exception:
+        return None
+    allowed: Optional[set[str]] = None
+    if section_type == SectionType.RC:
+        allowed = set(RC_TYPES)
+    elif section_type == SectionType.LR:
+        allowed = set(LR_TYPES)
+    for row in matrix.get("weakest") or []:
+        qt = row.get("q_type")
+        if not qt:
+            continue
+        if allowed is not None and qt not in allowed:
+            continue
+        return str(qt)
+    return None
+
+
 @router.post("/drills")
 def create_drill(body: DrillBody, session: Session = Depends(get_session)):
+    # LSAT-7 — weak-type remediation: when asked, and no explicit type was set,
+    # steer the whole drill at the weakest type. Resolved once here so the
+    # selector, SQL candidate filter, and echoed config all agree.
+    weak_type_applied: Optional[str] = None
+    if body.weak_type_remediation and not body.q_type:
+        weak_type_applied = _weakest_q_type(session, section_type=body.section_type)
+        if weak_type_applied:
+            body = body.model_copy(update={"q_type": weak_type_applied})
     selector = _selector_for_drill(
         session, q_type=body.q_type, section_type=body.section_type,
     )
@@ -356,6 +394,8 @@ def create_drill(body: DrillBody, session: Session = Depends(get_session)):
         "source": body.source,
         "origin": body.origin,
         "near_misses": body.near_misses,
+        "weak_type_remediation": body.weak_type_remediation,
+        "weak_type_applied": weak_type_applied,
     }
     s = StudySession(
         type=SessionType.drill,

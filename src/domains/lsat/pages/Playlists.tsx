@@ -18,7 +18,8 @@ import { EmptyState, ErrorState, LoadingState } from "@lsat/components/states";
 import { IllustrationPlaylists } from "@lsat/components/illustrations";
 import { SmartSetBuilder } from "@lsat/components/playlists/smart-set-builder";
 import { PlaylistCard } from "@lsat/components/playlists/playlist-card";
-import { usePlaylists } from "@lsat/lib/hooks";
+import { PacingBudgetCard } from "@lsat/components/drills/pacing-budget-card";
+import { usePacingBudget, usePlaylists } from "@lsat/lib/hooks";
 import {
   useCreatePlaylist,
   useDeletePlaylist,
@@ -37,6 +38,7 @@ import type { PlaylistSummary } from "@lsat/lib/types";
 export default function Playlists() {
   const navigate = useNavigate();
   const { data, isLoading, isError, error, refetch } = usePlaylists();
+  const pacing = usePacingBudget("all");
   const createPlaylist = useCreatePlaylist();
   const updatePlaylist = useUpdatePlaylist();
   const deletePlaylist = useDeletePlaylist();
@@ -139,6 +141,14 @@ export default function Playlists() {
         </div>
       }
     >
+      {(pacing.data?.data.budgets.length ?? 0) > 0 && (
+        <PacingBudgetCard
+          title="Per-type pacing budgets"
+          budgets={pacing.data?.data.budgets ?? []}
+          overBudgetCount={pacing.data?.data.over_budget_count}
+          max={6}
+        />
+      )}
       {isLoading ? (
         <LoadingState label="Loading smart sets…" />
       ) : isError ? (

@@ -66,6 +66,7 @@ import type {
   AiHealth,
   ArtifactVersion,
   AbilityMatrix,
+  AuditLogFeed,
   BacklinkRecord,
   BackupIntegrity,
   BackupList,
@@ -129,6 +130,8 @@ import type {
   NotebookNote,
   NotebookSearchResult,
   NotebookSource,
+  PacingBudgetReport,
+  PacingBudgetUpdateResult,
   ParsedPrepTest,
   PlaylistDetail,
   PlaylistPlayResult,
@@ -179,6 +182,7 @@ import type {
   AnnotationSearchHit,
   AnnotationSearchResult,
   Backlink,
+  WeakTypeSuggestionsReport,
   WorkspaceManifest,
   WhyLoopState,
 } from "./types";
@@ -825,6 +829,29 @@ export const api = {
       json: body,
       validate: contentSourceRegistrySchema as unknown as z.ZodType<ContentSourceRegistry>,
     }),
+  // LSAT-7 — content-trust cockpit + drill/playlist depth. All additive GET/POSTs
+  // under /api/content/*; bare casts (these long-tail shapes are not zod-gated).
+  contentAuditLog: (params?: { entity?: string; entity_id?: number; limit?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.entity) sp.set("entity", params.entity);
+    if (params?.entity_id != null) sp.set("entity_id", String(params.entity_id));
+    if (params?.limit != null) sp.set("limit", String(params.limit));
+    const qs = sp.toString();
+    return request<AuditLogFeed>(`/api/content/audit-log${qs ? `?${qs}` : ""}`);
+  },
+  pacingBudget: (source: "official" | "all" = "all") =>
+    request<PacingBudgetReport>(
+      `/api/content/pacing-budget?source=${encodeURIComponent(source)}`,
+    ),
+  setPacingBudget: (body: { q_type: string; target_seconds: number | null }) =>
+    request<PacingBudgetUpdateResult>("/api/content/pacing-budget", {
+      method: "POST",
+      json: body,
+    }),
+  weakTypeSuggestions: (limit = 5) =>
+    request<WeakTypeSuggestionsReport>(
+      `/api/content/weak-type-suggestions?limit=${encodeURIComponent(String(limit))}`,
+    ),
   whyLoop: (attemptId: number, reveal = false) =>
     request<WhyLoopState>(
       `/api/attempts/${attemptId}/why-loop?reveal=${reveal ? "true" : "false"}`,

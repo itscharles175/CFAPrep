@@ -7,11 +7,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from .. import content_health
+from .. import audit, content_health
 from ..db import get_session
 from ..models import ContentVersion, Question, SourceRegistry, ValidatorRun, utcnow
+from . import contentops_extensions
 
 router = APIRouter(prefix="/content")
+
+# LSAT-7 — drill-depth endpoints (pacing budgets + weak-type suggestions) live in
+# a sibling module and are included here (no prefix on that router) so they compose
+# to /api/content/* without touching the shared main.py router list.
+router.include_router(contentops_extensions.router)
 
 
 class SourceBody(BaseModel):
@@ -67,6 +73,30 @@ class RestoreVersionBody(BaseModel):
 @router.get("/health")
 def health(session: Session = Depends(get_session)):
     return content_health.health_report(session)
+
+
+@router.get("/audit-log")
+def content_audit_log(
+    entity: str | None = Query(default=None, max_length=60),
+    entity_id: int | None = Query(default=None, gt=0),
+    limit: int = Query(default=100, ge=1, le=1000),
+    session: Session = Depends(get_session),
+):
+    """LSAT-7 — recent content edits (the AuditLog feed) for the cockpit's
+    audit-log viewer, newest first, optionally scoped to one entity/id. Returns
+    the rows plus by-entity/by-field tallies so the viewer can render a summary
+    header without a second request."""
+    rows = audit.recent_edits(session, entity=entity, entity_id=entity_id, limit=limit)
+    from collections import Counter
+
+    by_entity: Counter = Counter(str(r.get("entity") or "unknown") for r in rows)
+    by_field: Counter = Counter(str(r.get("field") or "unknown") for r in rows)
+    return {
+        "count": len(rows),
+        "by_entity": dict(by_entity),
+        "by_field": dict(by_field),
+        "edits": rows,
+    }
 
 
 @router.get("/sources")

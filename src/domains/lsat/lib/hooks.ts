@@ -14,6 +14,7 @@ import type {
   AbilityMatrix,
   ActivityEvent,
   ArtifactVersion,
+  AuditLogFeed,
   BacklinkRecord,
   BenchmarkRunRecord,
   BackupIntegrity,
@@ -45,6 +46,7 @@ import type {
   NotebookSearchResult,
   NotebookSource,
   ObservabilityStatus,
+  PacingBudgetReport,
   PodcastEpisode,
   PrepTestProgress,
   Question,
@@ -62,6 +64,7 @@ import type {
   TransformationRun,
   TypeAnalytics,
   ValidatorRunRecord,
+  WeakTypeSuggestionsReport,
   WorkspaceManifest,
 } from "./types";
 import {
@@ -945,6 +948,66 @@ export function useContentVersions(
       () => api.contentVersions(filters),
       [] as ContentVersionRecord[],
     ),
+    staleTime: STALE,
+  });
+}
+
+// --- LSAT-7 content-trust cockpit + drill/playlist depth -------------------
+
+/** Recent content edits (AuditLog) + by-entity/by-field tallies. */
+export function useAuditLog(params?: {
+  entity?: string;
+  entity_id?: number;
+  limit?: number;
+}) {
+  return useQuery({
+    queryKey: ["content-audit-log", params ?? "all"],
+    queryFn: withFallback(
+      () => api.contentAuditLog(params),
+      { count: 0, by_entity: {}, by_field: {}, edits: [] } as AuditLogFeed,
+    ),
+    staleTime: STALE,
+  });
+}
+
+/** Per-type pacing budgets (benchmark, observed average, override). */
+export function usePacingBudget(source: "official" | "all" = "all") {
+  return useQuery({
+    queryKey: ["pacing-budget", source],
+    queryFn: withFallback(
+      () => api.pacingBudget(source),
+      {
+        source,
+        benchmarks_ms: { LR: 90_000, RC: 120_000 },
+        over_budget_count: 0,
+        budgets: [],
+      } as PacingBudgetReport,
+    ),
+    staleTime: STALE,
+  });
+}
+
+/** Smart weak-type drill suggestions (lowest mastery first). */
+export function useWeakTypeSuggestions(limit = 5) {
+  return useQuery({
+    queryKey: ["weak-type-suggestions", limit],
+    queryFn: withFallback(
+      () => api.weakTypeSuggestions(limit),
+      { count: 0, suggestions: [] } as WeakTypeSuggestionsReport,
+    ),
+    staleTime: STALE,
+  });
+}
+
+/**
+ * Quarantine inbox — questions held back from drills (AI quarantine queue). A
+ * drill must never serve these, so the cockpit/drills surface them for triage.
+ * Reuses the AI quarantine feed; offline falls back to an empty list.
+ */
+export function useQuarantineInbox() {
+  return useQuery({
+    queryKey: ["quarantine-inbox"],
+    queryFn: withFallback(() => api.genQuarantine(), [] as Question[]),
     staleTime: STALE,
   });
 }

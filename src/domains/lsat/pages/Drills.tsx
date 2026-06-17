@@ -22,6 +22,10 @@ import {
 import { PageLayout } from "@lsat/components/page-layout";
 import { Icon } from "@lsat/components/ui/icon";
 import { TrapSpiralCard } from "@lsat/components/drills/trap-spiral-card";
+import { WeakTypeRecommender } from "@lsat/components/drills/weak-type-recommender";
+import { PacingBudgetCard } from "@lsat/components/drills/pacing-budget-card";
+import { QuarantineInbox } from "@lsat/components/drills/quarantine-inbox";
+import { usePacingBudget, useQuarantineInbox } from "@lsat/lib/hooks";
 import { setDrillTimeCapMin } from "@lsat/lib/drillPrefs";
 import { ErrorState } from "@lsat/components/states";
 import { api } from "@lsat/lib/api";
@@ -60,6 +64,8 @@ export default function Drills() {
   const [err, setErr] = useState<string | null>(null);
   const [intentText, setIntentText] = useState("");
   const [intentBusy, setIntentBusy] = useState(false);
+  const pacing = usePacingBudget("all");
+  const quarantine = useQuarantineInbox();
 
   const types = sectionType === "LR" ? LR_TYPES : RC_TYPES;
 
@@ -310,6 +316,16 @@ export default function Drills() {
           </Button>
         </CardContent>
       </Card>
+
+      <WeakTypeRecommender />
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <PacingBudgetCard
+          budgets={pacing.data?.data.budgets ?? []}
+          overBudgetCount={pacing.data?.data.over_budget_count}
+        />
+        <QuarantineInbox questions={quarantine.data?.data ?? []} />
+      </div>
 
       <TrapSpiralCard />
     </PageLayout>

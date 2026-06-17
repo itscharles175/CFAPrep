@@ -39,6 +39,7 @@ import type {
   ValidatorRunRecord,
 } from "@lsat/lib/types";
 import {
+  useAuditLog,
   useBenchmarkRuns,
   useContentHealth,
   useContentRevalidation,
@@ -49,6 +50,10 @@ import {
   useScheduledTasks,
   useValidatorRuns,
 } from "@lsat/lib/hooks";
+import { NearDuplicatePanel } from "@lsat/components/content-ops/near-duplicate-panel";
+import { LexicalLeakHeatmap } from "@lsat/components/content-ops/lexical-leak-heatmap";
+import { CoverageMatrix } from "@lsat/components/content-ops/coverage-matrix";
+import { AuditLogViewer } from "@lsat/components/content-ops/audit-log-viewer";
 
 type ContentSourceRow = Pick<
   ContentSourceRegistry,
@@ -90,6 +95,7 @@ export default function ContentOps() {
   const schedule = useScheduledTasks();
   const benchmarks = useBenchmarkRuns();
   const migrations = useMigrationPreview();
+  const auditLog = useAuditLog({ limit: 50 });
   const [revalidating, setRevalidating] = useState(false);
   const [remediatingId, setRemediatingId] = useState<number | null>(null);
   const [remediatingDuplicateKey, setRemediatingDuplicateKey] = useState<string | null>(null);
@@ -120,6 +126,30 @@ export default function ContentOps() {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
   const duplicateClusters = h?.duplicates.clusters ?? [];
+  // LSAT-7 — coverage matrix derived from health: per q_type total vs how many of
+  // its questions appear in a near-duplicate cluster (cluster pressure by type).
+  const clusteredIdsByType = new Map<string, Set<number>>();
+  for (const cluster of duplicateClusters) {
+    for (const id of cluster.question_ids ?? []) {
+      for (const qt of Object.keys(cluster.q_type_mix ?? {})) {
+        if (!clusteredIdsByType.has(qt)) clusteredIdsByType.set(qt, new Set());
+        clusteredIdsByType.get(qt)!.add(id);
+      }
+    }
+  }
+  const coverageByType = Object.entries(h?.by_q_type ?? {}).map(([qType, total]) => {
+    const clustered = clusteredIdsByType.get(qType)?.size ?? 0;
+    return {
+      q_type: qType,
+      total,
+      clustered,
+      clustered_pct: total > 0 ? clustered / total : 0,
+    };
+  });
+  const lexicalLeakCells = h?.lexical_leak?.cells ?? [];
+  const auditEdits = auditLog.data?.data.edits ?? h?.audit_log_summary?.recent ?? [];
+  const auditByEntity = auditLog.data?.data.by_entity ?? h?.audit_log_summary?.by_entity;
+  const auditByField = auditLog.data?.data.by_field ?? h?.audit_log_summary?.by_field;
   const provenanceRows = h?.provenance_score?.sources ?? [];
   const visibleProvenanceRows = provenanceRows
     .filter((source) => source.question_count > 0 || source.status !== "ok")
@@ -768,6 +798,25 @@ export default function ContentOps() {
               {!validatorFailures.length && <Empty text="No validator failure reasons recorded." />}
             </CardContent>
           </Card>
+        </div>
+      </PageSection>
+
+      <PageSection title="Content integrity matrix" eyebrow="Trust signals">
+        <div className="grid gap-6 lg:grid-cols-2">
+          <NearDuplicatePanel
+            clusters={duplicateClusters}
+            mergingKey={remediatingDuplicateKey}
+            onMerge={(clusterKey, canonicalId, questionIds) =>
+              remediateDuplicateCluster(clusterKey, canonicalId, questionIds)
+            }
+          />
+          <LexicalLeakHeatmap cells={lexicalLeakCells} />
+          <CoverageMatrix rows={coverageByType} />
+          <AuditLogViewer
+            edits={auditEdits}
+            byEntity={auditByEntity}
+            byField={auditByField}
+          />
         </div>
       </PageSection>
 

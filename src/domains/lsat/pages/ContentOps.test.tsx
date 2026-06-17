@@ -6,6 +6,7 @@ import { createTestQueryClient } from "@lsat/test/setup";
 import ContentOps from "./ContentOps";
 
 const mocks = vi.hoisted(() => ({
+  useAuditLog: vi.fn(),
   useBenchmarkRuns: vi.fn(),
   useContentHealth: vi.fn(),
   useContentRevalidation: vi.fn(),
@@ -37,6 +38,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@lsat/lib/hooks", () => ({
+  useAuditLog: mocks.useAuditLog,
   useBenchmarkRuns: mocks.useBenchmarkRuns,
   useContentHealth: mocks.useContentHealth,
   useContentRevalidation: mocks.useContentRevalidation,
@@ -86,6 +88,24 @@ function renderPage() {
 describe("ContentOps cockpit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.useAuditLog.mockReturnValue(
+      query({
+        count: 1,
+        by_entity: { question: 1 },
+        by_field: { q_type: 1 },
+        edits: [
+          {
+            id: 1,
+            entity: "question",
+            entity_id: 17,
+            field: "q_type",
+            old_value: "Inference",
+            new_value: "Flaw",
+            created_at: new Date().toISOString(),
+          },
+        ],
+      }),
+    );
     mocks.useContentHealth.mockReturnValue(
       query({
         total_questions: 48,
@@ -624,13 +644,15 @@ describe("ContentOps cockpit", () => {
     expect(screen.getByText("Source trust summary")).toBeInTheDocument();
     expect(screen.getAllByText("Official").length).toBeGreaterThan(0);
     expect(screen.getAllByText("42 questions").length).toBeGreaterThan(0);
-    expect(screen.getByText("text:abc123")).toBeInTheDocument();
+    // "text:abc123" now appears in BOTH the legacy findings card and the new
+    // NearDuplicatePanel (Content integrity matrix), so assert >= 1.
+    expect(screen.getAllByText("text:abc123").length).toBeGreaterThan(0);
     expect(screen.getAllByText("normalized text").length).toBeGreaterThan(0);
-    expect(screen.getByText("Questions #17, #18, #19")).toBeInTheDocument();
+    expect(screen.getAllByText("Questions #17, #18, #19").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Keep question #17 and quarantine duplicates in text:abc123/i })).toBeInTheDocument();
     expect(screen.getByText("sources: official 2, research 1")).toBeInTheDocument();
     expect(screen.getByText("types: Flaw 3")).toBeInTheDocument();
-    expect(screen.getByText("Researchers sampled only one neighborhood before generalizing citywide.")).toBeInTheDocument();
+    expect(screen.getAllByText("Researchers sampled only one neighborhood before generalizing citywide.").length).toBeGreaterThan(0);
     expect(screen.getAllByText("length_tell").length).toBeGreaterThan(0);
     expect(screen.getByText("RC generation map")).toBeInTheDocument();
     expect(screen.getByText("single · 3 paragraphs · scope global")).toBeInTheDocument();
