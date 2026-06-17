@@ -56,6 +56,18 @@ class NextBody(BaseModel):
     section_type: SectionType | None = None
     source: Literal["real", "ai", "any"] = "real"
     include_recent: bool = False
+    # LEARN-6 — cross-domain content plane. Omit (default) for the current
+    # LSAT-only ranking over the Question pool. A host plane routes over the
+    # host content mirrored in HostProgressSnapshot (DATA-4a) via the unified
+    # ability; the LSAT-only filters above don't apply to a host plane.
+    domain: Literal["cfa", "quant", "excel"] | None = Field(
+        default=None,
+        description=(
+            "LEARN-6 — cross-domain content plane. Omit for the current "
+            "LSAT-only ranking. A host plane (cfa|quant|excel) routes over host "
+            "content via the unified cross-domain ability."
+        ),
+    )
 
 
 class PlanBody(BaseModel):
@@ -138,6 +150,7 @@ def next_questions(body: NextBody, session: Session = Depends(get_session)):
         section_type=body.section_type,
         source=body.source,
         include_recent=body.include_recent,
+        domain=body.domain,
     )
 
 

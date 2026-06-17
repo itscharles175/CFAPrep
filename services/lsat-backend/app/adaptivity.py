@@ -408,6 +408,67 @@ def _host_attempt_created_at(payload: dict[str, Any]) -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _host_content_candidates(
+    session: Session,
+    *,
+    domain: str,
+) -> list[dict[str, Any]]:
+    """LEARN-6 — collect routable host content units for one host plane.
+
+    The host (CFA/Quant/Excel) has no LSAT ``Question`` table; its content lives
+    in Dexie. What the backend HAS is the read-only DATA-4a mirror in
+    ``HostProgressSnapshot``. Each ``mastery`` snapshot is one objective/topic the
+    host can drill (``key`` = learning objective, ``masteryFraction`` 0..1), so we
+    surface those as the routable units. The matching ``review`` snapshots supply
+    a per-objective bucketed difficulty (foundation|intermediate|advanced) and a
+    leech/lapse signal, joined on the objective key (review ``itemType`` mirrors
+    the host topic, same vocabulary as mastery ``key``).
+
+    Read-only: never mutates ``HostProgressSnapshot``. Returns one dict per
+    objective with the raw signals ``next_questions`` needs to score it; an empty
+    list when the plane has no mirrored mastery rows yet (so the host falls back
+    to its own local ranking)."""
+    rows = session.exec(
+        select(HostProgressSnapshot)
+        .where(HostProgressSnapshot.plane == domain)
+        .where(HostProgressSnapshot.kind == "mastery")
+    ).all()
+    # Index review snapshots by objective key so we can borrow a difficulty bucket
+    # + leech flag for each mastery unit without a second per-row query.
+    review_by_key: dict[str, dict[str, Any]] = {}
+    for rv in session.exec(
+        select(HostProgressSnapshot)
+        .where(HostProgressSnapshot.plane == domain)
+        .where(HostProgressSnapshot.kind == "review")
+    ).all():
+        payload = rv.payload if isinstance(rv.payload, dict) else {}
+        key = payload.get("itemType") or payload.get("title")
+        if isinstance(key, str) and key and key not in review_by_key:
+            review_by_key[key] = payload
+
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        key = payload.get("key")
+        if not isinstance(key, str) or not key:
+            continue
+        mastery_fraction = _bounded(
+            _numeric(payload.get("masteryFraction"), default=0.5), 0.0, 1.0
+        )
+        review = review_by_key.get(key, {})
+        difficulty = _host_difficulty_to_lsat(review.get("difficulty"))
+        candidates.append({
+            "content_id": str(payload.get("crossId") or row.cross_id or key),
+            "key": key,
+            "mastery_fraction": round(mastery_fraction, 4),
+            "difficulty_estimate": round(difficulty, 3),
+            "attempts": int(_numeric(payload.get("attempts"), default=0)),
+            "leech": bool(review.get("leech")),
+            "lapses": int(_numeric(review.get("lapses"), default=0)),
+        })
+    return candidates
+
+
 def refresh_question_stats(
     session: Session,
     question_id: int,
@@ -777,6 +838,97 @@ def _recent_attempts(session: Session, *, days: int = 7) -> dict[int, Attempt]:
     return out
 
 
+def _host_next_questions(
+    session: Session,
+    *,
+    domain: str,
+    count: int,
+) -> dict[str, Any]:
+    """LEARN-6 — rank routable HOST content units by expected learning utility.
+
+    The host plane has no LSAT ``Question`` pool, so we route over the objectives
+    mirrored in ``HostProgressSnapshot`` (DATA-4a) instead, scored against the
+    SAME unified ability/selector math the LSAT path uses. Each candidate's
+    expected success comes from the unified theta minus the objective's own
+    difficulty (``_difficulty_to_b``), nudged toward its locally observed mastery
+    so a topic the host already owns isn't over-recommended. Reasons reuse the
+    LSAT vocabulary (stretch / fluency_check / recent_gap_review / maximum_information)
+    so the host card can present a single shared explanation set.
+
+    Returns the same envelope shape as the LSAT path (``ability`` / ``selector`` /
+    ``recommendations`` / ``guardrails``) minus the LSAT-only ``question`` body —
+    each recommendation instead carries the host ``content_id`` + objective ``key``
+    so the host maps it back to its own Dexie content. Degrades to an empty
+    ``recommendations`` list (still 200) when the plane has no mirrored mastery
+    rows yet."""
+    ability = ability_estimate(session, days=180, domain=domain)
+    selector = selector_from_ability(session, ability, days=180)
+    theta = float(ability.get("ability") or 0.0)
+    candidates = _host_content_candidates(session, domain=domain)
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for cand in candidates:
+        diff = float(cand["difficulty_estimate"])
+        # Blend the global ZPD prediction with the objective's own observed
+        # mastery so a topic the host already owns sits higher on the success
+        # curve (and thus reads as a fluency check, not a stretch).
+        base_success = _sigmoid(theta - _difficulty_to_b(diff))
+        mastery_fraction = float(cand["mastery_fraction"])
+        expected_success = _bounded(0.5 * base_success + 0.5 * mastery_fraction, 0.0, 1.0)
+        info = expected_success * (1.0 - expected_success)
+        # A leech/low-mastery objective is the host analogue of a "recent gap" —
+        # the host has no Blind-Review axis, so we lean on the leech flag instead.
+        review_bonus = 0.08 if (cand["leech"] or mastery_fraction < 0.4) else 0.0
+        utility = _question_utility(
+            selector,
+            expected_success=expected_success,
+            information=info,
+            review_bonus=review_bonus,
+            official_bonus=0.0,
+        )
+        score = utility["utility_score"]
+        reason = "maximum_information"
+        if expected_success < 0.42:
+            reason = "stretch"
+        elif expected_success > 0.78:
+            reason = "fluency_check"
+        if review_bonus:
+            reason = "recent_gap_review"
+        scored.append((
+            score,
+            {
+                "content_id": cand["content_id"],
+                "key": cand["key"],
+                "domain": domain,
+                "mastery_fraction": round(mastery_fraction, 4),
+                "difficulty_estimate": round(diff, 3),
+                "expected_success": round(expected_success, 4),
+                "information_score": round(score, 4),
+                "raw_information": round(info, 4),
+                "utility_score": utility["utility_score"],
+                "zpd_fit": utility["zpd_fit"],
+                "reason": reason,
+                "leech": cand["leech"],
+                "attempts": cand["attempts"],
+                "selector_strategy": selector.get("strategy"),
+            },
+        ))
+    scored.sort(key=lambda row: (-row[0], row[1]["key"]))
+    selected = scored[: max(1, min(count, 25))]
+    return {
+        "domain": domain,
+        "ability": ability,
+        "selector": selector,
+        "count": len(selected),
+        "recommendations": [meta for _score, meta in selected],
+        "guardrails": {
+            "source": "host_content",
+            "include_recent": True,
+            "answer_key_hidden": True,
+            "host_plane": True,
+        },
+    }
+
+
 def next_questions(
     session: Session,
     *,
@@ -785,8 +937,37 @@ def next_questions(
     section_type: SectionType | None = None,
     source: str = "real",
     include_recent: bool = False,
+    domain: str | None = None,
 ) -> dict[str, Any]:
-    """Rank next questions by expected learning information."""
+    """Rank next questions by expected learning information.
+
+    ``domain`` (LEARN-6) selects the evidence + content plane. Omitting it (the
+    default) keeps the historical LSAT-only behaviour byte-for-byte: rank the LSAT
+    ``Question`` pool against the LSAT ability. A host plane (``cfa`` | ``quant`` |
+    ``excel``) instead routes over the host content mirrored in
+    ``HostProgressSnapshot`` (DATA-4a) via the unified cross-domain ability — the
+    ``q_type`` / ``section_type`` / ``source`` / ``include_recent`` filters are
+    LSAT-only and don't apply to a host plane. An unknown/unsupported ``domain``
+    degrades to an empty host envelope rather than silently ranking LSAT content."""
+    host_domain = (domain or "").strip().lower() if domain else None
+    if host_domain is not None:
+        if host_domain in _HOST_DOMAINS:
+            return _host_next_questions(session, domain=host_domain, count=count)
+        # Unknown domain — empty host-shaped envelope (never falls back to LSAT).
+        empty_ability = ability_estimate(session, days=180, domain=host_domain)
+        return {
+            "domain": host_domain,
+            "ability": empty_ability,
+            "selector": selector_from_ability(session, empty_ability, days=180),
+            "count": 0,
+            "recommendations": [],
+            "guardrails": {
+                "source": "host_content",
+                "include_recent": True,
+                "answer_key_hidden": True,
+                "host_plane": True,
+            },
+        }
     selector = ability_selector(
         session, q_type=q_type, section_type=section_type, days=180
     )
