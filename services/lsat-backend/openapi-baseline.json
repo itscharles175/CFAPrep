@@ -13528,6 +13528,221 @@
         }
       }
     },
+    "/api/content/pacing-budget": {
+      "get": {
+        "summary": "Pacing Budget",
+        "description": "Per-type pacing budgets: section benchmark, observed average, and override.",
+        "operationId": "pacing_budget_api_content_pacing_budget_get",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "official",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Source"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Set Pacing Budget",
+        "description": "Set (or, with ``target_seconds=null``, clear) a per-type pacing override.",
+        "operationId": "set_pacing_budget_api_content_pacing_budget_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PacingBudgetBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/content/weak-type-suggestions": {
+      "get": {
+        "summary": "Weak Type Suggestions",
+        "description": "Ranked weak-type drill suggestions (lowest mastery first) with a\nready-to-submit DrillBody for each. Drives the cockpit's weak-type recommender\nand the Drills page's smart weak-type drills.",
+        "operationId": "weak_type_suggestions_api_content_weak_type_suggestions_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "default": 5,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/content/health": {
       "get": {
         "summary": "Health",
@@ -13569,6 +13784,113 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/content/audit-log": {
+      "get": {
+        "summary": "Content Audit Log",
+        "description": "LSAT-7 — recent content edits (the AuditLog feed) for the cockpit's\naudit-log viewer, newest first, optionally scoped to one entity/id. Returns\nthe rows plus by-entity/by-field tallies so the viewer can render a summary\nheader without a second request.",
+        "operationId": "content_audit_log_api_content_audit_log_get",
+        "parameters": [
+          {
+            "name": "entity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 60
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entity"
+            }
+          },
+          {
+            "name": "entity_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Entity Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -17471,6 +17793,215 @@
         }
       }
     },
+    "/api/generation/passages": {
+      "post": {
+        "summary": "Create Passage Job",
+        "description": "Queue a passage-first RC job. The durable worker drains it; returns at once.\n\nEnqueues a normal gen job and flips its ``passage_first`` flag so\n``generation.run_job`` dispatches to the passage-first orchestrator (generate\nONE passage, then attach a varied question set). The flag is set on the row\nafter enqueue so the existing ``jobs.enqueue`` signature is untouched.",
+        "operationId": "create_passage_job_api_generation_passages_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PassageJobBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/generation/passages/{passage_id}/questions": {
+      "get": {
+        "summary": "Passage Questions",
+        "description": "The questions the pipeline attached to one generated passage.\n\nReturns the passage text + topic and every (non-soft-deleted) question that\nshares this ``passage_id``, in review-mode shape (full answer key) so the\ngeneration-review UI can show the credited answer and trap labels. 404 when\nthe passage does not exist.",
+        "operationId": "passage_questions_api_generation_passages__passage_id__questions_get",
+        "parameters": [
+          {
+            "name": "passage_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Passage Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/generation/passages/{job_id}/progress": {
+      "get": {
+        "summary": "Passage Job Progress",
+        "description": "Progress for a passage-first job (same shape as the gen-job progress).\n\n``job_id`` here is a ``GenJob`` id (the value returned by ``POST\n/api/generation/passages``), NOT a passage id; the path is distinguished from\n``/questions`` by its suffix. 404 when the job does not exist.",
+        "operationId": "passage_job_progress_api_generation_passages__job_id__progress_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/rc/dashboard": {
       "get": {
         "summary": "Rc Dashboard",
@@ -20369,6 +20900,11 @@
               }
             ],
             "title": "Origin"
+          },
+          "weak_type_remediation": {
+            "type": "boolean",
+            "title": "Weak Type Remediation",
+            "default": false
           }
         },
         "type": "object",
@@ -21876,6 +22412,34 @@
         "type": "object",
         "title": "NotePatchBody"
       },
+      "PacingBudgetBody": {
+        "properties": {
+          "q_type": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Q Type"
+          },
+          "target_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 900,
+                "minimum": 10
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "q_type"
+        ],
+        "title": "PacingBudgetBody"
+      },
       "PageBody": {
         "properties": {
           "title": {
@@ -21950,6 +22514,41 @@
         },
         "type": "object",
         "title": "PagePatch"
+      },
+      "PassageJobBody": {
+        "properties": {
+          "q_type": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Q Type",
+            "default": "MainPoint"
+          },
+          "count": {
+            "type": "integer",
+            "maximum": 8,
+            "minimum": 1,
+            "title": "Count",
+            "default": 4
+          },
+          "priority": {
+            "type": "integer",
+            "maximum": 100,
+            "minimum": -100,
+            "title": "Priority",
+            "default": 0
+          },
+          "max_retries": {
+            "type": "integer",
+            "maximum": 5,
+            "minimum": 0,
+            "title": "Max Retries",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "PassageJobBody",
+        "description": "Start a passage-first RC generation job.\n\n``q_type`` is the LEAD RC question type (the one the coach asked to backfill);\nthe runner fills out a varied 3-4 question set around it. ``count`` caps the\nnumber of questions attached to the single generated passage."
       },
       "PlaylistCreate": {
         "properties": {
