@@ -370,6 +370,142 @@ def _rc_validator(expected: str, keywords: tuple[str, ...]):
     )
 
 
+# --- LSAT-5 RC SEMANTIC validators ------------------------------------------
+# Three passage-first-grade semantic checks that go beyond the keyword/scope
+# grounding of ``_validate_rc_grounding``: each asks the critic for a focused
+# soundness judgment specific to the RC question family, while still running the
+# cheap scope-anchor grounding check first (via ``validate_scope_anchor``) so a
+# misscoped item fails CLOSED before any model call. Like the LR type validators,
+# these FAIL CLOSED on an unparseable / error critic response — a validator that
+# cannot positively confirm the required semantic relation must not approve.
+#
+# These are the validators the passage-first generator leans on when it attaches
+# several questions to ONE coherent passage: every question must be defensibly
+# grounded in that shared passage, not just shaped like its type.
+
+# Per-semantic-focus configuration: (q_type, scope keywords, the critic JSON key
+# carrying the focused soundness verdict, the fail reason when it is False, and a
+# one-line focus instruction folded into the critic prompt).
+_RC_SEMANTIC_FOCUS: dict[str, dict] = {
+    "main_point_coherence": {
+        "q_type": "MainPoint",
+        "keywords": ("main point", "primary purpose", "main idea", "author's primary"),
+        "verdict_key": "coheres_with_whole_passage",
+        "fail_reason": "rc_main_point_incoherent",
+        "focus": (
+            "Judge whether the credited answer states the MAIN POINT that coheres "
+            "with the passage AS A WHOLE — not merely one paragraph or a single "
+            "detail. It must capture the author's overall thesis without overreach."
+        ),
+    },
+    "detail_basis": {
+        "q_type": "Detail",
+        "keywords": ("according to the passage", "states", "indicates", "mentions"),
+        "verdict_key": "has_explicit_textual_basis",
+        "fail_reason": "rc_detail_no_textual_basis",
+        "focus": (
+            "Judge whether the credited answer has an EXPLICIT textual basis: a "
+            "specific statement in the passage directly supports it (a Detail "
+            "answer must be stated, not merely implied or inferred)."
+        ),
+    },
+    "inference_support": {
+        "q_type": "Inference",
+        "keywords": ("inferred", "suggests", "most strongly supported", "most likely"),
+        "verdict_key": "follows_from_passage",
+        "fail_reason": "rc_inference_unsupported",
+        "focus": (
+            "Judge whether the credited answer is a valid INFERENCE that follows "
+            "from the passage — supported by the text but not explicitly stated, "
+            "and not requiring an unwarranted logical leap beyond what is supported."
+        ),
+    },
+}
+
+
+def _validate_rc_semantic(focus_key: str, cand: dict, critic: Critic) -> dict:
+    """LSAT-5 — focused RC semantic validator keyed by ``focus_key``.
+
+    Runs the cheap scope-anchor grounding check first (``validate_scope_anchor``
+    via ``_validate_prompt_shape`` + an explicit ``validate_scope_anchor`` call),
+    then asks the critic for the family-specific soundness verdict configured in
+    ``_RC_SEMANTIC_FOCUS`` (e.g. "does the MainPoint answer cohere with the WHOLE
+    passage"). Both the grounding relation AND the focused verdict must hold; the
+    critic must also confirm the answer is passage-grounded and single-best.
+    """
+    cfg = _RC_SEMANTIC_FOCUS[focus_key]
+    q_type = cfg["q_type"]
+    keywords = cfg["keywords"]
+    verdict_key = cfg["verdict_key"]
+
+    shape = _validate_prompt_shape(focus_key, keywords, cand, critic)
+    if not shape.get("ok"):
+        return shape
+
+    passage = str(cand.get("passage", "") or "").strip()
+    stem_text = str(cand.get("stem", "") or "").strip()
+    prompt_text = str(cand.get("prompt", "") or "").strip()
+    if not passage:
+        return _fail(focus_key, "missing_rc_passage", {"has_passage": False})
+
+    # Passage-grounding scope/anchor check (shared with _validate_rc_grounding).
+    scope = rc_intelligence.validate_scope_anchor(
+        q_type, prompt_text, stem_text, passage
+    )
+    if not scope.get("ok"):
+        return _fail(focus_key, str(scope.get("reason") or "rc_scope_mismatch"), scope)
+    scope_detail = {
+        key: scope.get(key)
+        for key in (
+            "scope",
+            "anchor_ref",
+            "requires_evidence",
+            "tags",
+            "tag_confidence",
+            "guidance_scope",
+            "guidance_anchor_ref",
+        )
+        if key in scope
+    }
+
+    credited = _credited_text(cand)
+    if not credited:
+        return _fail(focus_key, "missing_credited_choice")
+
+    critic_prompt = (
+        "You are validating a generated LSAT Reading Comprehension item. Use ONLY "
+        "the passage below; do not use outside knowledge.\n\n"
+        f"{cfg['focus']}\n\n"
+        f"Question type: {q_type}\n\n"
+        f"Passage:\n{passage}\n\n"
+        f"Question prompt:\n{prompt_text}\n\n"
+        f"Credited answer:\n{credited}\n\n"
+        "Respond ONLY with JSON: "
+        f'{{"{verdict_key}": true|false, '
+        '"credited_supported_by_passage": true|false, '
+        '"single_best_answer": true|false}'
+    )
+    obj = _parse_json(critic(critic_prompt))
+    if obj is None:
+        return _fail(focus_key, "rc_semantic_unverified", {"parsed": False})
+
+    focused_ok = _truthy(obj.get(verdict_key))
+    supported = _truthy(obj.get("credited_supported_by_passage"))
+    single_best = _truthy(obj.get("single_best_answer"))
+    detail = {**obj, **scope_detail, "focus": focus_key}
+    if focused_ok and supported and single_best:
+        return _ok(focus_key, detail)
+    if not supported:
+        return _fail(focus_key, "rc_answer_not_passage_grounded", detail)
+    if not single_best:
+        return _fail(focus_key, "rc_not_single_best", detail)
+    return _fail(focus_key, cfg["fail_reason"], detail)
+
+
+def _rc_semantic_validator(focus_key: str):
+    return lambda cand, critic: _validate_rc_semantic(focus_key, cand, critic)
+
+
 # q_type -> validator. LR and RC are split because names such as MainPoint and
 # Inference exist in both taxonomies but require different structural checks.
 _LR_VALIDATORS: dict[str, Callable[[dict, Critic], dict]] = {
@@ -424,9 +560,51 @@ _MISSING = (set(LR_TYPES) - set(_LR_VALIDATORS)) | (set(RC_TYPES) - set(_RC_VALI
 if _MISSING:  # pragma: no cover - import-time safety net
     raise RuntimeError(f"Missing LSAT validators: {sorted(_MISSING)}")
 
+# LSAT-5 — the three RC SEMANTIC validators (MainPoint coherence, Detail-basis,
+# Inference-support), registered in ``_RC_VALIDATORS`` under composite
+# ``<QType>:<focus>`` keys so the existing per-type grounding validators above are
+# left untouched (the keys are additive; the ``_MISSING`` completeness check only
+# requires every RC_TYPE be covered, which the base entries already satisfy). The
+# passage-first generator runs these per-question against the shared passage.
+RC_SEMANTIC_VALIDATOR_KEYS: dict[str, str] = {
+    "MainPoint": "MainPoint:coherence",
+    "Detail": "Detail:basis",
+    "Inference": "Inference:support",
+}
+_RC_VALIDATORS.update({
+    "MainPoint:coherence": _rc_semantic_validator("main_point_coherence"),
+    "Detail:basis": _rc_semantic_validator("detail_basis"),
+    "Inference:support": _rc_semantic_validator("inference_support"),
+})
+
 
 def has_validator(q_type: str) -> bool:
     return q_type in _LR_VALIDATORS or q_type in _RC_VALIDATORS
+
+
+def validate_rc_semantic(q_type: str, cand: dict, critic: Critic) -> dict:
+    """LSAT-5 — run the RC SEMANTIC validator for ``q_type`` if one is registered.
+
+    Maps a base RC ``q_type`` (MainPoint / Detail / Inference) to its composite
+    semantic-validator key and runs it. For an RC type WITHOUT a dedicated
+    semantic validator there is nothing extra to assert, so it returns a clean
+    pass (the type's grounding validator still runs in the main gate). Unlike the
+    grounding validators these focus on the family-specific soundness relation
+    (whole-passage coherence / explicit textual basis / valid inference)."""
+    semantic_key = RC_SEMANTIC_VALIDATOR_KEYS.get(q_type)
+    if semantic_key is None:
+        return {"ok": True, "reason": None, "check": "rc_semantic_none",
+                "detail": {"q_type": q_type}}
+    fn = _RC_VALIDATORS[semantic_key]
+    try:
+        return fn(cand, critic)
+    except Exception as exc:  # noqa: BLE001
+        from .llm.base import LLMError
+        if isinstance(exc, LLMError):
+            return {"ok": False, "reason": "critic_unavailable",
+                    "check": semantic_key, "detail": {"critic_error": str(exc)}}
+        return {"ok": True, "reason": None, "check": semantic_key,
+                "detail": {"validator_error": str(exc)}}
 
 
 def validate_structure(q_type: str, cand: dict, critic: Critic,

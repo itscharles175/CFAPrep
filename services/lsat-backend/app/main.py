@@ -38,6 +38,7 @@ from .routers import (
     notebook_os_routes,
     notebook_routes,
     observability_routes,
+    passage_routes,
     playlist_routes,
     rc_routes,
     socratic_routes,
@@ -409,6 +410,7 @@ for r in (
     content_health_routes.router,
     notebook_os_routes.router,
     notebook_routes.router,
+    passage_routes.router,
     rc_routes.router,
     trust_routes.router,
 ):

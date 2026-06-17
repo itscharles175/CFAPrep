@@ -903,6 +903,26 @@ def _m025_annotation_kb_fts(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 25")
 
 
+def _m026_genjob_passage_first(conn) -> None:
+    """LSAT-5 — additive ``genjob.passage_first`` column for passage-first RC
+    generation.
+
+    A single PRAGMA-guarded change, expressible only outside ``create_all`` on a
+    PRE-EXISTING DB: ``genjob.passage_first`` (BOOLEAN DEFAULT 0). ``create_all``
+    adds it on a fresh DB; on an existing DB ``_add_column_if_missing`` ALTERs it
+    in (a clean no-op when the column already exists, and a skip on a partial/old
+    DB that lacks the ``genjob`` table).
+
+    PRAGMA-guarded exactly like migrations 20-25: idempotent / tolerant, so a fresh
+    DB and a re-run are clean no-ops. Bumps ``PRAGMA user_version`` to 26 so the
+    DB-level version tracks the latest recorded migration."""
+    _add_column_if_missing(
+        conn, "genjob", "passage_first", "passage_first BOOLEAN DEFAULT 0",
+        mig="migration 26",
+    )
+    conn.exec_driver_sql("PRAGMA user_version = 26")
+
+
 def _annotation_search_text(data_json, user_explanation) -> str:
     """Flatten an annotation's searchable note text out of its opaque ``data_json``
     plus the user-authored explanation, into one whitespace-joined string for FTS.
@@ -998,6 +1018,7 @@ MIGRATIONS: list[Migration] = [
     (23, "host_progress_snapshot", _m023_host_progress_snapshot),
     (24, "shared_study_profile", _m024_shared_study_profile),
     (25, "annotation_kb_fts", _m025_annotation_kb_fts),
+    (26, "genjob_passage_first", _m026_genjob_passage_first),
 ]
 
 

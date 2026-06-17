@@ -356,10 +356,35 @@ def _gen_prompt(q_type: str, parent: Question | None,
                 parent_choices: list[AnswerChoice], *,
                 section_type: str = "LR", parent_passage: str = "",
                 coaching_note: str = "",
-                rc_context: dict[str, Any] | None = None) -> str:
+                rc_context: dict[str, Any] | None = None,
+                passage_first: bool = False) -> str:
     ch = ""
     if parent:
         ch = "\n".join(f"({c.label}) {c.text}" for c in parent_choices)
+
+    # LSAT-5 — passage-first branch: emit a PASSAGE-ONLY prompt. The passage-first
+    # runner generates ONE coherent RC passage here, then (in a SECOND pass) loops
+    # the requested q_types attaching several questions to that single passage. The
+    # questions are NOT emitted in this prompt; ``_question_prompt`` handles them.
+    if passage_first:
+        example = ""
+        if parent and (parent_passage or parent.stem):
+            ptxt = (parent_passage or parent.stem or "")[:1200]
+            example = (
+                "\nModel its register and structure loosely on this real passage "
+                f"(do NOT copy it):\nPassage: {ptxt}\n"
+            )
+        steering = _format_rc_generation_context(rc_context or {})
+        return (
+            "Write ONE original LSAT-style Reading Comprehension passage (about "
+            "three to four paragraphs on an academic topic — humanities, social "
+            "science, natural science, or law). It must be coherent, develop a "
+            "clear thesis, and read like genuine LSAT prose with varied sentence "
+            f"lengths.{example}{steering}{coaching_note}\n\n"
+            "Do NOT write any questions yet — only the passage.\n"
+            "Respond with ONLY a JSON object of this shape:\n"
+            '{"passage": "...", "topic": "...", "type": "single"}'
+        )
 
     if section_type == "RC":
         example = ""
@@ -393,6 +418,41 @@ def _gen_prompt(q_type: str, parent: Question | None,
         f"choices A-E with exactly one correct answer.{example}{coaching_note}\n\n"
         "Respond with ONLY a JSON object of this shape:\n"
         '{"stem": "...", "prompt": "...", "difficulty": 3, '
+        '"choices": [{"label":"A","text":"...","trap_type":"out_of_scope"}, ...], '
+        '"correct_answer": "B"}\n' + _TRAP_HELP
+    )
+
+
+def _question_prompt(q_type: str, passage: str, *,
+                     coaching_note: str = "",
+                     rc_context: dict[str, Any] | None = None,
+                     other_prompts: list[str] | None = None) -> str:
+    """LSAT-5 — second-pass prompt: write ONE RC question of ``q_type`` ABOUT a
+    fixed, already-generated passage.
+
+    Used by the passage-first runner after :func:`_gen_prompt` (passage_first)
+    produced the shared passage. The passage is given verbatim (not re-generated)
+    so every question is grounded in the SAME text. ``other_prompts`` lists the
+    question prompts already attached to this passage so the model varies the
+    focus rather than repeating a near-identical question."""
+    steering = _format_rc_generation_context(rc_context or {})
+    avoid = ""
+    existing = [p for p in (other_prompts or []) if p]
+    if existing:
+        joined = "\n".join(f"- {p}" for p in existing[:6])
+        avoid = (
+            "\nQuestions already written about this passage (write a DIFFERENT "
+            f"question that probes a distinct aspect):\n{joined}\n"
+        )
+    return (
+        f"Below is an LSAT Reading Comprehension passage. Write ONE original "
+        f"question of type '{q_type}' ABOUT THIS PASSAGE, with exactly five answer "
+        f"choices A-E and exactly one correct answer. Base the question and every "
+        f"choice strictly on the passage; do not require outside knowledge."
+        f"{steering}{avoid}{coaching_note}\n\n"
+        f"Passage:\n{passage}\n\n"
+        "Respond with ONLY a JSON object of this shape:\n"
+        '{"stem": "", "prompt": "...", "difficulty": 3, '
         '"choices": [{"label":"A","text":"...","trap_type":"out_of_scope"}, ...], '
         '"correct_answer": "B"}\n' + _TRAP_HELP
     )
@@ -1994,6 +2054,18 @@ def run_job(job_id: int, generate=None, *, critic=None, embedder=None) -> None:
         job.updated_at = datetime.now(timezone.utc)
         session.add(job)
         session.commit()
+
+        # LSAT-5 — passage-first jobs take a DISTINCT path: generate ONE coherent
+        # passage, analyze it eagerly, then attach several questions to that single
+        # passage_id (atomic: a failed passage fails the whole job). The legacy
+        # LR/RC single-candidate loop below is unchanged for every other job.
+        if bool(getattr(job, "passage_first", False)):
+            from . import passage_generator
+            passage_generator.run_passage_first_job(
+                session, job, gen_fn, critic_fn, embed_fn,
+                retry_history=retry_history,
+            )
+            return
 
         parents: list[Question] = []
         if job.parent_question_id is not None:

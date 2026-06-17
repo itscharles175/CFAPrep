@@ -292,6 +292,12 @@ class GenJob(SQLModel, table=True):
     parent_question_id: Optional[int] = Field(
         default=None, foreign_key="question.id"
     )
+    # LSAT-5 — passage-first RC generation. When True the runner generates ONE
+    # coherent RC passage and attaches several varied questions to it (rather than
+    # the default per-candidate path that emits an independent item per loop
+    # iteration). Additive/optional (migration 26); existing LR/RC single-candidate
+    # jobs leave it False and are unchanged.
+    passage_first: bool = Field(default=False)
     validation_report: dict = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: Optional[datetime] = None
