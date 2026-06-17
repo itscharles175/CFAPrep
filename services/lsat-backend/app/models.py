@@ -432,12 +432,22 @@ class Annotation(SQLModel, table=True):
     """Highlights / underlines / margin notes for a question, scoped either to a
     specific attempt (a single take) or to a question (cross-attempt markup).
     Stored as opaque JSON so the UI owns the mark shape; one row per (scope, ref_id)
-    enforced by a UNIQUE index (migration 3)."""
+    enforced by a UNIQUE index (migration 3).
+
+    LSAT-6 — the row also doubles as a Notebook knowledge-base entry: a
+    user-authored explanation (surfaced alongside the AI explanation) and a free
+    tag list. Both are NULLABLE/additive so existing highlight/note writers are
+    untouched; the FTS5 ``annotation_fts`` mirror (migration 25) indexes the note
+    text + ``user_explanation`` so the KB is keyword-searchable."""
     id: Optional[int] = Field(default=None, primary_key=True)
     scope: str = Field(index=True)        # "attempt" | "question"
     ref_id: int = Field(index=True)       # Attempt.id or Question.id
     data_json: dict = Field(default_factory=dict, sa_column=Column(JSON))
     updated_at: datetime = Field(default_factory=utcnow)
+    # LSAT-6 — user-authored explanation surfaced next to the AI one (nullable).
+    user_explanation: Optional[str] = None
+    # LSAT-6 — JSON-encoded list[str] of free tags for the notebook KB (nullable).
+    tags_json: Optional[str] = None
 
 
 class Reflection(SQLModel, table=True):

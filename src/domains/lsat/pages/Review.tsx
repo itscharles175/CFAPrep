@@ -1,6 +1,8 @@
+import { useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ClipboardCheck } from "lucide-react";
+import { ClipboardCheck, Search } from "lucide-react";
+import { Input } from "@lsat/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
 import { PageLayout } from "@lsat/components/page-layout";
 import { ListRow } from "@lsat/components/ui/list-row";
@@ -14,6 +16,9 @@ import { FlaggedQueue } from "@lsat/components/review/flagged-queue";
 import { ErrorLogWorkspace } from "@lsat/components/review/error-log-workspace";
 import { ErrorPatternBanner } from "@lsat/components/review/error-pattern-banner";
 import { AnnotationsHub } from "@lsat/components/review/annotations-hub";
+import { AnnotationInlineEditor } from "@lsat/components/review/annotation-inline-editor";
+import { searchAnnotationsKb } from "@lsat/lib/annotationsHub";
+import type { AnnotationSearchHit } from "@lsat/lib/types";
 import { DockedCoach } from "@lsat/components/coach/docked-coach";
 import { useSessionResults, useSessions, useSrsDue } from "@lsat/lib/hooks";
 import { api } from "@lsat/lib/api";
@@ -64,7 +69,7 @@ export default function Review() {
           <FlaggedQueue />
         </TabsContent>
         <TabsContent value="annotations">
-          <AnnotationsHub />
+          <AnnotationsTab />
         </TabsContent>
         <TabsContent value="srs">
           <SrsInlineQueue />
@@ -198,4 +203,76 @@ function RecentSessionRecap() {
   }
   if (!recent || !results.data) return null;
   return <SessionRecap results={results.data.data} summary={recent} />;
+}
+
+/**
+ * LSAT-6 — the Annotations tab: the existing local annotations hub plus a
+ * Notebook KB search (FTS over note text + user explanations, backend-backed,
+ * best-effort) and an inline explanation editor for the selected question. The
+ * search degrades to nothing when the backend is offline; the hub below is
+ * always shown from localStorage.
+ */
+function AnnotationsTab() {
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<AnnotationSearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selected, setSelected] = useState<AnnotationSearchHit | null>(null);
+
+  async function runSearch(e: FormEvent) {
+    e.preventDefault();
+    const term = query.trim();
+    if (!term) {
+      setHits([]);
+      return;
+    }
+    setSearching(true);
+    setHits(await searchAnnotationsKb(term, 25));
+    setSearching(false);
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="space-y-2">
+        <form onSubmit={runSearch} className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search your notes &amp; explanations…"
+              aria-label="Search annotations"
+              className="pl-9"
+            />
+          </div>
+          <Button type="submit" size="sm" variant="outline" loading={searching}>
+            Search
+          </Button>
+        </form>
+        {hits.length > 0 && (
+          <ul className="space-y-1.5">
+            {hits.map((h) => (
+              <li key={h.annotation_id}>
+                <button
+                  type="button"
+                  onClick={() => setSelected(h)}
+                  className="w-full rounded-md border bg-card px-3 py-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="text-xs text-muted-foreground">{h.target}</span>
+                  <p className="line-clamp-2">{h.snippet || h.user_explanation}</p>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {selected && (
+          <AnnotationInlineEditor
+            key={selected.annotation_id}
+            questionId={selected.ref_id}
+            annotationId={selected.annotation_id}
+          />
+        )}
+      </section>
+      <AnnotationsHub />
+    </div>
+  );
 }

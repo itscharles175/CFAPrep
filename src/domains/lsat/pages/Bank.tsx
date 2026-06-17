@@ -26,6 +26,7 @@ import { PageLayout, PageSection } from "@lsat/components/page-layout";
 import { SystemNotice } from "@lsat/components/system-notice";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
 import { QuestionBrowser } from "@lsat/components/bank/question-browser";
+import { AnnotationInlineEditor } from "@lsat/components/review/annotation-inline-editor";
 import { BankAuditPanel } from "@lsat/components/bank/audit-panel";
 import { Meter } from "@lsat/components/bank/meter";
 import {
@@ -228,8 +229,9 @@ export default function Bank() {
         <TabsTrigger value="quality">Quality</TabsTrigger>
         <TabsTrigger value="ops">Operations</TabsTrigger>
       </TabsList>
-      <TabsContent value="browse" className="mt-4">
+      <TabsContent value="browse" className="mt-4 space-y-6">
         <QuestionBrowser typeCounts={stats?.by_q_type ?? {}} />
+        <BankAnnotationAuthoring />
       </TabsContent>
       <TabsContent value="quality" className="mt-4">
         <BankAuditPanel />
@@ -574,6 +576,60 @@ export default function Bank() {
       </TabsContent>
     </Tabs>
     </PageLayout>
+  );
+}
+
+/**
+ * LSAT-6 — author a user explanation + tags for any question by id, straight
+ * from the bank browser. Additive + self-contained: it neither reads nor mutates
+ * the QuestionBrowser state, and the inline editor is local-first (it persists to
+ * localStorage and best-effort syncs to the backend KB).
+ */
+function BankAnnotationAuthoring() {
+  const [idDraft, setIdDraft] = useState("");
+  const [questionId, setQuestionId] = useState<number | null>(null);
+
+  return (
+    <PageSection
+      eyebrow="NOTEBOOK"
+      title="Author a note"
+    >
+      <Card>
+        <CardContent className="space-y-3 pt-[var(--card-pad)]">
+          <p className="text-xs text-muted-foreground">
+            Write your own explanation + tags for a question. Notes are searchable
+            in Review &gt; Annotations and surface beside the AI explanation.
+          </p>
+          <div className="flex items-end gap-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="bank-annot-qid">Question id</Label>
+              <Input
+                id="bank-annot-qid"
+                type="number"
+                min={1}
+                value={idDraft}
+                onChange={(e) => setIdDraft(e.target.value)}
+                className="w-32"
+                placeholder="e.g. 42"
+              />
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const n = Number(idDraft);
+                setQuestionId(Number.isFinite(n) && n > 0 ? n : null);
+              }}
+              disabled={!idDraft.trim()}
+            >
+              Open editor
+            </Button>
+          </div>
+          {questionId != null && (
+            <AnnotationInlineEditor key={questionId} questionId={questionId} />
+          )}
+        </CardContent>
+      </Card>
+    </PageSection>
   );
 }
 

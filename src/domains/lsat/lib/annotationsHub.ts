@@ -17,6 +17,9 @@
 
 import type { Highlight } from "@lsat/components/question/highlightable-text";
 import type { MarginNote } from "./prefs";
+// LSAT-6 — optional backend KB layer (best-effort; never touches the local path).
+import { fetchBacklogOnce, searchKb } from "./annotationSync";
+import type { AnnotationSearchHit, Backlink } from "./types";
 
 const ANNOT_PREFIX = "lsatlab.annotations.";
 const NOTES_PREFIX = "lsatlab.notes.";
@@ -148,4 +151,31 @@ export function aggregateAnnotations(storage?: StorageLike): AnnotationsAggregat
     scratch,
     isEmpty: questions.length === 0 && scratch.length === 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// LSAT-6 — optional backend KB layer.
+//
+// The aggregation above stays the local-first source of truth (it never touches
+// the network). These thin helpers add an OPTIONAL backend mirror via
+// `annotationSync.ts`: FTS search across all notes/explanations and backlink
+// resolution. They are best-effort — every one resolves to an empty/neutral
+// value when the backend is offline, so the localStorage hub keeps working.
+// ---------------------------------------------------------------------------
+
+/** Backend keyword search over annotation note text + user explanations. */
+export async function searchAnnotationsKb(
+  q: string,
+  limit = 20,
+): Promise<AnnotationSearchHit[]> {
+  return searchKb(q, limit);
+}
+
+/** Resolve the backlinks pointing at a question/attempt/tag ref, once per session. */
+export async function backlinksFor(
+  scope: "question" | "attempt",
+  refId: number,
+): Promise<Backlink[]> {
+  const hits = await fetchBacklogOnce(scope, refId);
+  return hits ?? [];
 }

@@ -841,6 +841,116 @@ def _m024_shared_study_profile(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 24")
 
 
+def _m025_annotation_kb_fts(conn) -> None:
+    """LSAT-6 — Notebook knowledge-base over the Annotation table.
+
+    Three additive, PRAGMA-guarded changes, all idempotent so a fresh DB (where
+    ``create_all`` already added the two columns) and a re-run are clean no-ops:
+
+    - ``annotation.user_explanation`` / ``annotation.tags_json`` — the
+      user-authored explanation + free tags. ``create_all`` adds them on a fresh
+      DB; on a PRE-EXISTING DB ``_add_column_if_missing`` ALTERs them in (a clean
+      no-op when already present).
+    - ``annotation_fts`` — an FTS5 virtual table mirroring the searchable text of
+      each annotation (the margin-note bodies/quotes packed out of ``data_json``
+      plus ``user_explanation`` and ``tags_json``). Modeled on migration 19's
+      ``knowledge_fts``: a contentless (external-content-free) FTS5 table that the
+      annotation KB routes rebuild on write rather than via triggers — ``data_json``
+      is opaque JSON SQLite triggers can't unpack into note text, so the route
+      layer recomputes the flattened ``text`` column on every upsert. A one-time
+      backfill seeds it from existing rows.
+
+    The whole FTS create+backfill is wrapped so a SQLite build without FTS5 (rare)
+    logs and continues rather than breaking boot — keyword search then degrades to
+    the LIKE fallback in the route layer. Bumps ``PRAGMA user_version`` to 25."""
+    _add_column_if_missing(
+        conn, "annotation", "user_explanation", "user_explanation TEXT",
+        mig="migration 25",
+    )
+    _add_column_if_missing(
+        conn, "annotation", "tags_json", "tags_json TEXT", mig="migration 25",
+    )
+    try:
+        # Contentless-ish FTS5 mirror. ``ref`` columns are UNINDEXED metadata so a
+        # hit row can be resolved back to its annotation; ``text`` + ``tags`` are
+        # the searchable body. ``annotation_id`` is the rowid join key.
+        conn.exec_driver_sql(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS annotation_fts USING fts5("
+            "annotation_id UNINDEXED, scope UNINDEXED, ref_id UNINDEXED, "
+            "text, tags, tokenize='porter unicode61')"
+        )
+        # One-time backfill from existing annotation rows. The note text lives in
+        # ``data_json`` (opaque JSON), so flatten it here in Python-free SQL using
+        # json_extract over the common note/highlight keys, falling back to the raw
+        # JSON string so nothing searchable is lost. user_explanation/tags are
+        # plain columns.
+        conn.exec_driver_sql("DELETE FROM annotation_fts")
+        rows = conn.exec_driver_sql(
+            "SELECT id, scope, ref_id, data_json, user_explanation, tags_json "
+            "FROM annotation"
+        ).fetchall()
+        for row in rows:
+            ann_id, scope, ref_id, data_json, user_explanation, tags_json = row
+            text = _annotation_search_text(data_json, user_explanation)
+            tags = _annotation_tag_text(tags_json)
+            conn.exec_driver_sql(
+                "INSERT INTO annotation_fts(annotation_id, scope, ref_id, text, tags) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (ann_id, scope, ref_id, text, tags),
+            )
+    except Exception as exc:  # pragma: no cover - FTS5 unavailable / odd build
+        log.warning("migration 25: annotation FTS create/backfill skipped (%s)", exc)
+    conn.exec_driver_sql("PRAGMA user_version = 25")
+
+
+def _annotation_search_text(data_json, user_explanation) -> str:
+    """Flatten an annotation's searchable note text out of its opaque ``data_json``
+    plus the user-authored explanation, into one whitespace-joined string for FTS.
+
+    Shared by migration 25's backfill and the KB route layer's upsert so the FTS
+    ``text`` column is computed identically in both places. Tolerant of any JSON
+    shape: it pulls note ``body``/``quote`` and highlight ``text`` when present and
+    otherwise falls back to the raw JSON, so nothing searchable is dropped."""
+    parts: list[str] = []
+    if user_explanation:
+        parts.append(str(user_explanation))
+    if data_json:
+        try:
+            obj = json.loads(data_json) if isinstance(data_json, str) else data_json
+        except (TypeError, ValueError):
+            obj = None
+        if isinstance(obj, dict):
+            for note in obj.get("notes", []) or []:
+                if isinstance(note, dict):
+                    for key in ("body", "quote", "text"):
+                        val = note.get(key)
+                        if val:
+                            parts.append(str(val))
+            for hl in obj.get("highlights", []) or []:
+                if isinstance(hl, dict):
+                    val = hl.get("text") or hl.get("quote")
+                    if val:
+                        parts.append(str(val))
+        if not parts and data_json:
+            # Unknown shape — index the raw JSON rather than losing the text.
+            parts.append(str(data_json))
+    return " ".join(p for p in parts if p).strip()
+
+
+def _annotation_tag_text(tags_json) -> str:
+    """Flatten a JSON tag list into a space-joined string for the FTS ``tags``
+    column. Tolerant: a non-list / malformed value yields an empty string."""
+    if not tags_json:
+        return ""
+    try:
+        tags = json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(tags, list):
+        return ""
+    return " ".join(str(t) for t in tags if t)
+
+
 def read_cross_domain_schema_version(conn) -> int:
     """Read the recorded cross-domain schema version from ``schema_meta``.
 
@@ -887,6 +997,7 @@ MIGRATIONS: list[Migration] = [
     (22, "cross_domain_schema_version", _m022_cross_domain_schema_version),
     (23, "host_progress_snapshot", _m023_host_progress_snapshot),
     (24, "shared_study_profile", _m024_shared_study_profile),
+    (25, "annotation_kb_fts", _m025_annotation_kb_fts),
 ]
 
 
