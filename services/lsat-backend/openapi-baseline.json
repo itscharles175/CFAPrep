@@ -8722,6 +8722,381 @@
         }
       }
     },
+    "/api/export/backup": {
+      "post": {
+        "summary": "Create Backup",
+        "description": "Build the unified {host, lsat} export envelope + record provenance.\n\nCopyrighted ``official`` LSAT content is always excluded (the\n``include_official=False`` firewall in ``bank_export``); there is deliberately\nno parameter to include it over the wire.",
+        "operationId": "create_backup_api_export_backup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BackupBody"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Create Backup Api Export Backup Post"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/export/validate": {
+      "post": {
+        "summary": "Validate",
+        "description": "Verify an envelope's schema + checksum + firewall BEFORE importing it.\n\nSide-effect-free. Returns ``{\"ok\": bool, \"errors\": [...]}`` so the UI can gate\nthe import button and surface a precise reason on a mismatch.",
+        "operationId": "validate_api_export_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvelopeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Validate Api Export Validate Post"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/export/import": {
+      "post": {
+        "summary": "Import Backup",
+        "description": "Import a unified envelope: apply the LSAT bank half + record provenance.\n\nValidates (schema + checksum + firewall) then routes the LSAT ``data`` through\nthe idempotent ``bank_export.import_bank``. A validation/firewall failure is a\nclient error (400). The host half (``hostData``) is NOT applied here — the\nhost re-imports it client-side; the backend never writes the host's store.",
+        "operationId": "import_backup_api_export_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvelopeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Import Backup Api Export Import Post"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/export/list": {
+      "get": {
+        "summary": "List Exports",
+        "description": "Paginated ExportHistory provenance feed, newest first.",
+        "operationId": "list_exports_api_export_list_get",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Exports Api Export List Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/export/history": {
+      "get": {
+        "summary": "History",
+        "description": "Detail for one provenance row by ``export_id`` (404 if unknown).",
+        "operationId": "history_api_export_history_get",
+        "parameters": [
+          {
+            "name": "export_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Export Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response History Api Export History Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/study/plan": {
       "get": {
         "summary": "Get Plan",
@@ -11616,6 +11991,67 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Schema Versions Api Observability Schema Versions Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/observability/relocation-status": {
+      "get": {
+        "summary": "Relocation Status",
+        "description": "DATA-7 — app-data relocation guard status (read-only).\n\nA bundle-id / app-data-dir change can orphan the LSAT SQLite store under the\nOLD OS app-data dir (``%APPDATA%/LSATLab`` on Windows). DATA-3 only versions\nthe cross-domain contract; it never moves stores. This endpoint reports\nwhether a recoverable store sits at the old path while the active (NEW) store\nis absent/empty, so the host can prompt the user / surface a \"data found at\nold location\" affordance.\n\nFolds ``relocation.relocation_status`` into a single ``status``\n(``ok`` | ``orphaned``) verdict plus the resolved old/new paths and existence\nflags. O(1)-ish (a couple of ``stat`` calls) and never raises: an\nunresolvable OS base or an unreadable dir degrades to a visible-but-empty\nfield rather than a 500. No DB writes.",
+        "operationId": "relocation_status_api_observability_relocation_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Relocation Status Api Observability Relocation Status Get"
                 }
               }
             }
@@ -19638,6 +20074,40 @@
         ],
         "title": "AttemptMode"
       },
+      "BackupBody": {
+        "properties": {
+          "host_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Data"
+          },
+          "include_history": {
+            "type": "boolean",
+            "title": "Include History",
+            "default": true
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "title": "BackupBody"
+      },
       "BankStats": {
         "properties": {
           "total": {
@@ -21123,6 +21593,20 @@
         },
         "type": "object",
         "title": "EmbedBody"
+      },
+      "EnvelopeBody": {
+        "properties": {
+          "envelope": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Envelope"
+          }
+        },
+        "type": "object",
+        "required": [
+          "envelope"
+        ],
+        "title": "EnvelopeBody"
       },
       "ErrorLogBody": {
         "properties": {
