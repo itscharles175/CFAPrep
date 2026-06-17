@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { saveLlmSettings } from '../../lib/localLlm';
 import { markOnboardingComplete, setOnboardingStep } from '../../lib/onboardingProgress';
+import { setUnifiedOnboardingDismissed } from '../../lib/unifiedResume';
 import {
   Dialog,
   InlineCluster,
@@ -221,6 +222,11 @@ export function OnboardingWizard({ open, onClose }: OnboardingWizardProps) {
   }
 
   function handleClose() {
+    // UX-3: dismissing the host wizard (skip or close) settles onboarding for the
+    // whole shell, so the LSAT "First Light" wizard never re-appears on a later
+    // hop into /lsat. The cross-domain flag is the single source both wizards
+    // consult; setting it here is the host → LSAT half of the two-way sync.
+    setUnifiedOnboardingDismissed();
     setStep(1);
     onClose();
   }

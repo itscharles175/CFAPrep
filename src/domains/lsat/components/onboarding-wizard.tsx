@@ -21,6 +21,10 @@ import {
   setGoal,
   setOnboardingDone,
 } from "@lsat/lib/prefs";
+import {
+  isUnifiedOnboardingDismissed,
+  setUnifiedOnboardingDismissed,
+} from "@/lib/unifiedResume";
 
 /**
  * R9 F3.1 — "First Light" onboarding. A full-bleed dark stage with a breathing
@@ -33,7 +37,13 @@ import {
 export function OnboardingWizard() {
   const navigate = useNavigate();
   const reduce = useReducedMotion();
-  const [open, setOpen] = useState(() => !isOnboardingDone() && getGoal() == null);
+  // UX-3: also suppress when onboarding was settled on ANOTHER plane (the host
+  // wizard sets the shared cross-domain dismiss flag). This is the LSAT → host
+  // half of the two-way sync: a user who dismissed setup on the host never gets
+  // the "First Light" wizard the first time they hop into /lsat.
+  const [open, setOpen] = useState(
+    () => !isOnboardingDone() && getGoal() == null && !isUnifiedOnboardingDismissed(),
+  );
   const [step, setStep] = useState(0);
   const [targetScore, setTargetScore] = useState(165);
   const [examDate, setExamDate] = useState("");
@@ -49,6 +59,10 @@ export function OnboardingWizard() {
         });
       }
       setOnboardingDone();
+      // UX-3: settling the LSAT wizard (finish OR skip) also settles onboarding
+      // for the host, so the host wizard never auto-opens afterwards. Paired with
+      // the suppression in the `open` gate above, this is the two-way dismiss sync.
+      setUnifiedOnboardingDismissed();
       setOpen(false);
     },
     [targetScore, examDate],

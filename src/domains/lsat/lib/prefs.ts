@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Confidence } from "./types";
-import { STORAGE_KEYS, getJSON, getRaw, setJSON } from "./storage";
+import { STORAGE_KEYS, getJSON, getRaw, setJSON, setRaw } from "./storage";
 
 // ---------------------------------------------------------------------------
 // localStorage keys. Fixed keys come from the central STORAGE_KEYS registry
@@ -354,14 +354,40 @@ export function applyDensity(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Onboarding (Wave 4)
+// Onboarding (Wave 4) + UX-3 cross-domain dismiss parity
+//
+// The LSAT-only `lsatlab.onboardingDone` flag still governs the LSAT "First
+// Light" wizard, but UX-3 unifies onboarding across both planes via a single
+// SHARED localStorage key (`qv-onboarding-dismissed-unified`) that BOTH wizards
+// write on finish/skip and read on open (see `src/lib/unifiedResume.ts`, the
+// host-side owner of the constant). prefs.ts deliberately does NOT import the
+// host module — the LSAT subtree stays self-contained — so the key STRING is
+// duplicated here as the on-disk contract (it must stay in sync with
+// `UNIFIED_ONBOARDING_DISMISSED_KEY`). `isOnboardingDone()` now also returns true
+// when onboarding was settled on the host, so any LSAT-only reader of this flag
+// honors a host dismissal too.
 // ---------------------------------------------------------------------------
+
+/** Shared cross-domain dismiss key — must match `UNIFIED_ONBOARDING_DISMISSED_KEY`. */
+const K_UNIFIED_ONBOARDING_DISMISSED = "qv-onboarding-dismissed-unified";
+
+function readUnifiedOnboardingDismissed(): boolean {
+  try {
+    return getRaw(K_UNIFIED_ONBOARDING_DISMISSED) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function isOnboardingDone(): boolean {
-  return get<boolean>(K_ONBOARDING, false);
+  // Honor either the LSAT-local flag OR a cross-domain dismissal from the host.
+  return get<boolean>(K_ONBOARDING, false) || readUnifiedOnboardingDismissed();
 }
 
 export function setOnboardingDone(): void {
   set(K_ONBOARDING, true);
+  // Mirror into the shared flag so the host wizard never re-opens afterwards.
+  setRaw(K_UNIFIED_ONBOARDING_DISMISSED, "1");
 }
 
 // ---------------------------------------------------------------------------
