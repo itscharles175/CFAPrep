@@ -273,6 +273,116 @@ def generation_quality_check(body: GenQualityBody) -> GenQualityReport:
     return GenQualityReport(**report)
 
 
+# INT-5 — generation-quality OBSERVABILITY. Two read-only, derived-only surfaces
+# for the System Health panel, both computed by replaying the stored
+# GenJob.validation_report / GenCandidate verdicts (no model calls, no DB writes,
+# no new table). They live on this router (prefix ``/gen``, mounted under
+# ``/api``) so the full paths are ``/api/gen/generation/quality-metrics`` and
+# ``/api/gen/generation/audit-log`` — the ``/generation/...`` sub-namespace keeps
+# them grouped as the observability pair distinct from the gen-job CRUD above.
+class GenGateMetric(BaseModel):
+    """Per-gate pass/fail breakdown for one of the 8+ pipeline gates."""
+
+    gate: str
+    # Candidates where this gate actually RAN (excludes skipped / short-circuited).
+    judged: int = 0
+    passed: int = 0
+    failed: int = 0
+    # passed / judged, or None when nothing was judged.
+    pass_rate: Optional[float] = None
+    # Histogram of the per-gate failure reason string.
+    fail_reasons: dict[str, int] = Field(default_factory=dict)
+
+
+class GenTypeMetric(BaseModel):
+    """Per-q_type rollup: overall pass/fail + the same per-gate breakdown."""
+
+    q_type: str
+    passed: int = 0
+    failed: int = 0
+    pass_rate: Optional[float] = None
+    gates: list[GenGateMetric] = Field(default_factory=list)
+
+
+class GenQualityMetrics(BaseModel):
+    """Aggregate generation-quality metrics across every recorded job."""
+
+    jobs: int = 0
+    total_candidates: int = 0
+    passed: int = 0
+    quarantined: int = 0
+    pass_rate: Optional[float] = None
+    # Overall first-failure histogram (mirrors GET /api/gen/quality).
+    fail_reasons: dict[str, int] = Field(default_factory=dict)
+    # Per-gate breakdown across the 8+ pipeline gates, in pipeline order.
+    gates: list[GenGateMetric] = Field(default_factory=list)
+    by_type: list[GenTypeMetric] = Field(default_factory=list)
+
+
+@router.get("/generation/quality-metrics", response_model=GenQualityMetrics)
+def generation_quality_metrics(
+    session: Session = Depends(get_session),
+) -> GenQualityMetrics:
+    """INT-5: per-type pass rates + per-gate pass/fail + fail-reason distribution.
+
+    Goes a layer deeper than ``GET /api/gen/quality`` (Q2's overall pass rate +
+    first-failure histogram): for every recorded candidate it replays the stored
+    ``checks`` through the SAME per-gate resolver INT-1 uses, so each of the 8+
+    pipeline gates (structural, trap-metadata, length-tell, lexical-leak,
+    deterministic-solve, self-consistency, permutation-invariance, informativity,
+    single-defensible, distractor-quality, CoVe, multi-model-agreement,
+    structural-type, RC-authenticity, novelty) reports its own judged/passed/
+    failed counts + a failure histogram. Read-only; no model calls or DB writes.
+    """
+    return GenQualityMetrics(**generation.quality_metrics(session))
+
+
+class GenAuditEvent(BaseModel):
+    """One derived generate / validate / firewall event (from a GenCandidate)."""
+
+    id: Optional[int] = None
+    # "generate" (accepted into the bank) | "validate" (gate-quarantined) |
+    # "firewall" (rejected for a provenance-adjacent reason: near-dup / error).
+    kind: str
+    gen_job_id: Optional[int] = None
+    q_type: Optional[str] = None
+    question_id: Optional[int] = None
+    candidate_index: int = 0
+    verdict: Optional[str] = None
+    reason: Optional[str] = None
+    solver_model: Optional[str] = None
+    critic_model: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class GenAuditLog(BaseModel):
+    """Recent generation pipeline events, newest first."""
+
+    events: list[GenAuditEvent] = Field(default_factory=list)
+    limit: int = 50
+    # Tally of the scanned window by kind (pre-filter), for the panel's chips.
+    counts: dict[str, int] = Field(default_factory=dict)
+    # Echoes the ?kind= filter (None when unfiltered).
+    kind: Optional[str] = None
+
+
+@router.get("/generation/audit-log", response_model=GenAuditLog)
+def generation_audit_log(
+    limit: int = Query(default=50, ge=1, le=500),
+    kind: Optional[Literal["generate", "validate", "firewall"]] = Query(default=None),
+    session: Session = Depends(get_session),
+) -> GenAuditLog:
+    """INT-5: recent generate / validate / firewall events for the panel.
+
+    Derives an append-only-feeling stream from ``GenCandidate`` rows (newest
+    first) WITHOUT a new table — each row records one item that passed through
+    the gate, with verdict + reason + the solver/critic models + a timestamp.
+    ``kind`` optionally filters to one event class; ``counts`` always reflects the
+    scanned window so the panel can show every chip even when filtered.
+    """
+    return GenAuditLog(**generation.audit_log(session, limit=limit, kind=kind))
+
+
 class CalibrateBody(BaseModel):
     # Minimum non-blind-review attempts before a question is recalibrated. None
     # uses the configured default (LSATLAB_CALIBRATION_MIN_ATTEMPTS).

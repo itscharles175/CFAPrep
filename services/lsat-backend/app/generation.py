@@ -1654,6 +1654,224 @@ def generation_quality(session: Session) -> dict:
     }
 
 
+# INT-5 — generation-quality OBSERVABILITY. Q2's ``generation_quality`` answers
+# "how often / why do candidates fail" at a coarse level (overall pass rate +
+# first-failure histogram + per-type pass/fail). INT-5 goes a layer deeper for the
+# System Health panel: a PER-GATE breakdown (each of the 8+ gates the pipeline
+# runs, with judged/passed counts and its own failure tally), folded per q_type,
+# computed by REPLAYING the stored ``checks`` of every candidate through the same
+# ``_gate_pass`` / ``_gate_reason`` helpers INT-1 uses. No model calls, no DB
+# writes, no new table — purely derived from ``GenJob.validation_report`` (and
+# ``GenCandidate`` for the audit feed below).
+#
+# The stable per-gate labels are exactly INT-1's ``_GENERATION_QUALITY_GATES``
+# (in pipeline order) so the host keys off the same names everywhere.
+def quality_metrics(session: Session) -> dict:
+    """INT-5 — per-gate pass rates + fail-reason distribution across all jobs.
+
+    For every recorded candidate (skipping ``error`` rows the same way Q2 does),
+    replay its stored ``checks`` through ``_gate_pass``/``_gate_reason`` to tally,
+    per gate (the 8+ pipeline gates):
+
+      * ``judged``  — candidates where the gate actually RAN (not skipped / not
+        short-circuited by an earlier failure). A skipped/never-reached gate is
+        ``None`` and excluded from ``judged`` so a gate's pass-rate denominator is
+        only the items it actually evaluated.
+      * ``passed``  — judged candidates the gate passed.
+      * ``failed``  — judged candidates the gate failed.
+      * ``pass_rate`` — ``passed / judged`` (None when nothing judged).
+      * ``fail_reasons`` — histogram of the per-gate reason string (e.g.
+        ``rc_authenticity:too_short``) for the failures.
+
+    Also returns a per-``q_type`` rollup (overall passed/failed + per-gate
+    judged/passed/failed) and the overall first-failure ``fail_reasons`` histogram
+    (same as Q2) so a single fetch drives the whole panel. JSON-serialisable.
+    """
+    gate_labels = [label for _key, label in _GENERATION_QUALITY_GATES]
+
+    def _empty_gate() -> dict:
+        return {"judged": 0, "passed": 0, "failed": 0, "fail_reasons": defaultdict(int)}
+
+    gates: dict[str, dict] = {label: _empty_gate() for label in gate_labels}
+    by_type: dict[str, dict] = {}
+    fail_reasons: dict[str, int] = defaultdict(int)
+    total = passed = failed = 0
+
+    def _ensure_type(q_type: str) -> dict:
+        if q_type not in by_type:
+            by_type[q_type] = {
+                "passed": 0,
+                "failed": 0,
+                "gates": {label: _empty_gate() for label in gate_labels},
+            }
+        return by_type[q_type]
+
+    all_jobs = session.exec(select(GenJob)).all()
+    for j in all_jobs:
+        report = j.validation_report or {}
+        for cand in report.get("candidates", []):
+            if "error" in cand:
+                continue
+            total += 1
+            type_bucket = _ensure_type(j.q_type or "Unknown")
+            cand_passed = bool(cand.get("passed"))
+            if cand_passed:
+                passed += 1
+                type_bucket["passed"] += 1
+            else:
+                failed += 1
+                type_bucket["failed"] += 1
+                fail_reasons[cand.get("reason") or "unknown"] += 1
+            # Replay every gate over this candidate's stored verdict.
+            for check_key, label in _GENERATION_QUALITY_GATES:
+                gate_pass = _gate_pass(check_key, cand)
+                if gate_pass is None:
+                    continue  # gate skipped / never reached — not judged
+                overall_gate = gates[label]
+                type_gate = type_bucket["gates"][label]
+                overall_gate["judged"] += 1
+                type_gate["judged"] += 1
+                if gate_pass:
+                    overall_gate["passed"] += 1
+                    type_gate["passed"] += 1
+                else:
+                    overall_gate["failed"] += 1
+                    type_gate["failed"] += 1
+                    reason = _gate_reason(check_key, cand) or label
+                    overall_gate["fail_reasons"][reason] += 1
+                    type_gate["fail_reasons"][reason] += 1
+
+    def _finalize_gate(label: str, g: dict) -> dict:
+        judged = g["judged"]
+        return {
+            "gate": label,
+            "judged": judged,
+            "passed": g["passed"],
+            "failed": g["failed"],
+            "pass_rate": round(g["passed"] / judged, 4) if judged else None,
+            "fail_reasons": dict(g["fail_reasons"]),
+        }
+
+    return {
+        "jobs": len(all_jobs),
+        "total_candidates": total,
+        "passed": passed,
+        "quarantined": failed,
+        "pass_rate": round(passed / total, 4) if total else None,
+        # Overall first-failure histogram (mirrors Q2's ``fail_reasons``).
+        "fail_reasons": dict(fail_reasons),
+        # Per-gate breakdown across the 8+ pipeline gates, in pipeline order.
+        "gates": [_finalize_gate(label, gates[label]) for label in gate_labels],
+        # Per-q_type rollup: overall pass/fail + the same per-gate breakdown.
+        "by_type": [
+            {
+                "q_type": q_type,
+                "passed": bucket["passed"],
+                "failed": bucket["failed"],
+                "pass_rate": (
+                    round(bucket["passed"] / (bucket["passed"] + bucket["failed"]), 4)
+                    if (bucket["passed"] + bucket["failed"]) else None
+                ),
+                "gates": [
+                    _finalize_gate(label, bucket["gates"][label])
+                    for label in gate_labels
+                ],
+            }
+            for q_type, bucket in sorted(by_type.items())
+        ],
+    }
+
+
+# INT-5 — audit-log event kinds the panel filters on. We DERIVE these from the
+# existing pipeline state (no new table): a ``GenCandidate`` row is the canonical
+# record of one validate event (it carries verdict + reason + gate scores + the
+# solver/critic models + a timestamp). A ``firewall`` event is a candidate the
+# gate rejected for a PROVENANCE-adjacent reason (near-duplicate of the existing
+# bank, or an unverifiable/error verdict) — the closest analogue to the export
+# firewall in the generation plane.
+_AUDIT_FIREWALL_REASONS = frozenset({
+    "near_duplicate",
+    "validation_error",
+    "persist_error",
+    "unparseable",
+})
+
+
+def _audit_event_kind(verdict: str | None, reason: str | None) -> str:
+    """Classify one GenCandidate row into a generate/validate/firewall event.
+
+    - ``accepted`` -> ``generate`` (a new item entered the bank),
+    - rejected for a firewall-adjacent reason -> ``firewall``,
+    - any other rejection -> ``validate`` (the soundness gate quarantined it).
+    """
+    if verdict == "accepted":
+        return "generate"
+    if reason and reason in _AUDIT_FIREWALL_REASONS:
+        return "firewall"
+    return "validate"
+
+
+def audit_log(session: Session, *, limit: int = 50,
+              kind: str | None = None) -> dict:
+    """INT-5 — recent generate / validate / firewall events for the panel.
+
+    Derives an append-only-feeling event stream from ``GenCandidate`` rows
+    (newest first) WITHOUT a new table: each row is one item that went through
+    the gate. Every event carries its job id, q_type (looked up once per job),
+    candidate index, event ``kind`` (see ``_audit_event_kind``), the verdict +
+    reason, the solver/critic models that judged it, and the row's timestamp.
+
+    ``kind`` optionally filters to one of ``generate`` / ``validate`` /
+    ``firewall`` (applied AFTER classification, before the limit). ``limit`` caps
+    how many events are returned (1..500). JSON-serialisable; no model calls.
+    """
+    limit = max(1, min(int(limit or 50), 500))
+    rows = session.exec(
+        select(GenCandidate).order_by(GenCandidate.id.desc()).limit(limit * 4)
+    ).all()
+    # One q_type lookup per distinct job (cheap; jobs are few relative to rows).
+    job_qtype: dict[int, str] = {}
+
+    def _qtype(gen_job_id: int | None) -> str | None:
+        if gen_job_id is None:
+            return None
+        if gen_job_id not in job_qtype:
+            job = session.get(GenJob, gen_job_id)
+            job_qtype[gen_job_id] = (job.q_type if job else None) or "Unknown"
+        return job_qtype[gen_job_id]
+
+    events: list[dict] = []
+    counts: dict[str, int] = defaultdict(int)
+    for row in rows:
+        event_kind = _audit_event_kind(row.verdict, row.verdict_reason)
+        counts[event_kind] += 1
+        if kind and event_kind != kind:
+            continue
+        events.append({
+            "id": row.id,
+            "kind": event_kind,
+            "gen_job_id": row.gen_job_id,
+            "q_type": _qtype(row.gen_job_id),
+            "question_id": row.question_id,
+            "candidate_index": row.candidate_index,
+            "verdict": row.verdict or None,
+            "reason": row.verdict_reason,
+            "solver_model": row.solver_model,
+            "critic_model": row.critic_model,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        })
+        if len(events) >= limit:
+            break
+    return {
+        "events": events,
+        "limit": limit,
+        # Tally of the (pre-filter) scanned window, so the panel can show
+        # generate/validate/firewall chips even when filtered to one kind.
+        "counts": dict(counts),
+        "kind": kind,
+    }
+
+
 def ai_drift_report(session: Session, *, min_attempts: int = 4,
                     floor: float = 0.4) -> dict:
     """Q5 — watch approved AI items for quality drift. Returns approved,
