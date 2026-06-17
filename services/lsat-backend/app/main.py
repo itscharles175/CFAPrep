@@ -33,6 +33,7 @@ from .routers import (
     drills,
     error_log,
     exam_routes,
+    fsrs_sync_routes,
     generation_routes,
     import_routes,
     notebook_os_routes,
@@ -396,6 +397,8 @@ for r in (
     study_routes.router,
     # DATA-4a — host -> backend cross-domain progress feed (POST /api/sync/...).
     study_routes.sync_router,
+    # DATA-4b — cross-domain FSRS write-back ledger (POST /api/sync/fsrs-write-back).
+    fsrs_sync_routes.router,
     # INT-4 — shared study-artifact store (CRUD under /api/study-artifacts).
     study_artifacts_routes.router,
     settings_routes.router,

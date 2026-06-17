@@ -923,6 +923,56 @@ def _m026_genjob_passage_first(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 26")
 
 
+def _m027_cross_domain_sync_log(conn) -> None:
+    """DATA-4b — cross-domain FSRS write-back ledger + write-back bookkeeping.
+
+    The ``crossdomainsynclog`` table itself is created by ``SQLModel.create_all``
+    (``models.CrossDomainSyncLog``); this migration adds what ``create_all`` can't
+    express on a PRE-EXISTING DB:
+
+    - ``hostprogresssnapshot.sync_revision`` / ``hostprogresssnapshot
+      .last_write_back_at`` — write-back bookkeeping on the DATA-4a mirror.
+      ``create_all`` adds them on a fresh DB; on an existing DB
+      ``_add_column_if_missing`` ALTERs them in (a clean no-op when already
+      present, a skip on a partial DB lacking the table). The read-only feed
+      leaves them at their defaults (0 / NULL).
+    - ``ux_crossdomainsynclog_write_id`` — a UNIQUE index on the host's per-write
+      idempotency key so a replayed write-back batch (offline reconnect) re-finds
+      its prior log row and is a recognised no-op instead of a double-apply.
+      Wrapped so a pre-existing DB that somehow holds duplicate ``write_id`` values
+      logs and keeps the app-level dedupe guard rather than breaking boot.
+    - ``ix_crossdomainsynclog_cross_id`` — the per-card lookup index for the
+      ledger's "history for this card" reads.
+
+    PRAGMA-guarded exactly like migrations 20-26: every statement is idempotent /
+    tolerant, so a fresh DB and a re-run are clean no-ops. Bumps
+    ``PRAGMA user_version`` to 27 so the DB-level version tracks the latest
+    recorded migration."""
+    _add_column_if_missing(
+        conn, "hostprogresssnapshot", "sync_revision",
+        "sync_revision INTEGER DEFAULT 0", mig="migration 27",
+    )
+    _add_column_if_missing(
+        conn, "hostprogresssnapshot", "last_write_back_at",
+        "last_write_back_at DATETIME", mig="migration 27",
+    )
+    try:
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_crossdomainsynclog_write_id "
+            "ON crossdomainsynclog (write_id)"
+        )
+    except Exception as exc:  # pre-existing duplicates — keep app-level dedupe
+        log.warning("migration 27: skipped ux_crossdomainsynclog_write_id (%s)", exc)
+    try:
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_crossdomainsynclog_cross_id "
+            "ON crossdomainsynclog (cross_id)"
+        )
+    except Exception as exc:  # pragma: no cover - missing table on a partial DB
+        log.warning("migration 27: skipped ix_crossdomainsynclog_cross_id (%s)", exc)
+    conn.exec_driver_sql("PRAGMA user_version = 27")
+
+
 def _annotation_search_text(data_json, user_explanation) -> str:
     """Flatten an annotation's searchable note text out of its opaque ``data_json``
     plus the user-authored explanation, into one whitespace-joined string for FTS.
@@ -1019,6 +1069,7 @@ MIGRATIONS: list[Migration] = [
     (24, "shared_study_profile", _m024_shared_study_profile),
     (25, "annotation_kb_fts", _m025_annotation_kb_fts),
     (26, "genjob_passage_first", _m026_genjob_passage_first),
+    (27, "cross_domain_sync_log", _m027_cross_domain_sync_log),
 ]
 
 

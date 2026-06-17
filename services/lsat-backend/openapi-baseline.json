@@ -9240,6 +9240,169 @@
         }
       }
     },
+    "/api/sync/fsrs-write-back": {
+      "post": {
+        "summary": "Post Fsrs Write Back",
+        "description": "Apply a batch of cross-domain FSRS write-backs (idempotent, last-write-wins).\n\nStrictly host -> backend and confined to the DATA-4a mirror — LSAT-native\n``SRSCard`` scheduling is never touched. Idempotent by ``writeId`` (a replay is\na no-op) and last-write-wins by ``observedAt`` (a stale out-of-order write is\nkept-existing). The response carries the reconciled authoritative ``fsrsState``\n+ ``syncRevision`` per card so the host can reconcile its own store. See\n``cross_domain_sync`` for the full contract.",
+        "operationId": "post_fsrs_write_back_api_sync_fsrs_write_back_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FsrsWriteBackBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Post Fsrs Write Back Api Sync Fsrs Write Back Post"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync/fsrs-write-back/log": {
+      "get": {
+        "summary": "Get Fsrs Write Back Log",
+        "description": "Read the write-back ledger (most-recent first), optionally for one card.\n\nRead-only diagnostics for the trust cockpit / debugging — surfaces how each\nwrite resolved (applied / kept_existing / noop_dedupe / no_target) without\nexposing any host data the backend doesn't already mirror.",
+        "operationId": "get_fsrs_write_back_log_api_sync_fsrs_write_back_log_get",
+        "parameters": [
+          {
+            "name": "cross_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 240
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cross Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Fsrs Write Back Log Api Sync Fsrs Write Back Log Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/study-artifacts/": {
       "post": {
         "summary": "Create Artifact",
@@ -21207,6 +21370,61 @@
           "q_type"
         ],
         "title": "ForTypeBody"
+      },
+      "FsrsWriteBackBody": {
+        "properties": {
+          "writes": {
+            "items": {
+              "$ref": "#/components/schemas/FsrsWriteIn"
+            },
+            "type": "array",
+            "maxItems": 2000,
+            "title": "Writes"
+          }
+        },
+        "type": "object",
+        "title": "FsrsWriteBackBody",
+        "description": "A batch of per-card FSRS write-backs to apply under last-write-wins."
+      },
+      "FsrsWriteIn": {
+        "properties": {
+          "writeId": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Writeid"
+          },
+          "crossId": {
+            "type": "string",
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Crossid"
+          },
+          "fsrsState": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Fsrsstate"
+          },
+          "observedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "writeId",
+          "crossId"
+        ],
+        "title": "FsrsWriteIn",
+        "description": "One per-card FSRS write-back in the request batch.\n\nPermissive like the DATA-4a feed: only the routing fields (``writeId`` /\n``crossId``) are required; ``fsrsState`` is carried verbatim (the backend\nstores it without coercion) and ``observedAt`` drives last-write-wins."
       },
       "GenAuditEvent": {
         "properties": {

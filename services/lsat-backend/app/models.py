@@ -1025,3 +1025,54 @@ class HostProgressSnapshot(SQLModel, table=True):
     observed_at: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
+    # DATA-4b — write-back bookkeeping (additive, migration 27). ``sync_revision``
+    # is bumped each time an accepted FSRS write-back mutates this mirrored card;
+    # the host reads it back as a reconcile cursor. ``last_write_back_at`` records
+    # when the last accepted write-back landed (NULL until the first one). The
+    # read-only DATA-4a feed leaves them at their defaults.
+    sync_revision: int = Field(default=0)
+    last_write_back_at: Optional[datetime] = None
+
+
+class CrossDomainSyncLog(SQLModel, table=True):
+    """DATA-4b — idempotent, last-write-wins ledger for cross-domain FSRS
+    write-backs.
+
+    DATA-4a feeds the host's review/attempt/mastery snapshots into
+    ``HostProgressSnapshot`` read-only. DATA-4b adds the WRITE side: the host
+    pushes updated per-card FSRS scheduling state to
+    ``POST /api/sync/fsrs-write-back``, which merges it into the mirrored snapshot
+    (``HostProgressSnapshot.payload['fsrsState']``) under a last-write-wins rule
+    and records EVERY accepted / rejected / deduped write here.
+
+    Strictly host -> backend and confined to the host's own mirror: LSAT-native
+    ``SRSCard`` scheduling is NEVER touched, so a write-back can't corrupt LSAT
+    progress. Idempotent by ``write_id`` (the host's per-write key, UNIQUE index
+    in migration 27): replaying a batch after an offline reconnect re-finds the
+    prior log row and is a recognised no-op rather than a double-apply. The route
+    echoes the reconciled authoritative ``fsrsState`` + ``sync_revision`` per card
+    so the host can detect when last-write-wins kept a value other than the one it
+    sent (the bidirectional reconcile) without the backend ever reaching into the
+    host's Dexie store.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # Host's per-write idempotency key (UNIQUE, migration 27). A replay re-finds
+    # this row and is a no-op.
+    write_id: str = Field(index=True)
+    # The mirrored card this write targets: "<plane>:<kind>:<nativeId>".
+    cross_id: str = Field(index=True)
+    # Originating host plane parsed from cross_id ("cfa" | "quant" | "excel").
+    source_plane: str = Field(default="", index=True)
+    # Write target plane — always "lsat" (the backend mirror) for DATA-4b; the
+    # reverse direction (backend -> host) stays deferred.
+    target_plane: str = Field(default="lsat")
+    # How the write resolved: "applied" | "kept_existing" (LWW kept the newer
+    # stored state) | "noop_dedupe" (write_id already seen) | "no_target" (the
+    # card has not been fed via DATA-4a yet).
+    resolution: str = Field(default="", index=True)
+    # The FSRS state before/after the write (audit + reconcile).
+    fsrs_before: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    fsrs_after: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    # When the host observed this scheduling state (ISO 8601) — the LWW key.
+    observed_at: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow, index=True)
