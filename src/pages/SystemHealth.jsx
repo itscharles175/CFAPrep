@@ -25,6 +25,7 @@ import { getSidecarLogs, getSidecarStatus, getAggregatedSystemHealth } from '../
 import { recordRuntimeSample } from '../lib/runtimeMetricsStore';
 import RuntimeMetricsTab from '../components/SystemHealth/RuntimeMetricsTab';
 import MaintenancePanel from '../components/SystemHealth/MaintenancePanel';
+import { GenerationQualityPanel } from '../components/SystemHealth/GenerationQualityPanel';
 import { recognizeOnceOffline } from '../lib/voice';
 import { readLastCrash, clearLastCrash } from '../components/ErrorBoundary';
 import {
@@ -1493,6 +1494,12 @@ export default function SystemHealth() {
           self-contained inline SVG sparklines — dependency-free, no shared viz
           barrel. */}
       <RuntimeMetricsTab backend={aggregatedHealth?.backend ?? null} webVitals={webVitals} />
+
+      {/* INT-5: Generation Quality — read-only observability over the LSAT
+          generation pipeline (per-gate pass rates, worst q_types, validate /
+          firewall audit feed). Self-contained + fully degrading: a down sidecar
+          shows an honest "offline" note rather than throwing. */}
+      <GenerationQualityPanel />
 
       {/* UC6: Core Web Vitals (LCP / CLS / INP), collected in-process via the
           browser-native PerformanceObserver. LOCAL-ONLY — nothing is sent

@@ -3171,6 +3171,145 @@
         }
       }
     },
+    "/api/analytics/weakness-index": {
+      "get": {
+        "summary": "Weakness Index",
+        "description": "ANL-2 — unified weakness index: LSAT per-type mastery + host per-topic\naccuracy merged into ONE list ranked by the ~95% credible LOWER bound (a\nconfidently-weak area outranks a tiny noisy one), each row carrying recent-miss\nids and a host-mountable recommended-drill deep-link. Honors the shared\n``?days=`` window; ``?domain=`` selects the plane; ``?limit=``/``?offset=`` page\nthe ranked list (the full count is echoed on ``X-Total-Count`` and in\n``meta.total``).",
+        "operationId": "weakness_index_api_analytics_weakness_index_get",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(lsat|host|all|cfa|quant|excel)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ANL-2 — evidence plane for the unified weakness index. Omit (or 'all') to merge LSAT + every host plane; 'lsat' for LSAT only; 'host' for the host planes; or a specific host plane (cfa|quant|excel).",
+              "title": "Domain"
+            },
+            "description": "ANL-2 — evidence plane for the unified weakness index. Omit (or 'all') to merge LSAT + every host plane; 'lsat' for LSAT only; 'host' for the host planes; or a specific host plane (cfa|quant|excel)."
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 730,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "restrict to the last N days",
+              "title": "Days"
+            },
+            "description": "restrict to the last N days"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional: cap the number of items returned (default: all).",
+              "title": "Limit"
+            },
+            "description": "Optional: cap the number of items returned (default: all)."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional: skip this many items from the start (default: 0).",
+              "title": "Offset"
+            },
+            "description": "Optional: skip this many items from the start (default: 0)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeaknessIndexResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analytics/feedback-cohorts": {
       "get": {
         "summary": "Feedback Cohorts",
@@ -5784,6 +5923,159 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GenQualityReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gen/generation/quality-metrics": {
+      "get": {
+        "summary": "Generation Quality Metrics",
+        "description": "INT-5: per-type pass rates + per-gate pass/fail + fail-reason distribution.\n\nGoes a layer deeper than ``GET /api/gen/quality`` (Q2's overall pass rate +\nfirst-failure histogram): for every recorded candidate it replays the stored\n``checks`` through the SAME per-gate resolver INT-1 uses, so each of the 8+\npipeline gates (structural, trap-metadata, length-tell, lexical-leak,\ndeterministic-solve, self-consistency, permutation-invariance, informativity,\nsingle-defensible, distractor-quality, CoVe, multi-model-agreement,\nstructural-type, RC-authenticity, novelty) reports its own judged/passed/\nfailed counts + a failure histogram. Read-only; no model calls or DB writes.",
+        "operationId": "generation_quality_metrics_api_gen_generation_quality_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenQualityMetrics"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gen/generation/audit-log": {
+      "get": {
+        "summary": "Generation Audit Log",
+        "description": "INT-5: recent generate / validate / firewall events for the panel.\n\nDerives an append-only-feeling stream from ``GenCandidate`` rows (newest\nfirst) WITHOUT a new table — each row records one item that passed through\nthe gate, with verdict + reason + the solver/critic models + a timestamp.\n``kind`` optionally filters to one event class; ``counts`` always reflects the\nscanned window so the panel can show every chip even when filtered.",
+        "operationId": "generation_audit_log_api_gen_generation_audit_log_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "generate",
+                    "validate",
+                    "firewall"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenAuditLog"
                 }
               }
             }
@@ -19839,6 +20131,208 @@
         ],
         "title": "ForTypeBody"
       },
+      "GenAuditEvent": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "gen_job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gen Job Id"
+          },
+          "q_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Type"
+          },
+          "question_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question Id"
+          },
+          "candidate_index": {
+            "type": "integer",
+            "title": "Candidate Index",
+            "default": 0
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "solver_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solver Model"
+          },
+          "critic_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Critic Model"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "GenAuditEvent",
+        "description": "One derived generate / validate / firewall event (from a GenCandidate)."
+      },
+      "GenAuditLog": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/GenAuditEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 50
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "title": "GenAuditLog",
+        "description": "Recent generation pipeline events, newest first."
+      },
+      "GenGateMetric": {
+        "properties": {
+          "gate": {
+            "type": "string",
+            "title": "Gate"
+          },
+          "judged": {
+            "type": "integer",
+            "title": "Judged",
+            "default": 0
+          },
+          "passed": {
+            "type": "integer",
+            "title": "Passed",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "fail_reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Fail Reasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "gate"
+        ],
+        "title": "GenGateMetric",
+        "description": "Per-gate pass/fail breakdown for one of the 8+ pipeline gates."
+      },
       "GenQualityBody": {
         "properties": {
           "candidate": {
@@ -20039,6 +20533,65 @@
         ],
         "title": "GenQualityGate"
       },
+      "GenQualityMetrics": {
+        "properties": {
+          "jobs": {
+            "type": "integer",
+            "title": "Jobs",
+            "default": 0
+          },
+          "total_candidates": {
+            "type": "integer",
+            "title": "Total Candidates",
+            "default": 0
+          },
+          "passed": {
+            "type": "integer",
+            "title": "Passed",
+            "default": 0
+          },
+          "quarantined": {
+            "type": "integer",
+            "title": "Quarantined",
+            "default": 0
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "fail_reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Fail Reasons"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GenGateMetric"
+            },
+            "type": "array",
+            "title": "Gates"
+          },
+          "by_type": {
+            "items": {
+              "$ref": "#/components/schemas/GenTypeMetric"
+            },
+            "type": "array",
+            "title": "By Type"
+          }
+        },
+        "type": "object",
+        "title": "GenQualityMetrics",
+        "description": "Aggregate generation-quality metrics across every recorded job."
+      },
       "GenQualityReport": {
         "properties": {
           "passed": {
@@ -20103,6 +20656,48 @@
         ],
         "title": "GenQualityReport",
         "description": "Typed ValidationReport returned by the generation-quality service."
+      },
+      "GenTypeMetric": {
+        "properties": {
+          "q_type": {
+            "type": "string",
+            "title": "Q Type"
+          },
+          "passed": {
+            "type": "integer",
+            "title": "Passed",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GenGateMetric"
+            },
+            "type": "array",
+            "title": "Gates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "q_type"
+        ],
+        "title": "GenTypeMetric",
+        "description": "Per-q_type rollup: overall pass/fail + the same per-gate breakdown."
       },
       "GroundingChunk": {
         "properties": {
@@ -20583,6 +21178,23 @@
             "type": "boolean",
             "title": "Include Recent",
             "default": false
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "cfa",
+                  "quant",
+                  "excel"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain",
+            "description": "LEARN-6 — cross-domain content plane. Omit for the current LSAT-only ranking. A host plane (cfa|quant|excel) routes over host content via the unified cross-domain ability."
           }
         },
         "type": "object",
@@ -23136,6 +23748,29 @@
         },
         "type": "object",
         "title": "ValidatorRunBody"
+      },
+      "WeaknessIndexResponse": {
+        "properties": {
+          "meta": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Meta"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meta",
+          "items"
+        ],
+        "title": "WeaknessIndexResponse"
       },
       "WorkspaceBody": {
         "properties": {

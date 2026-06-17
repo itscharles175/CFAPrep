@@ -12,6 +12,7 @@ import { searchCfaSourceVault } from '../../lib/cfaSourceVault';
 import { searchAllContent, type ContentHit } from '../../lib/contentSearch';
 import { commandRoutes } from '../../routes/routeManifest';
 import { KEYBOARD_HELP_EVENT } from '../KeyboardHelp/KeyboardHelp';
+import { NotificationCenter } from './NotificationCenter';
 
 // Unified shape used to render the command-palette results. Both
 // `buildSearchItems` and `commandRoutes` items conform to this, and
@@ -524,19 +525,10 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
 
       {notificationsOpen && (
         <div className="notifications-popover">
-          <div className="notifications-title">Study Signals</div>
-          {summary.upcomingReviews.length ? (
-            summary.upcomingReviews.map((item) => (
-              <Link key={item.id} to={item.path} className="notification-item" onClick={() => setNotificationsOpen(false)}>
-                <span>{item.title}</span>
-                <small>Due {new Date(item.dueAt).toLocaleDateString()} - {item.lastConfidence} confidence</small>
-              </Link>
-            ))
-          ) : (
-            <div className="notification-empty">
-              {summary.questionsAnswered ? 'No weak areas flagged from recent attempts.' : 'Take a quiz to unlock review signals.'}
-            </div>
-          )}
+          {/* UX-6: cross-domain notification surface — folds host due reviews +
+              the LSAT sidecar's ability-ranked queue into one nudge. Self-wiring
+              and fully degrading (a down sidecar quietly omits LSAT rows). */}
+          <NotificationCenter onNavigate={() => setNotificationsOpen(false)} />
         </div>
       )}
     </header>

@@ -6,6 +6,8 @@ import { Skeleton } from '../components/feedback';
 import { OnboardingResume, StudySessionCard } from '../components/session';
 import type { StudySessionPanel } from '../components/session';
 import UnifiedPlanSection from '../components/today/UnifiedPlanSection';
+import { useNextQuestions } from '../hooks/useNextQuestions';
+import { AdaptiveRecommendationCard } from '../components/drills/AdaptiveRecommendationCard';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { buildStudyPlan } from '../lib/studyDirector';
 import type { StudyAction, StudyPlan } from '../lib/studyDirector';
@@ -144,6 +146,15 @@ export default function Today() {
   const [examCountdown, setExamCountdown] = useState<ExamCountdown | null>(null);
   const [journal, setJournal] = useState<JournalState>({ text: '', savedAt: null, dirty: false });
   const journalKey = `journal:${new Date().toISOString().slice(0, 10)}`;
+
+  // LEARN-6 — adaptive next-objective routing over HOST content, scoped to this
+  // page's plane (CFA). Fully degrading: a down sidecar yields an offline note
+  // on the card rather than blocking the local plan above. Selecting a candidate
+  // opens the matching host drill keyed by the objective.
+  const { report: nextReport, loading: nextLoading, refresh: refreshNext } = useNextQuestions({
+    domain: 'cfa',
+    count: 5,
+  });
 
   // UX-1: restore the document scroll position when returning to /today (incl.
   // after a cross-domain soft-hop, which bypasses native scroll restoration).
@@ -548,7 +559,10 @@ export default function Today() {
         </div>
       ) : (
         <>
-          <OnboardingResume onResume={() => navigate('/')} />
+          <OnboardingResume
+            onResume={() => navigate('/')}
+            onResumeSession={(path) => navigate(path)}
+          />
 
           <StudySessionCard panels={sessionPanels} />
 
@@ -615,6 +629,22 @@ export default function Today() {
               fully degrading: renders nothing when the sidecar is offline or has
               no host evidence to merge, so the local plan above is never blocked. */}
           <UnifiedPlanSection variant="full" />
+
+          {/* LEARN-6 — adaptive "what to study next" over host (CFA) content,
+              ranked against the unified ability. Fully degrading: an offline
+              sidecar shows a graceful note. Selecting a row opens the matching
+              host drill keyed by the objective. */}
+          <div style={{ marginBottom: 'var(--space-6)' }}>
+            <AdaptiveRecommendationCard
+              report={nextReport}
+              loading={nextLoading}
+              onRefresh={refreshNext}
+              onSelect={(candidate) =>
+                navigate(`/cfa/drills?topic=${encodeURIComponent(candidate.key || candidate.contentId)}`)
+              }
+              maxItems={5}
+            />
+          </div>
 
           {weakAction && (
             <Surface tone="study" status="warning" style={{ marginBottom: 'var(--space-6)' }}>

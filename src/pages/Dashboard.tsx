@@ -32,6 +32,15 @@ import { OnboardingWizard } from '../components/Onboarding';
 import { Skeleton } from '../components/feedback';
 import { DashboardKpiBand } from '../components/dashboard/DashboardKpiBand';
 import { DashboardHero } from '../components/dashboard/DashboardHero';
+import { WeaknessIndexCard } from '../components/dashboard/WeaknessIndexCard';
+import { DashboardSparklineGrid } from '../components/dashboard/DashboardSparklineGrid';
+import { DashboardReadinessChecklist } from '../components/dashboard/DashboardReadinessChecklist';
+import {
+  fetchDashboardMetrics,
+  scoreReadiness,
+  aggregateBlindReviewOutcomes,
+  type DashboardMetrics,
+} from '../lib/dashboardMetrics';
 import UnifiedPlanSection from '../components/today/UnifiedPlanSection';
 import { useScrollRestoration } from '../lib/scrollRestore';
 
@@ -212,6 +221,11 @@ export default function Dashboard() {
   const [exportBusy, setExportBusy] = useState(false);
   const [sourceDocCount, setSourceDocCount] = useState<number | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  // ANL-4: shaped learning curves + study profile (per-domain mastery sparklines
+  // and the green/amber/red readiness checklist). fetchDashboardMetrics never
+  // throws — a down sidecar yields empty/unreachable curves and the components
+  // render honest empty cells, so this never blocks the dashboard.
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
 
   // UX-1: restore the document scroll position on return to the dashboard,
   // including after a cross-domain soft-hop (which bypasses native scroll
@@ -231,6 +245,26 @@ export default function Dashboard() {
       active = false;
     };
   }, []);
+
+  // ANL-4: load the shaped curves + study profile once on mount.
+  useEffect(() => {
+    let alive = true;
+    fetchDashboardMetrics().then((m) => {
+      if (alive) setMetrics(m);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // ANL-4: derive the readiness checklist rows once metrics load. Pure shaper —
+  // a dimension with no signal renders grey 'unknown' rather than a false verdict.
+  const readinessChecks = metrics
+    ? scoreReadiness(
+        { curves: metrics.curves, profile: metrics.profile },
+        { blindReview: aggregateBlindReviewOutcomes(metrics.curves) },
+      )
+    : [];
 
   useEffect(() => {
     let active = true;
@@ -629,6 +663,19 @@ export default function Dashboard() {
           dueReviews={summary.dueReviews}
           weakObjectives={summary.weakObjectives}
         />
+
+        {/* ANL-4 — per-domain learning-curve sparklines + green/amber/red
+            readiness checklist, shaped from the shipped cross-domain ability
+            curves + the DATA-6 study profile. Both return null on empty input,
+            so an offline sidecar simply renders nothing here. ANL-2 — unified
+            weakness index card (top weak areas across LSAT + host), self-wiring
+            and fully degrading. Sits in the analytics/readiness rail alongside
+            DashboardHero. */}
+        <div className="grid-2" style={{ marginTop: 'var(--space-4)', alignItems: 'start' }}>
+          {metrics && <DashboardSparklineGrid curves={metrics.curves} />}
+          {readinessChecks.length > 0 && <DashboardReadinessChecklist checks={readinessChecks} />}
+          <WeaknessIndexCard options={{ domain: 'all', days: 30, limit: 8 }} maxRows={5} />
+        </div>
 
         {/* LEARN-3 — a compact subset of the merged cross-domain daily plan
             (LSAT + host CFA/Quant/Excel) from the LSAT sidecar. Self-fetching and
