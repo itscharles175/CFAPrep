@@ -7,7 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
-from .. import ai, backup, config, jobs, llm, migrations, observability, trust
+from .. import ai, backup, config, jobs, llm, migrations, observability, relocation, trust
 from ..db import engine, get_session
 from ..models import CoachSnapshot, EmbeddingVector, GenJob, GenStatus, Question
 
@@ -368,3 +368,22 @@ def schema_versions() -> dict[str, Any]:
         "host_min_supported": migrations.CROSS_DOMAIN_HOST_MIN_SUPPORTED,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/observability/relocation-status", response_model=dict[str, Any])
+def relocation_status() -> dict[str, Any]:
+    """DATA-7 — app-data relocation guard status (read-only).
+
+    A bundle-id / app-data-dir change can orphan the LSAT SQLite store under the
+    OLD OS app-data dir (``%APPDATA%/LSATLab`` on Windows). DATA-3 only versions
+    the cross-domain contract; it never moves stores. This endpoint reports
+    whether a recoverable store sits at the old path while the active (NEW) store
+    is absent/empty, so the host can prompt the user / surface a "data found at
+    old location" affordance.
+
+    Folds ``relocation.relocation_status`` into a single ``status``
+    (``ok`` | ``orphaned``) verdict plus the resolved old/new paths and existence
+    flags. O(1)-ish (a couple of ``stat`` calls) and never raises: an
+    unresolvable OS base or an unreadable dir degrades to a visible-but-empty
+    field rather than a 500. No DB writes."""
+    return relocation.relocation_status()

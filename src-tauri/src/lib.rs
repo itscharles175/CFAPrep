@@ -20,6 +20,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_dialog::DialogExt;
 
+// DATA-7: app-data relocation guard. Detects an LSAT SQLite store orphaned at the
+// OLD OS app-data dir after a bundle-id / app-data-dir change and decides whether
+// the LSAT sidecar should read from the recovered store (set via LSATLAB_DATA_DIR).
+mod relocation;
+
 /// One supervised sidecar: its declarative spec (retained so a crashed process
 /// can be respawned from the same recipe) paired with the live `Child` handle.
 struct SupervisedSidecar {
@@ -715,13 +720,38 @@ struct SpawnOutcome {
 /// BA8: each successfully-launched child has its stdout + stderr attached to
 /// the shared `logs` ring buffer before being retained, so the log viewer sees
 /// output from process start.
+///
+/// Since DATA-7, the production path (`spawn_sidecars`) builds + relocation-guards
+/// the specs and calls `spawn_sidecars_with_specs` directly, so this `dir`-based
+/// wrapper is exercised only by the supervisor unit tests — hence the
+/// `allow(dead_code)` in non-test builds.
+#[cfg_attr(not(test), allow(dead_code))]
 fn spawn_sidecars_with<L: SidecarLauncher>(
     launcher: &L,
     dir: &Path,
     logs: &SidecarLogs,
     readiness_budget: Duration,
 ) -> SpawnOutcome {
+    // Build the specs from the pure recipe, then run the (unchanged) ordered
+    // startup. The production path (`spawn_sidecars`) instead builds the specs,
+    // applies the DATA-7 relocation guard to them, and calls
+    // `spawn_sidecars_with_specs` directly — so the only behavioural difference is
+    // the LSAT spec's `LSATLAB_DATA_DIR` env. Tests still drive this entrypoint.
     let specs = build_sidecar_specs(dir);
+    spawn_sidecars_with_specs(launcher, specs, logs, readiness_budget)
+}
+
+/// Ordered-startup core (BA2/OPS-5/BA8), parameterized by PRE-BUILT specs so the
+/// production path can post-process them (DATA-7 relocation guard) before launch
+/// without this function re-deriving them from a `dir`. `spawn_sidecars_with`
+/// (the test entrypoint) builds the specs from `build_sidecar_specs` and delegates
+/// here; behaviour is otherwise identical.
+fn spawn_sidecars_with_specs<L: SidecarLauncher>(
+    launcher: &L,
+    specs: Vec<SidecarSpec>,
+    logs: &SidecarLogs,
+    readiness_budget: Duration,
+) -> SpawnOutcome {
     // Index every spec's readiness port by name so a dependent can look up the
     // port it must wait on. Specs without a readiness port (the worker) map to
     // `None` and are skipped by the wait below.
@@ -800,9 +830,59 @@ fn spawn_sidecars_with<L: SidecarLauncher>(
     }
 }
 
+/// DATA-7: apply the app-data relocation guard to the LSAT backend spec.
+///
+/// `build_sidecar_specs` is pure (no I/O); this is where the filesystem-touching
+/// relocation check lives. `new_dir` is the data dir the host already pinned for
+/// the LSAT sidecar (via an `LSATLAB_DATA_DIR` env override) — `None` means "let
+/// the backend resolve its own default", in which case the guard is a no-op
+/// (old == new under that default, so nothing is ever orphaned). When a
+/// `new_dir` is given AND a non-empty store is orphaned at the legacy
+/// `%APPDATA%/LSATLab` location while `new_dir` has no store yet,
+/// `relocation::resolve_lsat_data_dir` returns the OLD dir so the sidecar reads
+/// the recovered bank in place — conservative: detect + set-env, never a move.
+///
+/// Mutates the passed `specs` in place: it sets/overrides the LSAT spec's
+/// `LSATLAB_DATA_DIR` env to the resolved dir, matching the existing
+/// env-pair-vec construction style. A no-op for non-LSAT specs and when nothing
+/// needs relocating with an unset `new_dir`.
+fn apply_lsat_relocation_env(specs: &mut [SidecarSpec], new_dir: Option<PathBuf>) {
+    let resolved = match relocation::resolve_lsat_data_dir(new_dir) {
+        Some(d) => d,
+        None => return, // unset new dir → backend resolves its default; no-op.
+    };
+    let Some(lsat) = specs.iter_mut().find(|s| s.name == "LSAT backend") else {
+        return;
+    };
+    let resolved_str = resolved.to_string_lossy().into_owned();
+    // Log in the same style as the ordered-startup / OPS-5 messages so the
+    // sidecar log viewer shows the relocation decision.
+    log::info!(
+        "sidecar: LSAT backend data dir resolved to {} (DATA-7 relocation guard)",
+        resolved_str
+    );
+    // Set or override LSATLAB_DATA_DIR; keep the existing (key, value) env-pair
+    // shape `build_sidecar_specs` uses.
+    if let Some(pair) = lsat.env.iter_mut().find(|(k, _)| k == "LSATLAB_DATA_DIR") {
+        pair.1 = resolved_str;
+    } else {
+        lsat.env.push(("LSATLAB_DATA_DIR".into(), resolved_str));
+    }
+}
+
 fn spawn_sidecars(logs: &SidecarLogs) -> SpawnOutcome {
     let dir = services_dir();
-    spawn_sidecars_with(&ProcessLauncher, &dir, logs, READINESS_WAIT_BUDGET)
+    // DATA-7: only the host knows where app-data was relocated to; it pins the
+    // LSAT data dir via the LSATLAB_DATA_DIR env. Detect an orphaned legacy store
+    // relative to that pinned dir and, if found, point the sidecar at it. With no
+    // override the backend resolves its own default and the guard is a no-op.
+    let new_dir = std::env::var("LSATLAB_DATA_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    let mut specs = build_sidecar_specs(&dir);
+    apply_lsat_relocation_env(&mut specs, new_dir);
+    spawn_sidecars_with_specs(&ProcessLauncher, specs, logs, READINESS_WAIT_BUDGET)
 }
 
 /// Probe one sidecar's readiness port. Sidecars with no `ready_port` (the
@@ -1419,6 +1499,43 @@ mod tests {
         // Other sidecars don't carry env overrides.
         assert!(specs[0].env.is_empty());
         assert!(specs[1].env.is_empty());
+    }
+
+    // ---- DATA-7 relocation guard wiring (apply_lsat_relocation_env) ----
+
+    #[test]
+    fn apply_lsat_relocation_env_noop_when_new_dir_unset() {
+        // Unset new dir → backend resolves its own default; env is left as built.
+        let mut specs = build_sidecar_specs(&PathBuf::from("C:/qv/services"));
+        apply_lsat_relocation_env(&mut specs, None);
+        let lsat = specs.iter().find(|s| s.name == "LSAT backend").unwrap();
+        assert!(
+            !lsat.env.iter().any(|(k, _)| k == "LSATLAB_DATA_DIR"),
+            "no relocation env when new dir is unset"
+        );
+    }
+
+    #[test]
+    fn apply_lsat_relocation_env_sets_dir_when_new_dir_given() {
+        // With a new dir given and no orphaned store, the LSAT spec is pinned to
+        // that dir (conservative: detect + set-env, no move). Use a temp dir as
+        // the populated NEW store so the guard resolves to it deterministically.
+        let tmp = tempdir().unwrap();
+        let new_dir = tmp.path().join("active");
+        fs::create_dir_all(&new_dir).unwrap();
+        fs::write(new_dir.join("lsatlab.db"), b"active-bank").unwrap();
+
+        let mut specs = build_sidecar_specs(&PathBuf::from("C:/qv/services"));
+        apply_lsat_relocation_env(&mut specs, Some(new_dir.clone()));
+        let lsat = specs.iter().find(|s| s.name == "LSAT backend").unwrap();
+        let pair = lsat
+            .env
+            .iter()
+            .find(|(k, _)| k == "LSATLAB_DATA_DIR")
+            .expect("LSATLAB_DATA_DIR set");
+        assert_eq!(pair.1, new_dir.to_string_lossy());
+        // Non-LSAT specs are untouched.
+        assert!(specs[0].env.iter().all(|(k, _)| k != "LSATLAB_DATA_DIR"));
     }
 
     /// Mock launcher: records every spec it was asked to launch, decides
