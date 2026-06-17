@@ -69,6 +69,11 @@ import {
   type SharedStudyProfile,
   type StudyProfilePatch,
 } from './types/StudyProfile';
+// UX-6 — fold the LSAT sidecar's ability-ranked due queue (LEARN-2) into the
+// host's cross-domain notification surface. Degrading by contract: any sidecar
+// failure returns `{ ok: false, items: [] }`, so the host nudge simply omits the
+// LSAT rows rather than erroring.
+import { fetchUnifiedDue, type UnifiedReviewItem } from './lsatReviewBridge';
 
 export const PROGRESS_EVENT = 'quantvault:progress';
 const PROGRESS_CHANNEL = 'quantvault:progress-channel';
@@ -1072,6 +1077,118 @@ export async function getProgressSummary() {
 
 export function progressSummaryQuery() {
   return liveQuery(getProgressSummary);
+}
+
+/**
+ * UX-6 — one cross-domain "due" row for the proactive notification surface. The
+ * host's own Dexie reviews and the LSAT sidecar's queue speak different native
+ * vocabularies, so both are projected onto this single shape: a title, a target
+ * path, the due timestamp, and the domain badge. The CFA bell popover renders
+ * these uniformly ("N reviews due across CFA + LSAT").
+ */
+export interface CrossDomainNotification {
+  /** Namespaced so host + LSAT ids never collide in the rendered list. */
+  id: string;
+  domain: DomainId | 'lsat';
+  title: string;
+  /** Where the row sends the user (host route, or LSAT deep-link hard-nav). */
+  path: string;
+  /** ISO due timestamp when known (host rows always carry one; LSAT may not). */
+  dueAt?: string;
+  /** True for LSAT rows so the consumer can hard-navigate across the app split. */
+  external?: boolean;
+}
+
+/**
+ * UX-6 — the folded cross-domain due summary backing the notification center.
+ * `upcomingReviews` is the host-local queue (unchanged from `getProgressSummary`)
+ * folded together with the LSAT sidecar's LEARN-2 unified queue. Counts are split
+ * so the surface can say "N reviews due across CFA + LSAT" precisely.
+ */
+export interface CrossDomainNotificationSummary {
+  notifications: CrossDomainNotification[];
+  total: number;
+  cfaCount: number;
+  lsatCount: number;
+  /** False when the LSAT sidecar was unreachable (rows simply omitted). */
+  lsatAvailable: boolean;
+  /** False when the local Dexie read failed (host rows omitted, no throw). */
+  indexedDbAvailable: boolean;
+}
+
+export const emptyCrossDomainNotificationSummary: CrossDomainNotificationSummary = {
+  notifications: [],
+  total: 0,
+  cfaCount: 0,
+  lsatCount: 0,
+  lsatAvailable: false,
+  indexedDbAvailable: true,
+};
+
+/** Project a host {@link ReviewItem} onto the unified notification row. */
+function hostReviewToNotification(item: ReviewItem): CrossDomainNotification {
+  return {
+    id: `host:${item.id}`,
+    domain: item.domain,
+    title: item.title,
+    path: item.path,
+    dueAt: item.dueAt,
+  };
+}
+
+/** Project an LSAT {@link UnifiedReviewItem} onto the unified notification row. */
+function lsatReviewToNotification(item: UnifiedReviewItem): CrossDomainNotification {
+  return {
+    id: `lsat:${item.id}`,
+    domain: 'lsat',
+    title: item.title,
+    path: item.deepLinkPath,
+    dueAt: item.canonical.dueAt,
+    external: true,
+  };
+}
+
+/**
+ * UX-6 — fold the host's local due reviews together with the LSAT sidecar's
+ * ability-ranked unified queue (LEARN-2 {@link fetchUnifiedDue}) into one
+ * cross-domain notification list. Fully degrading on both legs:
+ *   - the Dexie read failing yields `indexedDbAvailable: false` (host rows omitted);
+ *   - the sidecar being down/timed-out yields `lsatAvailable: false` (LSAT rows
+ *     omitted) — never throws, so the surface always renders something.
+ *
+ * `limit` caps each domain independently (so a flood of LSAT cards can't crowd
+ * out the host's, and vice-versa), keeping the popover compact.
+ */
+export async function getCrossDomainUpcomingReviews(
+  options: { limit?: number; timeoutMs?: number } & Level3PathwayQuery = {},
+): Promise<CrossDomainNotificationSummary> {
+  const { limit = 5, timeoutMs = 2500, level3Pathway } = options;
+
+  let hostRows: CrossDomainNotification[] = [];
+  let indexedDbAvailable = true;
+  try {
+    const due = await getDueReviews(new Date(), { level3Pathway });
+    hostRows = due.slice(0, limit).map(hostReviewToNotification);
+  } catch {
+    indexedDbAvailable = false;
+  }
+
+  // The sidecar leg already degrades to `{ ok: false, items: [] }` by contract,
+  // so no try/catch is needed here — we just read its `ok` flag for availability.
+  const lsat = await fetchUnifiedDue({ limit, timeoutMs });
+  const lsatRows = lsat.ok ? lsat.items.map(lsatReviewToNotification) : [];
+
+  // Host rows first (the active CFA study domain), then the LSAT sidecar queue.
+  const notifications = [...hostRows, ...lsatRows];
+
+  return {
+    notifications,
+    total: notifications.length,
+    cfaCount: hostRows.length,
+    lsatCount: lsatRows.length,
+    lsatAvailable: lsat.ok,
+    indexedDbAvailable,
+  };
 }
 
 function noteIdFor({
