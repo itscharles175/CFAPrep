@@ -1339,6 +1339,246 @@ def blind_review_gap_cross_domain(
     }
 
 
+# --- unified weakness index (ANL-2) -----------------------------------------
+# How many recent miss ids to attach per weakness row (the "drill these first"
+# pointer the Dashboard card surfaces). Kept small so the payload stays compact.
+_WEAKNESS_RECENT_MISS_LIMIT = 5
+# Beta-Binomial lower-bound parameters for the HOST side, mirroring the LSAT
+# `mastery()` estimator so both planes rank on the SAME credible-lower-bound
+# scale (a 2-attempt host topic can't masquerade as the weakest beside a
+# 200-attempt LSAT type). Same weak 0.5-centered prior + ~95% z as `mastery()`.
+_WEAKNESS_PRIOR_STRENGTH = _MASTERY_PRIOR_STRENGTH
+_WEAKNESS_PRIOR_MEAN = _MASTERY_PRIOR_MEAN
+_WEAKNESS_CI_Z = _MASTERY_CI_Z
+
+
+def _beta_lower_bound(successes: float, n: float) -> tuple[float, float, float]:
+    """(posterior_mean, lower_bound, ci_high) for a Beta-Binomial posterior with
+    the shared weak 0.5 prior. Used for the HOST side so its accuracy is ranked on
+    the same credible-lower-bound scale as the LSAT `mastery()` rows."""
+    a0 = _WEAKNESS_PRIOR_STRENGTH * _WEAKNESS_PRIOR_MEAN
+    b0 = _WEAKNESS_PRIOR_STRENGTH * (1.0 - _WEAKNESS_PRIOR_MEAN)
+    alpha = a0 + successes
+    beta = b0 + (n - successes)
+    post_mean = alpha / (alpha + beta)
+    post_var = (alpha * beta) / ((alpha + beta) ** 2 * (alpha + beta + 1.0))
+    post_sd = post_var ** 0.5
+    low = max(0.0, post_mean - _WEAKNESS_CI_Z * post_sd)
+    high = min(1.0, post_mean + _WEAKNESS_CI_Z * post_sd)
+    return post_mean, low, high
+
+
+def _topic_from_cross_id(cross_id: str | None) -> str | None:
+    """Pull the native topic/objective key out of a `<plane>:question:<native>`
+    cross-id (DATA-2 §1). Returns None when the shape doesn't parse so the caller
+    can fall back to the plane."""
+    if not cross_id or not isinstance(cross_id, str):
+        return None
+    parts = cross_id.split(":", 2)
+    if len(parts) == 3 and parts[2]:
+        return parts[2]
+    return None
+
+
+def _lsat_drill_path(q_type: str) -> str:
+    """Host-mountable deep-link into the LSAT type-analytics / drill view for a
+    q_type (the LSAT app's `/analytics/type/:qType` mounted under `/lsat`)."""
+    from urllib.parse import quote
+
+    return f"/lsat/analytics/type/{quote(q_type, safe='')}"
+
+
+def _host_drill_path(plane: str, topic: str | None) -> str:
+    """Host-mountable deep-link into a plane's drills, optionally scoped to a
+    topic. Mirrors the host's `/<plane>/drills` route (see src/data/catalog)."""
+    from urllib.parse import quote
+
+    base = f"/{quote(plane, safe='')}/drills"
+    if topic:
+        return f"{base}?topic={quote(topic, safe='')}"
+    return base
+
+
+def _lsat_weakness_rows(
+    session: Session, *, days: int | None,
+) -> list[dict]:
+    """LSAT weakness rows from `mastery()` (already ranked weakest-first by the
+    credible lower bound) plus the most recent miss question_ids per q_type."""
+    rows = mastery(session, days=days)
+    if not rows:
+        return []
+
+    # Recent miss ids per q_type: one windowed pass over practice attempts,
+    # newest-first, capped per type — reuses the same windowed attempt fetch the
+    # rest of analytics uses (no per-type query).
+    attempts = _all_attempts(session, days=days)
+    qmap = _question_map(session, {a.question_id for a in attempts})
+    misses_by_type: dict[str, list[int]] = defaultdict(list)
+    practice = [a for a in attempts if a.mode in (AttemptMode.timed, AttemptMode.drill)]
+    practice.sort(key=lambda a: (_aware(a.created_at), a.id or 0), reverse=True)
+    for a in practice:
+        if a.is_correct:
+            continue
+        q = qmap.get(a.question_id)
+        if q is None:
+            continue
+        bucket = misses_by_type[q.q_type]
+        if len(bucket) < _WEAKNESS_RECENT_MISS_LIMIT and a.question_id is not None:
+            bucket.append(a.question_id)
+
+    out: list[dict] = []
+    for m in rows:
+        if m["attempts"] < 1:
+            continue
+        q_type = m["q_type"]
+        out.append({
+            "domain": "lsat",
+            "key": q_type,
+            "label": q_type,
+            "section_type": m.get("section_type"),
+            "accuracy": m.get("weighted_accuracy"),
+            "mastery": m.get("mastery"),
+            "lower_bound": m.get("lower_bound"),
+            "attempts": m["attempts"],
+            "trend": m.get("trend"),
+            "recent_miss_ids": [str(i) for i in misses_by_type.get(q_type, [])],
+            "drill_path": _lsat_drill_path(q_type),
+        })
+    return out
+
+
+def _host_weakness_rows(
+    session: Session, *, plane: str | None, days: int | None,
+) -> list[dict]:
+    """HOST weakness rows from the DATA-4a `HostProgressSnapshot` attempt mirror.
+
+    Groups host attempt snapshots by topic (parsed from the canonical
+    `questionCrossId`, falling back to the plane), computes a windowed accuracy +
+    a Beta-Binomial credible lower bound (same scale as LSAT `mastery()`), and the
+    most recent miss `crossId`s per topic. Read-only — never mutates the mirror.
+    ``plane`` restricts to one host plane or all of them when None."""
+    stmt = select(HostProgressSnapshot).where(HostProgressSnapshot.kind == "attempt")
+    if plane:
+        stmt = stmt.where(HostProgressSnapshot.plane == plane)
+    cutoff = _cutoff(days)
+    if cutoff is not None:
+        stmt = stmt.where(HostProgressSnapshot.created_at >= cutoff)
+    rows = session.exec(stmt).all()
+
+    # Group attempts by (plane, topic). Each entry carries enough to compute the
+    # accuracy + recent misses.
+    groups: dict[tuple[str, str], list[tuple[HostProgressSnapshot, dict]]] = defaultdict(list)
+    for row in rows:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        topic = _topic_from_cross_id(payload.get("questionCrossId")) or row.plane
+        groups[(row.plane, topic)].append((row, payload))
+
+    out: list[dict] = []
+    for (row_plane, topic), items in groups.items():
+        n = len(items)
+        if not n:
+            continue
+        correct = sum(1 for _r, p in items if bool(p.get("correct")))
+        accuracy = round(correct / n, 4)
+        _mean, low, _high = _beta_lower_bound(float(correct), float(n))
+        # Recent miss ids: newest-first by the snapshot's observed/created order.
+        items_sorted = sorted(
+            items,
+            key=lambda rp: (_aware(rp[0].created_at), rp[0].id or 0),
+            reverse=True,
+        )
+        recent_miss_ids = [
+            str(r.cross_id)
+            for r, p in items_sorted
+            if not bool(p.get("correct"))
+        ][:_WEAKNESS_RECENT_MISS_LIMIT]
+        label = topic if topic != row_plane else row_plane.upper()
+        out.append({
+            "domain": row_plane,
+            "key": topic,
+            "label": label,
+            "section_type": None,
+            "accuracy": accuracy,
+            "mastery": accuracy,
+            "lower_bound": round(low, 4),
+            "attempts": n,
+            "trend": None,
+            "recent_miss_ids": recent_miss_ids,
+            "drill_path": _host_drill_path(row_plane, topic if topic != row_plane else None),
+        })
+    return out
+
+
+def weakness_index(
+    session: Session,
+    *,
+    domain: str | None = None,
+    days: int | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+) -> dict:
+    """ANL-2 — unified weakness index across LSAT + host content.
+
+    Merges the LSAT per-type `mastery()` (ranked by its ~95% credible LOWER bound)
+    with HOST per-topic accuracy (derived from the DATA-4a `HostProgressSnapshot`
+    attempt mirror, scored on the SAME Beta-Binomial lower-bound scale so the two
+    planes are comparable) into ONE ranked list. Each row carries the recent-miss
+    ids (LSAT `question_id` / host `crossId`) and a host-mountable
+    ``drill_path`` deep-link so the Dashboard card can send the user straight to
+    the weakest area.
+
+    Ranking: ascending by ``lower_bound`` (a confidently-low area outranks a tiny
+    noisy one), tie-broken by accuracy then by more attempts — identical in spirit
+    to `mastery()`'s weakest-first ordering.
+
+    ``domain`` selects the evidence plane and is BACKWARD-COMPATIBLE additive:
+    - ``None`` / ``"all"`` -> LSAT + every host plane merged (the default view).
+    - ``"lsat"`` -> LSAT only.
+    - ``"host"`` -> host planes only (all of cfa/quant/excel).
+    - a specific host plane (``"cfa"`` | ``"quant"`` | ``"excel"``) -> that plane.
+
+    ``limit``/``offset`` page the ranked list (the full pre-slice count is in
+    ``meta.total``); omit them for the whole list.
+    """
+    plane = (domain or "").strip().lower() or None
+
+    include_lsat = plane in (None, "all", "lsat")
+    include_host = plane in (None, "all", "host", "cfa", "quant", "excel")
+    host_plane = plane if plane in ("cfa", "quant", "excel") else None
+
+    lsat_rows = _lsat_weakness_rows(session, days=days) if include_lsat else []
+    host_rows = (
+        _host_weakness_rows(session, plane=host_plane, days=days) if include_host else []
+    )
+
+    merged = lsat_rows + host_rows
+    # Weakest-first by credible lower bound; tie-break on accuracy then attempts.
+    merged.sort(
+        key=lambda r: (
+            r["lower_bound"] if r["lower_bound"] is not None else 1.0,
+            r["accuracy"] if r["accuracy"] is not None else 1.0,
+            -r["attempts"],
+        )
+    )
+    total = len(merged)
+    page = paginate(merged, limit=limit, offset=offset)
+
+    return {
+        "meta": {
+            "model": "weakness_index_v1",
+            "domain": plane or "all",
+            "window_days": days,
+            "total": total,
+            "limit": limit,
+            "offset": offset or 0,
+            "lsat_count": len(lsat_rows),
+            "host_count": len(host_rows),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "items": page,
+    }
+
+
 # --- traps ------------------------------------------------------------------
 def traps(session: Session, *, days: int | None = None) -> list[dict]:
     """How often the student fell for each trap type (chose a wrong choice that

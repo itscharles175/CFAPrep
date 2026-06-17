@@ -51,6 +51,16 @@ class BlindReviewGapResponse(BaseModel):
     lucky_rate: Optional[float] = None
     by_domain: Optional[dict] = None
 
+# ANL-2 — inline response_model for the unified weakness index. ``meta`` carries
+# the pagination + provenance envelope; ``items`` is the ranked weakness list. The
+# item rows stay an open dict list (the merged LSAT-mastery / host-accuracy shape)
+# so adding a diagnostic field later doesn't require a schema bump — same idiom as
+# ``BlindReviewGapResponse`` above.
+class WeaknessIndexResponse(BaseModel):
+    meta: dict
+    items: list[dict]
+
+
 _Days = Query(None, ge=1, le=730, description="restrict to the last N days")
 
 
@@ -183,6 +193,42 @@ def cross_domain(
         weakest_limit=weakest_limit,
         weakest_offset=weakest_offset,
     )
+
+
+@router.get("/weakness-index", response_model=WeaknessIndexResponse)
+def weakness_index(
+    response: Response,
+    domain: Optional[str] = Query(
+        None,
+        pattern="^(lsat|host|all|cfa|quant|excel)$",
+        description=(
+            "ANL-2 — evidence plane for the unified weakness index. Omit (or 'all') "
+            "to merge LSAT + every host plane; 'lsat' for LSAT only; 'host' for the "
+            "host planes; or a specific host plane (cfa|quant|excel)."
+        ),
+    ),
+    days: Optional[int] = _Days,
+    limit: Optional[int] = LimitQuery,
+    offset: Optional[int] = OffsetQuery,
+    session: Session = Depends(get_session),
+):
+    """ANL-2 — unified weakness index: LSAT per-type mastery + host per-topic
+    accuracy merged into ONE list ranked by the ~95% credible LOWER bound (a
+    confidently-weak area outranks a tiny noisy one), each row carrying recent-miss
+    ids and a host-mountable recommended-drill deep-link. Honors the shared
+    ``?days=`` window; ``?domain=`` selects the plane; ``?limit=``/``?offset=`` page
+    the ranked list (the full count is echoed on ``X-Total-Count`` and in
+    ``meta.total``)."""
+    result = analytics.weakness_index(
+        session, domain=domain, days=days, limit=limit, offset=offset,
+    )
+    _set_list_meta(
+        response,
+        total=int(result.get("meta", {}).get("total", len(result.get("items", [])))),
+        limit=limit,
+        offset=offset,
+    )
+    return result
 
 
 @router.get("/feedback-cohorts")
