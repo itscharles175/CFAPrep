@@ -1076,3 +1076,50 @@ class CrossDomainSyncLog(SQLModel, table=True):
     # When the host observed this scheduling state (ISO 8601) — the LWW key.
     observed_at: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class ExportHistory(SQLModel, table=True):
+    """DATA-5 — provenance ledger for the unified {host, lsat} export/backup
+    artifact.
+
+    Every unified export build and every unified import records / refreshes one
+    row here, keyed by the envelope's ``export_id`` (UNIQUE index added in
+    migration 28). This makes "back up StudyVault" one auditable action: the user
+    can see when each artifact was produced, what schema versions it carries, its
+    checksum (sha256 of the canonical-JSON envelope sans ``checksum``), the
+    per-table row counts, and how many times it has been restored from.
+
+    Strictly local bookkeeping: this table NEVER carries question content (that
+    lives in the envelope's ``data`` payload, which itself preserves
+    ``bank_export``'s ``include_official=False`` firewall) — only metadata about
+    artifacts. Re-importing the SAME ``export_id`` is idempotent: the row is found
+    and its ``restore_count`` / ``last_restored`` are bumped rather than
+    duplicated.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # The envelope's exportId — the UPSERT key (UNIQUE index, migration 28).
+    export_id: str = Field(index=True)
+    # When the artifact was produced (ISO 8601, mirrors the envelope's exportedAt).
+    exported_at: str = Field(default="")
+    # The unified-envelope schema version this row was written under.
+    schema_version: int = Field(default=1)
+    # The host's Dexie VAULT_SCHEMA_VERSION when the host half was included; NULL
+    # for an LSAT-only artifact (no host payload).
+    host_schema_version: Optional[int] = None
+    # Artifact format discriminator (e.g. "unified-json").
+    fmt: str = Field(default="unified-json")
+    # True when this row was written by the source machine's export build; False
+    # when written/updated by an import on a (possibly different) machine.
+    source_host: bool = Field(default=True)
+    # Per-table row counts captured at build time (audit + quick diff).
+    row_counts: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    # sha256 of the canonical-JSON envelope (sans the ``checksum`` field itself).
+    checksum: str = Field(default="")
+    # How many times this artifact has been imported/restored from.
+    restore_count: int = Field(default=0)
+    # When the last restore from this artifact landed (NULL until the first).
+    last_restored: Optional[datetime] = None
+    # Free-text operator note (optional).
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)

@@ -973,6 +973,34 @@ def _m027_cross_domain_sync_log(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 27")
 
 
+def _m028_export_history(conn) -> None:
+    """DATA-5 — provenance ledger for the unified {host, lsat} export/backup
+    artifact.
+
+    The ``exporthistory`` table itself is created by ``SQLModel.create_all``
+    (``models.ExportHistory``); this migration adds what ``create_all`` can't
+    express on a PRE-EXISTING DB:
+
+    - ``ux_exporthistory_export_id`` — a UNIQUE index on the envelope's
+      ``export_id`` so ``import_unified_export`` can UPSERT idempotently
+      (find-the-row + bump ``restore_count`` instead of duplicating). Wrapped so a
+      pre-existing DB that somehow holds duplicate ``export_id`` values logs and
+      keeps the app-level upsert guard rather than breaking boot.
+
+    PRAGMA-guarded exactly like migrations 20-27: every statement is idempotent /
+    tolerant, so a fresh DB (where ``create_all`` already made the table) and a
+    re-run are clean no-ops. Bumps ``PRAGMA user_version`` to 28 so the DB-level
+    version tracks the latest recorded migration."""
+    try:
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_exporthistory_export_id "
+            "ON exporthistory (export_id)"
+        )
+    except Exception as exc:  # pre-existing duplicates — keep app-level upsert
+        log.warning("migration 28: skipped ux_exporthistory_export_id (%s)", exc)
+    conn.exec_driver_sql("PRAGMA user_version = 28")
+
+
 def _annotation_search_text(data_json, user_explanation) -> str:
     """Flatten an annotation's searchable note text out of its opaque ``data_json``
     plus the user-authored explanation, into one whitespace-joined string for FTS.
@@ -1070,6 +1098,7 @@ MIGRATIONS: list[Migration] = [
     (25, "annotation_kb_fts", _m025_annotation_kb_fts),
     (26, "genjob_passage_first", _m026_genjob_passage_first),
     (27, "cross_domain_sync_log", _m027_cross_domain_sync_log),
+    (28, "export_history", _m028_export_history),
 ]
 
 

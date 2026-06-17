@@ -1090,6 +1090,75 @@ export const api = {
       method: "POST",
       json: { payload },
     }),
+
+  // DATA-5 — unified {host, lsat} export/backup. One artifact, one checksum, one
+  // provenance ledger; the LSAT half preserves bank_export's include_official
+  // firewall and import routes the LSAT payload through import_bank.
+  exportBackup: (
+    body: {
+      host_data?: Record<string, unknown> | null;
+      include_history?: boolean;
+      notes?: string | null;
+    } = {},
+  ) =>
+    request<Record<string, unknown>>("/api/export/backup", {
+      method: "POST",
+      json: body,
+    }),
+  exportValidate: (envelope: Record<string, unknown>) =>
+    request<{ ok: boolean; errors: string[] }>("/api/export/validate", {
+      method: "POST",
+      json: { envelope },
+    }),
+  exportImport: (envelope: Record<string, unknown>) =>
+    request<{
+      ok: boolean;
+      export_id: string;
+      counts: Record<string, number>;
+      restore_count: number;
+      host_data_present: boolean;
+    }>("/api/export/import", {
+      method: "POST",
+      json: { envelope },
+    }),
+  exportList: (offset = 0, limit = 50) =>
+    request<{
+      total: number;
+      offset: number;
+      limit: number;
+      has_more: boolean;
+      items: {
+        export_id: string;
+        exported_at: string;
+        schema_version: number;
+        host_schema_version: number | null;
+        format: string;
+        source_host: boolean;
+        row_counts: Record<string, number>;
+        checksum: string;
+        restore_count: number;
+        last_restored: string | null;
+        notes: string | null;
+        created_at: string | null;
+        updated_at: string | null;
+      }[];
+    }>(`/api/export/list?offset=${offset}&limit=${limit}`),
+  exportHistory: (exportId: string) =>
+    request<{
+      export_id: string;
+      exported_at: string;
+      schema_version: number;
+      host_schema_version: number | null;
+      format: string;
+      source_host: boolean;
+      row_counts: Record<string, number>;
+      checksum: string;
+      restore_count: number;
+      last_restored: string | null;
+      notes: string | null;
+      created_at: string | null;
+      updated_at: string | null;
+    }>(`/api/export/history?export_id=${encodeURIComponent(exportId)}`),
   bankBulkTag: async (body: {
     question_ids: number[];
     q_type?: string;

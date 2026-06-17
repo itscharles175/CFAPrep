@@ -33,6 +33,7 @@ from .routers import (
     drills,
     error_log,
     exam_routes,
+    export_backup_routes,
     fsrs_sync_routes,
     generation_routes,
     import_routes,
@@ -394,6 +395,8 @@ for r in (
     dataset_routes.router,
     error_log.router,
     exam_routes.router,
+    # DATA-5 — unified {host, lsat} export/backup (/api/export/...).
+    export_backup_routes.router,
     study_routes.router,
     # DATA-4a — host -> backend cross-domain progress feed (POST /api/sync/...).
     study_routes.sync_router,
