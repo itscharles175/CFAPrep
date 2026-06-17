@@ -1656,6 +1656,46 @@ export interface TutorConversation {
   updated_at: string;
 }
 
+// LSAT-4 — streaming Socratic tutor (useSocraticStream + socratic_routes).
+/** A turn in the live Socratic stream (user prediction or assistant nudge). */
+export interface SocraticTurn {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  /** Present on assistant turns: the citable context behind the nudge. */
+  context?: TutorSocraticContext;
+}
+
+/** An inline citation badge flattened from a turn's Socratic context. */
+export interface SocraticCitation {
+  kind: "similar_miss" | "notebook";
+  label: string;
+  detail?: string;
+  /** Set for ``similar_miss`` citations. */
+  questionId?: number;
+  /** Set for ``notebook`` citations. */
+  id?: number;
+}
+
+/** GET /api/conversations/{id}/evidence — the citable evidence for a conversation. */
+export interface SocraticEvidence {
+  conversation_id: number;
+  question_id: number;
+  answer_key_hidden: boolean;
+  prior_turn_count: number;
+  recent_turns: { role: string; content: string }[];
+  question_context: TutorQuestionContext | Record<string, never>;
+  similar_misses: TutorSimilarMissEvidence[];
+  notebook_context: TutorNotebookContext;
+}
+
+/** Done-frame metadata streamed by POST /api/conversations/{id}/turns-stream. */
+export interface SocraticTurnStreamDone {
+  turn?: TutorTurnRecord;
+  reply?: TutorTurnRecord | null;
+  socratic_context?: TutorSocraticContext;
+}
+
 // Import wizard
 export interface ParsedQuestion {
   prompt: string;
@@ -2248,4 +2288,53 @@ export interface GenDrift {
   flagged: DriftItem[];
   min_attempts: number;
   floor: number;
+}
+
+// LSAT-6 — Annotation Notebook knowledge base (backlinks + FTS search + inline
+// authoring). Wire shapes from services/lsat-backend/app/routers/annotation_kb_routes.py.
+export interface Backlink {
+  annotation_id: number;
+  scope: string;
+  ref_id: number;
+  /** Canonical ref this annotation links from/to, e.g. "question:42" / "attempt:7". */
+  target: string;
+  user_explanation: string;
+  tags: string[];
+  snippet: string;
+  updated_at: string | null;
+}
+
+export interface AnnotationSearchHit {
+  annotation_id: number;
+  scope: string;
+  ref_id: number;
+  target: string;
+  user_explanation: string;
+  tags: string[];
+  /** FTS snippet (or an excerpt of the explanation in the LIKE-fallback path). */
+  snippet: string;
+  updated_at: string | null;
+}
+
+export interface AnnotationSearchResult {
+  query: string;
+  /** "fts" when the FTS5 index served it, "like" when it fell back. */
+  mode: "fts" | "like" | string;
+  hits: AnnotationSearchHit[];
+}
+
+export interface AnnotationExplanation {
+  annotation_id: number;
+  scope: string;
+  ref_id: number;
+  target: string;
+  user_explanation: string;
+  tags: string[];
+  updated_at: string | null;
+}
+
+export interface AnnotationBacklinksResult {
+  target: string;
+  count: number;
+  backlinks: Backlink[];
 }

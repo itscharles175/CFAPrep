@@ -40,6 +40,8 @@ import {
   type NotebookContextMeta,
   type SocraticExplainMeta,
 } from "@lsat/lib/api";
+import { TrapPatternsAccordion } from "@lsat/components/explanation/trap-patterns-accordion";
+import type { TrapPattern } from "@lsat/lib/types-lsat2";
 import {
   useAddErrorLog,
   useBulkSrsCards,
@@ -50,6 +52,7 @@ import { SimilarQuestions } from "@lsat/components/explanation/similar-questions
 import { ChoiceBreakdown } from "@lsat/components/explanation/choice-breakdown";
 import { TimedBrAnswers } from "@lsat/components/explanation/timed-br-answers";
 import { getQuestionAnnotations } from "@lsat/lib/annotationPrefs";
+import { getUserExplanation, getAnnotationTags } from "@lsat/components/review/annotation-inline-editor";
 import { ERROR_REASONS, difficultyStars } from "@lsat/lib/labels";
 import { getNotes, readingClasses, useReadingPrefs } from "@lsat/lib/prefs";
 import { cn } from "@lsat/lib/utils";
@@ -101,6 +104,7 @@ export default function Explanation() {
   const [perChoice, setPerChoice] = useState<Record<string, string>>({}); // A4
   const [notebookContext, setNotebookContext] = useState<NotebookContextMeta | null>(null);
   const [socraticContext, setSocraticContext] = useState<SocraticExplainMeta | null>(null);
+  const [trapPatterns, setTrapPatterns] = useState<TrapPattern[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const lastAskRef = useRef<{ userMessage?: string; focusChoice?: string | null } | null>(null);
 
@@ -125,6 +129,7 @@ export default function Explanation() {
     setAiText(explanationBody);
     setCached(true);
     setNotebookContext(null);
+    setTrapPatterns([]);
     setPerChoice(explanationPerChoice ?? {});
   }, [question?.id, explanationBody, explanationPerChoice]);
 
@@ -156,6 +161,8 @@ export default function Explanation() {
   const validLabels = q.choices.map((c) => c.label);
   const savedNotes = getNotes(q.id);
   const savedHighlights = getQuestionAnnotations(q.id);
+  const userExplanation = getUserExplanation(q.id);
+  const userTags = getAnnotationTags(q.id);
   const rcls = readingClasses(reading);
 
   function askCoach(opts?: { userMessage?: string; focusChoice?: string | null }) {
@@ -167,6 +174,7 @@ export default function Explanation() {
     setPerChoice({});
     setNotebookContext(null);
     setSocraticContext(null);
+    setTrapPatterns([]);
     setCached(false);
     setAiError(false);
     setStreaming(true);
@@ -193,6 +201,7 @@ export default function Explanation() {
           setPerChoice({});
           setNotebookContext(null);
           setSocraticContext(null);
+          setTrapPatterns([]);
         },
         onDone: (_eid, meta) => {
           setStreaming(false);
@@ -201,6 +210,7 @@ export default function Explanation() {
             setPerChoice((prev) => ({ ...prev, ...meta.per_choice }));
           setNotebookContext(meta?.notebook_context ?? null);
           setSocraticContext(meta?.socratic_context ?? null);
+          setTrapPatterns(meta?.trap_patterns?.items ?? []);
         },
         onError: () => {
           setStreaming(false);
@@ -386,6 +396,10 @@ export default function Explanation() {
             </div>
           ) : null}
 
+          {trapPatterns.length ? (
+            <TrapPatternsAccordion patterns={trapPatterns} />
+          ) : null}
+
           {/* Follow-up prompts. */}
           <div className="flex flex-wrap gap-2">
             {spotlight && validLabels.includes(spotlight) && (
@@ -474,6 +488,26 @@ export default function Explanation() {
             </div>
           )}
         </section>
+
+        {(userExplanation || userTags.length > 0) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Your explanation</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {userExplanation && (
+                <p className={cn(rcls, "whitespace-pre-wrap")}>{userExplanation}</p>
+              )}
+              {userTags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {userTags.map((t) => (
+                    <Badge key={t} variant="secondary">{t}</Badge>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Per-choice breakdown — secondary to the prose but still primary-column. */}
         <Card>

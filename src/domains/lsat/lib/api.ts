@@ -13,6 +13,7 @@ import { recordExplainLatency } from "./aiMetrics";
 // this reaches across the vendored-domain boundary to the one stream reader.
 import { streamEvents, type SseParser } from "@/lib/streamingClient";
 import type { z } from "zod";
+import type { TrapPatternsMeta } from "./types-lsat2";
 import {
   activityEventSchema,
   artifactVersionSchema,
@@ -171,6 +172,13 @@ import type {
   ConceptCardsResult,
   TutorConversation,
   TutorTurnResult,
+  SocraticEvidence,
+  SocraticTurnStreamDone,
+  AnnotationBacklinksResult,
+  AnnotationExplanation,
+  AnnotationSearchHit,
+  AnnotationSearchResult,
+  Backlink,
   WorkspaceManifest,
   WhyLoopState,
 } from "./types";
@@ -867,6 +875,24 @@ export const api = {
       json: body,
       validate: tutorTurnResultSchema as unknown as z.ZodType<TutorTurnResult>,
     }),
+  // LSAT-4 — the standalone citable evidence (similar_misses + notebook_context)
+  // behind a conversation's Socratic nudges (read-only).
+  getConversationEvidence: (conversationId: number) =>
+    request<SocraticEvidence>(`/api/conversations/${conversationId}/evidence`),
+  // LSAT-4 — stream a Socratic reply for a new turn over SSE. Handler-based like
+  // streamExplain; builds on the unified BB2 stream reader. The user turn +
+  // assistant reply are persisted server-side before the first token, so an
+  // aborted mid-stream send never loses the record.
+  addTutorTurnStream: (
+    conversationId: number,
+    body: { role?: "user" | "assistant"; content: string; auto_reply?: boolean },
+    handlers: {
+      onToken: (token: string) => void;
+      onDone?: (meta?: SocraticTurnStreamDone) => void;
+      onError?: (err: Error) => void;
+      signal?: AbortSignal;
+    },
+  ) => streamSocraticTurn(conversationId, body, handlers),
 
   // Playlists / Smart sets (R7 6.1). The response bodies are free-form on the
   // wire (the OpenAPI snapshot leaves them untyped); we cast to the hand-written
@@ -1066,6 +1092,32 @@ export const api = {
     }
     return null;
   },
+  // LSAT-6 — Annotation Notebook knowledge base. FTS search over note text +
+  // user explanations; backlinks (question:/attempt:/tag:); inline authoring.
+  searchAnnotations: (q: string, limit = 20) =>
+    request<AnnotationSearchResult>(
+      `/api/annotations/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
+  // Namespaced under /api/annotations/backlinks/ (NOT /api/backlinks, which the
+  // notebook artifact backlink list owns). Returns { target, count, backlinks }.
+  getAnnotationBacklinks: (target: string) =>
+    request<AnnotationBacklinksResult>(
+      `/api/annotations/backlinks/${encodeURIComponent(target)}`,
+    ).then((r) => r.backlinks ?? []),
+  getAnnotationExplanation: (annotationId: number) =>
+    request<AnnotationExplanation>(
+      `/api/annotations/${annotationId}/explanation`,
+    ),
+  saveAnnotationExplanation: (annotationId: number, userExplanation: string) =>
+    request<{ ok: boolean; annotation_id: number; user_explanation: string }>(
+      `/api/annotations/${annotationId}/explanation`,
+      { method: "POST", json: { user_explanation: userExplanation } },
+    ),
+  saveAnnotationTags: (annotationId: number, tags: string[]) =>
+    request<{ ok: boolean; annotation_id: number; tags: string[] }>(
+      `/api/annotations/${annotationId}/tags`,
+      { method: "PUT", json: { tags } },
+    ),
   saveAnnotations: async (
     questionId: number,
     highlights: unknown[],
@@ -1333,6 +1385,7 @@ export async function streamExplain(
         per_choice?: Record<string, string>;
         notebook_context?: NotebookContextMeta;
         socratic_context?: SocraticExplainMeta;
+        trap_patterns?: TrapPatternsMeta;
       }, // A2
     ) => void;
     onError?: (err: Error) => void;
@@ -1429,6 +1482,7 @@ export async function streamExplain(
                 per_choice?: Record<string, string>;
                 notebook_context?: NotebookContextMeta;
                 socratic_context?: SocraticExplainMeta;
+                trap_patterns?: TrapPatternsMeta;
               }
             | undefined;
           handlers.onDone?.(meta?.explanation_id, {
@@ -1436,6 +1490,7 @@ export async function streamExplain(
             per_choice: meta?.per_choice,
             notebook_context: meta?.notebook_context,
             socratic_context: meta?.socratic_context,
+            trap_patterns: meta?.trap_patterns,
           });
           settled = true;
           outcome = { kind: "done" };
@@ -1509,6 +1564,74 @@ export async function streamExplain(
     if (interrupted) return; // aborted during the wait
     handlers.onReconnect?.(attempt);
   }
+}
+
+/**
+ * LSAT-4 — stream a Socratic reply for a new turn over SSE.
+ *
+ * Contract: POST /api/conversations/{id}/turns-stream -> text/event-stream with
+ *   data: {"token":"..."}
+ *   data: {"done":true,"turn":{...},"reply":{...},"socratic_context":{...}}
+ *
+ * Builds on the unified stream reader (BB2). Unlike streamExplain it does NOT
+ * auto-reconnect: the user turn + assistant reply are persisted server-side
+ * before the first token, so a dropped connection is recovered by re-fetching
+ * the conversation rather than re-POSTing (which would append a duplicate turn).
+ * A caller abort ends silently; any other terminal surfaces through onError.
+ */
+export async function streamSocraticTurn(
+  conversationId: number,
+  body: { role?: "user" | "assistant"; content: string; auto_reply?: boolean },
+  handlers: {
+    onToken: (token: string) => void;
+    onDone?: (meta?: SocraticTurnStreamDone) => void;
+    onError?: (err: Error) => void;
+    signal?: AbortSignal;
+  },
+): Promise<void> {
+  const { signal } = handlers;
+  const parseSocraticSse: SseParser = (raw) => {
+    if (typeof raw !== "object" || raw === null) {
+      return { kind: "delta", text: String(raw) };
+    }
+    const obj = raw as { token?: string; done?: boolean; error?: string };
+    if (obj.error) return { kind: "error", message: obj.error };
+    if (obj.token) return { kind: "delta", text: obj.token, data: obj };
+    if (obj.done) return { kind: "done", meta: obj };
+    return null;
+  };
+
+  let settled = false;
+  for await (const ev of streamEvents(
+    `${PREFIX}/api/conversations/${conversationId}/turns-stream`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify({ auto_reply: true, role: "user", ...body }),
+    },
+    { signal, parseSse: parseSocraticSse },
+  )) {
+    if (ev.type === "delta") {
+      const token = (ev.data as { token?: string } | undefined)?.token ?? ev.text;
+      if (token) handlers.onToken(token);
+    } else if (ev.type === "done") {
+      handlers.onDone?.(ev.meta as SocraticTurnStreamDone | undefined);
+      settled = true;
+      return;
+    } else if (ev.type === "timeout") {
+      handlers.onError?.(ev.error);
+      settled = true;
+      return;
+    } else {
+      handlers.onError?.(ev.error);
+      settled = true;
+      return;
+    }
+  }
+  if (!settled && !signal?.aborted) handlers.onDone?.();
 }
 
 /** Resolve after `ms`, or immediately (true) if the signal aborts first. */
