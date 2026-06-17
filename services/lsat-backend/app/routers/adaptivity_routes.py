@@ -97,6 +97,13 @@ class TurnBody(BaseModel):
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=8000)
     ]
     auto_reply: bool = True
+    # LSAT-4 — opt-in streaming. The default sync path (POST /conversations/{id}/
+    # turns below) is unchanged; a client that wants a live Socratic stream sets
+    # ``streaming: true`` and instead POSTs to the SSE endpoint in
+    # ``socratic_routes`` (POST /conversations/{id}/turns-stream), which reuses the
+    # same body shape. This flag is accepted here so the one request type serves
+    # both transports without a contract break.
+    streaming: bool = False
 
 
 @router.get("/adaptivity/ability")

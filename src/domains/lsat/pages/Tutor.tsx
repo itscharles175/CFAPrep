@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, BrainCircuit, MessageSquare, RotateCcw } from "lucide-react";
+import { Bot, BrainCircuit, MessageSquare, RotateCcw, Sparkles, Square } from "lucide-react";
 import { toast } from "sonner";
 import { PageLayout, PageSection } from "@lsat/components/page-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
@@ -17,7 +17,8 @@ import { Textarea } from "@lsat/components/ui/textarea";
 import { Badge } from "@lsat/components/ui/badge";
 import { api } from "@lsat/lib/api";
 import { useAdaptivityPlan, useReadinessStatus } from "@lsat/lib/hooks";
-import type { TutorSocraticContext } from "@lsat/lib/types";
+import { useSocraticStream } from "@lsat/hooks/useSocraticStream";
+import type { SocraticCitation, TutorSocraticContext } from "@lsat/lib/types";
 
 export function SocraticEvidence({
   context,
@@ -145,6 +146,30 @@ export function SocraticEvidence({
   );
 }
 
+export function SocraticCitationBadges({
+  citations,
+}: {
+  citations: SocraticCitation[];
+}) {
+  if (!citations.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {citations.map((c, index) => (
+        <Badge
+          key={`${c.kind}-${c.label}-${index}`}
+          variant={c.kind === "notebook" ? "secondary" : "outline"}
+          className="max-w-full text-[11px]"
+          title={c.detail ?? undefined}
+        >
+          {c.kind === "notebook" ? "Notebook · " : ""}
+          {c.label}
+          {c.detail ? ` · ${c.detail}` : ""}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 export default function Tutor() {
   const qc = useQueryClient();
   const [attemptId, setAttemptId] = useState("");
@@ -154,6 +179,11 @@ export default function Tutor() {
   const [trapGuess, setTrapGuess] = useState("out_of_scope");
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [turn, setTurn] = useState("");
+  // LSAT-4 — live Socratic streaming alongside the existing sync sendTurn. On by
+  // default (the streamed nudge feels responsive); a toggle falls back to the
+  // one-shot sync path. The hook owns its own AbortController so a mid-stream
+  // re-send (or a conversation switch) is safe.
+  const [streamingMode, setStreamingMode] = useState(true);
   const attemptNumber = Number(attemptId);
   const plan = useAdaptivityPlan(60);
   const readiness = useReadinessStatus();
@@ -199,6 +229,16 @@ export default function Tutor() {
     await qc.invalidateQueries({ queryKey: ["conversations", why.data?.question_id ?? "none"] });
   }
 
+  async function sendTurnStreaming() {
+    if (!conversationId || !turn.trim()) return;
+    const text = turn;
+    setTurn("");
+    await socratic.sendTurn(text);
+    // The stream persisted both turns server-side; refresh the canonical
+    // conversation so the committed transcript replaces the live overlay.
+    await qc.invalidateQueries({ queryKey: ["conversations", why.data?.question_id ?? "none"] });
+  }
+
   async function createCards() {
     if (!why.data) return;
     const result = await api.createConceptCards(why.data.attempt_id);
@@ -208,6 +248,19 @@ export default function Tutor() {
   const activeConversation =
     (conversations.data ?? []).find((c) => c.id === conversationId) ??
     conversations.data?.[0];
+
+  // LSAT-4 — drive the live Socratic stream for the active conversation. Seed it
+  // with the persisted turns so the live overlay (streamingText + citations)
+  // layers on top of the canonical transcript the React-Query fetch renders.
+  const socratic = useSocraticStream(
+    activeConversation?.id ?? null,
+    activeConversation?.turns ?? [],
+  );
+  useEffect(() => {
+    if (socratic.error) {
+      toast.error("The Socratic stream stopped. Try again or switch off streaming.");
+    }
+  }, [socratic.error]);
 
   return (
     <PageLayout
@@ -320,6 +373,24 @@ export default function Tutor() {
                     ) : null}
                   </div>
                 ))}
+                {socratic.isStreaming || socratic.streamingText ? (
+                  <div
+                    className="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm"
+                    aria-live="polite"
+                  >
+                    <Badge variant="secondary" className="gap-1">
+                      <Sparkles className="h-3 w-3" aria-hidden />
+                      assistant
+                      {socratic.isStreaming ? " · streaming" : ""}
+                    </Badge>
+                    <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
+                      {socratic.streamingText || "Thinking through your prediction…"}
+                    </p>
+                    {socratic.citations.length ? (
+                      <SocraticCitationBadges citations={socratic.citations} />
+                    ) : null}
+                  </div>
+                ) : null}
                 {!activeConversation && (
                   <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
                     Start a local tutor loop after loading an attempt.
@@ -331,9 +402,29 @@ export default function Tutor() {
                 onChange={(e) => setTurn(e.target.value)}
                 placeholder="Ask for a Socratic hint without revealing the answer."
               />
-              <Button onClick={sendTurn} disabled={!activeConversation || !turn.trim()}>
-                Send
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={streamingMode ? sendTurnStreaming : sendTurn}
+                  disabled={!activeConversation || !turn.trim() || socratic.isStreaming}
+                >
+                  Send
+                </Button>
+                {socratic.isStreaming ? (
+                  <Button variant="outline" size="sm" onClick={socratic.abort}>
+                    <Square className="h-4 w-4" aria-hidden /> Stop
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-pressed={streamingMode}
+                  onClick={() => setStreamingMode((v) => !v)}
+                >
+                  <Sparkles className="h-4 w-4" aria-hidden />
+                  Live streaming {streamingMode ? "on" : "off"}
+                </Button>
+              </div>
             </CardContent>
           </Card>
 

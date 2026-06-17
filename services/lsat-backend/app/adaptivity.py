@@ -2051,6 +2051,122 @@ def add_tutor_turn(
     }
 
 
+def socratic_evidence(
+    session: Session,
+    conversation_id: int,
+) -> dict[str, Any]:
+    """LSAT-4 — the citable evidence behind a conversation's Socratic nudges.
+
+    Returns the SAME ``similar_misses`` + ``notebook_context`` (and the lightweight
+    question/turn context) that ``_socratic_context`` injects into a reply, but as a
+    standalone read so the Tutor UI can render inline citation badges without
+    waiting for the next streamed turn. Read-only: never writes a turn.
+    """
+    conv = session.get(QuestionConversation, conversation_id)
+    if conv is None:
+        raise ValueError("conversation_not_found")
+    ctx = _socratic_context(session, conv)
+    return {
+        "conversation_id": conv.id,
+        "question_id": conv.question_id,
+        "answer_key_hidden": ctx.get("answer_key_hidden", True),
+        "prior_turn_count": ctx.get("prior_turn_count", 0),
+        "recent_turns": ctx.get("recent_turns", []),
+        "question_context": ctx.get("question_context") or {},
+        "similar_misses": ctx.get("similar_misses") or [],
+        "notebook_context": ctx.get("notebook_context")
+        or {"count": 0, "notes": [], "items": [], "refs": []},
+    }
+
+
+def _socratic_reply_tokens(reply: str) -> list[str]:
+    """Chunk a deterministic Socratic reply into stream-friendly word tokens.
+
+    Mirrors how ``ai_routes`` streams a cached explanation (``word + " "`` per
+    frame) so the unified streaming client (BB2) parses identical ``{"token": …}``
+    frames whether the reply is deterministic (this path) or model-generated.
+    """
+    if not reply:
+        return []
+    return [word + " " for word in reply.split(" ")]
+
+
+def stream_tutor_turn(
+    session: Session,
+    *,
+    conversation_id: int,
+    role: str,
+    content: str,
+    auto_reply: bool = True,
+):
+    """LSAT-4 — streaming sibling of :func:`add_tutor_turn`.
+
+    Persists the user turn, builds the same deterministic Socratic context +
+    reply that the sync path produces, then yields ``(kind, payload)`` events the
+    SSE route frames identically to ``ai_routes`` explain:
+
+      * ``("token", {"token": str})`` — one word-chunk of the reply,
+      * ``("done", {...})``           — final frame carrying the persisted turn,
+        reply, and the citable ``socratic_context`` (similar_misses + notebook).
+
+    The existing sync ``add_tutor_turn`` is left untouched; both share
+    ``_socratic_context`` / ``_socratic_reply`` so the deterministic text is
+    byte-identical across the streaming and non-streaming paths. The user turn +
+    assistant reply are committed BEFORE the first token is yielded so an aborted
+    mid-stream read never loses the persisted record (the client can re-fetch the
+    conversation), matching the append-only contract of the sync path.
+    """
+    conv = session.get(QuestionConversation, conversation_id)
+    if conv is None:
+        raise ValueError("conversation_not_found")
+
+    do_reply = auto_reply and role == "user"
+    socratic_context = _socratic_context(session, conv) if do_reply else None
+
+    turn = TutorTurn(
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        meta_json={"local_only": True},
+    )
+    session.add(turn)
+    conv.updated_at = datetime.now(timezone.utc)
+    session.add(conv)
+
+    reply: TutorTurn | None = None
+    reply_text = ""
+    if do_reply:
+        reply_text = _socratic_reply(session, conv, content, context=socratic_context)
+        reply = TutorTurn(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=reply_text,
+            meta_json={
+                "local_only": True,
+                "model": "deterministic_socratic_v2_stream",
+                "socratic_context": socratic_context,
+            },
+        )
+        session.add(reply)
+    session.commit()
+    session.refresh(turn)
+    if reply is not None:
+        session.refresh(reply)
+
+    for token in _socratic_reply_tokens(reply_text):
+        yield ("token", {"token": token})
+
+    yield (
+        "done",
+        {
+            "done": True,
+            "turn": _turn_payload(turn),
+            "reply": _turn_payload(reply) if reply is not None else None,
+            "socratic_context": socratic_context,
+        },
+    )
+
+
 def conversation_payload(session: Session, conv: QuestionConversation) -> dict[str, Any]:
     turns = session.exec(
         select(TutorTurn)
