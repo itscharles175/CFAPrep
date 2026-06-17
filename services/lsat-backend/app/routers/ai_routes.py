@@ -241,6 +241,11 @@ def explain(body: ExplainBody, session: Session = Depends(get_session)):
     context_notes: list[str] = []
     exemplar = None
     notebook_context: dict = {"notes": [], "items": []}
+    # LSAT-2 — the trap-similar misses (records) are kept separately from the flat
+    # prompt notes so the streamed `done` event can carry them as a structured
+    # `trap_patterns` field for the "See trap patterns" accordion, AND inject a
+    # compact block into the prompt context.
+    trap_misses: list[dict] = []
     if not is_followup:
         try:
             context_notes = embeddings.context_notes_for_question(session, q.id)
@@ -256,6 +261,7 @@ def explain(body: ExplainBody, session: Session = Depends(get_session)):
             context_notes.extend(embeddings.trap_miss_context_notes(trap_misses))
         except Exception:
             log.debug("trap miss context failed for question_id=%s", q.id, exc_info=True)
+            trap_misses = []
         try:
             notebook_context = notebook_os.explanation_context_for_question(
                 session, q, passage_id=q.passage_id
@@ -282,6 +288,10 @@ def explain(body: ExplainBody, session: Session = Depends(get_session)):
             extra["context_notes"] = context_notes
         if exemplar:
             extra["exemplar"] = exemplar
+        if trap_misses:
+            # LSAT-2 — inject a compact "common traps you've fallen for" block into
+            # the prompt so the explanation can name the recurring pattern.
+            extra["trap_misses"] = trap_misses
         if passage_text:
             extra["passage_text"] = passage_text
         if passage_topic:
@@ -343,6 +353,14 @@ def explain(body: ExplainBody, session: Session = Depends(get_session)):
             done["notebook_context"] = {
                 "count": len(notebook_context["items"]),
                 "items": notebook_context["items"],
+            }
+        # LSAT-2 — surface the trap-similar misses as a structured optional field so
+        # the UI can render the "See trap patterns" accordion ("you fell for this
+        # reversal on Q31, Q18"). Absent entirely when there are no prior misses.
+        if trap_misses:
+            done["trap_patterns"] = {
+                "count": len(trap_misses),
+                "items": trap_misses,
             }
         if socratic_context:
             done["socratic_context"] = socratic_context["meta"]

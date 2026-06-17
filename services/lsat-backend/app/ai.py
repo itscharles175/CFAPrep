@@ -221,7 +221,8 @@ def _explain_prompt(stem: str, prompt: str, choices: list[dict],
                     exemplar: dict | None = None,
                     passage_text: str | None = None,
                     passage_topic: str | None = None,
-                    socratic_context: dict | None = None) -> list[dict]:
+                    socratic_context: dict | None = None,
+                    trap_misses: list[dict] | None = None) -> list[dict]:
     choice_lines = "\n".join(f"({c['label']}) {c['text']}" for c in choices)
     is_rc = bool((passage_text or "").strip())
     sys = (
@@ -267,6 +268,29 @@ def _explain_prompt(stem: str, prompt: str, choices: list[dict],
             "\nThe student previously wrote these notes on similar questions they "
             f"missed; reinforce any relevant lesson:\n{joined}\n"
         )
+    if trap_misses:
+        # LSAT-2 — name the recurring trap shapes the student keeps falling
+        # for so the explanation can call out the pattern directly
+        # ("you fell for this reversal on Q31, Q18").
+        trap_lines = []
+        for m in trap_misses[:5]:
+            qid = m.get("question_id")
+            trap = m.get("trap_type") or "unknown"
+            picked = m.get("chosen_answer")
+            note = (m.get("note_excerpt") or "").strip()
+            line = f"- Q{qid}: trap '{trap}'"
+            if picked:
+                line += f", you chose ({picked})"
+            if note:
+                line += f" — your note: {note}"
+            trap_lines.append(line)
+        if trap_lines:
+            user += (
+                "\nCommon traps you've fallen for on similar questions — call "
+                "out the recurring pattern by name if this question shares it:\n"
+                + "\n".join(trap_lines)
+                + "\n"
+            )
     if socratic_context:
         lines: list[str] = []
         if socratic_context.get("timed_answer"):
@@ -392,7 +416,8 @@ async def stream_explanation(stem: str, prompt: str, choices: list[dict],
                              exemplar: dict | None = None,
                              passage_text: str | None = None,
                              passage_topic: str | None = None,
-                             socratic_context: dict | None = None) -> AsyncIterator[str]:
+                             socratic_context: dict | None = None,
+                             trap_misses: list[dict] | None = None) -> AsyncIterator[str]:
     """Yield think-filtered explanation tokens for a question.
 
     ``context_notes`` (optional) are the student's own past notes on similar
@@ -410,6 +435,7 @@ async def stream_explanation(stem: str, prompt: str, choices: list[dict],
         passage_text=passage_text,
         passage_topic=passage_topic,
         socratic_context=socratic_context,
+        trap_misses=trap_misses,
     )
     flt = _ThinkFilter()
     async for delta in _chat_stream(resolve_explain_model(), messages,
