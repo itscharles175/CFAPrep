@@ -11,7 +11,13 @@ import tailwindAnimate from "tailwindcss-animate";
 
 export default {
   darkMode: ["class"],
-  content: ["./src/domains/lsat/**/*.{ts,tsx}"],
+  // K4-Tw — widened from the LSAT-only glob (`./src/domains/lsat/**`) to the
+  // whole `src/` tree so Tailwind utilities are generated for host-authored
+  // class usage too (the reskins + the eventual unified shell rely on this).
+  // Done EARLY + isolated — with S6 style-isolation + the LSAT `@layer base`
+  // body rule still in place — so a config regression is caught alone, not
+  // tangled with the cascade cutover (K4-12/K4-13).
+  content: ["./src/**/*.{ts,tsx,js,jsx}", "./index.html"],
   theme: {
     container: {
       center: true,
