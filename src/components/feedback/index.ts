@@ -18,3 +18,39 @@ export type { ErrorStateProps } from './ErrorState';
 
 export { Skeleton, SkeletonList } from './Skeleton';
 export type { SkeletonProps, SkeletonListProps } from './Skeleton';
+
+// K4-4 — route-shaped skeletons (host twins of the LSAT
+// SkeletonCard/SkeletonChart/SkeletonListPage/SkeletonDetailPage/DashboardSkeleton)
+// so a lazy host route can reserve its real layout instead of flashing the bare
+// RouteFallback spinner.
+export {
+  SkeletonCard,
+  SkeletonChart,
+  SkeletonListPage,
+  SkeletonDetailPage,
+  SkeletonDashboard,
+} from './skeletons';
+export type {
+  SkeletonCardProps,
+  SkeletonChartProps,
+  SkeletonListPageProps,
+  SkeletonDetailPageProps,
+  SkeletonDashboardProps,
+} from './skeletons';
+
+// K4-4 — shared data surfaces. Re-exported from the host-styled primitive barrel
+// (src/components/ui) so a reskin reaches the full feedback + table/list-row
+// vocabulary through one import path.
+export {
+  Table,
+  TableHeader,
+  TableBody,
+  TableFooter,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableCaption,
+} from '../ui/table';
+
+export { ListRow } from '../ui/list-row';
+export type { ListRowProps } from '../ui/list-row';

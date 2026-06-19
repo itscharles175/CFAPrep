@@ -3416,3 +3416,669 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   .main-content { padding-top: 52px; }
   .sidebar-header { min-height: 52px; padding: var(--space-3); }
 }
+
+/* =====================================================================
+   K4-2 — host-styled primitive barrel (src/components/ui/*.tsx)
+   =====================================================================
+   The `.qv-*` vocabulary backing the net-new host wrappers that mirror the
+   LSAT UI primitives' module names + prop surfaces (button/card/badge/input/
+   label/select/dialog + popover/tabs/tooltip). These render HOST tokens — the
+   same `--accent` / `--bg-card` / `--surface-*` / `--ring` / elevation /
+   spacing variables defined at the top of this file — so a later reskin can
+   swap an `@lsat/components/ui/X` import for the host one and inherit the
+   QuantVault look with no class churn.
+
+   Additive + self-contained: every selector here is net-new (no existing rule
+   uses a `.qv-*` class), and the wrappers are not yet imported anywhere, so
+   this block changes nothing in the running app until a screen opts in.
+
+   NOTE: the host `index.css` is NOT Tailwind-processed (the host Tailwind config
+   only scans `src/domains/lsat/**`), so this block is intentionally PLAIN
+   top-level CSS — a literal `@layer components { … }` wrapper would fail the
+   PostCSS/Tailwind pass ("`@layer components` used but no matching `@tailwind
+   components`"). It is still additive + component-scoped per the K4-2 spec; the
+   `@layer` wrapper is reserved for the future host Tailwind migration (F38). The
+   Radix-backed primitives keep their data-state hooks (`[data-state]`,
+   `[data-disabled]`, `[data-side]`) so the library's keyboard/focus/typeahead
+   a11y is fully preserved. */
+
+  /* ---- Button (.btn parity, host gradient/secondary/ghost) ---- */
+  /* `.qv-btn` composes ON TOP of the existing `.btn` base (display/transition/
+     focus-ring/press already defined above); these add the LSAT-parity variants
+     the host base lacks: danger, link, and the icon-gap for inline svgs. */
+  .qv-btn > svg {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+  }
+  .btn.btn-danger {
+    background: linear-gradient(135deg, var(--red-500), #DC2626);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+  }
+  .btn.btn-danger:hover {
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+  }
+  .btn.btn-link {
+    background: transparent;
+    color: var(--accent);
+    padding: var(--space-1) var(--space-2);
+    box-shadow: none;
+  }
+  .btn.btn-link:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  /* `outline` variant: the host `.btn-secondary` reads as a filled neutral; the
+     outline modifier strips the fill to a bordered transparent button. */
+  .btn.qv-btn-outline {
+    background: transparent;
+  }
+  .btn.qv-btn-outline:hover {
+    background: rgba(148, 163, 184, 0.08);
+  }
+  /* Inline loading spinner (LSAT used lucide + `animate-spin`). */
+  .qv-spin {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    animation: qvSpin 0.8s linear infinite;
+  }
+  @keyframes qvSpin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ---- Card (host surface card with optional hover-lift) ---- */
+  .qv-card {
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: var(--elevation-1);
+  }
+  .qv-card-interactive {
+    cursor: pointer;
+    transition: transform var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out);
+  }
+  .qv-card-interactive:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--elevation-3);
+    border-color: var(--border-hover);
+  }
+  .qv-card-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-6);
+  }
+  .qv-card-title {
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    line-height: var(--lh-tight);
+    letter-spacing: -0.01em;
+  }
+  .qv-card-title-display {
+    line-height: var(--lh-snug);
+    text-wrap: balance;
+  }
+  .qv-card-description {
+    font-size: var(--fs-sm);
+    color: var(--text-muted);
+  }
+  .qv-card-content {
+    padding: 0 var(--space-6) var(--space-6);
+  }
+  .qv-card-footer {
+    display: flex;
+    align-items: center;
+    padding: 0 var(--space-6) var(--space-6);
+  }
+
+  /* ---- Badge (.badge parity, host tone ramp) ---- */
+  /* `.qv-badge` rides the existing `.badge` base (pill shape, size, weight);
+     these add the variant tones using the host semantic colours. */
+  .qv-badge-default {
+    background: var(--accent);
+    color: var(--navy-900);
+  }
+  .qv-badge-secondary {
+    background: var(--surface-data);
+    color: var(--text-secondary);
+  }
+  .qv-badge-destructive {
+    background: var(--danger);
+    color: #fff;
+  }
+  .qv-badge-success {
+    background: var(--success);
+    color: var(--navy-900);
+  }
+  .qv-badge-warning {
+    background: var(--warning);
+    color: var(--navy-900);
+  }
+  .qv-badge-outline {
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border-hover);
+  }
+
+  /* ---- Input ---- */
+  .qv-input {
+    display: flex;
+    height: 40px;
+    width: 100%;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--fs-sm);
+    color: var(--text-primary);
+    transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
+  }
+  .qv-input::placeholder {
+    color: var(--text-muted);
+  }
+  .qv-input:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 var(--ring-offset) var(--bg-primary),
+      0 0 0 calc(var(--ring-offset) + 2px) hsl(var(--ring));
+  }
+  .qv-input:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  /* ---- Label ---- */
+  .qv-label {
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    line-height: 1;
+    color: var(--text-primary);
+  }
+
+  /* ---- Select (Radix facade) ---- */
+  .qv-select-trigger {
+    display: flex;
+    height: 40px;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--fs-sm);
+    color: var(--text-primary);
+  }
+  .qv-select-trigger:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 var(--ring-offset) var(--bg-primary),
+      0 0 0 calc(var(--ring-offset) + 2px) hsl(var(--ring));
+  }
+  .qv-select-trigger[data-disabled] {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .qv-select-trigger-icon {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    opacity: 0.6;
+  }
+  .qv-select-content {
+    position: relative;
+    z-index: 50;
+    max-height: 24rem;
+    min-width: 8rem;
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    color: var(--text-primary);
+    box-shadow: var(--elevation-3);
+    backdrop-filter: blur(var(--glass-blur));
+  }
+  .qv-select-content-popper[data-side="bottom"] { transform: translateY(4px); }
+  .qv-select-content-popper[data-side="top"] { transform: translateY(-4px); }
+  .qv-select-viewport {
+    padding: var(--space-1);
+  }
+  .qv-select-viewport-popper {
+    width: 100%;
+    min-width: var(--radix-select-trigger-width);
+  }
+  .qv-select-scroll-button {
+    display: flex;
+    cursor: default;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-1) 0;
+  }
+  .qv-select-item {
+    position: relative;
+    display: flex;
+    width: 100%;
+    cursor: default;
+    user-select: none;
+    align-items: center;
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-8);
+    font-size: var(--fs-sm);
+    color: var(--text-primary);
+    outline: none;
+  }
+  .qv-select-item[data-highlighted] {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .qv-select-item[data-disabled] {
+    pointer-events: none;
+    opacity: 0.5;
+  }
+  .qv-select-item-indicator {
+    position: absolute;
+    left: var(--space-2);
+    display: inline-flex;
+    height: 0.875rem;
+    width: 0.875rem;
+    align-items: center;
+    justify-content: center;
+  }
+  .qv-select-item-check {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  /* ---- Dialog (Radix facade) ---- */
+  .qv-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(2, 6, 23, 0.66);
+  }
+  .qv-dialog-content {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    z-index: 50;
+    display: grid;
+    width: 100%;
+    max-width: 32rem;
+    transform: translate(-50%, -50%);
+    gap: var(--space-4);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    padding: var(--space-6);
+    color: var(--text-primary);
+    box-shadow: var(--elevation-4);
+  }
+  .qv-dialog-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    text-align: left;
+  }
+  .qv-dialog-footer {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: var(--space-2);
+  }
+  .qv-dialog-title {
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    line-height: 1;
+  }
+  .qv-dialog-description {
+    font-size: var(--fs-sm);
+    color: var(--text-muted);
+  }
+  .qv-dialog-close {
+    position: absolute;
+    right: var(--space-4);
+    top: var(--space-4);
+    display: inline-flex;
+    border-radius: var(--radius-sm);
+    opacity: 0.7;
+    color: var(--text-secondary);
+    transition: opacity var(--duration-fast);
+  }
+  .qv-dialog-close:hover {
+    opacity: 1;
+  }
+  .qv-dialog-close:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: var(--ring-offset);
+  }
+  .qv-dialog-close-icon {
+    width: 1rem;
+    height: 1rem;
+  }
+  @media (min-width: 640px) {
+    .qv-dialog-footer {
+      flex-direction: row;
+      justify-content: flex-end;
+    }
+  }
+
+  /* ---- screen-reader-only helper (dialog close label) ---- */
+  .qv-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* ---- Popover (Radix facade) ---- */
+  .qv-popover-content {
+    z-index: 50;
+    width: 18rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    padding: var(--space-4);
+    color: var(--text-primary);
+    box-shadow: var(--elevation-3);
+    backdrop-filter: blur(var(--glass-blur));
+    outline: none;
+  }
+
+  /* ---- Tabs (Radix facade, segmented-pill look) ---- */
+  .qv-tabs-list {
+    position: relative;
+    display: inline-flex;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    border-radius: var(--radius-md);
+    background: var(--surface-data);
+    padding: var(--space-1);
+    color: var(--text-muted);
+  }
+  .qv-tabs-trigger {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    color: var(--text-secondary);
+    transition: color var(--duration-fast), background var(--duration-fast);
+  }
+  .qv-tabs-trigger:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: var(--ring-offset);
+  }
+  .qv-tabs-trigger[data-state="active"] {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: var(--elevation-1);
+  }
+  .qv-tabs-trigger[data-disabled] {
+    pointer-events: none;
+    opacity: 0.5;
+  }
+  .qv-tabs-content {
+    margin-top: var(--space-4);
+  }
+  .qv-tabs-content:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: var(--ring-offset);
+  }
+
+  /* ---- Tooltip (Radix facade) ---- */
+  .qv-tooltip-content {
+    z-index: 50;
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--glass-border);
+    background: var(--surface-raised);
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--fs-xs);
+    color: var(--text-primary);
+    box-shadow: var(--elevation-2);
+  }
+
+/* =====================================================================
+   K4-4 — shared feedback + table/list-row barrel
+   =====================================================================
+   The `.qv-table*` / `.qv-list-row*` / `.qv-skeleton-*` vocabulary backing the
+   net-new host wrappers (src/components/ui/{table,list-row}.tsx +
+   src/components/feedback/skeletons.tsx) that mirror the LSAT primitives'
+   module names + prop surfaces. Like the K4-2 block above, these render HOST
+   tokens (`--border` / `--bg-card` / `--bg-hover` / `--ring` / `--space-*` /
+   `--radius-*` / elevation) so a later reskin can swap an
+   `@lsat/components/ui/{table,list-row}` or `@lsat/components/states` skeleton
+   import for the host one and inherit the QuantVault look with no class churn.
+
+   Additive + self-contained: every selector here is net-new, and the wrappers
+   are not yet imported anywhere, so this block changes nothing in the running
+   app until a screen opts in. Plain top-level CSS (NOT wrapped in
+   `@layer components`) for the same reason as the K4-2 block: the host
+   index.css is not Tailwind-processed. */
+
+  /* ---- Table (semantic <table>, host surface) ---- */
+  .qv-table-wrapper {
+    position: relative;
+    width: 100%;
+    overflow: auto;
+  }
+  .qv-table {
+    width: 100%;
+    caption-side: bottom;
+    font-size: var(--fs-sm);
+    border-collapse: collapse;
+    color: var(--text-primary);
+  }
+  .qv-table-header .qv-table-row {
+    border-bottom: 1px solid var(--border);
+  }
+  .qv-table-body .qv-table-row:last-child {
+    border-bottom: 0;
+  }
+  .qv-table-footer {
+    border-top: 1px solid var(--border);
+    background: var(--surface-data);
+    font-weight: var(--fw-medium);
+  }
+  .qv-table-footer .qv-table-row:last-child {
+    border-bottom: 0;
+  }
+  .qv-table-row {
+    border-bottom: 1px solid var(--border);
+    transition: background var(--duration-fast) var(--ease-out);
+  }
+  .qv-table-body .qv-table-row:hover {
+    background: var(--bg-hover);
+  }
+  .qv-table-row[data-state="selected"] {
+    background: var(--bg-hover);
+  }
+  .qv-table-head {
+    height: 2.5rem;
+    padding: var(--space-2);
+    text-align: left;
+    vertical-align: middle;
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    color: var(--text-muted);
+  }
+  .qv-table-cell {
+    padding: var(--space-2);
+    vertical-align: middle;
+  }
+  .qv-table-caption {
+    margin-top: var(--space-4);
+    font-size: var(--fs-sm);
+    color: var(--text-muted);
+  }
+
+  /* ---- ListRow (dense data row; renders as <button> when clickable) ---- */
+  /* `--qv-row-h` is the host fallback for the LSAT `--row-h` density token: a
+     reskin under the LSAT shell inherits `--row-h`, but in the host context this
+     keeps the row height self-contained. */
+  .qv-list-row {
+    --qv-row-h: var(--row-h, 2.25rem);
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: var(--space-3);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+    background: var(--bg-card);
+    padding: var(--space-2) var(--space-4);
+    min-height: calc(var(--qv-row-h) * 1.6);
+    text-align: left;
+    color: var(--text-primary);
+  }
+  /* Reset the host `.btn`-free button defaults when ListRow renders a <button>. */
+  button.qv-list-row {
+    font: inherit;
+    cursor: default;
+  }
+  .qv-list-row-interactive {
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-out);
+  }
+  .qv-list-row-interactive:hover {
+    background: var(--bg-hover);
+  }
+  .qv-list-row-interactive:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px hsl(var(--ring));
+  }
+  .qv-list-row-leading {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+  }
+  .qv-list-row-main {
+    min-width: 0;
+    flex: 1;
+    display: grid;
+    gap: 2px;
+  }
+  .qv-list-row-title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: var(--fw-medium);
+    line-height: var(--lh-snug);
+  }
+  .qv-list-row-meta {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+  }
+  .qv-list-row-trailing {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  /* ---- Route-shaped skeletons ---- */
+  /* A card-shaped skeleton block: the host `.skeleton-card` is a fixed-height
+     shimmer block, so route skeletons need a *container* that stacks several
+     <Skeleton> lines on a host surface. */
+  .qv-skeleton-card {
+    display: grid;
+    gap: var(--space-3);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+    background: var(--bg-card);
+    padding: var(--space-4);
+  }
+  .qv-skeleton-card-grid {
+    display: grid;
+    gap: var(--space-4);
+    grid-template-columns: 1fr;
+  }
+  .qv-skeleton-detail-grid {
+    display: grid;
+    gap: var(--space-4);
+    grid-template-columns: 1fr;
+  }
+  .qv-skeleton-detail-main {
+    grid-column: auto;
+  }
+  .qv-skeleton-page-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+  .qv-skeleton-page-header-lead {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .qv-skeleton-hero-band {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+    background: var(--bg-card);
+    padding: var(--space-5);
+  }
+  .qv-skeleton-dashboard-row {
+    display: grid;
+    gap: var(--space-6);
+    grid-template-columns: 1fr;
+  }
+  .qv-skeleton-dashboard-grid {
+    display: grid;
+    gap: var(--space-6);
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 640px) {
+    .qv-skeleton-card-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (min-width: 768px) {
+    .qv-skeleton-dashboard-row {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .qv-skeleton-dashboard-wide {
+      grid-column: span 2;
+    }
+    .qv-skeleton-dashboard-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (min-width: 1024px) {
+    .qv-skeleton-card-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .qv-skeleton-detail-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .qv-skeleton-detail-main {
+      grid-column: span 2;
+    }
+  }
