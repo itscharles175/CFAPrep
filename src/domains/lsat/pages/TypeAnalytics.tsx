@@ -1,9 +1,9 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { Crosshair } from "lucide-react";
 import { PageLayout } from "@lsat/components/page-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { GapDumbbell, type GapRow } from "@lsat/components/viz";
 import { EmptyState, SkeletonChart } from "@lsat/components/states";
 import { useTypeAnalytics } from "@lsat/lib/hooks";

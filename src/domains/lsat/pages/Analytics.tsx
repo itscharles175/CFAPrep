@@ -10,9 +10,9 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TrendChart } from "@lsat/components/viz";
 import { avg, inRange, splitTrendPeriods } from "@lsat/lib/dateRange";
 import {

@@ -1,10 +1,11 @@
-import { BookMarked, Clock, Map, RefreshCw, SearchCheck } from "lucide-react";
+import { Clock, Map, RefreshCw, SearchCheck } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PageLayout, PageSection } from "@lsat/components/page-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+import { PageSection } from "@lsat/components/page-layout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/ui/Primitives";
 import { Progress } from "@lsat/components/ui/progress";
 import { Icon } from "@lsat/components/ui/icon";
 import { api } from "@lsat/lib/api";
@@ -29,14 +30,22 @@ export default function RcLab() {
   }
 
   return (
-    <PageLayout
-      title="RC Lab"
-      eyebrow="Content intelligence"
-      icon={BookMarked}
-      width="2xl"
-      description="Passage structure, paragraph roles, and RC timing evidence in one reader-first workspace."
-    >
-      {(usingSample || hasQueryError) && (
+    // K4-9 — host chrome bridge. The page previously routed through the LSAT
+    // `PageLayout` (eyebrow + serif title + graphite icon chip + a centered
+    // `max-w-6xl` reading column from `width="2xl"`). On host primitives that maps
+    // to the host `PageHeader` (eyebrow → badge, description → subtitle) inside the
+    // host `.page-container`, with the `max-w-6xl` column preserved via an inner
+    // `mx-auto` wrapper so the dashboard keeps its width/layout. The `BookMarked`
+    // header chip is dropped (host headers have no icon slot) — an intentional
+    // skin delta. Behaviour and child markup are unchanged.
+    <div className="page-container">
+      <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
+        <PageHeader
+          badge="Content intelligence"
+          title="RC Lab"
+          subtitle="Passage structure, paragraph roles, and RC timing evidence in one reader-first workspace."
+        />
+        {(usingSample || hasQueryError) && (
         <div
           role="status"
           className={
@@ -194,8 +203,9 @@ export default function RcLab() {
             </Card>
           )}
         </div>
-      </PageSection>
-    </PageLayout>
+        </PageSection>
+      </div>
+    </div>
   );
 }
 

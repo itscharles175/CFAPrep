@@ -16,9 +16,9 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Icon } from "@lsat/components/ui/icon";
 import { Textarea } from "@lsat/components/ui/textarea";
 import {
@@ -27,7 +27,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@lsat/components/ui/select";
+} from "@/components/ui/select";
 import { AnnotatedText } from "@lsat/components/question/annotated-text";
 import { ReadingControls } from "@lsat/components/question/reading-controls";
 import { TypeBadge } from "@lsat/components/viz";

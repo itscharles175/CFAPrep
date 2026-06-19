@@ -1,20 +1,21 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, BrainCircuit, MessageSquare, RotateCcw, Sparkles, Square } from "lucide-react";
+import { Bot, MessageSquare, RotateCcw, Sparkles, Square } from "lucide-react";
 import { toast } from "sonner";
-import { PageLayout, PageSection } from "@lsat/components/page-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Input } from "@lsat/components/ui/input";
+import { PageSection } from "@lsat/components/page-layout";
+import { PageHeader } from "@/components/ui/Primitives";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@lsat/components/ui/select";
+} from "@/components/ui/select";
 import { Textarea } from "@lsat/components/ui/textarea";
-import { Badge } from "@lsat/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { api } from "@lsat/lib/api";
 import { useAdaptivityPlan, useReadinessStatus } from "@lsat/lib/hooks";
 import { useSocraticStream } from "@lsat/hooks/useSocraticStream";
@@ -263,14 +264,14 @@ export default function Tutor() {
   }, [socratic.error]);
 
   return (
-    <PageLayout
-      title="Tutor"
-      eyebrow="Socratic Blind Review"
-      icon={BrainCircuit}
-      width="2xl"
-      description="Local-only why loops, rationale memory, Socratic turns, and concept-gap remediation."
-      actions={<Button variant="outline" onClick={createCards}><RotateCcw className="h-4 w-4" aria-hidden /> Create SRS cards</Button>}
-    >
+    <div className="page-container">
+      <PageHeader
+        eyebrow="Socratic Blind Review"
+        title="Tutor"
+        subtitle="Local-only why loops, rationale memory, Socratic turns, and concept-gap remediation."
+        actions={<Button variant="outline" onClick={createCards}><RotateCcw className="h-4 w-4" aria-hidden /> Create SRS cards</Button>}
+      />
+      <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <Card>
           <CardHeader>
@@ -450,6 +451,7 @@ export default function Tutor() {
           </PageSection>
         </div>
       </div>
-    </PageLayout>
+      </div>
+    </div>
   );
 }

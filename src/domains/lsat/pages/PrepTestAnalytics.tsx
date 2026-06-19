@@ -8,9 +8,9 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Progress } from "@lsat/components/ui/progress";
 import { GapDumbbell, type GapRow } from "@lsat/components/viz";
 import { EmptyState, ErrorState, SkeletonChart } from "@lsat/components/states";

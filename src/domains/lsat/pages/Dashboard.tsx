@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense, useMemo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { m, useReducedMotion } from "motion/react";
 import {
@@ -6,7 +6,6 @@ import {
   ArrowRight,
   ArrowUpRight,
   BrainCircuit,
-  LayoutDashboard,
   ShieldCheck,
   Target,
 } from "lucide-react";
@@ -15,12 +14,12 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/ui/Primitives";
 import { Icon } from "@lsat/components/ui/icon";
 import { MotionCard } from "@lsat/components/ui/motion-card";
-import { PageLayout } from "@lsat/components/page-layout";
 import { ErrorState, Skeleton } from "@lsat/components/states";
 import { DashboardSkeleton } from "@lsat/components/dashboard/dashboard-skeleton";
 import { FirstLightConsole } from "@lsat/components/dashboard/first-light-console";
@@ -94,6 +93,36 @@ function TrendIcon({ trend }: { trend: Trend }) {
   return <Icon as={ArrowRight} size="sm" className="text-muted-foreground" />;
 }
 
+/**
+ * K4-9 — host chrome bridge. Every Dashboard branch previously routed through the
+ * LSAT `PageLayout` (eyebrow + serif title + graphite `LayoutDashboard` chip + a
+ * centered `max-w-6xl` console column). On host primitives that maps to the host
+ * `PageHeader` (eyebrow → badge, same title/actions) inside the host
+ * `.page-container`, with the wide console column preserved via an inner
+ * `mx-auto max-w-6xl` wrapper so the instrument cluster keeps its layout width.
+ * The header icon chip is dropped (no host `PageHeader` icon slot) — an
+ * intentional skin delta. Behaviour is unchanged; this is the page-frame skin
+ * only.
+ */
+function DashboardShell({
+  title,
+  actions,
+  children,
+}: {
+  title: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="page-container">
+      <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
+        <PageHeader badge="Console" title={title} actions={actions} />
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const reduce = useReducedMotion();
@@ -119,18 +148,18 @@ export default function Dashboard() {
 
   if (isLoading) {
     return (
-      <PageLayout title="Welcome back" eyebrow="Console" icon={LayoutDashboard} width="2xl">
+      <DashboardShell title="Welcome back">
         <div role="status" aria-busy="true" aria-label="Loading your dashboard">
           <DashboardSkeleton />
         </div>
-      </PageLayout>
+      </DashboardShell>
     );
   }
   if (isError || !data) {
     return (
-      <PageLayout title="Dashboard" eyebrow="Console" icon={LayoutDashboard} width="2xl">
+      <DashboardShell title="Dashboard">
         <ErrorState error={error} onRetry={refetch} />
-      </PageLayout>
+      </DashboardShell>
     );
   }
 
@@ -151,14 +180,9 @@ export default function Dashboard() {
 
   if (isBrandNew) {
     return (
-      <PageLayout
-        title="First light"
-        eyebrow="Console"
-        icon={LayoutDashboard}
-        width="2xl"
-      >
+      <DashboardShell title="First light">
         <FirstLightConsole />
-      </PageLayout>
+      </DashboardShell>
     );
   }
 
@@ -209,11 +233,8 @@ export default function Dashboard() {
   );
 
   return (
-    <PageLayout
+    <DashboardShell
       title="Welcome back"
-      eyebrow="Console"
-      icon={LayoutDashboard}
-      width="2xl"
       actions={
         data.usingSample ? (
           <Badge variant="outline" className="text-muted-foreground">
@@ -480,7 +501,7 @@ export default function Dashboard() {
         <TodayPlan />
       </m.div>
     </m.div>
-    </PageLayout>
+    </DashboardShell>
   );
 }
 

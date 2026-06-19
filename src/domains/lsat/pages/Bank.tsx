@@ -15,16 +15,17 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/ui/Primitives";
 import { Checkbox } from "@lsat/components/ui/checkbox";
-import { Input } from "@lsat/components/ui/input";
-import { Label } from "@lsat/components/ui/label";
 import { Icon } from "@lsat/components/ui/icon";
-import { PageLayout, PageSection } from "@lsat/components/page-layout";
+import { PageSection } from "@lsat/components/page-layout";
 import { SystemNotice } from "@lsat/components/system-notice";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
 import { QuestionBrowser } from "@lsat/components/bank/question-browser";
 import { AnnotationInlineEditor } from "@lsat/components/review/annotation-inline-editor";
 import { BankAuditPanel } from "@lsat/components/bank/audit-panel";
@@ -216,13 +217,11 @@ export default function Bank() {
   const progressPct = Math.min(100, Math.round((total / targetTotal) * 100));
 
   return (
-    <PageLayout
-      title="Question bank"
-      eyebrow="CORPUS"
-      icon={Database}
-      description="Import research datasets, auto-tag, and grow toward your target size."
-      width="lg"
-    >
+    <div className="page-container">
+      <PageHeader
+        title="Question bank"
+        subtitle="Import research datasets, auto-tag, and grow toward your target size."
+      />
     <Tabs defaultValue="browse">
       <TabsList>
         <TabsTrigger value="browse">Browse</TabsTrigger>
@@ -575,7 +574,7 @@ export default function Bank() {
       </PageSection>
       </TabsContent>
     </Tabs>
-    </PageLayout>
+    </div>
   );
 }
 

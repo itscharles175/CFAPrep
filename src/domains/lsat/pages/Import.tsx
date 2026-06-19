@@ -6,11 +6,11 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@lsat/components/ui/checkbox";
-import { Input } from "@lsat/components/ui/input";
-import { Label } from "@lsat/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Icon } from "@lsat/components/ui/icon";
 import { PageLayout } from "@lsat/components/page-layout";
 import { SystemNotice } from "@lsat/components/system-notice";
