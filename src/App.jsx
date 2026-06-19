@@ -256,6 +256,10 @@ export default function App() {
     if (path.startsWith('/cfa')) domain = 'cfa';
     else if (path.startsWith('/excel')) domain = 'excel';
     else if (path.startsWith('/quant')) domain = 'quant';
+    // K4-accent: /lsat/* tints the cascade with the LSAT violet. Inert under the
+    // legacy shell (LsatRoot owns /lsat, not this host App), it takes effect once
+    // K4-7 mounts LSAT in the host router; SharedLayout already sets it too.
+    else if (path.startsWith('/lsat')) domain = 'lsat';
     if (domain) {
       document.body.setAttribute('data-domain', domain);
     } else {

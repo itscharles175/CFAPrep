@@ -373,6 +373,18 @@
     --color-accent-soft: var(--surface-soft);
   }
 
+  /* LSAT — violet (K4-accent). Reconciles the host cascade with the LSAT brand
+     accent (its --primary is `262 83% 60%` ≈ #8B5CF6); App.jsx + SharedLayout
+     set data-domain="lsat" on /lsat/*. Dark-theme defaults; light block below
+     tightens for AA on white. */
+  [data-domain="lsat"] {
+    --accent:        hsl(262 83% 60%);       /* #8B5CF6 */
+    --accent-hover:  hsl(258 92% 70%);       /* #A78BFA */
+    --surface-soft:  rgba(139, 92, 246, 0.12);
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+  }
+
   /* Light-theme contrast tightening — picks slightly darker hues that pass
      WCAG 2.1 AA body-text contrast against #FFFFFF surface. Triggers on the
      explicit attribute and on the system-light media branch. */
@@ -390,6 +402,11 @@
     --accent:        hsl(294.7 72.4% 39.8%); /* #A21CAF */
     --accent-hover:  hsl(295.4 70.2% 32.9%); /* #86198F */
     --surface-soft:  rgba(162, 28, 175, 0.10);
+  }
+  :root[data-theme="light"] [data-domain="lsat"] {
+    --accent:        hsl(262 83% 48%);       /* #6D28D9 — darker violet, AA on white */
+    --accent-hover:  hsl(263 70% 40%);       /* #5B21B6 */
+    --surface-soft:  rgba(109, 40, 217, 0.10);
   }
 
   /* System-theme light palette routing lives in the raw palette layer.
