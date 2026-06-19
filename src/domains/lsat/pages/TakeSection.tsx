@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Button } from "@lsat/components/ui/button";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -8,7 +8,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@lsat/components/ui/dialog";
+} from "@/components/ui/dialog";
 import { LoadingState, ErrorState } from "@lsat/components/states";
 import { PostExamWizard } from "@lsat/components/exam/post-exam-wizard";
 import { SealedBeat } from "@lsat/components/exam/sealed-beat";

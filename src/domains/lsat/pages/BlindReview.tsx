@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
-import { Button } from "@lsat/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Logo } from "@lsat/components/logo";
 import { AnnotatedText } from "@lsat/components/question/annotated-text";
 import { ReadingControls } from "@lsat/components/question/reading-controls";
@@ -32,7 +32,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@lsat/components/ui/select";
+} from "@/components/ui/select";
 import { setResume } from "@lsat/lib/resume";
 import {
   buildBrWorksheetHtml,

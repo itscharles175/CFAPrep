@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Keyboard, PlayCircle } from "lucide-react";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@lsat/components/ui/dialog";
+} from "@/components/ui/dialog";
 import { LoadingState, ErrorState } from "@lsat/components/states";
 import { PostExamHub } from "@lsat/components/exam/post-exam-hub";
 import { Ceremony } from "@lsat/components/exam/ceremony";

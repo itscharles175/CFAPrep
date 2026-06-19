@@ -15,8 +15,8 @@ import {
   Maximize2,
 } from "lucide-react";
 import { Logo } from "@lsat/components/logo";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { ChoiceList } from "@lsat/components/question/choice-list";
 import {
   LineReferenceChips,
