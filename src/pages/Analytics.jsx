@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Activity, BarChart3, Clock, Gauge, Layers, Target } from 'lucide-react';
 // ANL-5 — migrated off bare recharts onto the shared, host-styled @visx viz
-// barrel (src/domains/shared/components/viz). The recharts dep is intentionally
-// retained in package.json for now (other host code may still import it);
-// dropping the dependency is a follow-up once all host charts are migrated.
+// barrel (src/domains/shared/components/viz). K4-3 completed the migration of
+// the remaining host consumer (QuantModule.jsx) and dropped the recharts
+// dependency from package.json.
 import {
   LineTrend,
   BandTrend,

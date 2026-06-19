@@ -1,17 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useLocation, useParams, Link } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, FlaskConical, Lightbulb } from 'lucide-react';
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Line,
-  LineChart as ReLineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+// K4-3 — migrated off bare recharts onto the shared, host-styled @visx viz
+// barrel (src/domains/shared/components/viz). recharts is no longer a dependency.
+import { LineTrend } from '../shared/components/viz';
 import EmptyState from '../../components/EmptyState';
 import FormulaBlock from '../../components/FormulaBlock';
 import { quantModules } from '../../data/catalog';
@@ -196,6 +188,11 @@ function BrownianPathLab() {
       return [...points, { day: index, price: Number(next.toFixed(2)) }];
     }, []);
   }, [drift, vol]);
+  // Preserve the recharts `domain={['dataMin - 2', 'dataMax + 2']}` padding.
+  const priceDomain = useMemo(() => {
+    const prices = path.map((point) => point.price);
+    return [Math.min(...prices) - 2, Math.max(...prices) + 2];
+  }, [path]);
 
   return (
     <LabShell title="Geometric Brownian Path">
@@ -204,15 +201,15 @@ function BrownianPathLab() {
         <NumberField label="Annual Volatility" value={vol} onChange={setVol} step="0.1" suffix="%" />
       </div>
       <div className="chart-frame">
-        <ResponsiveContainer width="100%" height={240}>
-          <AreaChart data={path}>
-            <CartesianGrid stroke="rgba(148,163,184,0.12)" />
-            <XAxis dataKey="day" stroke="var(--text-muted)" />
-            <YAxis stroke="var(--text-muted)" domain={['dataMin - 2', 'dataMax + 2']} />
-            <Tooltip contentStyle={{ background: 'var(--navy-800)', border: '1px solid var(--border)' }} />
-            <Area type="monotone" dataKey="price" stroke="var(--accent)" fill="rgba(59,130,246,0.18)" />
-          </AreaChart>
-        </ResponsiveContainer>
+        <LineTrend
+          data={path}
+          xKey="day"
+          height={240}
+          yDomain={priceDomain}
+          series={[
+            { dataKey: 'price', name: 'Price', color: 'var(--accent, #60a5fa)', area: true },
+          ]}
+        />
       </div>
     </LabShell>
   );
@@ -251,16 +248,15 @@ function OptionSurfaceLab() {
         <div><small>Delta</small><strong>{model ? model.deltaCall.toFixed(3) : '-'}</strong></div>
       </div>
       <div className="chart-frame">
-        <ResponsiveContainer width="100%" height={220}>
-          <ReLineChart data={payoff}>
-            <CartesianGrid stroke="rgba(148,163,184,0.12)" />
-            <XAxis dataKey="price" stroke="var(--text-muted)" />
-            <YAxis stroke="var(--text-muted)" />
-            <Tooltip contentStyle={{ background: 'var(--navy-800)', border: '1px solid var(--border)' }} />
-            <Line type="monotone" dataKey="call" stroke="var(--success)" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="put" stroke="var(--danger)" strokeWidth={2} dot={false} />
-          </ReLineChart>
-        </ResponsiveContainer>
+        <LineTrend
+          data={payoff}
+          xKey="price"
+          height={220}
+          series={[
+            { dataKey: 'call', name: 'Call', color: 'var(--success, #34d399)', strokeWidth: 2 },
+            { dataKey: 'put', name: 'Put', color: 'var(--danger, #f87171)', strokeWidth: 2 },
+          ]}
+        />
       </div>
     </LabShell>
   );
@@ -409,15 +405,14 @@ function EfficientFrontierLab() {
         <div><small>Normal Loss Probability</small><strong>{percent(normalCdf(-ret / risk), 2)}</strong></div>
       </div>
       <div className="chart-frame">
-        <ResponsiveContainer width="100%" height={220}>
-          <ReLineChart data={frontier}>
-            <CartesianGrid stroke="rgba(148,163,184,0.12)" />
-            <XAxis dataKey="risk" stroke="var(--text-muted)" label={{ value: 'Risk %', position: 'insideBottom', offset: -4 }} />
-            <YAxis dataKey="return" stroke="var(--text-muted)" />
-            <Tooltip contentStyle={{ background: 'var(--navy-800)', border: '1px solid var(--border)' }} />
-            <Line type="monotone" dataKey="return" stroke="var(--accent)" strokeWidth={2} dot />
-          </ReLineChart>
-        </ResponsiveContainer>
+        <LineTrend
+          data={frontier}
+          xKey="risk"
+          height={220}
+          series={[
+            { dataKey: 'return', name: 'Return %', color: 'var(--accent, #60a5fa)', strokeWidth: 2, dots: true },
+          ]}
+        />
       </div>
       <div className="data-table compact-table" aria-label="Efficient frontier scenario table">
         <div><strong>Weight</strong><strong>Return</strong><strong>Risk</strong></div>
