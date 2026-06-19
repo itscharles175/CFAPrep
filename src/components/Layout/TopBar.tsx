@@ -19,6 +19,7 @@ import NavBackButton from '../NavBackButton';
 import { pushHistory } from '../../lib/navigationHistory';
 import { labelForPath } from '../../lib/navigationCrumbs';
 import { useFeatureFlag } from '../../lib/featureFlags';
+import { lsatRecentEntries, lsatRouteEntries } from '../../lib/lsatPaletteEntries';
 
 // K4-6: the LSAT shell's study/test mode, surfaced in the unified TopBar.
 export type LsatShellMode = 'study' | 'test';
@@ -179,15 +180,35 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLDivElement | null>(null);
   const searchItems = useMemo(() => buildSearchItems({ level3Pathway: activePathway }), [activePathway]);
+  // K4-cmd — fold the LSAT route vocabulary + the LSAT palette's cmdk Recents
+  // into the host palette so ONE ⌘K serves both planes. Gated on
+  // `LSAT_UNIFIED_SHELL` (default OFF): when the flag is off these arrays are
+  // empty, so the spread below leaves `commandItems` byte-for-byte identical to
+  // the pre-K4-cmd palette. Test Mode (from the shell's `lsatMode` prop) hides
+  // the LSAT routes the manifest marks `hideInTest`. The entries are `external`,
+  // so they soft-navigate cross-domain via `goToResult` → `navigateDomain`.
+  const lsatTestMode = lsatMode === 'test';
+  const lsatRoutes = useMemo<SearchResultItem[]>(
+    () => (lsatShell ? lsatRouteEntries({ testMode: lsatTestMode }) : []),
+    [lsatShell, lsatTestMode],
+  );
+  const lsatRecents = useMemo<SearchResultItem[]>(
+    () => (lsatShell ? lsatRecentEntries({ testMode: lsatTestMode }) : []),
+    [lsatShell, lsatTestMode],
+  );
   const commandItems = useMemo<SearchResultItem[]>(
     () => [
+      // Recents lead so the most-recent LSAT destinations surface first in the
+      // unified palette's default (empty-query) list when in the LSAT plane.
+      ...lsatRecents,
       ...searchItems,
       ...commandRoutes.map((item) => ({
         ...item,
         type: item.action ? 'action' : 'command',
       })),
+      ...lsatRoutes,
     ],
-    [searchItems],
+    [searchItems, lsatRoutes, lsatRecents],
   );
 
   const results = useMemo<SearchResultItem[]>(() => {

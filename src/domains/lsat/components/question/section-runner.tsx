@@ -42,7 +42,13 @@ import {
   getKeyboardMap,
   resolveExamKey,
 } from "@lsat/lib/keyboardMap";
-import { useCommandPalette } from "@lsat/components/command-palette";
+// K4-cmd — the runner no longer depends on the LSAT palette's
+// `useCommandPalette`; it registers its exam affordances through a neutral seam
+// (`useExamCommands`) its own domain owns, so the palette can be deleted (K4-13)
+// without breaking the runner. The runner's exam timing / focus / keyboard
+// behavior is unchanged — it is driven by the local keydown handler, not the
+// palette.
+import { useExamCommands } from "@lsat/lib/examCommands";
 import { cn } from "@lsat/lib/utils";
 import {
   adjustedTimeLimitSec,
@@ -545,8 +551,10 @@ export function SectionRunner({
     return () => window.removeEventListener("keydown", onKey);
   }, [index, questions, cur.answer, cur.flagged, select, toggleEliminate, setCur, go]);
 
-  // Command-palette actions (docs prompt §4.2 / §4.5 / §4.3).
-  const { register } = useCommandPalette();
+  // Command-palette actions (docs prompt §4.2 / §4.5 / §4.3). Registered via the
+  // neutral `useExamCommands` seam (K4-cmd): identical commands, but no hard
+  // dependency on the LSAT palette.
+  const { register } = useExamCommands();
   useEffect(() => {
     return register([
       {

@@ -39,6 +39,20 @@ export function useCommandPalette() {
   return ctx;
 }
 
+/**
+ * K4-cmd — non-throwing variant of {@link useCommandPalette}. Returns the palette
+ * context when a `<CommandPaletteProvider>` is mounted above, otherwise `null`.
+ *
+ * This is the SEAM that lets exam-scoped command registration be optional: a
+ * consumer (the section runner, via its neutral `useExamCommands` shim) can
+ * register exam commands when the legacy LSAT palette is present, and quietly
+ * register nothing when it is not — so the palette can be removed (K4-13)
+ * without the runner crashing on a missing provider.
+ */
+export function useOptionalCommandPalette(): CommandPaletteState | null {
+  return useContext(Ctx);
+}
+
 export function CommandPaletteProvider({
   children,
   initialActions = [],
