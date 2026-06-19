@@ -9,10 +9,13 @@ import {
   Binary, Sigma, Flame, GitBranch, Target, Cpu, BrainCircuit,
   FileSpreadsheet, Code, Gauge,
   Inbox, NotebookTabs, BadgeCheck, ClipboardList, FileSearch, HardDrive, Sun, Network,
+  Scale, BookMarked, Clock, Database, Download, Flag, ListMusic, RotateCcw, Settings, ShieldCheck,
 } from 'lucide-react';
 import { cfaTopics, excelModules, quantModules } from '../../data/catalog';
 import { appRoutes } from '../../routes/routeManifest';
 import type { AppRoute } from '../../routes/routeManifest';
+import { useFeatureFlag } from '../../lib/featureFlags';
+import { buildLsatNavGroups, type LsatNavMode } from '../../lib/lsatNavSection';
 
 type LucideIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 
@@ -58,6 +61,21 @@ const routeIconMap: Record<string, LucideIcon> = {
   'hard-drive': HardDrive,
   sun: Sun,
   network: Network,
+  // K4-6: icon keys carried by the merged LSAT routes (lsatAppRoutes). Mapped
+  // here so the flag-gated LSAT section resolves the same lucide glyphs the
+  // legacy LSAT rail uses.
+  'book-open': BookOpen,
+  'book-marked': BookMarked,
+  'brain-circuit': BrainCircuit,
+  clock: Clock,
+  database: Database,
+  download: Download,
+  flag: Flag,
+  'list-music': ListMusic,
+  'rotate-ccw': RotateCcw,
+  settings: Settings,
+  'shield-check': ShieldCheck,
+  target: Target,
 };
 
 const sidebarToolRouteIds = ['today', 'review', 'flashcards', 'vault', 'mock', 'analytics', 'knowledge-graph', 'calculators', 'formulas', 'content-ops', 'system'];
@@ -134,12 +152,96 @@ function SidebarSection({ label, icon: Icon, basePath, items, collapsed, onNavig
   );
 }
 
+/**
+ * K4-6 — the unified shell's LSAT navigation section (Phase 1 of Keystone K4).
+ *
+ * Renders the vendored LSAT surface (from `lsatAppRoutes`) as ONE collapsible
+ * host Sidebar section, its rows grouped by `navGroup` (Practice / Insight /
+ * Setup) via `buildLsatNavGroups`, honoring the active `mode` (Test Mode hides
+ * the `hideInTest` rows). It mounts ONLY when `LSAT_UNIFIED_SHELL` is on — the
+ * caller already flag-gates it, so the default render never includes this.
+ *
+ * The section header soft-navigates cross-domain to `/lsat` (the LSAT plane has
+ * no host router yet — that's K4-7), and the rows do too; in this dormant phase
+ * the section is a styled, byte-additive nav block that the legacy shell never
+ * shows.
+ */
+function LsatSidebarSection({
+  collapsed,
+  mode = 'study',
+  onNavigate,
+}: {
+  collapsed?: boolean;
+  mode?: LsatNavMode;
+  onNavigate?: () => void;
+}) {
+  const location = useLocation();
+  const isActive = location.pathname === '/lsat' || location.pathname.startsWith('/lsat/');
+  const [expanded, setExpanded] = useState(isActive);
+  const groups = buildLsatNavGroups(mode);
+
+  return (
+    <div className="sidebar-section">
+      <NavLink
+        to="/lsat"
+        className={`sidebar-link ${isActive ? 'active' : ''}`}
+        onClick={(e) => {
+          if (!collapsed) {
+            e.preventDefault();
+            setExpanded(!expanded);
+          } else {
+            onNavigate?.();
+          }
+        }}
+      >
+        <Scale />
+        {!collapsed && (
+          <>
+            <span style={{ flex: 1 }}>LSAT</span>
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </>
+        )}
+      </NavLink>
+
+      {!collapsed && expanded && (
+        <div className="sidebar-sub-links">
+          {groups.map((group) => (
+            <div key={group.group} className="sidebar-section">
+              <div className="sidebar-section-label">{group.label}</div>
+              {group.items.map((item) => {
+                const Icon = routeIconMap[item.iconKey] || Gauge;
+                return (
+                  <NavLink
+                    key={item.id}
+                    to={item.path}
+                    onClick={onNavigate}
+                    className={({ isActive: active }) => `sidebar-link ${active ? 'active' : ''}`}
+                  >
+                    <Icon size={14} />
+                    <span>{item.label}</span>
+                  </NavLink>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface SidebarProps {
   collapsed?: boolean;
   open?: boolean;
   mobileHidden?: boolean;
   onToggle?: () => void;
   onNavigate?: () => void;
+  /**
+   * K4-6: active LSAT mode (study/test). Only consumed by the flag-gated LSAT
+   * section (when `LSAT_UNIFIED_SHELL` is on) to hide `hideInTest` rows in Test
+   * Mode. Defaults to 'study'; the legacy render ignores it entirely.
+   */
+  lsatMode?: LsatNavMode;
   /**
    * UB4: dedicated "close the mobile drawer" callback. Defaults to `onNavigate`
    * when omitted so the existing App shell wiring (which closes the drawer in
@@ -161,7 +263,13 @@ export default function Sidebar({
   onToggle,
   onNavigate,
   onClose,
+  lsatMode = 'study',
 }: SidebarProps) {
+  // K4-6: gate the LSAT section behind `LSAT_UNIFIED_SHELL` (default OFF). When
+  // off, every branch below is identical to today's render — no LSAT section,
+  // no extra section label. The hook reads synchronously (pre-paint) so there's
+  // no flash, and re-renders live if a dev flips the flag.
+  const lsatShell = useFeatureFlag('LSAT_UNIFIED_SHELL');
   // UB4: swipe-to-close. We track the pointer-down origin and, on release,
   // close the drawer when the gesture is a deliberate leftward swipe. Falls back
   // to `onNavigate` so the current shell (which uses onNavigate to close) works
@@ -264,6 +372,16 @@ export default function Sidebar({
             );
           })}
         </div>
+
+        {/* K4-6: the unified shell's 4th nav section — the merged LSAT surface.
+            Flag-gated (default OFF) so the legacy render is byte-for-byte
+            unchanged; only `LSAT_UNIFIED_SHELL` on mounts it. */}
+        {lsatShell && (
+          <>
+            {!collapsed && <div className="sidebar-section-label">LSAT Lab</div>}
+            <LsatSidebarSection collapsed={collapsed} mode={lsatMode} onNavigate={onNavigate} />
+          </>
+        )}
       </nav>
     </aside>
   );
