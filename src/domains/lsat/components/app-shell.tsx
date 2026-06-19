@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { saveScroll, restoreScroll } from "@lsat/lib/scrollRestore";
 import { prefetchRoute } from "@lsat/lib/routePrefetch";
 import { m, useReducedMotion } from "motion/react";
@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Flame,
   type LucideIcon,
+  Menu,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -16,6 +17,10 @@ import {
 // Host-side cross-domain navigation (Plan S6). The `@` alias resolves to /src
 // (host), so the vendored domain can soft-hop back to the StudyVault host.
 import { navigateDomain } from "@/lib/domainNav";
+// UX-4 — shared cross-domain navigation history + history-aware back resolver.
+import { performBack, resolveBack } from "@/lib/history-aware-back";
+import { useNavigationHistory } from "@/lib/navigationHistory";
+import { recordLsatVisit, toHostPath } from "@lsat/lib/navigationHistory";
 import { cn, countLabel } from "@lsat/lib/utils";
 import { Logo } from "@lsat/components/logo";
 import { Icon } from "@lsat/components/ui/icon";
@@ -30,6 +35,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@lsat/components/ui/tooltip";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@lsat/components/ui/sheet";
 import { useTheme } from "@lsat/components/theme-provider";
 import { useMode } from "@lsat/components/mode-provider";
 import {
@@ -49,6 +59,11 @@ import { manifestRoutesByGroup, type RouteManifestEntry } from "@lsat/lib/routeM
 const SIDEBAR_COLLAPSED_KEY = "lsatlab.sidebarCollapsed";
 // The rail auto-collapses below this width unless the user has pinned it open.
 const NARROW_QUERY = "(max-width: 1100px)";
+// UX-5 — below the Tailwind `sm` breakpoint the persistent rail is hidden
+// entirely (`hidden sm:flex`), so on phones the only way to reach navigation is
+// an off-canvas drawer. This query matches that breakpoint so the hamburger +
+// drawer appear exactly where the rail disappears (host drawer parity).
+const MOBILE_QUERY = "(max-width: 639px)";
 const APP_VERSION = `v${import.meta.env.VITE_APP_VERSION ?? "dev"}`;
 
 interface NavItem {
@@ -295,15 +310,82 @@ function useRailCollapsed(): [boolean, () => void] {
   return [collapsed, toggle];
 }
 
+/**
+ * UX-5 — `true` while the viewport is below the `sm` breakpoint (where the
+ * persistent rail is hidden). matchMedia-driven, mirroring `useRailCollapsed`'s
+ * SSR-safe init + addEventListener/addListener fallback, so the host and LSAT
+ * shells observe their mobile state the same way.
+ */
+function useIsMobile(): boolean {
+  const [mobile, setMobile] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(MOBILE_QUERY).matches,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function")
+      return;
+    const mql = window.matchMedia(MOBILE_QUERY);
+    const onChange = () => setMobile(mql.matches);
+    onChange();
+    if (mql.addEventListener) mql.addEventListener("change", onChange);
+    else mql.addListener(onChange);
+    return () => {
+      if (mql.removeEventListener) mql.removeEventListener("change", onChange);
+      else mql.removeListener(onChange);
+    };
+  }, []);
+  return mobile;
+}
+
 export function AppShell() {
   const [collapsed, toggleCollapsed] = useRailCollapsed();
+  const isMobile = useIsMobile();
+  // UX-5 — off-canvas mobile drawer (host Sidebar parity). Below `sm` the
+  // persistent rail is hidden, so this Sheet is the only path to navigation.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { resolved, setTheme } = useTheme();
   const { mode, setMode } = useMode();
   const { data: dash } = useDashboard();
   const location = useLocation();
+  const navigate = useNavigate();
 
   // In Test Mode the shell is intentionally calm and hides streak/score.
   const testMode = mode === "test";
+
+  // UX-5 — close-on-navigate (host drawer parity): any route change dismisses
+  // the drawer, so tapping a nav row both navigates and closes. Also force it
+  // shut once the viewport grows back past the breakpoint (the persistent rail
+  // takes over), so it can't linger as an orphaned overlay.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+  useEffect(() => {
+    if (!isMobile) setMobileNavOpen(false);
+  }, [isMobile]);
+
+  // UX-4 — record each LSAT in-plane navigation on the SHARED cross-domain trail
+  // (prefixing the `/lsat` basename), so the unified Back button can hop back
+  // out to the host plane and the trail stays consistent across both routers.
+  useEffect(() => {
+    recordLsatVisit(location.pathname);
+  }, [location.pathname]);
+
+  // Subscribe to the trail so the Back affordance re-resolves as it changes.
+  useNavigationHistory();
+  // The full host-served path (with `/lsat`) is what the resolver reasons about.
+  const back = resolveBack(toHostPath(location.pathname));
+  const backLabel = back.canGoBack && back.target ? `Back to ${back.target.label}` : "Back to StudyVault";
+  // Same-domain back stays inside the LSAT router; cross-domain hops are handled
+  // by performBack via navigateDomain. With no trail to fall back on (e.g. a
+  // fresh deep-link straight into /lsat), preserve the original behavior: hop to
+  // the StudyVault host root.
+  const onBack = () => {
+    if (!performBack(toHostPath(location.pathname), () => navigate(-1))) {
+      navigateDomain("/");
+    }
+  };
 
   return (
     // R9 (docs/19 F1.1): `data-app-root` opts the shell into Mica transparency
@@ -340,32 +422,38 @@ export function AppShell() {
             <span className="text-lg font-bold tracking-tight">LSAT Lab</span>
           )}
         </div>
-        {/* S6: soft-hop back to the StudyVault host (CFA/Quant/Excel). Keeps the
-            two domains feeling like one product — the host dashboard links in,
-            this links back, both without a full page reload. */}
+        {/* S6 + UX-4: history-aware back. Where the previous location is in the
+            host plane this soft-hops cross-domain (as before); where it's an
+            earlier LSAT screen it steps back in-plane. The aria-label names the
+            destination, and the label collapses to "Back to StudyVault" when
+            there's no trail yet (a fresh deep-link). Keeps the two domains
+            feeling like one product — no full page reload either way. */}
         <div className="px-2 pt-2">
           {collapsed ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => navigateDomain("/")}
-                  aria-label="Back to StudyVault"
+                  onClick={onBack}
+                  aria-label={backLabel}
                   className="flex w-full items-center justify-center rounded-md p-2 text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98] motion-reduce:active:scale-100"
                 >
                   <Icon as={ArrowLeft} size="sm" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">Back to StudyVault</TooltipContent>
+              <TooltipContent side="right">{backLabel}</TooltipContent>
             </Tooltip>
           ) : (
             <button
               type="button"
-              onClick={() => navigateDomain("/")}
+              onClick={onBack}
+              aria-label={backLabel}
               className="group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.99] motion-reduce:active:scale-100"
             >
               <Icon as={ArrowLeft} size="sm" />
-              <span>StudyVault</span>
+              <span className="truncate">
+                {back.canGoBack && back.target ? back.target.label : "StudyVault"}
+              </span>
             </button>
           )}
         </div>
@@ -401,6 +489,49 @@ export function AppShell() {
         </div>
       </aside>
 
+      {/* UX-5: off-canvas mobile navigation drawer (host Sidebar parity).
+          Reuses the Sheet primitive (Radix Dialog) for a left-slide panel with
+          an overlay scrim, focus trap, and Escape-to-close out of the box. Holds
+          the same back affordance, command launcher, and nav rail the desktop
+          rail shows — always expanded inside the drawer. Close-on-navigate is
+          driven by the location effect above. Only meaningfully reachable below
+          `sm` (the trigger is `sm:hidden`); we still gate `open` on `isMobile` so
+          it can't be left open across a resize. */}
+      <Sheet open={mobileNavOpen && isMobile} onOpenChange={setMobileNavOpen}>
+        <SheetContent
+          id="lsat-mobile-drawer"
+          side="left"
+          className="w-72 max-w-[85vw] gap-0 p-0"
+          aria-label="Navigation"
+        >
+          <div className="flex h-14 items-center gap-2 border-b px-4">
+            <Logo className="h-6 w-6" />
+            <SheetTitle className="text-lg font-bold tracking-tight">
+              LSAT Lab
+            </SheetTitle>
+          </div>
+          <div className="px-2 pt-2">
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label={backLabel}
+              className="group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.99] motion-reduce:active:scale-100"
+            >
+              <Icon as={ArrowLeft} size="sm" />
+              <span className="truncate">
+                {back.canGoBack && back.target ? back.target.label : "StudyVault"}
+              </span>
+            </button>
+          </div>
+          <div className="px-2 pt-2">
+            <CommandAffordance collapsed={false} />
+          </div>
+          <div className="scroll-thin flex-1 overflow-y-auto">
+            <NavRail collapsed={false} />
+          </div>
+        </SheetContent>
+      </Sheet>
+
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* R9 (docs/19 F5): the top header sheds its redundant window title (now
             centered in the titlebar) and carries only contextual controls:
@@ -408,7 +539,32 @@ export function AppShell() {
             unifies it with the titlebar under Mica. */}
         <header className="chrome-glass flex h-14 items-center justify-between border-b px-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
+            {/* UX-5: mobile menu button — only below `sm`, where the persistent
+                rail is hidden. Opens the off-canvas drawer (host hamburger
+                parity). `aria-controls` points at the drawer panel id. */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0 sm:hidden"
+              aria-label="Open navigation"
+              aria-expanded={mobileNavOpen}
+              aria-controls="lsat-mobile-drawer"
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <Icon as={Menu} size="md" />
+            </Button>
             <ModeToggle mode={mode} onChange={setMode} />
+            {/* UX-4: domain badge — names the active plane (LSAT) so the unified
+                window always says which app it's showing, matching the host
+                shell's DomainIndicator. role="status" for SR announcement. */}
+            <Badge
+              variant="secondary"
+              role="status"
+              aria-label="Active domain: LSAT Lab"
+              className="hidden shrink-0 sm:inline-flex"
+            >
+              LSAT
+            </Badge>
             {/* R9 (docs/19 F5): router-driven breadcrumb wakes the dormant
                 primitive and gives the (otherwise empty) header "where am I"
                 context with a clickable trail. Renders nothing on the root. */}

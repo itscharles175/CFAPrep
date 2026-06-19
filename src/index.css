@@ -577,6 +577,24 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   gap: var(--space-4);
 }
 
+/* UX-5: deep-link target wrapper + transient highlight ring. The wrapper is a
+   plain grid item; the contained .review-item-card keeps its own flex layout
+   and fills it (the wrapper adds no chrome of its own when not highlighted). */
+.review-item-deeplink-target {
+  display: block;
+  border-radius: var(--radius-lg);
+}
+.review-item-deeplinked {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  animation: reviewDeepLinkFlash 2.2s var(--ease-out);
+}
+@keyframes reviewDeepLinkFlash {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  35% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+
 .forecast-strip,
 .coverage-grid {
   display: grid;
@@ -2750,6 +2768,96 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   position: relative;
 }
 
+/* UX-4 — shared shell chrome: history-aware Back + breadcrumb + domain badge.
+   A min-width:0 flex cluster so the breadcrumb can truncate before it shoves the
+   search box; the Back button and badge stay fixed-size at the ends. */
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.nav-back-button {
+  flex-shrink: 0;
+}
+
+/* The breadcrumb trail — token-driven so it tracks light/dark with the shell. */
+.breadcrumb {
+  min-width: 0;
+}
+
+.breadcrumb-list {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+.breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.breadcrumb-link {
+  display: inline-block;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm, 4px);
+  transition: color var(--duration-fast);
+}
+
+.breadcrumb-link:hover,
+.breadcrumb-link:focus-visible {
+  color: var(--text-primary);
+}
+
+.breadcrumb-current {
+  display: inline-block;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.breadcrumb-separator {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+/* Domain badge — reuses .search-result-domain token classes (already
+   theme-safe); this just lets it sit inline in the top bar without shrinking. */
+.domain-indicator {
+  flex-shrink: 0;
+}
+
+/* Compact the chrome on narrow viewports: keep Back + badge, drop the trail
+   (the breadcrumb already truncates, but below the sidebar breakpoint the row
+   is too tight). */
+@media (max-width: 900px) {
+  .topbar-breadcrumb {
+    display: none;
+  }
+}
+
 .search-popover,
 .notifications-popover {
   position: absolute;
@@ -2929,6 +3037,34 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   height: 52px;
   border-radius: var(--radius-md);
   flex-shrink: 0;
+}
+
+/* ===== Route-transition progress bar (UX-5) =====
+   A slim top bar that shows while a lazy route chunk is suspended (and a brief
+   per-navigation nudge for cached routes). Driven by <RouteProgressBar> in
+   App.jsx; CSS-only animation so the prefers-reduced-motion block below (which
+   collapses transition/animation durations) neutralizes it for free — the bar
+   then simply appears and disappears without the easing crawl. */
+.route-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 400;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+.route-progress.visible {
+  opacity: 1;
+}
+.route-progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+  transition: width var(--duration-base) var(--ease-out);
 }
 
 /* ===== Toast / Snackbar (C6) ===== */

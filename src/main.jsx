@@ -7,6 +7,8 @@ import {
   setActiveDomain,
   startStyleIsolation,
 } from './lib/domainNav';
+import { pushHistory } from './lib/navigationHistory';
+import { labelForPath } from './lib/navigationCrumbs';
 
 // StudyVault is two large apps sharing one window + bundle: the CFA/Quant/Excel
 // host and the vendored LSAT domain. Each keeps its OWN router + design system.
@@ -30,8 +32,24 @@ function DomainFallback() {
 function StudyVaultRoot() {
   const [pathname, setPathname] = useState(() => window.location.pathname);
 
+  // UX-4 — seed the shared navigation trail with the initial location so the
+  // unified Back button has a starting point (the per-plane shells refine the
+  // label once their router context mounts; pushHistory de-dupes same-path).
   useEffect(() => {
-    const sync = () => setPathname(window.location.pathname);
+    const initial = window.location.pathname;
+    pushHistory({ path: initial, domain: domainForPath(initial), label: labelForPath(initial) });
+  }, []);
+
+  useEffect(() => {
+    const sync = () => {
+      setPathname(window.location.pathname);
+      // UX-4 — record browser back/forward (incl. across the domain boundary)
+      // on the shared trail at the root level, where both planes' popstate is
+      // observable. The mounted shell's own route effect also records, but this
+      // guarantees coverage even if a swap unmounts the recorder mid-pop.
+      const path = window.location.pathname;
+      pushHistory({ path, domain: domainForPath(path), label: labelForPath(path) });
+    };
     // popstate = browser back/forward (incl. crossing the domain boundary);
     // DOMAIN_NAV_EVENT = our programmatic cross-domain hops.
     //

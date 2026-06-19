@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Activity, CalendarClock, Gauge, ListChecks, Wrench } from 'lucide-react';
 import { EmptyPanel, MetricCard, PageHeader, ReviewItemCard, SegmentedControl, StatusBadge, Surface } from '../components/ui/Primitives';
 import { SkeletonList } from '../components/feedback';
@@ -29,13 +29,33 @@ const filters = [
   { value: 'unfinished-lesson', label: 'Lessons' },
 ];
 
+// UX-5 — the filter slice names that the `filter` deep-link param accepts. Built
+// from the same `filters` list the SegmentedControl renders so the URL contract
+// and the UI can't drift. An unknown / absent param falls back to "all".
+const VALID_FILTERS = new Set(filters.map((f) => f.value));
+
 export default function ReviewInbox() {
   const [activePathway] = useLevel3Pathway();
+  // UX-5 — deep-link support, mirroring the LSAT Review page's `tab` param.
+  // `?filter=` opens a specific inbox slice; `?item=` scrolls to + highlights a
+  // specific queue item once the list resolves. The filter lives in the URL so
+  // the slice is shareable/bookmarkable and survives a refresh, and so the ⌘K
+  // palette / cross-domain notification surface can link straight to a slice.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filterParam = searchParams.get('filter');
+  const deepLinkItemId = searchParams.get('item');
   const [items, setItems] = useState([]);
   const [readiness, setReadiness] = useState([]);
   const [studyPlan, setStudyPlan] = useState(null);
   const [forecast, setForecast] = useState([]);
-  const [filter, setFilter] = useState('all');
+  // UX-5 — the active slice is DERIVED from the URL (the single source of
+  // truth), so a deep-link / ⌘K / back-forward change reflects on the next
+  // render without a state-sync effect. `changeFilter` only writes the param.
+  const filter = filterParam && VALID_FILTERS.has(filterParam) ? filterParam : 'all';
+  // Ref to the deep-linked item's wrapper so we can scroll it into view + flash
+  // a highlight once the queue content (not the skeleton) is on screen.
+  const deepLinkRef = useRef(null);
+  const deepLinkHandled = useRef(false);
   const [message, setMessage] = useState('');
   const [tutorResponse, setTutorResponse] = useState(null);
   const [targetLevel, setTargetLevel] = useState('level1');
@@ -129,6 +149,32 @@ export default function ReviewInbox() {
     };
   }, [activePathway]);
 
+  // UX-5 — filter changes flow through the URL so the active slice is a deep
+  // link. We merge into the existing params (preserving any `item` target) and
+  // drop the param entirely for the default "all" so the canonical URL stays
+  // clean. `replace` avoids stacking a history entry per filter tap.
+  const changeFilter = useCallback(
+    (next) => {
+      setSearchParams(
+        (prev) => {
+          const merged = new URLSearchParams(prev);
+          if (next === 'all') merged.delete('filter');
+          else merged.set('filter', next);
+          return merged;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  // A fresh deep-link target (or filter change) should re-run the scroll +
+  // highlight below. Only a ref is reset here — the active filter is derived
+  // from the URL during render, so there is no filter state to sync.
+  useEffect(() => {
+    deepLinkHandled.current = false;
+  }, [filterParam, deepLinkItemId]);
+
   async function handleRepair() {
     const preview = await repairVaultData();
     setMessage(`Vault repair complete. ${Object.values(preview.counts).reduce((sum, count) => sum + count, 0)} rows checked.`);
@@ -149,6 +195,25 @@ export default function ReviewInbox() {
   }
 
   const visibleItems = filter === 'all' ? items : items.filter((item) => item.type === filter);
+
+  // UX-5 — once the queue (not the skeleton) is on screen and the deep-linked
+  // item is in the visible slice, scroll it into view and flash a highlight.
+  // Runs at most once per deep-link (guarded by `deepLinkHandled`) so it doesn't
+  // re-scroll on later refreshes/state changes, and it never interferes with the
+  // ReviewItemCard's own click → navigate behavior (it only touches its wrapper).
+  const deepLinkVisible =
+    deepLinkItemId != null && visibleItems.some((item) => item.id === deepLinkItemId);
+  useEffect(() => {
+    if (deepLinkHandled.current || studyPlan == null || !deepLinkVisible) return;
+    const node = deepLinkRef.current;
+    if (!node) return;
+    deepLinkHandled.current = true;
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    node.classList.add('review-item-deeplinked');
+    const timer = window.setTimeout(() => node.classList.remove('review-item-deeplinked'), 2200);
+    return () => window.clearTimeout(timer);
+  }, [deepLinkVisible, studyPlan]);
+
   const weakest = readiness[0];
   // LEARN-2: one combined "due today" count across planes — the host's local
   // queue plus the LSAT sidecar's ability-ranked due cards (0 when the sidecar
@@ -293,7 +358,9 @@ export default function ReviewInbox() {
         </div>
       </Surface>
 
-      <SegmentedControl label="Review inbox filter" options={filters} value={filter} onChange={setFilter} />
+      {/* UX-5: filter changes route through `changeFilter`, which mirrors the
+          slice into the `?filter=` deep-link param. */}
+      <SegmentedControl label="Review inbox filter" options={filters} value={filter} onChange={changeFilter} />
       {message && <p className="muted-copy">{message}</p>}
 
       {/* UX-1: reserve a deterministic min-height for the queue so the
@@ -304,7 +371,20 @@ export default function ReviewInbox() {
         {studyPlan == null ? (
           <SkeletonList rows={4} />
         ) : visibleItems.length ? (
-          visibleItems.map((item) => <ReviewItemCard key={item.id} item={item} />)
+          visibleItems.map((item) =>
+            // UX-5: wrap only the deep-linked item in a marker div so we have a
+            // scroll/highlight target (`deepLinkRef`). The card itself is
+            // unchanged — its Link click still navigates as before. The wrapper
+            // is a normal grid item carrying the highlight ring; the contained
+            // card keeps its own layout.
+            item.id === deepLinkItemId ? (
+              <div key={item.id} ref={deepLinkRef} className="review-item-deeplink-target">
+                <ReviewItemCard item={item} />
+              </div>
+            ) : (
+              <ReviewItemCard key={item.id} item={item} />
+            ),
+          )
         ) : (
           <EmptyPanel title="No items in this slice yet" description="Complete a lesson or quiz to populate the queue." tone="vault" />
         )}

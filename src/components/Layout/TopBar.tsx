@@ -13,6 +13,11 @@ import { searchAllContent, type ContentHit } from '../../lib/contentSearch';
 import { commandRoutes } from '../../routes/routeManifest';
 import { KEYBOARD_HELP_EVENT } from '../KeyboardHelp/KeyboardHelp';
 import { NotificationCenter } from './NotificationCenter';
+import NavigationBreadcrumb from '../NavigationBreadcrumb';
+import DomainIndicator from '../DomainIndicator';
+import NavBackButton from '../NavBackButton';
+import { pushHistory } from '../../lib/navigationHistory';
+import { labelForPath } from '../../lib/navigationCrumbs';
 
 // Unified shape used to render the command-palette results. Both
 // `buildSearchItems` and `commandRoutes` items conform to this, and
@@ -283,6 +288,14 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
     };
   }, [location.pathname, query]);
 
+  // UX-4 — record every host route change on the shared cross-domain trail so
+  // the unified Back button + breadcrumb stay accurate. `pushHistory` de-dupes a
+  // repeat of the current path, so this is safe alongside the cross-domain
+  // recording in navigateDomain and the popstate seed in main.jsx.
+  useEffect(() => {
+    pushHistory({ path: location.pathname, domain: 'host', label: labelForPath(location.pathname) });
+  }, [location.pathname]);
+
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
       if (!searchRef.current?.contains(event.target as Node)) setSearchOpen(false);
@@ -403,6 +416,15 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle }: Top
       >
         <Menu size={18} />
       </button>
+
+      {/* UX-4 — shared shell chrome: history-aware Back + unified breadcrumb +
+          domain badge. Back delegates same-domain hops to the host router; the
+          breadcrumb/badge are derived purely from the URL. */}
+      <div className="topbar-nav">
+        <NavBackButton onSameDomainBack={() => navigate(-1)} />
+        <NavigationBreadcrumb className="topbar-breadcrumb" />
+        <DomainIndicator className="topbar-domain" />
+      </div>
 
       <div
         ref={searchRef}
