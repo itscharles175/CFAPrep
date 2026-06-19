@@ -14,27 +14,9 @@ import './styles/unified-palette.css';
 // KaTeX CSS bundled locally from npm — the strict-offline invariant forbids
 // the cdn.jsdelivr.net `katex.min.css` that used to be linked from index.html.
 import 'katex/dist/katex.min.css';
-import { registerServiceWorker } from './registerServiceWorker';
-import { bootstrapSourceVault } from './lib/bootstrapSourceVault';
-import { bootstrapAiContent } from './lib/bootstrapAiContent';
-import { bootstrapFsrsParameters } from './lib/bootstrapFsrsParameters';
-import { bootstrapStorage } from './lib/bootstrapStorage';
-
-// App-lifetime startup side-effects. Guarded so they run once even though the
-// host tree unmounts/remounts as the user soft-switches domains.
-let hostStarted = false;
-function runHostStartupOnce() {
-  if (hostStarted) return;
-  hostStarted = true;
-  registerServiceWorker();
-  // Re-activate the user's chosen storage backend BEFORE the data bootstraps
-  // run, so they read/write through the correct driver. Falls back to Dexie.
-  bootstrapStorage().finally(() => {
-    bootstrapSourceVault();
-    bootstrapAiContent();
-    bootstrapFsrsParameters();
-  });
-}
+// K4-7: the one-time host startup now lives in a shared module so the unified
+// root (flag-ON) runs the identical bootstraps. The behavior here is unchanged.
+import { runHostStartupOnce } from './lib/hostStartup';
 
 /** The host SPA (CFA/Quant/Excel) under its own router. Mounted by the unified
  *  StudyVault root when the URL is NOT under /lsat. Default export so

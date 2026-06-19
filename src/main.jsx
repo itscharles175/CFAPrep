@@ -9,6 +9,7 @@ import {
 } from './lib/domainNav';
 import { pushHistory } from './lib/navigationHistory';
 import { labelForPath } from './lib/navigationCrumbs';
+import { selectRootShell } from './lib/rootShellSelection';
 
 // StudyVault is two large apps sharing one window + bundle: the CFA/Quant/Excel
 // host and the vendored LSAT domain. Each keeps its OWN router + design system.
@@ -23,6 +24,9 @@ const rootEl = document.getElementById('root');
 
 const HostApp = lazy(() => import('./host-entry.jsx'));
 const LsatRoot = lazy(() => import('./domains/lsat/LsatRoot.tsx'));
+// K4-7: the unified single-router root, mounted ONLY when LSAT_UNIFIED_SHELL is
+// ON. Lazy so the legacy (flag-OFF) bundle never pulls it in.
+const UnifiedRoot = lazy(() => import('./components/UnifiedRoot.tsx'));
 
 function DomainFallback() {
   // Brief, themed blank while a domain's chunk resolves on first switch.
@@ -91,12 +95,31 @@ migrateLegacyLsatTheme();
 // Apply the stored theme to <html> BEFORE React mounts so the first paint shows
 // the correct palette (avoids a one-frame wrong-theme flash).
 applyTheme(getStoredTheme());
-// Start attributing injected stylesheets to a domain before any sub-app's CSS
-// loads, seeded with the domain of the initial URL.
-startStyleIsolation(domainForPath(window.location.pathname));
 
-ReactDOM.createRoot(rootEl).render(
-  <React.StrictMode>
-    <StudyVaultRoot />
-  </React.StrictMode>,
-);
+// K4-7: resolve the root shell ONCE, pre-paint (selectRootShell reads the
+// `LSAT_UNIFIED_SHELL` flag, which resolves synchronously at module load, so this
+// never flashes the wrong root). 'legacy' by default → the split-shell path below
+// is byte-for-byte unchanged.
+const rootShell = selectRootShell();
+
+if (rootShell === 'legacy') {
+  // LEGACY PATH (flag OFF, default): unchanged. The style-isolation observer
+  // keeps only the active domain's CSS live across the HostApp <-> LsatRoot swap.
+  startStyleIsolation(domainForPath(window.location.pathname));
+  ReactDOM.createRoot(rootEl).render(
+    <React.StrictMode>
+      <StudyVaultRoot />
+    </React.StrictMode>,
+  );
+} else {
+  // UNIFIED PATH (flag ON): one host BrowserRouter routes both planes. We do NOT
+  // start the style-isolation observer — under the unified shell both design
+  // systems coexist in one document (the K4 reskin reconciles them).
+  ReactDOM.createRoot(rootEl).render(
+    <React.StrictMode>
+      <Suspense fallback={<DomainFallback />}>
+        <UnifiedRoot />
+      </Suspense>
+    </React.StrictMode>,
+  );
+}
