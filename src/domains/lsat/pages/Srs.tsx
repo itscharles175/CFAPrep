@@ -1,14 +1,14 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { m, useReducedMotion } from "motion/react";
-import { BookOpen, Check, Layers, RotateCcw, Sparkles } from "lucide-react";
-import { Card, CardContent } from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+import { BookOpen, Check, RotateCcw, Sparkles } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/ui/Primitives";
 import { Icon } from "@lsat/components/ui/icon";
 import { ChoiceList } from "@lsat/components/question/choice-list";
-import { PageLayout } from "@lsat/components/page-layout";
 import { IllustrationSrsCaughtUp } from "@lsat/components/illustrations";
 import { LoadingState, ErrorState, EmptyState } from "@lsat/components/states";
 import { useSrsDue } from "@lsat/lib/hooks";
@@ -33,6 +33,39 @@ function fmtInterval(days: number): string {
   if (days < 30) return `${Math.round(days)}d`;
   if (days < 365) return `${Math.round(days / 30)}mo`;
   return `${(days / 365).toFixed(days < 730 ? 1 : 0)}y`;
+}
+
+/**
+ * K4-8 — host chrome bridge. The page previously routed every branch through the
+ * LSAT `PageLayout` (eyebrow + serif title + graphite icon chip + a centered
+ * `max-w-2xl` reading column). On host primitives that maps to the host
+ * `PageHeader` (eyebrow → badge, description → subtitle, same actions) inside the
+ * host `.page-container`, with the narrow reading column preserved via an inner
+ * `mx-auto max-w-2xl` wrapper so the SRS card keeps its single-column layout.
+ * Behaviour is unchanged — this is the page-frame skin only.
+ */
+function SrsShell({
+  description,
+  actions,
+  children,
+}: {
+  description?: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="page-container">
+      <div className="mx-auto max-w-2xl space-y-[calc(var(--space-unit)*4)]">
+        <PageHeader
+          badge="Spaced repetition"
+          title="SRS"
+          subtitle={description}
+          actions={actions}
+        />
+        {children}
+      </div>
+    </div>
+  );
 }
 
 export default function Srs() {
@@ -76,27 +109,21 @@ export default function Srs() {
 
   if (isLoading)
     return (
-      <PageLayout title="SRS" eyebrow="Spaced repetition" icon={Layers} width="md">
+      <SrsShell>
         <LoadingState label="Loading due cards…" />
-      </PageLayout>
+      </SrsShell>
     );
   if (isError || !data)
     return (
-      <PageLayout title="SRS" eyebrow="Spaced repetition" icon={Layers} width="md">
+      <SrsShell>
         <ErrorState error={error} onRetry={refetch} />
-      </PageLayout>
+      </SrsShell>
     );
 
   const cards = data.data.cards;
   if (cards.length === 0)
     return (
-      <PageLayout
-        title="SRS"
-        eyebrow="Spaced repetition"
-        icon={Layers}
-        description="Missed questions resurface here on the spaced-repetition schedule."
-        width="md"
-      >
+      <SrsShell description="Missed questions resurface here on the spaced-repetition schedule.">
         <EmptyState
           illustration={<IllustrationSrsCaughtUp />}
           title="No cards due"
@@ -112,12 +139,12 @@ export default function Srs() {
             </Button>
           }
         />
-      </PageLayout>
+      </SrsShell>
     );
 
   if (index >= cards.length)
     return (
-      <PageLayout title="SRS" eyebrow="Spaced repetition" icon={Layers} width="md">
+      <SrsShell>
         <EmptyState
           title={`Reviewed ${completed} card${completed === 1 ? "" : "s"}`}
           description="You're done for today. The schedule will resurface the next batch when it's due."
@@ -132,7 +159,7 @@ export default function Srs() {
             </Button>
           }
         />
-      </PageLayout>
+      </SrsShell>
     );
 
   const card = cards[index];
@@ -210,12 +237,8 @@ export default function Srs() {
   }
 
   return (
-    <PageLayout
-      title="SRS"
-      eyebrow="Spaced repetition"
-      icon={Layers}
+    <SrsShell
       description="Questions you missed, scheduled for recall."
-      width="md"
       actions={
         <Badge variant="secondary" className="type-numeric">
           {index + 1} / {cards.length} · {data.data.due_count} due
@@ -312,7 +335,7 @@ export default function Srs() {
           </Card>
         </m.div>
       </div>
-    </PageLayout>
+    </SrsShell>
   );
 }
 

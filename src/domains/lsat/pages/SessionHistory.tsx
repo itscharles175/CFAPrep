@@ -2,15 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { History, TrendingDown, TrendingUp } from "lucide-react";
 import { PageLayout } from "@lsat/components/page-layout";
-import { Badge } from "@lsat/components/ui/badge";
-import { Button } from "@lsat/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Icon } from "@lsat/components/ui/icon";
-import { ListRow } from "@lsat/components/ui/list-row";
+import { ListRow } from "@/components/ui/list-row";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@lsat/components/ui/popover";
+} from "@/components/ui/popover";
 import { LoadingState, EmptyState, ErrorState } from "@lsat/components/states";
 import { IllustrationTimeline } from "@lsat/components/illustrations";
 import { SessionComparePicker } from "@lsat/components/analytics/session-compare-picker";

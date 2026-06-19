@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ShieldCheck, X } from "lucide-react";
-import { PageLayout } from "@lsat/components/page-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+import { PageHeader } from "@/components/ui/Primitives";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Icon } from "@lsat/components/ui/icon";
 import { EmptyState, ErrorState, SkeletonListPage } from "@lsat/components/states";
 import { IllustrationSrsCaughtUp } from "@lsat/components/illustrations";
@@ -120,25 +120,26 @@ export default function Quarantine() {
   }
   if (isError) {
     return (
-      <PageLayout title="Generation quarantine" width="lg">
+      <div className="page-container">
+        <PageHeader title="Generation quarantine" />
         <ErrorState error={error} onRetry={refetch} />
-      </PageLayout>
+      </div>
     );
   }
 
   return (
-    <PageLayout
-      title="Generation quarantine"
-      description="AI-generated questions pending review — batch approve or dismiss."
-      width="lg"
-      actions={
-        selectedIds.length > 0 ? (
-          <Button size="sm" onClick={approveBatch} disabled={batchBusy}>
-            {batchBusy ? "Approving…" : `Approve ${selectedIds.length} selected`}
-          </Button>
-        ) : undefined
-      }
-    >
+    <div className="page-container">
+      <PageHeader
+        title="Generation quarantine"
+        subtitle="AI-generated questions pending review — batch approve or dismiss."
+        actions={
+          selectedIds.length > 0 ? (
+            <Button size="sm" onClick={approveBatch} disabled={batchBusy}>
+              {batchBusy ? "Approving…" : `Approve ${selectedIds.length} selected`}
+            </Button>
+          ) : undefined
+        }
+      />
       {items.length === 0 ? (
         <EmptyState
           illustration={<IllustrationSrsCaughtUp />}
@@ -189,7 +190,7 @@ export default function Quarantine() {
           />
         </div>
       )}
-    </PageLayout>
+    </div>
   );
 }
 

@@ -5,9 +5,9 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { PageLayout } from "@lsat/components/page-layout";
 import { ResumeBanner } from "@lsat/components/practice/resume-banner";
 import { ErrorState, SkeletonListPage } from "@lsat/components/states";

@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ListMusic, Plus } from "lucide-react";
-import { Button } from "@lsat/components/ui/button";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Icon } from "@lsat/components/ui/icon";
-import { Input } from "@lsat/components/ui/input";
-import { Label } from "@lsat/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -12,8 +12,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@lsat/components/ui/dialog";
-import { PageLayout } from "@lsat/components/page-layout";
+} from "@/components/ui/dialog";
+import { PageHeader } from "@/components/ui/Primitives";
 import { EmptyState, ErrorState, LoadingState } from "@lsat/components/states";
 import { IllustrationPlaylists } from "@lsat/components/illustrations";
 import { SmartSetBuilder } from "@lsat/components/playlists/smart-set-builder";
@@ -109,38 +109,38 @@ export default function Playlists() {
   }
 
   return (
-    <PageLayout
-      title="Smart sets"
-      eyebrow="COLLECTIONS"
-      icon={ListMusic}
-      description="Custom problem sets that re-resolve to live questions each time you play them."
-      width="lg"
-      actions={
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setManualName("");
-              setManualOpen(true);
-            }}
-          >
-            <Icon as={Plus} size="sm" />
-            Manual set
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setBuilderOpen(true);
-            }}
-          >
-            <Icon as={Plus} size="sm" />
-            New smart set
-          </Button>
-        </div>
-      }
-    >
+    <div className="page-container">
+      <PageHeader
+        badge="COLLECTIONS"
+        title="Smart sets"
+        subtitle="Custom problem sets that re-resolve to live questions each time you play them."
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setManualName("");
+                setManualOpen(true);
+              }}
+            >
+              <Icon as={Plus} size="sm" />
+              Manual set
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditing(null);
+                setBuilderOpen(true);
+              }}
+            >
+              <Icon as={Plus} size="sm" />
+              New smart set
+            </Button>
+          </div>
+        }
+      />
+      <div className="space-y-[calc(var(--space-unit)*4)]">
       {(pacing.data?.data.budgets.length ?? 0) > 0 && (
         <PacingBudgetCard
           title="Per-type pacing budgets"
@@ -191,6 +191,7 @@ export default function Playlists() {
           ))}
         </div>
       )}
+      </div>
 
       {/* Smart-set create / edit */}
       <SmartSetBuilder
@@ -301,6 +302,6 @@ export default function Playlists() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </PageLayout>
+    </div>
   );
 }

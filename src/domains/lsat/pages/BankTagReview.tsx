@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { CheckCircle2, Tags } from "lucide-react";
-import { PageLayout } from "@lsat/components/page-layout";
-import { Badge } from "@lsat/components/ui/badge";
-import { Button } from "@lsat/components/ui/button";
-import { Card, CardContent } from "@lsat/components/ui/card";
+import { PageHeader } from "@/components/ui/Primitives";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@lsat/components/ui/checkbox";
 import {
   Select,
@@ -11,7 +11,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@lsat/components/ui/select";
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -19,7 +19,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@lsat/components/ui/table";
+} from "@/components/ui/table";
 import { LoadingState, ErrorState, EmptyState } from "@lsat/components/states";
 import { IllustrationReview } from "@lsat/components/illustrations";
 import { ProvenanceBadge } from "@lsat/components/bank/provenance-badge";
@@ -95,20 +95,21 @@ export default function BankTagReview() {
   };
 
   return (
-    <PageLayout
-      title="Tag review"
-      description="Confirm or correct auto-assigned types and difficulty for low-confidence items. Confirming marks them human-verified."
-      width="xl"
-      actions={
-        data.usingSample ? (
-          <Badge variant="outline" className="text-muted-foreground">
-            Sample data
-          </Badge>
-        ) : (
-          <Badge variant="secondary">{questions.length} to review</Badge>
-        )
-      }
-    >
+    <div className="page-container">
+      <PageHeader
+        badge="TAG REVIEW"
+        title="Tag review"
+        subtitle="Confirm or correct auto-assigned types and difficulty for low-confidence items. Confirming marks them human-verified."
+        actions={
+          data.usingSample ? (
+            <Badge variant="outline" className="text-muted-foreground">
+              Sample data
+            </Badge>
+          ) : (
+            <Badge variant="secondary">{questions.length} to review</Badge>
+          )
+        }
+      />
       {questions.length === 0 ? (
         <EmptyState
           illustration={<IllustrationReview />}
@@ -264,6 +265,6 @@ export default function BankTagReview() {
           </Card>
         </div>
       )}
-    </PageLayout>
+    </div>
   );
 }

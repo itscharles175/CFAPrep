@@ -6,10 +6,10 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Label } from "@lsat/components/ui/label";
-import { Input } from "@lsat/components/ui/input";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@lsat/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@lsat/components/ui/toggle-group";
 import {
@@ -18,8 +18,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@lsat/components/ui/select";
-import { PageLayout } from "@lsat/components/page-layout";
+} from "@/components/ui/select";
+import { PageHeader } from "@/components/ui/Primitives";
 import { Icon } from "@lsat/components/ui/icon";
 import { TrapSpiralCard } from "@lsat/components/drills/trap-spiral-card";
 import { WeakTypeRecommender } from "@lsat/components/drills/weak-type-recommender";
@@ -138,13 +138,13 @@ export default function Drills() {
   }
 
   return (
-    <PageLayout
-      title="Drills"
-      eyebrow="Targeted practice"
-      icon={Target}
-      description="Build a focused set by type and difficulty."
-      width="md"
-    >
+    <div className="page-container">
+      <PageHeader
+        eyebrow="Targeted practice"
+        title="Drills"
+        subtitle="Build a focused set by type and difficulty."
+      />
+      <div className="mx-auto max-w-2xl space-y-[calc(var(--space-unit)*4)]">
       {err && (
         <ErrorState
           error={new Error(err)}
@@ -328,7 +328,8 @@ export default function Drills() {
       </div>
 
       <TrapSpiralCard />
-    </PageLayout>
+      </div>
+    </div>
   );
 }
 

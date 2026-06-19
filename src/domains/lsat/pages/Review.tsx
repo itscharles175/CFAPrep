@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ClipboardCheck, Search } from "lucide-react";
-import { Input } from "@lsat/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
-import { PageLayout } from "@lsat/components/page-layout";
-import { ListRow } from "@lsat/components/ui/list-row";
+import { Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/ui/Primitives";
+import { ListRow } from "@/components/ui/list-row";
 import { AnimatedList } from "@lsat/components/ui/animated-list";
 import { EmptyState, SkeletonCard, SkeletonList } from "@lsat/components/states";
 import { IllustrationSrsCaughtUp } from "@lsat/components/illustrations";
@@ -24,7 +24,7 @@ import { useSessionResults, useSessions, useSrsDue } from "@lsat/lib/hooks";
 import { api } from "@lsat/lib/api";
 import { enqueue } from "@lsat/lib/offlineQueue";
 import { toast } from "@lsat/lib/toast";
-import { Button } from "@lsat/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import type { SrsDue } from "@lsat/lib/types";
 
@@ -37,18 +37,22 @@ export default function Review() {
   const due = srs.data?.data.due_count ?? 0;
 
   return (
-    <PageLayout
-      title="Review"
-      eyebrow="CLOSE THE LOOP"
-      icon={ClipboardCheck}
-      description="Blind-review buckets, error log, and SRS — close the loop after timed work."
-      width="lg"
-      actions={
-        <Button variant="outline" size="sm" onClick={() => navigate("/review/history")}>
-          Session history
-        </Button>
-      }
-    >
+    // K4-8 — host chrome bridge: the LSAT `PageLayout` wrapper is swapped for the
+    // host `PageHeader` (StatusBadge eyebrow + title + subtitle + ActionBar) so
+    // the page reads in the host design system. The page keeps its own centered,
+    // width-constrained content column (the LSAT shell's `<main>` supplies the
+    // outer padding) — `PageHeader` is header-only, so the container lives here.
+    <div className="mx-auto max-w-4xl space-y-[calc(var(--space-unit)*4)]">
+      <PageHeader
+        eyebrow="CLOSE THE LOOP"
+        title="Review"
+        subtitle="Blind-review buckets, error log, and SRS — close the loop after timed work."
+        actions={
+          <Button variant="outline" size="sm" onClick={() => navigate("/review/history")}>
+            Session history
+          </Button>
+        }
+      />
       <ErrorPatternBanner />
       <RecentSessionRecap />
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
@@ -76,7 +80,7 @@ export default function Review() {
         </TabsContent>
       </Tabs>
       <DockedCoach scope="review" />
-    </PageLayout>
+    </div>
   );
 }
 
