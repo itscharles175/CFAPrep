@@ -1,14 +1,16 @@
 /**
- * Ambient shim for the vendored LSAT domain.
+ * QA-4 — the vendored LSAT domain is now a typed project reference.
  *
- * The host's strict `tsc` follows `main.jsx`'s dynamic import into
- * `src/domains/lsat/LsatRoot.tsx`, whose imports use the `@lsat/*` alias. We
- * deliberately do NOT type-check the vendored React-18/TS-5.6 subtree under the
- * host's strict config (it has its own toolchain conventions). Declaring
- * `@lsat/*` as an ambient module makes tsc resolve those imports to `any` and
- * stop there — so the subtree is never pulled into the host program — while
- * Vite/esbuild still bundles the real files via the `@lsat` resolve.alias.
+ * Previously this file declared `@lsat/*` as an ambient module, which resolved
+ * every cross-domain import to `any` so the host's strict `tsc` never pulled the
+ * subtree in. That blanket `any` is gone: the host `tsconfig.json` now maps
+ * `@lsat/*` to `src/domains/lsat/*` (with a `references` entry to
+ * `tsconfig.lsat.json`, the subtree's own strict project), so cross-domain
+ * imports resolve to the REAL subtree types and are type-checked end-to-end.
  *
- * Type-safety inside the LSAT subtree is owned by its own tooling, not the host.
+ * Type-safety inside the subtree itself remains owned by `tsconfig.lsat.json`
+ * (run via `npx tsc -p tsconfig.lsat.json`); see TESTING.md for the two-project
+ * layout. This file is intentionally left as documentation only — no ambient
+ * `declare module` — so nothing silently degrades a cross-domain import to `any`.
  */
-declare module '@lsat/*';
+export {};
