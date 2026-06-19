@@ -19,12 +19,13 @@ import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PageLayout, PageSection } from "@lsat/components/page-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
-import { Input } from "@lsat/components/ui/input";
-import { Label } from "@lsat/components/ui/label";
+import { PageSection } from "@lsat/components/page-layout";
+import { PageHeader } from "@/components/ui/Primitives";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@lsat/components/ui/switch";
 import { Textarea } from "@lsat/components/ui/textarea";
 import { ApiError, api } from "@lsat/lib/api";
@@ -478,26 +479,34 @@ export default function ContentOps() {
   }
 
   return (
-    <PageLayout
-      title="Content Ops"
-      eyebrow="Trust OS"
-      icon={ShieldCheck}
-      width="2xl"
-      description="Source eligibility, validators, versions, scheduled maintenance, and release evidence."
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => runRevalidation(false)} disabled={revalidating}>
-            {revalidating ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            ) : (
-              <RefreshCw className="h-4 w-4" aria-hidden />
-            )}
-            Revalidate due
-          </Button>
-          <Button onClick={runBenchmark}><Activity className="h-4 w-4" aria-hidden /> Benchmark smoke</Button>
-        </div>
-      }
-    >
+    // K4-10 — host chrome bridge. The page previously routed through the LSAT
+    // `PageLayout` (eyebrow + serif title + graphite icon chip + a centered
+    // `max-w-6xl` column for `width="2xl"`). On host primitives that maps to the
+    // host `PageHeader` (eyebrow → badge, description → subtitle, same actions)
+    // inside the host `.page-container`, with the wide reading column preserved
+    // via an inner `mx-auto max-w-6xl` wrapper so every section keeps its width.
+    // Behaviour is unchanged — this is the page-frame skin only.
+    <div className="page-container">
+      <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
+        <PageHeader
+          badge="Trust OS"
+          title="Content Ops"
+          subtitle="Source eligibility, validators, versions, scheduled maintenance, and release evidence."
+          tone="ops"
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={() => runRevalidation(false)} disabled={revalidating}>
+                {revalidating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <RefreshCw className="h-4 w-4" aria-hidden />
+                )}
+                Revalidate due
+              </Button>
+              <Button onClick={runBenchmark}><Activity className="h-4 w-4" aria-hidden /> Benchmark smoke</Button>
+            </div>
+          }
+        />
       {(usingSample || hasQueryError) && (
         <TrustNotice
           tone={hasQueryError ? "error" : "warning"}
@@ -1156,7 +1165,8 @@ export default function ContentOps() {
           </CardContent>
         </Card>
       </div>
-    </PageLayout>
+      </div>
+    </div>
   );
 }
 

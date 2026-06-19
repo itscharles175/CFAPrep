@@ -3,7 +3,6 @@ import {
   Download,
   Keyboard,
   Palette,
-  Sliders,
   Sparkles,
   Target,
 } from "lucide-react";
@@ -13,11 +12,12 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/Primitives";
 import { Icon } from "@lsat/components/ui/icon";
 import { api } from "@lsat/lib/api";
-import { PageLayout, PageSection } from "@lsat/components/page-layout";
+import { PageSection } from "@lsat/components/page-layout";
 import { getExamKiosk, setExamKiosk } from "@lsat/lib/prefs";
 import { GoalSettingsForm } from "@lsat/components/settings/goal-settings-form";
 import { KeyboardSettings } from "@lsat/components/settings/keyboard-settings";
@@ -71,103 +71,113 @@ export default function Settings() {
   }
 
   return (
-    <PageLayout
-      title="Settings"
-      eyebrow="PREFERENCES"
-      icon={Sliders}
-      description="Goals, appearance, input, AI, and your data — all on this device."
-      width="2xl"
-    >
-      <div className="grid gap-8 md:grid-cols-[12rem_minmax(0,1fr)]">
-        <AnchorRail />
+    // K4-10 — host chrome bridge. The page previously routed through the LSAT
+    // `PageLayout` (eyebrow + serif title + graphite icon chip + a centered
+    // `max-w-6xl` column from `width="2xl"`). On host primitives that maps to the
+    // host `PageHeader` (eyebrow → badge, description → subtitle) inside the host
+    // `.page-container`, with the wide two-column settings layout preserved via an
+    // inner `mx-auto max-w-6xl` wrapper. The `Sliders` page-icon has no slot on
+    // the host `PageHeader` and is dropped (parity with batch A/B). Every form,
+    // section, anchor rail, and the export handler are unchanged — page-frame skin
+    // only.
+    <div className="page-container">
+      <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
+        <PageHeader
+          badge="Preferences"
+          title="Settings"
+          subtitle="Goals, appearance, input, AI, and your data — all on this device."
+        />
+        <div className="grid gap-8 md:grid-cols-[12rem_minmax(0,1fr)]">
+          <AnchorRail />
 
-        <div className="min-w-0 space-y-10">
-          <PageSection
-            eyebrow="STUDY"
-            title="Goals & timing"
-            description="Drive the dashboard countdown, on-track band, and section timers."
-          >
-            <div id="study" className="scroll-mt-24 space-y-4">
-              <GoalSettingsForm />
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Timer defaults</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <TimerSettingsForm />
-                </CardContent>
-              </Card>
-              <AccommodationsSettings />
-            </div>
-          </PageSection>
+          <div className="min-w-0 space-y-10">
+            <PageSection
+              eyebrow="STUDY"
+              title="Goals & timing"
+              description="Drive the dashboard countdown, on-track band, and section timers."
+            >
+              <div id="study" className="scroll-mt-24 space-y-4">
+                <GoalSettingsForm />
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Timer defaults</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <TimerSettingsForm />
+                  </CardContent>
+                </Card>
+                <AccommodationsSettings />
+              </div>
+            </PageSection>
 
-          <PageSection
-            eyebrow="APPEARANCE"
-            title="Theme & comfort"
-            description="Tune how the app looks and how dense the data screens are."
-          >
-            <div id="appearance" className="scroll-mt-24">
-              <Card>
-                <CardContent className="pt-[var(--card-pad)]">
-                  <AppearanceSettings
-                    kiosk={kiosk}
-                    onKioskChange={(v) => {
-                      setKioskState(v);
-                      setExamKiosk(v);
-                    }}
-                  />
-                </CardContent>
-              </Card>
-            </div>
-          </PageSection>
+            <PageSection
+              eyebrow="APPEARANCE"
+              title="Theme & comfort"
+              description="Tune how the app looks and how dense the data screens are."
+            >
+              <div id="appearance" className="scroll-mt-24">
+                <Card>
+                  <CardContent className="pt-[var(--card-pad)]">
+                    <AppearanceSettings
+                      kiosk={kiosk}
+                      onKioskChange={(v) => {
+                        setKioskState(v);
+                        setExamKiosk(v);
+                      }}
+                    />
+                  </CardContent>
+                </Card>
+              </div>
+            </PageSection>
 
-          <PageSection
-            eyebrow="INPUT"
-            title="Keyboard"
-            description="Customize exam keys and review the global shortcuts."
-          >
-            <div id="input" className="scroll-mt-24">
-              <KeyboardSettings />
-            </div>
-          </PageSection>
+            <PageSection
+              eyebrow="INPUT"
+              title="Keyboard"
+              description="Customize exam keys and review the global shortcuts."
+            >
+              <div id="input" className="scroll-mt-24">
+                <KeyboardSettings />
+              </div>
+            </PageSection>
 
-          <PageSection
-            eyebrow="AI & SYSTEM"
-            title="Model routing & diagnostics"
-            description="Where realtime and batch AI run, plus local database health."
-          >
-            <div id="ai-system" className="scroll-mt-24 space-y-4">
-              <ModelRoutingCard />
-              <DiagnosticsPanel />
-            </div>
-          </PageSection>
+            <PageSection
+              eyebrow="AI & SYSTEM"
+              title="Model routing & diagnostics"
+              description="Where realtime and batch AI run, plus local database health."
+            >
+              <div id="ai-system" className="scroll-mt-24 space-y-4">
+                <ModelRoutingCard />
+                <DiagnosticsPanel />
+              </div>
+            </PageSection>
 
-          <PageSection
-            eyebrow="DATA"
-            title="Backup & export"
-            description="Everything stays on this machine."
-          >
-            <div id="data" className="scroll-mt-24">
-              <Card>
-                <CardContent className="space-y-2 pt-[var(--card-pad)]">
-                  <Button
-                    variant="outline"
-                    onClick={exportData}
-                    disabled={exporting}
-                  >
-                    <Icon as={Download} size="sm" />
-                    {exporting ? "Exporting…" : "Export / backup data"}
-                  </Button>
-                  {exportMsg && (
-                    <p className="text-xs text-muted-foreground">{exportMsg}</p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </PageSection>
+            <PageSection
+              eyebrow="DATA"
+              title="Backup & export"
+              description="Everything stays on this machine."
+            >
+              <div id="data" className="scroll-mt-24">
+                <Card>
+                  <CardContent className="space-y-2 pt-[var(--card-pad)]">
+                    <Button
+                      variant="outline"
+                      onClick={exportData}
+                      disabled={exporting}
+                    >
+                      <Icon as={Download} size="sm" />
+                      {exporting ? "Exporting…" : "Export / backup data"}
+                    </Button>
+                    {exportMsg && (
+                      <p className="text-xs text-muted-foreground">{exportMsg}</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </PageSection>
+          </div>
         </div>
       </div>
-    </PageLayout>
+    </div>
   );
 }
 

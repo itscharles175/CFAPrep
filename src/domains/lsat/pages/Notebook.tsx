@@ -23,11 +23,16 @@ import { CitationChip } from "@lsat/components/notebook-os/citation-chip";
 import { ContextToggle } from "@lsat/components/notebook-os/context-toggle";
 import { EvidencePanel } from "@lsat/components/notebook-os/evidence-panel";
 import { SourceStatusPill } from "@lsat/components/notebook-os/source-status-pill";
-import { Badge } from "@lsat/components/ui/badge";
-import { Button } from "@lsat/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+// K4-10 — host-styled primitive swap (chrome only). These six render the host
+// `.qv-*`/`.btn`/`.badge` vocabulary and are verified drop-in for the props this
+// page passes; behaviour, structure, and a11y markup are unchanged. `icon`,
+// `switch`, `textarea`, and the `page-layout` / `notebook-os` feature components
+// have no host-barrel equivalent and stay on `@lsat`.
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Icon } from "@lsat/components/ui/icon";
-import { Input } from "@lsat/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@lsat/components/ui/switch";
 import {
   Select,
@@ -35,8 +40,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@lsat/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@lsat/components/ui/tabs";
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@lsat/components/ui/textarea";
 import { api } from "@lsat/lib/api";
 import {

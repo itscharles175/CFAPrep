@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { m } from "motion/react";
-import { Button } from "@lsat/components/ui/button";
-import { Card } from "@lsat/components/ui/card";
+// K4-10 — host-barrel primitives (drop-in: same exports + the props this page
+// passes — Button `variant`/`loading`/`size`, Card `className`). Page-chrome
+// reskin only; the demonstrated components below stay on @lsat by design.
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/Primitives";
 import { Logo } from "@lsat/components/logo";
 import { TYPE_FAMILY_LIST, qTypeLabel } from "@lsat/lib/labels";
 import type { QType } from "@lsat/lib/types";
-import { PageLayout } from "@lsat/components/page-layout";
 import { fadeUp, stagger } from "@lsat/lib/motion";
 import { toast } from "@lsat/lib/toast";
 import {
@@ -230,12 +233,18 @@ export default function Styleguide() {
   });
 
   return (
-    <PageLayout
-      title="Design System"
-      description="Tokens, components, and motion — dev reference."
-      width="xl"
-      className="pb-16"
-    >
+    // K4-10 host-chrome bridge: the LSAT `PageLayout` (serif title + description)
+    // maps to the host `PageHeader` inside the host `.page-container`. The
+    // showcase's deliberately-narrower `width="xl"` reading column (max-w-5xl)
+    // and `pb-16` bottom padding are preserved via the inner wrapper so the
+    // demonstration grids keep their exact measure — only the page frame is
+    // reskinned; every demonstrated primitive below is untouched.
+    <div className="page-container">
+      <div className="mx-auto max-w-5xl space-y-[calc(var(--space-unit)*4)] pb-16">
+        <PageHeader
+          title="Design System"
+          subtitle="Tokens, components, and motion — dev reference."
+        />
     <m.div
       variants={stagger}
       initial="hidden"
@@ -563,6 +572,7 @@ export default function Styleguide() {
         </div>
       </Section>
     </m.div>
-    </PageLayout>
+      </div>
+    </div>
   );
 }
