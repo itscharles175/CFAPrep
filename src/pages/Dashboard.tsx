@@ -33,6 +33,7 @@ import { Skeleton } from '../components/feedback';
 import { DashboardKpiBand } from '../components/dashboard/DashboardKpiBand';
 import { DashboardHero } from '../components/dashboard/DashboardHero';
 import { WeaknessIndexCard } from '../components/dashboard/WeaknessIndexCard';
+import { CrossDomainProgressReport } from '../components/dashboard/CrossDomainProgressReport';
 import { DashboardSparklineGrid } from '../components/dashboard/DashboardSparklineGrid';
 import { DashboardReadinessChecklist } from '../components/dashboard/DashboardReadinessChecklist';
 import {
@@ -675,6 +676,9 @@ export default function Dashboard() {
           {metrics && <DashboardSparklineGrid curves={metrics.curves} />}
           {readinessChecks.length > 0 && <DashboardReadinessChecklist checks={readinessChecks} />}
           <WeaknessIndexCard options={{ domain: 'all', days: 30, limit: 8 }} maxRows={5} />
+          {/* ANL-7 — exportable cross-domain progress report (CSV + print-to-PDF),
+              self-wiring off the same merged weakness index; fully degrading. */}
+          <CrossDomainProgressReport />
         </div>
 
         {/* LEARN-3 — a compact subset of the merged cross-domain daily plan
