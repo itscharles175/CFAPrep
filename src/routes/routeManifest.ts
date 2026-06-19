@@ -6,16 +6,52 @@
 // never invoked at module-eval time), so importing it from a plain node script
 // via the TS loader is safe.
 import { routeManifest as lsatRouteManifest } from '../domains/lsat/lib/routeManifest';
+import type { RouteManifestEntry as LsatRouteManifestEntry } from '../domains/lsat/lib/routeManifest';
+// K4-5: the host manifest addresses icons by string key; the LSAT manifest
+// carries lucide components. We import the SAME component set the LSAT manifest
+// uses to build a component->key map (translate, don't re-declare). These are
+// tree-shakeable references used only inside a Map literal at module-eval time.
+import {
+  BarChart3,
+  BookMarked,
+  BookOpen,
+  BrainCircuit,
+  Clock,
+  Database,
+  Download,
+  Flag,
+  Library,
+  ListMusic,
+  RotateCcw,
+  Settings,
+  ShieldCheck,
+  Target,
+} from 'lucide-react';
+
+/** K4-5: the LSAT manifest's `group` union, re-stated for the host mappers. */
+type RouteManifestEntryGroup = LsatRouteManifestEntry['group'];
 
 export type RouteBoundary = 'page' | 'domain';
-export type RouteDomain = 'home' | 'cfa' | 'quant' | 'excel' | 'vault' | 'analytics' | 'ops' | 'tool';
+// K4-5: `'lsat'` joins the host domains so the merged route tree can carry the
+// vendored LSAT surface alongside CFA/Quant/Excel. (Pre-K4 the LSAT plane has
+// its own manifest + shell; this domain tag is DATA only — it does not mount any
+// router. See `lsatAppRoutes` / `routeTree` below.)
+export type RouteDomain = 'home' | 'cfa' | 'quant' | 'excel' | 'vault' | 'analytics' | 'ops' | 'tool' | 'lsat';
 export type RouteAccentRole = 'study' | 'exam' | 'quant' | 'excel' | 'vault' | 'analytics' | 'ops' | 'danger';
 export type PreferredLayout = 'dashboard' | 'learning' | 'assessment' | 'tool' | 'ops';
 export type RouteActionKind = 'navigate' | 'backup' | 'repair' | 'cache' | 'start-assessment' | 'open-drawer' | 'export';
 export type PreloadStrategy = 'eager' | 'idle' | 'interaction' | 'manual';
 export type QaViewport = 320 | 375 | 414 | 768 | 1024 | 1440;
 
-export type AppRouteId =
+/**
+ * K4-5: study/test/ both, mirroring the LSAT shell's `AppMode` plus its
+ * `hideInTest` flag. A host route is implicitly `'both'`; an LSAT route carries
+ * the mode it should appear in so the future unified nav can honor Test Mode
+ * (which hides the LSAT `hideInTest` routes) without re-deriving it.
+ */
+export type AppRouteMode = 'study' | 'test' | 'both';
+
+export type HostRouteId =
   | 'dashboard'
   | 'cfa-dashboard'
   | 'cfa-module'
@@ -39,6 +75,43 @@ export type AppRouteId =
   | 'today'
   | 'knowledge-graph'
   | 'style';
+
+/**
+ * K4-5: ids for the merged LSAT surface. Each is the LSAT manifest path slug
+ * prefixed with `lsat-` so it can never collide with a `HostRouteId`. Dynamic
+ * LSAT routes (take/exam/blind-review/etc.) are included so the merged tree is a
+ * faithful map of the LSAT shell's `<Routes>`.
+ */
+export type LsatRouteId =
+  | 'lsat-home'
+  | 'lsat-dashboard'
+  | 'lsat-practice'
+  | 'lsat-preptests'
+  | 'lsat-drills'
+  | 'lsat-playlists'
+  | 'lsat-tutor'
+  | 'lsat-notebook'
+  | 'lsat-rc-lab'
+  | 'lsat-review'
+  | 'lsat-review-history'
+  | 'lsat-srs'
+  | 'lsat-analytics'
+  | 'lsat-bank'
+  | 'lsat-content-ops'
+  | 'lsat-quarantine'
+  | 'lsat-import'
+  | 'lsat-settings'
+  | 'lsat-bank-tag-review'
+  | 'lsat-analytics-type'
+  | 'lsat-analytics-pt'
+  | 'lsat-explanation'
+  | 'lsat-take-section'
+  | 'lsat-take-session'
+  | 'lsat-exam'
+  | 'lsat-blind-review'
+  | 'lsat-popout-passage';
+
+export type AppRouteId = HostRouteId | LsatRouteId;
 
 export interface AppRoute {
   id: AppRouteId;
@@ -64,6 +137,22 @@ export interface AppRoute {
   qaStates: Array<{ id: string; label: string; viewports: QaViewport[] }>;
   smokeRoute?: string;
   screenshotRoute?: string;
+  // ── K4-5: LSAT-carried metadata (all OPTIONAL; host routes leave them unset) ──
+  /** ⌘K command label (LSAT manifest's `commandLabel`, e.g. "Go to SRS"). */
+  commandLabel?: string;
+  /** Free-text search keywords (LSAT manifest's `keywords`). */
+  keywords?: string[];
+  /** When true, hidden from nav/search while in Test Mode (LSAT `hideInTest`). */
+  hideInTest?: boolean;
+  /** Capability gate key (LSAT manifest's `capability`, e.g. "notebook_os"). */
+  capability?: string;
+  /**
+   * Canonical target for an alias route (LSAT manifest's `canonicalPath`). Stored
+   * here ALREADY `/lsat`-prefixed so it matches this entry's `path` space.
+   */
+  canonicalPath?: string;
+  /** Which app mode this route belongs to. Host routes are implicitly `'both'`. */
+  appMode?: AppRouteMode;
 }
 
 export interface SearchRoute {
@@ -475,3 +564,272 @@ export const lsatScreenshotRoutes = lsatGateRoutes.map((route) => ({
   preferredLayout: 'tool' as const,
   viewports: ['desktop', 'mobile'] as const,
 }));
+
+// ──────────────────────────────────────────────────────────────────────────
+// K4-5 — MERGED ROUTE TREE (Phase 1 of Keystone K4: full UI unification).
+//
+// This block builds the LSAT surface as first-class `AppRoute` entries
+// (`lsatAppRoutes`) and a merged read-only tree (`routeTree`) that unions the
+// host `appRoutes` with the LSAT entries. It is DATA + NAV FOUNDATION ONLY:
+//
+//   * `appRoutes` (the host array App.jsx maps into <Route>s) is UNCHANGED — the
+//     LSAT entries are a SEPARATE array. Merging them into `appRoutes` would
+//     register phantom host routes (App.jsx iterates it) and is K4-7/K4-13.
+//   * Every LSAT path is `/lsat`-prefixed (so "/srs" -> "/lsat/srs"), resolving
+//     the "/" and "/dashboard" collisions the host already owns.
+//   * LSAT `group` maps onto host `navGroup`/`searchGroup`; LSAT `icon` maps onto
+//     host `iconKey` — we map, never duplicate. `commandLabel`/`keywords`/
+//     `hideInTest`/`capability`/`canonicalPath`/`appMode` carry across.
+// ──────────────────────────────────────────────────────────────────────────
+
+// Stable `LsatRouteId` per LSAT manifest path (mirrors `LsatRouteId`'s union).
+const lsatManifestRouteIds: Record<string, LsatRouteId> = {
+  '/': 'lsat-home',
+  '/dashboard': 'lsat-dashboard',
+  '/practice': 'lsat-practice',
+  '/preptests': 'lsat-preptests',
+  '/drills': 'lsat-drills',
+  '/playlists': 'lsat-playlists',
+  '/tutor': 'lsat-tutor',
+  '/notebook': 'lsat-notebook',
+  '/rc-lab': 'lsat-rc-lab',
+  '/review': 'lsat-review',
+  '/review/history': 'lsat-review-history',
+  '/srs': 'lsat-srs',
+  '/analytics': 'lsat-analytics',
+  '/bank': 'lsat-bank',
+  '/content-ops': 'lsat-content-ops',
+  '/quarantine': 'lsat-quarantine',
+  '/import': 'lsat-import',
+  '/settings': 'lsat-settings',
+};
+
+// LSAT manifest `group` -> host nav/search group + visual role. The host nav
+// taxonomy ("domains"/"practice"/"tools"/"ops") is the target vocabulary; LSAT's
+// "Practice"/"Insight"/"Setup"/"System" map onto it.
+const lsatGroupToNavGroup: Record<RouteManifestEntryGroup, string> = {
+  Practice: 'practice',
+  Insight: 'tools',
+  Setup: 'ops',
+  System: 'ops',
+};
+const lsatGroupToAccentRole: Record<RouteManifestEntryGroup, RouteAccentRole> = {
+  Practice: 'study',
+  Insight: 'analytics',
+  Setup: 'ops',
+  System: 'ops',
+};
+const lsatGroupToLayout: Record<RouteManifestEntryGroup, PreferredLayout> = {
+  Practice: 'assessment',
+  Insight: 'dashboard',
+  Setup: 'ops',
+  System: 'ops',
+};
+
+// Lucide-icon component -> host `iconKey` string. The host manifest addresses
+// icons by string key (resolved to a component by the sidebar); the LSAT
+// manifest carries the component directly, so we translate by reference.
+const lsatIconKeys = new Map<LsatRouteManifestEntry['icon'], string>([
+  [BarChart3, 'bar-chart-3'],
+  [BookMarked, 'book-marked'],
+  [BookOpen, 'book-open'],
+  [BrainCircuit, 'brain-circuit'],
+  [Clock, 'clock'],
+  [Database, 'database'],
+  [Download, 'download'],
+  [Flag, 'flag'],
+  [Library, 'library'],
+  [ListMusic, 'list-music'],
+  [RotateCcw, 'rotate-ccw'],
+  [Settings, 'settings'],
+  [ShieldCheck, 'shield-check'],
+  [Target, 'target'],
+]);
+
+// Deterministic body-text anchor for the dynamic + full-bleed LSAT routes that
+// aren't in `lsatRouteExpectedText` (which only covers the stable shelled list
+// pages). Used purely to satisfy the `AppRoute.expectedText` QA-gate field; the
+// gate crawl itself still derives from `lsatGateRoutes` above, so these dynamic
+// entries never enter the screenshot/smoke sets (they need a started session).
+const lsatDynamicExpectedText: Record<string, string> = {
+  '/dashboard': 'Dashboard',
+  '/notebook': 'Notebook OS',
+  '/tutor': 'Tutor',
+  '/review/history': 'Session history',
+  '/bank/tag-review': 'Tag review',
+  '/analytics/type/:qType': 'Type analytics',
+  '/analytics/pt/:ptId': 'PrepTest analytics',
+  '/explanation/:questionId': 'Explanation',
+  '/take/:sectionId': 'Timed section',
+  '/take/session/:sessionId': 'Timed section',
+  '/exam/:preptestId': 'Full exam',
+  '/blind-review/:sessionId': 'Blind review',
+  '/popout/passage': 'Passage',
+};
+
+function lsatExpectedTextFor(manifestPath: string): string {
+  return lsatRouteExpectedText[manifestPath] ?? lsatDynamicExpectedText[manifestPath] ?? 'LSAT';
+}
+
+// Breadcrumb trail for an LSAT entry: always rooted at the LSAT plane home
+// (`/lsat` -> "LSAT Lab"), then the entry itself. Aliases and the home route
+// collapse to a single crumb.
+function lsatBreadcrumbsFor(hostPath: string, label: string): AppRoute['breadcrumbs'] {
+  const root = { label: 'LSAT Lab', path: LSAT_ROUTE_PREFIX };
+  if (hostPath === LSAT_ROUTE_PREFIX) return [root];
+  return [root, { label, path: hostPath }];
+}
+
+// A static LSAT manifest entry -> AppRoute (study-mode list/detail/setup pages).
+function lsatStaticAppRoute(entry: LsatRouteManifestEntry, navOrder: number): AppRoute {
+  const id = lsatManifestRouteIds[entry.path];
+  const navGroup = lsatGroupToNavGroup[entry.group];
+  const hostPath = lsatHostPath(entry.path);
+  const isHome = entry.path === '/';
+  // Only the curated stable list pages get crawled by the QA gate (those in
+  // `lsatRouteExpectedText`); carry their `/lsat` host path as the smoke /
+  // screenshot anchor so the merged entry agrees with `lsatGateRoutes`.
+  const isGated = !entry.canonicalPath && entry.path in lsatRouteExpectedText;
+  return {
+    id,
+    path: hostPath,
+    expectedText: lsatExpectedTextFor(entry.path),
+    domain: 'lsat',
+    navGroup,
+    iconKey: lsatIconKeys.get(entry.icon) ?? 'book-open',
+    accentRole: lsatGroupToAccentRole[entry.group],
+    preferredLayout: lsatGroupToLayout[entry.group],
+    navOrder,
+    navLabel: entry.label,
+    searchGroup: navGroup,
+    offlineCritical: false,
+    keyboardScopes: ['route'],
+    breadcrumbs: lsatBreadcrumbsFor(hostPath, entry.label),
+    routeActions: [],
+    keyboardHelp: [{ scope: 'route', keys: ['/', 'k', 'tab'], label: 'route' }],
+    preloadStrategy: 'idle',
+    qaStates: [{ id: 'default', label: 'Default route state', viewports: [320, 375, 414, 768, 1024, 1440] }],
+    smokeRoute: isGated ? hostPath : undefined,
+    screenshotRoute: isGated ? hostPath : undefined,
+    commandLabel: entry.commandLabel,
+    keywords: entry.keywords,
+    hideInTest: entry.hideInTest,
+    capability: entry.capability,
+    // canonicalPath is `/lsat`-prefixed so it lives in this entry's path space.
+    canonicalPath: entry.canonicalPath ? lsatHostPath(entry.canonicalPath) : undefined,
+    appMode: entry.hideInTest ? 'study' : 'both',
+  };
+}
+
+// Dynamic + full-bleed LSAT routes (not in the LSAT manifest, but real entries
+// in the LSAT shell's <Routes> — see src/domains/lsat/App.tsx). They never enter
+// the nav/search/gate surfaces; they exist so `routeTree` is a faithful map of
+// every navigable LSAT URL for lookups (canonicalRoutePath, route-by-path).
+interface LsatDynamicSpec {
+  id: LsatRouteId;
+  manifestPath: string; // app-relative LSAT path (pre-/lsat)
+  navLabel: string;
+  navGroup: string;
+  accentRole: RouteAccentRole;
+  preferredLayout: PreferredLayout;
+  hideInTest?: boolean;
+}
+
+const lsatDynamicSpecs: LsatDynamicSpec[] = [
+  { id: 'lsat-bank-tag-review', manifestPath: '/bank/tag-review', navLabel: 'Tag review', navGroup: 'ops', accentRole: 'ops', preferredLayout: 'ops', hideInTest: true },
+  { id: 'lsat-analytics-type', manifestPath: '/analytics/type/:qType', navLabel: 'Type analytics', navGroup: 'tools', accentRole: 'analytics', preferredLayout: 'dashboard', hideInTest: true },
+  { id: 'lsat-analytics-pt', manifestPath: '/analytics/pt/:ptId', navLabel: 'PrepTest analytics', navGroup: 'tools', accentRole: 'analytics', preferredLayout: 'dashboard', hideInTest: true },
+  { id: 'lsat-explanation', manifestPath: '/explanation/:questionId', navLabel: 'Explanation', navGroup: 'tools', accentRole: 'analytics', preferredLayout: 'learning', hideInTest: true },
+  { id: 'lsat-take-section', manifestPath: '/take/:sectionId', navLabel: 'Timed section', navGroup: 'practice', accentRole: 'study', preferredLayout: 'assessment' },
+  { id: 'lsat-take-session', manifestPath: '/take/session/:sessionId', navLabel: 'Timed section', navGroup: 'practice', accentRole: 'study', preferredLayout: 'assessment' },
+  { id: 'lsat-exam', manifestPath: '/exam/:preptestId', navLabel: 'Full exam', navGroup: 'practice', accentRole: 'study', preferredLayout: 'assessment' },
+  { id: 'lsat-blind-review', manifestPath: '/blind-review/:sessionId', navLabel: 'Blind review', navGroup: 'tools', accentRole: 'analytics', preferredLayout: 'assessment', hideInTest: true },
+  { id: 'lsat-popout-passage', manifestPath: '/popout/passage', navLabel: 'Passage', navGroup: 'tools', accentRole: 'study', preferredLayout: 'tool' },
+];
+
+function lsatDynamicAppRoute(spec: LsatDynamicSpec, navOrder: number): AppRoute {
+  const hostPath = lsatHostPath(spec.manifestPath);
+  return {
+    id: spec.id,
+    path: hostPath,
+    expectedText: lsatExpectedTextFor(spec.manifestPath),
+    domain: 'lsat',
+    navGroup: spec.navGroup,
+    iconKey: 'book-open',
+    accentRole: spec.accentRole,
+    preferredLayout: spec.preferredLayout,
+    navOrder,
+    navLabel: spec.navLabel,
+    searchGroup: spec.navGroup,
+    offlineCritical: false,
+    keyboardScopes: ['route'],
+    breadcrumbs: lsatBreadcrumbsFor(hostPath, spec.navLabel),
+    routeActions: [],
+    keyboardHelp: [{ scope: 'route', keys: ['/', 'k', 'tab'], label: 'route' }],
+    preloadStrategy: 'manual',
+    qaStates: [{ id: 'default', label: 'Default route state', viewports: [320, 375, 414, 768, 1024, 1440] }],
+    hideInTest: spec.hideInTest,
+    appMode: spec.hideInTest ? 'study' : 'both',
+  };
+}
+
+/**
+ * The vendored LSAT surface as first-class `AppRoute` entries, every path
+ * `/lsat`-prefixed. NOT fed into `appRoutes` (the host router array) — consumed
+ * via `routeTree` + the merged helpers below. `navOrder` continues after the
+ * host routes so a future unified sidebar can render one contiguous order.
+ */
+export const lsatAppRoutes: AppRoute[] = (() => {
+  const hostMax = appRoutes.reduce((max, route) => Math.max(max, route.navOrder), 0);
+  const statics = lsatRouteManifest.map((entry, index) => lsatStaticAppRoute(entry, hostMax + index + 1));
+  const dynamics = lsatDynamicSpecs.map((spec, index) =>
+    lsatDynamicAppRoute(spec, hostMax + statics.length + index + 1),
+  );
+  return [...statics, ...dynamics];
+})();
+
+/**
+ * K4-5 merged tree: host routes + LSAT routes in one array. Read-only data for
+ * unified nav/search/lookup. The host shell still mounts `appRoutes` ONLY (no
+ * router change); this union is what the merged helpers below resolve against.
+ */
+export const routeTree: AppRoute[] = [...appRoutes, ...lsatAppRoutes];
+
+/** Quick path -> route lookup over the merged tree (exact, static paths). */
+const routeTreeByPath = new Map(routeTree.map((route) => [route.path, route]));
+
+/** The merged route whose `path` exactly equals `path`, if any. */
+export function routeByPath(path: string): AppRoute | undefined {
+  return routeTreeByPath.get(path);
+}
+
+/**
+ * Canonical path resolver over the merged tree: follows an alias entry's
+ * `canonicalPath` (e.g. `/lsat/notebook` -> `/lsat`). Host routes have no
+ * aliases, so they pass through unchanged.
+ */
+export function canonicalRoutePath(path: string): string {
+  return routeTreeByPath.get(path)?.canonicalPath ?? path;
+}
+
+/** Friendly nav label for a merged-tree path (canonical-aware). */
+export function routeLabel(path: string): string | undefined {
+  return routeTreeByPath.get(canonicalRoutePath(path))?.navLabel;
+}
+
+/**
+ * ⌘K-style search rows derived from the merged tree's LSAT entries (host search
+ * rows still come from `searchToolRoutes`/`commandRoutes`). Excludes aliases and
+ * the dynamic/full-bleed routes (no `commandLabel`), so it mirrors the LSAT
+ * shell's own command list, but with `/lsat`-prefixed paths.
+ */
+export const lsatSearchRoutes: SearchRoute[] = lsatAppRoutes
+  .filter((route) => route.commandLabel && !route.canonicalPath)
+  .map((route) => ({
+    id: `lsat:${route.id}`,
+    title: route.navLabel,
+    subtitle: route.commandLabel as string,
+    type: 'LSAT',
+    path: route.path,
+    keywords: route.keywords ?? [],
+  }));
