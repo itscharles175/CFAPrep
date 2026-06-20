@@ -271,7 +271,12 @@ async fn cfa_pick_folder(app: AppHandle) -> Result<Option<String>, String> {
             let path = chosen.map(|p| p.to_string());
             let _ = tx.send(path);
         });
-    pick_folder_recv(rx)
+    // audit (LOW) — the dialog callback fires on another thread, so receiving on
+    // the async executor would park a Tauri async worker for the whole modal
+    // lifetime. Hand the blocking recv to spawn_blocking so the runtime stays free.
+    tauri::async_runtime::spawn_blocking(move || pick_folder_recv(rx))
+        .await
+        .map_err(|e| format!("Folder picker task error: {e}"))?
 }
 
 /// Pure-logic wrapper around the dialog callback's channel receive. Extracted
@@ -903,6 +908,26 @@ fn probe_sidecar_healthy(spec: &SidecarSpec) -> bool {
 ///
 /// BA8: a respawned child gets fresh log capture attached (its stdout/stderr
 /// pipes are new), so the ring buffer keeps streaming across a restart.
+/// audit M15 — terminate a sidecar AND its descendants. open-notebook + the worker
+/// are launched via `uv`, which forks Python grandchildren; a plain `child.kill()`
+/// reaps only the direct `uv` process and orphans those grandchildren (they keep
+/// holding ports/files). On Windows `taskkill /T` walks the whole tree by PID. On
+/// other platforms we fall back to the direct kill (a full Unix tree-kill needs a
+/// process-group spawn — tracked as a follow-up). Always follow with `child.wait()`
+/// at the call site to reap the handle.
+fn kill_child_tree(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        // /T = tree, /F = force. Best-effort: if the pid is already gone this
+        // no-ops. We still call child.kill() below as a fallback / for the
+        // direct handle.
+        let _ = std::process::Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .output();
+    }
+    let _ = child.kill();
+}
+
 fn supervise_once<L: SidecarLauncher>(
     launcher: &L,
     sidecars: &Mutex<Vec<SupervisedSidecar>>,
@@ -929,8 +954,9 @@ fn supervise_once<L: SidecarLauncher>(
             log::warn!(
                 "sidecar: {name} appears down (port_down={port_down}, exited={process_exited}); respawning"
             );
-            // Reap the old handle so we don't leak a zombie on Unix.
-            let _ = slot.child.kill();
+            // Reap the old handle (and its uv grandchildren, audit M15) so we
+            // don't leak a zombie on Unix or orphan the Python workers on Windows.
+            kill_child_tree(&mut slot.child);
             let _ = slot.child.wait();
             match launcher.launch(&slot.spec) {
                 Ok(mut child) => {
@@ -2237,7 +2263,10 @@ pub fn run() {
             if let RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<Sidecars>() {
                     for mut supervised in state.0.lock().unwrap().drain(..) {
-                        let _ = supervised.child.kill();
+                        // audit M15 — kill the whole tree so uv-spawned Python
+                        // grandchildren don't survive as orphans holding ports.
+                        kill_child_tree(&mut supervised.child);
+                        let _ = supervised.child.wait();
                         log::info!("sidecar: {} terminated on exit", supervised.spec.name);
                     }
                 }
