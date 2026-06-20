@@ -60,6 +60,10 @@ import {
 } from "@lsat/lib/routeManifest";
 // S4: cross-domain jumps into the StudyVault host (the `@` alias → /src).
 import { navigateDomain } from "@/lib/domainNav";
+// K4-13a — "doubled chrome" signal: `true` only when mounted inside the host
+// <SharedLayout> (flag-ON unified shell). Used to drop the redundant Titlebar
+// (SharedLayout's TopBar is the unified window chrome). Default is `false`.
+import { useUnifiedShell } from "@lsat/lib/unifiedShellContext";
 
 // Code-split heavy routes (R4-H1) + non-critical shelled routes (R5-J1).
 // P5 — the full-bleed exam screens are large and never the first paint (the
@@ -405,6 +409,12 @@ function GlobalChrome({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { resolved, setTheme } = useTheme();
   const { mode, setMode } = useMode();
+  // K4-13a — under the unified host shell, SharedLayout's TopBar is the single
+  // window chrome, so we drop this app's own <Titlebar/> to avoid a doubled bar.
+  // Everything else GlobalChrome provides (command palette, loading bar, offline/
+  // prereq banners, error boundary, keyboard help, onboarding, toaster) is
+  // functional and stays in BOTH modes. Default is `false` → Titlebar renders.
+  const unified = useUnifiedShell();
 
   useEffect(() => {
     pushCommandRecent(location.pathname);
@@ -571,7 +581,7 @@ function GlobalChrome({ children }: { children: React.ReactNode }) {
           data-app-root
           className="flex h-screen w-full flex-col overflow-hidden bg-background"
         >
-          <Titlebar />
+          {!unified && <Titlebar />}
           <OfflineBanner />
           <AiPrereqBanner />
           <div className="min-h-0 flex-1">

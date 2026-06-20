@@ -52,6 +52,10 @@ import {
 import { useDashboard, useSrsDue } from "@lsat/lib/hooks";
 import { getRaw, setRaw } from "@lsat/lib/storage";
 import { manifestRoutesByGroup, type RouteManifestEntry } from "@lsat/lib/routeManifest";
+// K4-13a — "doubled chrome" signal. `true` only when the LSAT App is mounted
+// inside the host <SharedLayout> (flag-ON unified shell), in which case this
+// shell renders chromeless. Default (legacy LsatRoot, tests) is `false`.
+import { useUnifiedShell } from "@lsat/lib/unifiedShellContext";
 
 // R9 (docs/19 F4) — persisted rail-collapse pin. Not in STORAGE_KEYS (that
 // registry is owned elsewhere); the storage module accepts an explicit key
@@ -339,7 +343,46 @@ function useIsMobile(): boolean {
   return mobile;
 }
 
+/**
+ * K4-13a — the LSAT shell as a layout route element. It dispatches on the
+ * unified-shell signal:
+ *   - UNIFIED (flag-ON, mounted inside the host <SharedLayout>): render
+ *     CHROMELESS via <ChromelessShell> — no LSAT Sidebar/header/titlebar/mobile
+ *     drawer/skip-link, since SharedLayout already supplies exactly one of each.
+ *     Only the scrollable content region (with scroll restoration) + <Outlet/>
+ *     render. Mode/theme/providers are untouched (they live above this in
+ *     <LsatUnifiedMount>), so pages reading useMode()/useTheme() still work.
+ *   - LEGACY (default — LsatRoot path, every existing test): render the FULL
+ *     <FullChromeShell> exactly as before, byte-for-byte.
+ *
+ * Dispatching to two sibling components (rather than branching mid-body) keeps
+ * the rules of hooks intact: each variant calls only the hooks it needs, and the
+ * chromeless path never runs the rail/mobile/dashboard chrome hooks.
+ */
 export function AppShell() {
+  const unified = useUnifiedShell();
+  return unified ? <ChromelessShell /> : <FullChromeShell />;
+}
+
+/**
+ * K4-13a — the unified-shell content region. SharedLayout owns the sidebar,
+ * topbar, titlebar, mobile drawer, and skip-to-main link, so this renders ONLY
+ * the scrollable main area + the routed <Outlet/>. Crucially it KEEPS
+ * <MainScrollArea>, so per-route scroll save/restore (saveScroll/restoreScroll)
+ * is preserved identically to the full shell. It deliberately does NOT call the
+ * chrome-only hooks (useRailCollapsed/useIsMobile/useDashboard/useTheme/the
+ * history-aware back resolver) — that chrome lives in SharedLayout now.
+ */
+function ChromelessShell() {
+  const location = useLocation();
+  return (
+    <MainScrollArea pathname={location.pathname}>
+      <Outlet />
+    </MainScrollArea>
+  );
+}
+
+function FullChromeShell() {
   const [collapsed, toggleCollapsed] = useRailCollapsed();
   const isMobile = useIsMobile();
   // UX-5 — off-canvas mobile drawer (host Sidebar parity). Below `sm` the
