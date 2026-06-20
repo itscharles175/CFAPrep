@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Boxes, CloudCog, Database, Download, Gauge, HardDrive, KeyRound, Mic2, Network, RefreshCw, ServerCog, ShieldCheck, Terminal, Upload, WifiOff, Wrench } from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
 import { exportVaultData, getVaultHealthReport, importVaultData, previewVaultRepair } from '../lib/learning';
+// AUDIT-2 — unified {host, lsat} backup/restore (DATA-5 wired into the UI).
+import { exportUnifiedBackup, importUnifiedBackup, UnifiedBackupError } from '../lib/unifiedBackup';
 import { decryptVaultBackup, encryptVaultBackup } from '../lib/encryptedBackup';
 import { cacheCriticalOfflineRoutes, getOfflineReadinessReport } from '../lib/offlineContentCache';
 import { checkLlmConnection, getLlmSettings, LLM_PRESETS, saveLlmSettings } from '../lib/localLlm';
@@ -114,6 +116,9 @@ export default function SystemHealth() {
   const [encryptedBusy, setEncryptedBusy] = useState(false);
   const [encryptedImportPassphrase, setEncryptedImportPassphrase] = useState('');
   const [pendingEncryptedFile, setPendingEncryptedFile] = useState(null);
+  // AUDIT-2 — unified backup (host + LSAT) state.
+  const [unifiedBusy, setUnifiedBusy] = useState(false);
+  const [pendingUnifiedFile, setPendingUnifiedFile] = useState(null);
   const [vaultHealth, setVaultHealth] = useState(null);
   const [offlineReadiness, setOfflineReadiness] = useState(null);
   const [persisted, setPersisted] = useState(null);
@@ -948,6 +953,44 @@ export default function SystemHealth() {
   async function handlePlaintextBackup() {
     downloadJson(await exportVaultData());
     setMessage('Plaintext backup exported from the advanced path. Prefer encrypted backups for normal vault moves.');
+  }
+
+  // AUDIT-2 — unified {host, lsat} backup. Bundles the Dexie host vault AND the
+  // LSAT bank into one checksummed envelope (official content firewalled out).
+  // Needs the LSAT backend; surfaces a clear message when it's offline.
+  async function handleUnifiedExport() {
+    setUnifiedBusy(true);
+    try {
+      const envelope = await exportUnifiedBackup();
+      const counts = envelope.rowCounts || {};
+      setMessage(`Unified backup downloaded (host + LSAT): ${counts.questions ?? 0} questions, ${counts.preptests ?? 0} preptests.`);
+      toast.success('Unified backup ready', 'One file holds both your host vault and the LSAT bank.');
+    } catch (err) {
+      const detail = err instanceof UnifiedBackupError ? err.message : 'Could not build the unified backup.';
+      setMessage(detail);
+      toast.warning('Unified backup unavailable', detail);
+    } finally {
+      setUnifiedBusy(false);
+    }
+  }
+
+  async function handleUnifiedRestore() {
+    if (!pendingUnifiedFile) return;
+    setUnifiedBusy(true);
+    try {
+      const text = await pendingUnifiedFile.text();
+      const result = await importUnifiedBackup(text);
+      setPendingUnifiedFile(null);
+      const hostNote = result.hostApplied ? ' Host vault merged.' : '';
+      setMessage(`Unified backup restored (LSAT bank).${hostNote} A reload is recommended.`);
+      toast.success('Unified backup restored', `Applied from ${result.exportId}.`);
+    } catch (err) {
+      const detail = err instanceof UnifiedBackupError ? err.message : 'Could not restore the unified backup.';
+      setMessage(detail);
+      toast.error('Restore failed', detail);
+    } finally {
+      setUnifiedBusy(false);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1893,6 +1936,49 @@ export default function SystemHealth() {
               <Download size={16} /> {encryptedBusy ? 'Working…' : 'Import Encrypted Backup'}
             </button>
           </div>
+        </div>
+      </Surface>
+
+      <Surface tone="vault" className="ops-report-panel">
+        <div className="qv-mb-3">
+          <StatusBadge tone="vault">Unified Backup</StatusBadge>
+          <h3 style={{ margin: 'var(--space-2) 0 0' }}>One file for the whole vault (host + LSAT)</h3>
+          <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
+            Bundles your host study vault (CFA / Quant / Excel) and the LSAT question bank into a single
+            checksummed <code className="qv-mono">.json</code> envelope. Copyrighted official LSAT content is never
+            included (provenance firewall). Requires the LSAT backend to be running — the host-only backups above
+            keep working offline.
+          </p>
+        </div>
+        <div className="qv-row-2" style={{ flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+          <button className="btn btn-primary" onClick={handleUnifiedExport} disabled={unifiedBusy}>
+            <Download size={16} /> {unifiedBusy ? 'Working…' : 'Unified Backup'}
+          </button>
+          <label
+            className="btn btn-secondary"
+            style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+            aria-disabled={unifiedBusy}
+          >
+            <Upload size={14} style={{ marginRight: 'var(--space-1)' }} />
+            {pendingUnifiedFile ? pendingUnifiedFile.name : 'Pick backup .json'}
+            <input
+              type="file"
+              accept=".json,application/json"
+              style={{ display: 'none' }}
+              onChange={(event) => {
+                setPendingUnifiedFile(event.target.files?.[0] || null);
+                event.target.value = '';
+              }}
+              disabled={unifiedBusy}
+            />
+          </label>
+          <button
+            className="btn btn-secondary"
+            onClick={handleUnifiedRestore}
+            disabled={unifiedBusy || !pendingUnifiedFile}
+          >
+            <Download size={16} /> {unifiedBusy ? 'Working…' : 'Restore Unified Backup'}
+          </button>
         </div>
       </Surface>
 
