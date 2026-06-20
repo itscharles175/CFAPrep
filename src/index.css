@@ -365,6 +365,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   *::before,
   *::after {
     animation-duration: 1ms !important;
+    /* E1 (UIv2) — cap iteration so INFINITE animations (shimmer, pulse-soft,
+       aurora-drift, route-progress) don't loop at 1ms into a rapid flicker, which
+       is worse for vestibular users than no motion. The 1ms duration (not 0) is
+       kept so any `animationend` listeners still fire once. */
+    animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 1ms !important;
   }

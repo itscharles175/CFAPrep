@@ -51,11 +51,32 @@ function useComputedVars(tokens) {
   return values;
 }
 
+// G6 (UIv2) — token names are click-to-copy so the gallery is a usable reference,
+// not just a readout. Falls back silently if the Clipboard API is unavailable
+// (e.g. an insecure context); shows a brief "Copied ✓" then reverts.
 function TokenLabel({ name }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) return;
+    navigator.clipboard.writeText(name).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+      },
+      () => {},
+    );
+  };
   return (
-    <code className="qv-fs-xs qv-text-muted qv-mono">
-      {name}
-    </code>
+    <button
+      type="button"
+      onClick={copy}
+      title={`Copy ${name}`}
+      aria-label={`Copy token ${name} to clipboard`}
+      className="qv-fs-xs qv-text-muted qv-mono"
+      style={{ background: 'none', border: 0, padding: 0, cursor: 'copy', font: 'inherit', color: 'inherit', textAlign: 'left' }}
+    >
+      {copied ? 'Copied ✓' : name}
+    </button>
   );
 }
 
