@@ -156,3 +156,24 @@ before each commit:
   `status-badge-danger` 4.03:1, analytics UTC/local day-keying off-by-one,
   `fsrsOptimizer` FSRS-4.5→6 comment drift, `playlists()` empty-shape swallow, the
   calibration/difficulty TABLE zero-attempt rows. All cosmetic/correctness-polish.
+
+### Residual closure (R1–R4, 2026-06-20)
+The residuals above were then worked down — only M14 + M16 remain (both need an
+on-Windows runtime to verify; see rationale above):
+- **R1** `55c944a` — LOW cosmetics: light `--text-muted` tier, `status-badge-danger`
+  → `--danger` token, `fsrsOptimizer` FSRS-6 comments, calibration/difficulty TABLE
+  zero-attempt rows dashed. (`playlists()` swallow + the timezone day-keying were
+  judged genuinely-not-worth-it and left as-is, with rationale in the commit.)
+- **R2** `291a7a6` — sidecar crash-loop **backoff** (exponential, 14s→5min; resets on
+  recovery). cargo test 61 ✓.
+- **R3** `a292839` — **M19** completed: `actions/cache` seeds/restores Linux visual
+  baselines so the (already fail-closed) gate actually enforces.
+- **R4** `d626fff` — **M18** completed: regenerated the typed client to the live
+  226-path spec (was 185) + added the `--client` drift gate wired into CI + `gen:api`
+  / `contract:check:client` scripts. tsc lsat 0; gate reports 226 covers 226.
+
+**Open (verification-gated):** M14 (Windows Job Object kill-on-CRASH) and M16
+(DATA-7 backend-path-matched relocation). Both compile-safe to add but their runtime
+behaviour (kill-on-crash; not redirecting the data dir to an empty store) can only be
+confirmed by running the packaged Tauri shell on Windows — out of scope for this
+headless environment.
