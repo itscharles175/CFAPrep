@@ -40,7 +40,9 @@
     "browser:regression": "node --import ./scripts/register-ts-loader.mjs scripts/browser-regression.mjs",
     "visual:regression": "node --import ./scripts/register-ts-loader.mjs scripts/visual-regression.mjs",
     "a11y:check": "node --import ./scripts/register-ts-loader.mjs scripts/a11y-check.mjs",
-    "fresh-import:check": "node --import ./scripts/register-ts-loader.mjs scripts/fresh-import-check.mjs"
+    "fresh-import:check": "node --import ./scripts/register-ts-loader.mjs scripts/fresh-import-check.mjs",
+    "gen:api": "node scripts/export-lsat-openapi.mjs --write-client && npx --yes openapi-typescript@7 src/domains/lsat/_meta/openapi.json -o src/domains/lsat/lib/api.gen.ts",
+    "contract:check:client": "node scripts/export-lsat-openapi.mjs --client"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.3",

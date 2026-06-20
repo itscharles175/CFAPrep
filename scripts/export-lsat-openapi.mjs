@@ -41,6 +41,10 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, '..');
 const BACKEND_DIR = join(REPO_ROOT, 'services', 'lsat-backend');
 const BASELINE_PATH = join(BACKEND_DIR, 'openapi-baseline.json');
+// audit M18 — the typed client's codegen INPUT. api.gen.ts is generated from this
+// file (openapi-typescript). The `--client` mode below fails when this snapshot is
+// behind the live backend, so the client can't silently rot 41 paths behind again.
+const CLIENT_SPEC_PATH = join(REPO_ROOT, 'src', 'domains', 'lsat', '_meta', 'openapi.json');
 
 /** The backend's own interpreter, relative to the backend dir (see header). */
 function defaultPython() {
@@ -57,6 +61,8 @@ function parseArgs(argv) {
     const a = rest.shift();
     if (a === '--write') out.mode = 'write';
     else if (a === '--check') out.mode = 'check';
+    else if (a === '--client') out.mode = 'client';
+    else if (a === '--write-client') out.mode = 'write-client';
     else if (a === '--python') out.python = rest.shift();
     else {
       console.error(`export-lsat-openapi: unknown arg ${a}`);
@@ -213,6 +219,49 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const live = dumpLiveSpec(args.python);
   const liveJson = serialize(live);
+
+  // audit M18 — refresh the typed client's codegen input from the live spec.
+  // `npm run gen:api` runs this then openapi-typescript to regenerate api.gen.ts.
+  if (args.mode === 'write-client') {
+    writeFileSync(CLIENT_SPEC_PATH, liveJson);
+    console.log(
+      `export-lsat-openapi: wrote client spec (${Object.keys(live.paths).length} paths) → ${CLIENT_SPEC_PATH}`,
+    );
+    process.exit(0);
+  }
+
+  // audit M18 — client-drift gate. Fail when the committed client spec is BEHIND
+  // the backend (a backend path the client codegen never saw). The original gate
+  // only diffed live-vs-backend-baseline, so the client could (and did) rot 41
+  // paths behind invisibly — a backend field RENAME on those routes shipped green.
+  if (args.mode === 'client') {
+    if (!existsSync(CLIENT_SPEC_PATH)) {
+      console.error(`export-lsat-openapi: --client requires ${CLIENT_SPEC_PATH}. Run \`npm run gen:api\`.`);
+      process.exit(2);
+    }
+    let clientSpec;
+    try {
+      clientSpec = JSON.parse(readFileSync(CLIENT_SPEC_PATH, 'utf8'));
+    } catch (err) {
+      console.error(`export-lsat-openapi: client spec is not valid JSON — ${err.message}`);
+      process.exit(2);
+    }
+    const livePaths = Object.keys(live.paths || {});
+    const clientPaths = new Set(Object.keys(clientSpec.paths || {}));
+    const missing = livePaths.filter((p) => !clientPaths.has(p));
+    if (missing.length) {
+      console.error(`export-lsat-openapi: the typed client is ${missing.length} path(s) BEHIND the backend:`);
+      for (const m of missing) console.error(`  - ${m}`);
+      console.error('');
+      console.error('  Regenerate the client: `npm run gen:api`, then commit');
+      console.error('  src/domains/lsat/_meta/openapi.json + src/domains/lsat/lib/api.gen.ts.');
+      process.exit(1);
+    }
+    console.log(
+      `export-lsat-openapi: typed client is current (${clientPaths.size} client paths cover all ${livePaths.length} backend paths).`,
+    );
+    process.exit(0);
+  }
 
   const baselineExists = existsSync(BASELINE_PATH);
 

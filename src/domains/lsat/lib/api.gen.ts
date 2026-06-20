@@ -190,6 +190,9 @@ export interface paths {
          *
          *     Adds ``duration_sec``, ``br_accuracy`` (over attempts with a BR answer), and
          *     ``official_only_score`` (scaled estimate over official timed attempts only).
+         *
+         *     BC2: optional limit/offset slice the built list in Python (one aggregate
+         *     query regardless); omit both for the full most-recent-first list as before.
          */
         get: operations["list_sessions_api_sessions_get"];
         put?: never;
@@ -507,6 +510,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ai/model/keep-alive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Model Keep Alive
+         * @description BB1 — pin or unload a model in the active provider's VRAM.
+         *
+         *     ``mode="pin"`` keeps the model resident (keep_alive=-1) so the realtime
+         *     explain model stays warm during study; ``mode="unload"`` evicts it
+         *     (keep_alive=0) so two ~9 GB models don't thrash a 12 GB GPU. Delegates to the
+         *     existing ``OllamaProvider.set_keep_alive``, which is best-effort and never
+         *     raises. No-ops gracefully (``applied=False``) when the active local provider
+         *     is not Ollama (e.g. LMStudio has no keep-alive control).
+         */
+        post: operations["model_keep_alive_api_ai_model_keep_alive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ai/coach/chat": {
         parameters: {
             query?: never;
@@ -587,7 +617,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Blind Review Gap */
+        /**
+         * Blind Review Gap
+         * @description Blind-review gap (timed vs Blind-Review accuracy).
+         *
+         *     BACKWARD-COMPATIBLE: with no ``?domain=`` this returns the LSAT-native
+         *     ``analytics.blind_review_gap`` exactly as before. Supplying ``?domain=`` opts
+         *     into the ANL-3 cross-domain merge (LSAT `Attempt` BR data + host BR attempts
+         *     mirrored via DATA-4a's `HostProgressSnapshot`), adding the 2x2 outcome
+         *     distribution, careless/concept/lucky rates, and per-domain blocks.
+         */
         get: operations["blind_review_gap_api_analytics_blind_review_gap_get"];
         put?: never;
         post?: never;
@@ -660,6 +699,57 @@ export interface paths {
         };
         /** Activity */
         get: operations["activity_api_analytics_activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analytics/cross-domain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cross Domain
+         * @description ANL-1 — bidirectional cross-domain study rollup the HOST pulls and merges
+         *     with its own Dexie analytics: combined study time, accuracy by domain, merged
+         *     weakest types, the longest active streak across domains, and a 30-day activity
+         *     trend. Host numbers are OPTIONAL (DATA-4a owns the persisted host->backend
+         *     feed); omit them for the LSAT-only view (``meta.host_provided`` = False) and
+         *     let the host merge its CFA/Quant numbers client-side.
+         */
+        get: operations["cross_domain_api_analytics_cross_domain_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analytics/weakness-index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Weakness Index
+         * @description ANL-2 — unified weakness index: LSAT per-type mastery + host per-topic
+         *     accuracy merged into ONE list ranked by the ~95% credible LOWER bound (a
+         *     confidently-weak area outranks a tiny noisy one), each row carrying recent-miss
+         *     ids and a host-mountable recommended-drill deep-link. Honors the shared
+         *     ``?days=`` window; ``?domain=`` selects the plane; ``?limit=``/``?offset=`` page
+         *     the ranked list (the full count is echoed on ``X-Total-Count`` and in
+         *     ``meta.total``).
+         */
+        get: operations["weakness_index_api_analytics_weakness_index_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -912,6 +1002,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/srs/params": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Srs Params
+         * @description LEARN-4 — expose the backend's source-of-truth FSRS weights + desired
+         *     retention so the host scheduler can mirror them. Idempotent + side-effect
+         *     free: ``load_optimized_params`` only reads (and applies to the backend's own
+         *     cached Scheduler) the persisted optimized weights — it never writes — and the
+         *     retention is read straight from config. Returns ``weights=[]`` when no
+         *     per-user optimization has been persisted yet.
+         */
+        get: operations["srs_params_api_srs_params_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/srs/cards": {
         parameters: {
             query?: never;
@@ -944,10 +1059,73 @@ export interface paths {
          * Concept Gap Queue
          * @description 1.1 — the concept-gap remediation queue: SRS cards created because the
          *     timed AND blind-review answers were both wrong (origin="concept_gap").
+         *
+         *     LEARN-5 — with ``include_host=true`` the cross-domain concept gaps the host
+         *     mirrored (DATA-4a review snapshots whose ``origin`` marks unfinished
+         *     understanding) are ALSO appended, already projected onto the canonical
+         *     cross-domain shape (``cross_domain_review_card`` / ``CrossDomainReviewCard``)
+         *     so the unified UI renders both planes with one vocabulary. Read-only on the
+         *     host mirror. When ``include_host`` is false (the default) nothing host-side is
+         *     read and the response is unchanged.
          */
         get: operations["concept_gap_queue_api_srs_concept_gap_queue_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/srs/attempts/{attempt_id}/blind-review-note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Blind Review Note
+         * @description LSAT-3 — capture the short "why" the user writes when revealing a Blind
+         *     Review item. Stored as an ``AttemptRationale`` (stage="blind_review") with the
+         *     note in ``br_note``; the longer Socratic ``rationale_text`` stays empty here.
+         *     The captured note then feeds the auto-cloze "Gap" card generation below.
+         *
+         *     Append-only (one row per reveal) — matching how the why-loop records
+         *     rationales — so re-revealing keeps a small history rather than overwriting.
+         */
+        post: operations["blind_review_note_api_srs_attempts__attempt_id__blind_review_note_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/srs/concept-gap-cards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Concept Gap Cards
+         * @description LSAT-3 — auto-generate cloze/pattern "Gap" SRS cards from the concept-gap
+         *     queue. For each concept-gap question (timed AND blind-review both wrong) we
+         *     ensure one card tagged ``origin="concept_gap_cloze"`` — a distinct "Gap" card
+         *     type surfaced in the SRS screen — and derive a deterministic cloze + pattern
+         *     from the stem and the captured Blind Review note (LSAT-3's ``br_note``).
+         *
+         *     Idempotent: ``ensure_card`` is one card per question, so re-running creates no
+         *     duplicates and a question already promoted to a Gap card is skipped. Returns
+         *     each generated card's id + cloze/pattern preview so the caller can show what
+         *     was made and the SRS screen can render the Gap card body.
+         */
+        post: operations["concept_gap_cards_api_srs_concept_gap_cards_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -964,7 +1142,9 @@ export interface paths {
         /**
          * Due Cards
          * @description Due SRS cards, most-overdue-first AND interleaved by q_type so a single
-         *     type never dominates a long review run. (Card response shape unchanged.)
+         *     type never dominates a long review run. Each card additionally carries its
+         *     ``origin`` (why it's queued) — answer-key-free, used by the SRS screen to
+         *     badge the card (incl. LSAT-3's distinct "Gap" cloze cards).
          */
         get: operations["due_cards_api_srs_due_get"];
         put?: never;
@@ -987,6 +1167,14 @@ export interface paths {
          * @description 3.2 — the leech remediation queue: cards that have lapsed too many times
          *     (``lapses >= config.SRS_LEECH_THRESHOLD``), most-lapsed first. Served in
          *     test mode (no answer leak) with the lapse count + card id attached.
+         *
+         *     LEARN-5 — with ``include_host=true`` the host leeches mirrored cross-domain
+         *     (DATA-4a review snapshots that self-report ``leech`` / enough ``lapses``) are
+         *     ALSO appended, already projected onto the canonical cross-domain shape
+         *     (``CrossDomainReviewCard`` + ``lapses`` / ``leech``) and sorted most-lapsed
+         *     first, so the unified UI renders both planes with one vocabulary. Read-only on
+         *     the host mirror. When ``include_host`` is false (the default) nothing host-side
+         *     is read and the response is unchanged.
          */
         get: operations["leeches_api_srs_leeches_get"];
         put?: never;
@@ -1261,6 +1449,89 @@ export interface paths {
          * @description Q2: pass rate + failure-reason histogram across generation jobs.
          */
         get: operations["generation_quality_api_gen_quality_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gen/generation-quality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generation Quality Check
+         * @description INT-1: validate one candidate against the shared generation rubric.
+         *
+         *     Runs every gate (trap-metadata, distractor-quality, structural-type,
+         *     self-consistency, permutation-invariance, lexical-leak, CoVe, multi-model
+         *     agreement, RC-authenticity) via ``generation.build_validation_report`` WITHOUT
+         *     enqueuing a job or writing to the DB. The embedding-dedup/novelty gate skips
+         *     (no session) since cross-domain content isn't in the LSAT bank. Fails CLOSED:
+         *     a model outage yields ``passed=False`` + ``error`` rather than a 500, so the
+         *     caller quarantines weak distractors instead of admitting them.
+         */
+        post: operations["generation_quality_check_api_gen_generation_quality_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gen/generation/quality-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Generation Quality Metrics
+         * @description INT-5: per-type pass rates + per-gate pass/fail + fail-reason distribution.
+         *
+         *     Goes a layer deeper than ``GET /api/gen/quality`` (Q2's overall pass rate +
+         *     first-failure histogram): for every recorded candidate it replays the stored
+         *     ``checks`` through the SAME per-gate resolver INT-1 uses, so each of the 8+
+         *     pipeline gates (structural, trap-metadata, length-tell, lexical-leak,
+         *     deterministic-solve, self-consistency, permutation-invariance, informativity,
+         *     single-defensible, distractor-quality, CoVe, multi-model-agreement,
+         *     structural-type, RC-authenticity, novelty) reports its own judged/passed/
+         *     failed counts + a failure histogram. Read-only; no model calls or DB writes.
+         */
+        get: operations["generation_quality_metrics_api_gen_generation_quality_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gen/generation/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Generation Audit Log
+         * @description INT-5: recent generate / validate / firewall events for the panel.
+         *
+         *     Derives an append-only-feeling stream from ``GenCandidate`` rows (newest
+         *     first) WITHOUT a new table — each row records one item that passed through
+         *     the gate, with verdict + reason + the solver/critic models + a timestamp.
+         *     ``kind`` optionally filters to one event class; ``counts`` always reflects the
+         *     scanned window so the panel can show every chip even when filtered.
+         */
+        get: operations["generation_audit_log_api_gen_generation_audit_log_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1562,6 +1833,9 @@ export interface paths {
         /**
          * Sources
          * @description Registry of supported research datasets (key, HF id, expected section).
+         *
+         *     BC2: optional limit/offset slice the (small, fixed) registry in Python; omit
+         *     both for the full registry exactly as before.
          */
         get: operations["sources_api_bank_sources_get"];
         put?: never;
@@ -1949,6 +2223,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/export/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Backup
+         * @description Build the unified {host, lsat} export envelope + record provenance.
+         *
+         *     Copyrighted ``official`` LSAT content is always excluded (the
+         *     ``include_official=False`` firewall in ``bank_export``); there is deliberately
+         *     no parameter to include it over the wire.
+         */
+        post: operations["create_backup_api_export_backup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/export/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate
+         * @description Verify an envelope's schema + checksum + firewall BEFORE importing it.
+         *
+         *     Side-effect-free. Returns ``{"ok": bool, "errors": [...]}`` so the UI can gate
+         *     the import button and surface a precise reason on a mismatch.
+         */
+        post: operations["validate_api_export_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/export/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Backup
+         * @description Import a unified envelope: apply the LSAT bank half + record provenance.
+         *
+         *     Validates (schema + checksum + firewall) then routes the LSAT ``data`` through
+         *     the idempotent ``bank_export.import_bank``. A validation/firewall failure is a
+         *     client error (400). The host half (``hostData``) is NOT applied here — the
+         *     host re-imports it client-side; the backend never writes the host's store.
+         */
+        post: operations["import_backup_api_export_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/export/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Exports
+         * @description Paginated ExportHistory provenance feed, newest first.
+         */
+        get: operations["list_exports_api_export_list_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/export/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * History
+         * @description Detail for one provenance row by ``export_id`` (404 if unknown).
+         */
+        get: operations["history_api_export_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/study/plan": {
         parameters: {
             query?: never;
@@ -1977,9 +2363,59 @@ export interface paths {
         /**
          * Today
          * @description Today's concrete plan: due reviews + drills on weakest types + forecast.
+         *
+         *     LEARN-3 — ``include_host=true`` ALSO folds in the host's weakest-by-ability
+         *     planes (CFA/Quant/Excel, via ``adaptivity.ability_estimate(domain=...)``) as
+         *     ``host_drill`` tasks, reranks the WHOLE list (LSAT + host) by one cross-domain
+         *     utility score, and packs to the merged DATA-6 ``SharedStudyProfile`` budget;
+         *     the response then carries the additive ``include_host`` / ``planes_merged`` /
+         *     ``host_task_count`` / ``budget_source`` / ``cross_domain`` keys. The default
+         *     (``include_host=false``) returns the unchanged LSAT-only body.
          */
         get: operations["today_api_study_today_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Profile
+         * @description DATA-6 — the reconciled shared study profile (idempotent, read-only).
+         *
+         *     Merges the active LSAT ``StudyPlan`` with the persisted ``SharedStudyProfile``
+         *     row by last-write-wins (most recent ``updated_at`` wins per shared scalar);
+         *     host-owned fields (target_level / rest_days / mock_cadence_days /
+         *     topic_weights) come from the profile row. Never mutates — two consecutive GETs
+         *     return the identical body. This is the single source of truth LEARN-3 (daily
+         *     plan) and ANL-4 (readiness) read.
+         */
+        get: operations["get_profile_api_study_profile_get"];
+        /**
+         * Put Profile
+         * @description DATA-6 — write the shared study profile (last-write-wins).
+         *
+         *     Updates the active LSAT ``StudyPlan`` row with the reconciled scalars (reusing
+         *     ``study_plan.upsert_plan`` so the single-active-plan invariant holds) AND
+         *     upserts the single ``SharedStudyProfile`` row with the full profile — incl. the
+         *     host-owned fields the ``StudyPlan`` has no column for. The writer stamps a
+         *     fresh ``updated_at`` on both, so a later GET resolves this as the winning
+         *     write. Unsent fields keep their current reconciled value (no zeroing).
+         *
+         *     The host persists its own Dexie copy via the degrading-fetch bridge; this PUT
+         *     is the backend half of the dual-write. Backward-compatible: the existing
+         *     ``GET/PUT /api/study/plan`` routes are untouched and keep working.
+         */
+        put: operations["put_profile_api_study_profile_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2002,6 +2438,208 @@ export interface paths {
          */
         post: operations["today_feedback_api_study_today_feedback_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study/due-unified": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Due Unified
+         * @description LEARN-2 — cross-domain due queue in the canonical ``CrossDomainReviewCard``
+         *     shape, ability-ranked. Sources LSAT due cards the same way ``GET /api/srs/due``
+         *     does (every SRS card whose ``due_date`` has passed), then orders them by:
+         *       1. ``overdueSeconds`` DESC (most overdue first),
+         *       2. q_type round-robin interleave (no single type dominates a run),
+         *       3. ability-weighted utility DESC (the shared Ability Engine selector's
+         *          utility score, so the most productive reviews surface first).
+         *
+         *     The host merges its OWN local Dexie review queue with these rows client-side
+         *     and ranks the combined list — the host's local cards never round-trip through
+         *     the backend, so this projects the LSAT plane only. Strictly read-only.
+         */
+        get: operations["due_unified_api_study_due_unified_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sync/progress-updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Progress Updates
+         * @description DATA-4a — UPSERT a batch of HOST cross-domain progress snapshots.
+         *
+         *     Idempotent by ``cross_id`` (the host's namespaced ``<plane>:<kind>:<nativeId>``):
+         *     a re-POST of the same logical row updates it in place rather than inserting a
+         *     duplicate (UNIQUE index ``ux_hostprogresssnapshot_cross_id``, migration 23).
+         *     An unchanged re-POST (same ``dedupe_key``) is a recognised no-op — the row is
+         *     left untouched, so ``updated_at`` only moves on a genuine change.
+         *
+         *     Strictly host -> backend: this NEVER writes back into host data and never
+         *     mutates LSAT-native progress. Snapshots whose ``kind`` is unknown or whose
+         *     ``domain`` is not a host plane (e.g. a stray ``lsat`` row) are skipped rather
+         *     than rejected, so a single bad row never fails an offline-replayed batch.
+         */
+        post: operations["post_progress_updates_api_sync_progress_updates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sync/fsrs-write-back": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Fsrs Write Back
+         * @description Apply a batch of cross-domain FSRS write-backs (idempotent, last-write-wins).
+         *
+         *     Strictly host -> backend and confined to the DATA-4a mirror — LSAT-native
+         *     ``SRSCard`` scheduling is never touched. Idempotent by ``writeId`` (a replay is
+         *     a no-op) and last-write-wins by ``observedAt`` (a stale out-of-order write is
+         *     kept-existing). The response carries the reconciled authoritative ``fsrsState``
+         *     + ``syncRevision`` per card so the host can reconcile its own store. See
+         *     ``cross_domain_sync`` for the full contract.
+         */
+        post: operations["post_fsrs_write_back_api_sync_fsrs_write_back_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sync/fsrs-write-back/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fsrs Write Back Log
+         * @description Read the write-back ledger (most-recent first), optionally for one card.
+         *
+         *     Read-only diagnostics for the trust cockpit / debugging — surfaces how each
+         *     write resolved (applied / kept_existing / noop_dedupe / no_target) without
+         *     exposing any host data the backend doesn't already mirror.
+         */
+        get: operations["get_fsrs_write_back_log_api_sync_fsrs_write_back_log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study-artifacts/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Artifacts
+         * @description List artifacts, newest first, filtered by question/topic/type with BC2
+         *     ``limit``/``offset`` pagination.
+         *
+         *     ``question_id`` and ``type`` (``kind``) are scalar columns filtered in SQL.
+         *     ``topic`` matches an artifact whose ``tags_json`` list contains that exact
+         *     tag; since ``tags_json`` is a JSON column (no portable SQL membership
+         *     operator across SQLite here), that match is applied in Python after the
+         *     scalar filters have narrowed the rows.
+         */
+        get: operations["list_artifacts_api_study_artifacts__get"];
+        put?: never;
+        /**
+         * Create Artifact
+         * @description Persist a host explanation or LSAT Socratic note as a ``StudyArtifact``.
+         */
+        post: operations["create_artifact_api_study_artifacts__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study-artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Artifacts
+         * @description List artifacts, newest first, filtered by question/topic/type with BC2
+         *     ``limit``/``offset`` pagination.
+         *
+         *     ``question_id`` and ``type`` (``kind``) are scalar columns filtered in SQL.
+         *     ``topic`` matches an artifact whose ``tags_json`` list contains that exact
+         *     tag; since ``tags_json`` is a JSON column (no portable SQL membership
+         *     operator across SQLite here), that match is applied in Python after the
+         *     scalar filters have narrowed the rows.
+         */
+        get: operations["list_artifacts_api_study_artifacts_get"];
+        put?: never;
+        /**
+         * Create Artifact
+         * @description Persist a host explanation or LSAT Socratic note as a ``StudyArtifact``.
+         */
+        post: operations["create_artifact_api_study_artifacts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study-artifacts/{artifact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artifact
+         * @description Fetch a single artifact by id (404 if missing).
+         */
+        get: operations["get_artifact_api_study_artifacts__artifact_id__get"];
+        /**
+         * Update Artifact
+         * @description Partial update: only fields present in the request body are changed.
+         */
+        put: operations["update_artifact_api_study_artifacts__artifact_id__put"];
+        post?: never;
+        /**
+         * Delete Artifact
+         * @description Delete a single artifact by id (404 if missing).
+         */
+        delete: operations["delete_artifact_api_study_artifacts__artifact_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2062,6 +2700,98 @@ export interface paths {
         post: operations["put_question_annotations_api_questions__question_id__annotations_post"];
         /** Delete Question Annotations */
         delete: operations["delete_question_annotations_api_questions__question_id__annotations_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/annotations/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Annotations
+         * @description FTS5 keyword search over annotation note text + user explanations + tags.
+         *
+         *     Returns ``{"query", "mode", "hits"}``. ``mode`` is ``"fts"`` when the FTS5
+         *     index served the query, ``"like"`` when it fell back (no FTS5 / a malformed
+         *     MATCH expression). The fallback keeps search working on any SQLite build.
+         */
+        get: operations["search_annotations_api_annotations_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/annotations/backlinks/{target}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backlinks
+         * @description Every annotation that references ``target``.
+         *
+         *     ``target`` is either a ``scope:ref_id`` ref (``question:42`` / ``attempt:7``)
+         *     — resolved against the matching annotation row — or a free ``tag:{name}``
+         *     pseudo-ref, which returns every annotation carrying that tag. This is the
+         *     inverse index powering the wiki backlink panel: "what notes point here?".
+         */
+        get: operations["get_backlinks_api_annotations_backlinks__target__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/annotations/{annotation_id}/explanation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Annotation Explanation */
+        get: operations["get_annotation_explanation_api_annotations__annotation_id__explanation_get"];
+        put?: never;
+        /**
+         * Save Annotation Explanation
+         * @description Author / replace the user-written explanation on an annotation, then
+         *     re-mirror the row into the FTS index so it becomes searchable.
+         */
+        post: operations["save_annotation_explanation_api_annotations__annotation_id__explanation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/annotations/{annotation_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Annotation Tags
+         * @description Replace an annotation's free tag list (de-duplicated, trimmed), then
+         *     re-mirror it into FTS so tag search + ``tag:`` backlinks stay current.
+         */
+        put: operations["save_annotation_tags_api_annotations__annotation_id__tags_put"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2133,6 +2863,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/observability/cloud-budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cloud Budget
+         * @description BB4 — read-only cloud-budget picture + a NEXT-CALL dry-run cost estimate,
+         *     plus local Whisper/voice model cache status.
+         *
+         *     ``cloud`` carries month-to-date spend, the configured monthly budget, the
+         *     remaining headroom, and a forecast of what the *next* cloud call would cost —
+         *     priced identically to the real pre-call guard, but WITHOUT invoking any
+         *     provider. Pass ``input_tokens``/``output_tokens`` to price a specific call;
+         *     they default to the representative ``CLOUD_DRY_RUN_*`` token counts.
+         *
+         *     ``voice`` reports the configured Whisper model id, the on-disk cache dir, and
+         *     a best-effort presence check so the UI can show "downloaded / not downloaded"
+         *     (the authoritative in-browser cache check lives on the host). Everything here
+         *     is best-effort and never raises — a missing budget/metrics store or cache dir
+         *     degrades softly to a visible-but-empty gauge.
+         */
+        get: operations["cloud_budget_api_observability_cloud_budget_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/observability/runtime-evidence": {
         parameters: {
             query?: never;
@@ -2145,6 +2908,159 @@ export interface paths {
          * @description Local log/metric evidence for the native Reliability Console.
          */
         get: operations["runtime_evidence_api_observability_runtime_evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/observability/sqlite-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sqlite Health
+         * @description BC4 — SQLite contention/PRAGMA snapshot.
+         *
+         *     Returns the live connection PRAGMA values, the observed SQLITE_BUSY/LOCKED
+         *     retry count since process start, and a cheap WAL-size estimate (``None`` when
+         *     the WAL sidecar is absent or unreadable). O(1): no DB rows are read.
+         */
+        get: operations["sqlite_health_api_observability_sqlite_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/observability/trust-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trust Status
+         * @description BC4 — cached lightweight trust verdict for the Settings trust strip.
+         *
+         *     Runs only the content-health, privacy-firewall, and model-readiness checks
+         *     (NOT the full release manifest) and rolls them up into a single
+         *     ``ok`` | ``warning`` | ``blocked`` status. Cached ~1h; pass ``refresh=true``
+         *     to recompute. The full manifest stays on /observability/trust.
+         */
+        get: operations["trust_status_api_observability_trust_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/observability/health-aggregated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health Aggregated
+         * @description OPS-3 — one consolidated System-Health roll-up for the host header badge
+         *     and Runtime Metrics tab.
+         *
+         *     Folds the *backend-local* signals already exposed piecemeal across this
+         *     router — backend_readiness (DB integrity / worker liveness / backup
+         *     freshness), sqlite_health (PRAGMA / WAL / SQLITE_BUSY contention), the
+         *     in-RAM cloud token counters, the gen-queue depth, and the live LLM explain
+         *     p50 — into a single ``ok`` | ``degraded`` | ``error`` verdict so the host
+         *     doesn't have to fan out four requests just to draw a header badge.
+         *
+         *     ADDITIVE: every underlying read already has its own endpoint; this one only
+         *     reuses them. The verdict mirrors the readiness convention used by ``/ready``
+         *     (``error`` when the backend isn't ready, ``degraded`` when it's ready but has
+         *     warnings, ``ok`` otherwise). The host's own sidecar roll-up (the native
+         *     ``get_system_health_aggregated`` Tauri command) layers process supervision on
+         *     top of this; this endpoint speaks only for the LSAT backend's own health.
+         *
+         *     O(1)-ish and never raises: each component read degrades softly on its own, so
+         *     a missing WAL file or an unstarted worker yields a visible-but-degraded badge
+         *     rather than a 500.
+         */
+        get: operations["health_aggregated_api_observability_health_aggregated_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/observability/schema-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Schema Versions
+         * @description DATA-3 — the cross-domain schema-version handshake.
+         *
+         *     Reports the version of the SHARED cross-domain field-semantics contract this
+         *     backend speaks (recorded in SQLite by migration 22, pinned by
+         *     docs/DATA-DICTIONARY.md), alongside the SQLite ``PRAGMA user_version`` and the
+         *     latest recorded migration version for diagnostics. The host reads this on boot
+         *     and disables CROSS-DOMAIN writes (host->LSAT / LSAT->host) — NOT local writes —
+         *     when the versions are incompatible, surfaced as the "data planes aligned"
+         *     check on System Health. The cheapest guard against an old SQLite + new Dexie
+         *     silently losing data on a cross-plane write.
+         *
+         *     O(1) and never raises: a DB that pre-dates migration 22 still reports the
+         *     code-default version rather than erroring.
+         */
+        get: operations["schema_versions_api_observability_schema_versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/observability/relocation-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Relocation Status
+         * @description DATA-7 — app-data relocation guard status (read-only).
+         *
+         *     A bundle-id / app-data-dir change can orphan the LSAT SQLite store under the
+         *     OLD OS app-data dir (``%APPDATA%/LSATLab`` on Windows). DATA-3 only versions
+         *     the cross-domain contract; it never moves stores. This endpoint reports
+         *     whether a recoverable store sits at the old path while the active (NEW) store
+         *     is absent/empty, so the host can prompt the user / surface a "data found at
+         *     old location" affordance.
+         *
+         *     Folds ``relocation.relocation_status`` into a single ``status``
+         *     (``ok`` | ``orphaned``) verdict plus the resolved old/new paths and existence
+         *     flags. O(1)-ish (a couple of ``stat`` calls) and never raises: an
+         *     unresolvable OS base or an unreadable dir degrades to a visible-but-empty
+         *     field rather than a 500. No DB writes.
+         */
+        get: operations["relocation_status_api_observability_relocation_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2526,6 +3442,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{conversation_id}/turns-stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Turn Stream
+         * @description Stream a Socratic reply for a new user turn (SSE).
+         *
+         *     The user turn + deterministic assistant reply are persisted up front (inside
+         *     ``adaptivity.stream_tutor_turn``) so an aborted mid-stream read never loses the
+         *     record — the client can re-fetch the conversation. We pre-roll the generator's
+         *     events here (the persistence + context build happens before the first yield) so
+         *     a missing conversation surfaces as a clean 404 rather than a half-open stream.
+         */
+        post: operations["add_turn_stream_api_conversations__conversation_id__turns_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Conversation Evidence
+         * @description The citable similar-misses + Notebook context behind this conversation's
+         *     Socratic nudges (read-only; never writes a turn).
+         */
+        get: operations["conversation_evidence_api_conversations__conversation_id__evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/pacing-budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pacing Budget
+         * @description Per-type pacing budgets: section benchmark, observed average, and override.
+         */
+        get: operations["pacing_budget_api_content_pacing_budget_get"];
+        put?: never;
+        /**
+         * Set Pacing Budget
+         * @description Set (or, with ``target_seconds=null``, clear) a per-type pacing override.
+         */
+        post: operations["set_pacing_budget_api_content_pacing_budget_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/weak-type-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Weak Type Suggestions
+         * @description Ranked weak-type drill suggestions (lowest mastery first) with a
+         *     ready-to-submit DrillBody for each. Drives the cockpit's weak-type recommender
+         *     and the Drills page's smart weak-type drills.
+         */
+        get: operations["weak_type_suggestions_api_content_weak_type_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/content/health": {
         parameters: {
             query?: never;
@@ -2535,6 +3544,29 @@ export interface paths {
         };
         /** Health */
         get: operations["health_api_content_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Content Audit Log
+         * @description LSAT-7 — recent content edits (the AuditLog feed) for the cockpit's
+         *     audit-log viewer, newest first, optionally scoped to one entity/id. Returns
+         *     the rows plus by-entity/by-field tallies so the viewer can render a summary
+         *     header without a second request.
+         */
+        get: operations["content_audit_log_api_content_audit_log_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3026,6 +4058,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notebook-grounding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cross Domain Grounding
+         * @description INT-3 — cross-domain chunk grounding.
+         *
+         *     Ranks the host curriculum chunks the caller submits against ``query`` (so
+         *     host material can be unioned into LSAT/Notebook retrieval) AND, unless
+         *     ``include_notebook_sources`` is false, surfaces local notebook sources that
+         *     match the query as chunk-shaped hits. The two streams are merged and
+         *     re-ranked into one ``hits`` list, mirroring the host-side union in
+         *     ``localRag.ts`` so both planes ground over the same set.
+         *
+         *     Degrades gracefully: when embeddings are unavailable the host-chunk ranking
+         *     is simply empty and only the notebook full-text matches are returned (and
+         *     vice-versa), so neither plane being offline breaks the other.
+         */
+        post: operations["cross_domain_grounding_api_notebook_grounding_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notebook-chat/sessions": {
         parameters: {
             query?: never;
@@ -3228,6 +4291,81 @@ export interface paths {
         };
         /** Study Sheet */
         get: operations["study_sheet_api_notebook_pages__page_id__study_sheet_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/generation/passages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Passage Job
+         * @description Queue a passage-first RC job. The durable worker drains it; returns at once.
+         *
+         *     Enqueues a gen job WITH ``passage_first=True`` set atomically at insert so
+         *     ``generation.run_job`` dispatches to the passage-first orchestrator (generate
+         *     ONE passage, then attach a varied question set). audit M8: the flag is no
+         *     longer flipped in a second commit — that left a window where the worker could
+         *     grab the queued job before the flag was set and run the wrong pipeline.
+         */
+        post: operations["create_passage_job_api_generation_passages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/generation/passages/{passage_id}/questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Passage Questions
+         * @description The questions the pipeline attached to one generated passage.
+         *
+         *     Returns the passage text + topic and every (non-soft-deleted) question that
+         *     shares this ``passage_id``, in review-mode shape (full answer key) so the
+         *     generation-review UI can show the credited answer and trap labels. 404 when
+         *     the passage does not exist.
+         */
+        get: operations["passage_questions_api_generation_passages__passage_id__questions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/generation/passages/{job_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Passage Job Progress
+         * @description Progress for a passage-first job (same shape as the gen-job progress).
+         *
+         *     ``job_id`` here is a ``GenJob`` id (the value returned by ``POST
+         *     /api/generation/passages``), NOT a passage id; the path is distinguished from
+         *     ``/questions`` by its suffix. 404 when the job does not exist.
+         */
+        get: operations["passage_job_progress_api_generation_passages__job_id__progress_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3500,6 +4638,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ActivityDay
+         * @description One day of ``GET /api/analytics/activity`` (mirrors ``analytics.activity``).
+         */
+        ActivityDay: {
+            /** Date */
+            date: string;
+            /** Questions */
+            questions: number;
+            /** Minutes */
+            minutes: number;
+            /** Correct */
+            correct: number;
+            /** Sessions */
+            sessions: number;
+        } & {
+            [key: string]: unknown;
+        };
         /** AnnotationBody */
         AnnotationBody: {
             /**
@@ -3553,11 +4709,8 @@ export interface components {
          * @description 5.2 — a list of attempts written in one request (finish-a-section flush).
          */
         AttemptBatch: {
-            /**
-             * Attempts
-             * @default []
-             */
-            attempts: components["schemas"]["AttemptCreate"][];
+            /** Attempts */
+            attempts?: components["schemas"]["AttemptCreate"][];
         };
         /** AttemptCreate */
         AttemptCreate: {
@@ -3578,11 +4731,8 @@ export interface components {
              */
             flagged: boolean;
             confidence?: components["schemas"]["Confidence"] | null;
-            /**
-             * Choice Events
-             * @default []
-             */
-            choice_events: components["schemas"]["ChoiceEvent"][];
+            /** Choice Events */
+            choice_events?: components["schemas"]["ChoiceEvent"][];
             /** Client Attempt Id */
             client_attempt_id?: string | null;
         };
@@ -3591,6 +4741,41 @@ export interface components {
          * @enum {string}
          */
         AttemptMode: "timed" | "blind_review" | "drill";
+        /** BackupBody */
+        BackupBody: {
+            /** Host Data */
+            host_data?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Include History
+             * @default true
+             */
+            include_history: boolean;
+            /** Notes */
+            notes?: string | null;
+        };
+        /**
+         * BankStats
+         * @description ``GET /api/bank/stats`` — the Bank UI headline counts.
+         *
+         *     Mirrors the dict built in ``routers.dataset_routes.stats`` from
+         *     ``bank_bootstrap.bank_stats``.
+         */
+        BankStats: {
+            /** Total */
+            total: number;
+            /** By Source */
+            by_source: {
+                [key: string]: number;
+            };
+            /** By Q Type */
+            by_q_type: {
+                [key: string]: number;
+            };
+            /** Available Sources */
+            available_sources: string[];
+        };
         /** BenchmarkBody */
         BenchmarkBody: {
             /** Kind */
@@ -3615,6 +4800,53 @@ export interface components {
         BlindReview: {
             /** Br Answer */
             br_answer: string;
+            confidence?: components["schemas"]["Confidence"] | null;
+        };
+        /** BlindReviewGapResponse */
+        BlindReviewGapResponse: {
+            /** Timed Accuracy */
+            timed_accuracy: number;
+            /** Br Accuracy */
+            br_accuracy: number;
+            /** Gap */
+            gap: number;
+            /** By Type */
+            by_type: {
+                [key: string]: unknown;
+            }[];
+            /** Lucky Rate By Type */
+            lucky_rate_by_type: {
+                [key: string]: number;
+            };
+            /** Meta */
+            meta?: {
+                [key: string]: unknown;
+            } | null;
+            /** Outcomes */
+            outcomes?: {
+                [key: string]: unknown;
+            } | null;
+            /** Careless Rate */
+            careless_rate?: number | null;
+            /** Concept Gap Rate */
+            concept_gap_rate?: number | null;
+            /** Lucky Rate */
+            lucky_rate?: number | null;
+            /** By Domain */
+            by_domain?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * BlindReviewNoteBody
+         * @description LSAT-3 — the short reveal-time rationale captured in the Blind Review
+         *     screen. Posted per attempt the moment the answer is revealed.
+         */
+        BlindReviewNoteBody: {
+            /** Br Note */
+            br_note: string;
+            /** Answer */
+            answer?: string | null;
             confidence?: components["schemas"]["Confidence"] | null;
         };
         /** Body_import_source_api_notebook_sources_import_post */
@@ -3671,7 +4903,10 @@ export interface components {
         };
         /** Body_parse_api_import_parse_post */
         Body_parse_api_import_parse_post: {
-            /** File */
+            /**
+             * File
+             * Format: binary
+             */
             file: string;
         };
         /** BootstrapBody */
@@ -3715,6 +4950,28 @@ export interface components {
             q_type?: string | null;
             /** Difficulty */
             difficulty?: number | null;
+        };
+        /**
+         * ByTypeRow
+         * @description One row of ``GET /api/analytics/by-type`` (mirrors ``analytics.by_type``).
+         */
+        ByTypeRow: {
+            /** Q Type */
+            q_type: string;
+            /** Section Type */
+            section_type: string;
+            /** Attempts */
+            attempts: number;
+            /** Accuracy */
+            accuracy: number;
+            /** Avg Time Ms */
+            avg_time_ms: number;
+            /** Trend */
+            trend: string;
+            /** Efficiency Band */
+            efficiency_band: string;
+        } & {
+            [key: string]: unknown;
         };
         /** CalibrateBody */
         CalibrateBody: {
@@ -3886,6 +5143,18 @@ export interface components {
             training_notes?: string | null;
         };
         /**
+         * ConceptGapCardsBody
+         * @description LSAT-3 — bound the auto-cloze generation run (most-recent concept gaps
+         *     first). Optional; the defaults cover a normal study session's gaps.
+         */
+        ConceptGapCardsBody: {
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+        };
+        /**
          * Confidence
          * @enum {string}
          */
@@ -3919,6 +5188,188 @@ export interface components {
              */
             mode: string;
         };
+        /**
+         * CrossDomainAnalytics
+         * @description ``GET /api/analytics/cross-domain`` — bidirectional study rollup.
+         *
+         *     Aggregates LSAT-side study time, accuracy-by-domain, merged weakest types,
+         *     a combined streak, and a 30-day activity trend. Host-side numbers (CFA/Quant)
+         *     can be merged in via query params; when omitted the payload is the LSAT-only
+         *     view and ``meta.host_provided`` is False (the host then merges its own Dexie
+         *     analytics with this payload client-side — DATA-4a owns the persisted feed).
+         */
+        CrossDomainAnalytics: {
+            meta: components["schemas"]["CrossDomainMeta"];
+            /** Study Minutes */
+            study_minutes: number;
+            /** Combined Streak Days */
+            combined_streak_days: number;
+            /** Accuracy By Domain */
+            accuracy_by_domain: components["schemas"]["CrossDomainDomainStat"][];
+            /** Weakest Types */
+            weakest_types: components["schemas"]["CrossDomainWeakType"][];
+            /** Trend 30D */
+            trend_30d: components["schemas"]["CrossDomainTrendPoint"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CrossDomainDomainStat
+         * @description Per-domain rollup inside ``GET /api/analytics/cross-domain``.
+         */
+        CrossDomainDomainStat: {
+            /** Domain */
+            domain: string;
+            /** Attempts */
+            attempts: number;
+            /** Correct */
+            correct: number;
+            /** Accuracy */
+            accuracy: number | null;
+            /** Study Minutes */
+            study_minutes: number;
+            /** Streak Days */
+            streak_days: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CrossDomainGroundingBody
+         * @description INT-3 — union request: rank the host's curriculum chunks against a query
+         *     and surface matching local notebook sources, so host material and LSAT/
+         *     notebook sources share one grounded retrieval set.
+         */
+        CrossDomainGroundingBody: {
+            /** Query */
+            query: string;
+            /** Chunks */
+            chunks?: components["schemas"]["GroundingChunk"][];
+            /**
+             * K
+             * @default 6
+             */
+            k: number;
+            /**
+             * Includenotebooksources
+             * @default true
+             */
+            includeNotebookSources: boolean;
+        };
+        /**
+         * CrossDomainMeta
+         * @description BC2/BC3 meta envelope for the cross-domain payload (window + pagination +
+         *     provenance), kept as a sibling so the data fields stay additive.
+         */
+        CrossDomainMeta: {
+            /** Model */
+            model: string;
+            /** Window Days */
+            window_days: number;
+            /** Host Provided */
+            host_provided: boolean;
+            /** Generated At */
+            generated_at: string;
+            /** Weakest Total */
+            weakest_total: number;
+            /** Weakest Limit */
+            weakest_limit: number | null;
+            /** Weakest Offset */
+            weakest_offset: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CrossDomainTrendPoint
+         * @description One day of the combined 30-day activity trend.
+         */
+        CrossDomainTrendPoint: {
+            /** Date */
+            date: string;
+            /** Lsat Questions */
+            lsat_questions: number;
+            /** Host Questions */
+            host_questions: number;
+            /** Questions */
+            questions: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CrossDomainWeakType
+         * @description One merged weakest-type entry across both domains.
+         */
+        CrossDomainWeakType: {
+            /** Domain */
+            domain: string;
+            /** Label */
+            label: string;
+            /** Accuracy */
+            accuracy: number | null;
+            /** Attempts */
+            attempts: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * DashboardAnalytics
+         * @description ``GET /api/analytics/dashboard`` (mirrors ``analytics.dashboard``).
+         *
+         *     ``trend``/``weakest_types``/``coach`` are left as open shapes here because
+         *     each is itself an additive analytics sub-dict; pinning only the headline
+         *     scalar keys keeps the schema honest without freezing nested analytics that
+         *     still evolve. ``extra='allow'`` carries everything else through unchanged.
+         */
+        DashboardAnalytics: {
+            /** Predicted Score */
+            predicted_score: number | null;
+            /** Score Delta 30D */
+            score_delta_30d: number | null;
+            /** Trend */
+            trend: {
+                [key: string]: unknown;
+            }[];
+            /** Weakest Types */
+            weakest_types: {
+                [key: string]: unknown;
+            }[];
+            /** Coach */
+            coach: {
+                [key: string]: unknown;
+            };
+            /** Streak Days */
+            streak_days: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * DatasetSource
+         * @description One entry of ``GET /api/bank/sources`` (the research-dataset registry).
+         *
+         *     Mirrors the dict built in ``routers.dataset_routes.sources`` from each
+         *     ``import_dataset.DatasetSpec``.
+         */
+        DatasetSource: {
+            /** Key */
+            key: string;
+            /** Hf Dataset */
+            hf_dataset: string;
+            /** Hf Split */
+            hf_split: string;
+            /** Section Type */
+            section_type: string;
+            /** Preptest Name */
+            preptest_name: string;
+            /** License */
+            license: string;
+            /** Expected Fields */
+            expected_fields: string[];
+            /** Question Source */
+            question_source: string;
+            /** Requires Local Path */
+            requires_local_path: boolean;
+            /** Requires Nc Acknowledgement */
+            requires_nc_acknowledgement: boolean;
+        };
         /** DrillBody */
         DrillBody: {
             /** Q Type */
@@ -3949,6 +5400,11 @@ export interface components {
             near_misses: boolean;
             /** Origin */
             origin?: string | null;
+            /**
+             * Weak Type Remediation
+             * @default false
+             */
+            weak_type_remediation: boolean;
         };
         /** DuplicateRemediationBody */
         DuplicateRemediationBody: {
@@ -3977,6 +5433,13 @@ export interface components {
              * @default 200
              */
             limit: number;
+        };
+        /** EnvelopeBody */
+        EnvelopeBody: {
+            /** Envelope */
+            envelope: {
+                [key: string]: unknown;
+            };
         };
         /** ErrorLogBody */
         ErrorLogBody: {
@@ -4024,6 +5487,14 @@ export interface components {
             /** Note */
             note?: string | null;
         };
+        /** ExplanationBody */
+        ExplanationBody: {
+            /**
+             * User Explanation
+             * @default
+             */
+            user_explanation: string;
+        };
         /** ExportBody */
         ExportBody: {
             /**
@@ -4056,6 +5527,293 @@ export interface components {
              * @default true
              */
             activate: boolean;
+        };
+        /**
+         * FsrsWriteBackBody
+         * @description A batch of per-card FSRS write-backs to apply under last-write-wins.
+         */
+        FsrsWriteBackBody: {
+            /** Writes */
+            writes?: components["schemas"]["FsrsWriteIn"][];
+        };
+        /**
+         * FsrsWriteIn
+         * @description One per-card FSRS write-back in the request batch.
+         *
+         *     Permissive like the DATA-4a feed: only the routing fields (``writeId`` /
+         *     ``crossId``) are required; ``fsrsState`` is carried verbatim (the backend
+         *     stores it without coercion) and ``observedAt`` drives last-write-wins.
+         */
+        FsrsWriteIn: {
+            /** Writeid */
+            writeId: string;
+            /** Crossid */
+            crossId: string;
+            /** Fsrsstate */
+            fsrsState?: {
+                [key: string]: unknown;
+            };
+            /** Observedat */
+            observedAt?: string | null;
+        };
+        /**
+         * GenAuditEvent
+         * @description One derived generate / validate / firewall event (from a GenCandidate).
+         */
+        GenAuditEvent: {
+            /** Id */
+            id?: number | null;
+            /** Kind */
+            kind: string;
+            /** Gen Job Id */
+            gen_job_id?: number | null;
+            /** Q Type */
+            q_type?: string | null;
+            /** Question Id */
+            question_id?: number | null;
+            /**
+             * Candidate Index
+             * @default 0
+             */
+            candidate_index: number;
+            /** Verdict */
+            verdict?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Solver Model */
+            solver_model?: string | null;
+            /** Critic Model */
+            critic_model?: string | null;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /**
+         * GenAuditLog
+         * @description Recent generation pipeline events, newest first.
+         */
+        GenAuditLog: {
+            /** Events */
+            events?: components["schemas"]["GenAuditEvent"][];
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
+            /** Counts */
+            counts?: {
+                [key: string]: number;
+            };
+            /** Kind */
+            kind?: string | null;
+        };
+        /**
+         * GenGateMetric
+         * @description Per-gate pass/fail breakdown for one of the 8+ pipeline gates.
+         */
+        GenGateMetric: {
+            /** Gate */
+            gate: string;
+            /**
+             * Judged
+             * @default 0
+             */
+            judged: number;
+            /**
+             * Passed
+             * @default 0
+             */
+            passed: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /** Fail Reasons */
+            fail_reasons?: {
+                [key: string]: number;
+            };
+        };
+        /** GenQualityBody */
+        GenQualityBody: {
+            candidate: components["schemas"]["GenQualityCandidate"];
+            /** Q Type */
+            q_type?: string | null;
+            /** Section Type */
+            section_type?: ("LR" | "RC") | null;
+            /** Permutation Invariant */
+            permutation_invariant?: boolean | null;
+            /** Informativity */
+            informativity?: boolean | null;
+            /** Distractor Quality Enabled */
+            distractor_quality_enabled?: boolean | null;
+        };
+        /**
+         * GenQualityCandidate
+         * @description A candidate item to gate, in the same shape generation produces.
+         *
+         *     RC items additionally carry a ``passage``; LR items omit it. The endpoint
+         *     forwards the whole candidate to the gate, so host content just needs to be
+         *     mapped into this envelope (stem + prompt + 5 choices + credited letter).
+         */
+        GenQualityCandidate: {
+            /**
+             * Stem
+             * @default
+             */
+            stem: string;
+            /**
+             * Prompt
+             * @default
+             */
+            prompt: string;
+            /** Passage */
+            passage?: string | null;
+            /** Difficulty */
+            difficulty?: number | null;
+            /** Correct Answer */
+            correct_answer: string;
+            /** Choices */
+            choices: components["schemas"]["GenQualityChoice"][];
+        };
+        /**
+         * GenQualityChoice
+         * @description One answer choice in the LSAT candidate envelope (5 of them, A-E).
+         */
+        GenQualityChoice: {
+            /** Label */
+            label: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /** Trap Type */
+            trap_type?: string | null;
+        };
+        /** GenQualityGate */
+        GenQualityGate: {
+            /** Gate */
+            gate: string;
+            /** Passed */
+            passed?: boolean | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * GenQualityMetrics
+         * @description Aggregate generation-quality metrics across every recorded job.
+         */
+        GenQualityMetrics: {
+            /**
+             * Jobs
+             * @default 0
+             */
+            jobs: number;
+            /**
+             * Total Candidates
+             * @default 0
+             */
+            total_candidates: number;
+            /**
+             * Passed
+             * @default 0
+             */
+            passed: number;
+            /**
+             * Quarantined
+             * @default 0
+             */
+            quarantined: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /** Fail Reasons */
+            fail_reasons?: {
+                [key: string]: number;
+            };
+            /** Gates */
+            gates?: components["schemas"]["GenGateMetric"][];
+            /** By Type */
+            by_type?: components["schemas"]["GenTypeMetric"][];
+        };
+        /**
+         * GenQualityReport
+         * @description Typed ValidationReport returned by the generation-quality service.
+         */
+        GenQualityReport: {
+            /** Passed */
+            passed: boolean;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Gate Confidence
+             * @default 0
+             */
+            gate_confidence: number;
+            /**
+             * Score
+             * @default 0
+             */
+            score: number;
+            /** Failure Reasons */
+            failure_reasons?: string[];
+            /** Gates */
+            gates?: components["schemas"]["GenQualityGate"][];
+            /** Checks */
+            checks?: {
+                [key: string]: unknown;
+            };
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * GenTypeMetric
+         * @description Per-q_type rollup: overall pass/fail + the same per-gate breakdown.
+         */
+        GenTypeMetric: {
+            /** Q Type */
+            q_type: string;
+            /**
+             * Passed
+             * @default 0
+             */
+            passed: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /** Gates */
+            gates?: components["schemas"]["GenGateMetric"][];
+        };
+        /**
+         * GroundingChunk
+         * @description A host curriculum chunk submitted for cross-domain grounding.
+         */
+        GroundingChunk: {
+            /** Id */
+            id?: string | null;
+            /** Documentid */
+            documentId?: string | null;
+            /** Domain */
+            domain?: string | null;
+            /** Level */
+            level?: string | null;
+            /** Topic */
+            topic?: string | null;
+            /**
+             * Locator
+             * @default
+             */
+            locator: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -4170,6 +5928,13 @@ export interface components {
              */
             max_retries: number;
         };
+        /** KeepAliveBody */
+        KeepAliveBody: {
+            /** Model */
+            model: string;
+            /** Mode */
+            mode: string;
+        };
         /** LinkBody */
         LinkBody: {
             /** Question Id */
@@ -4208,6 +5973,11 @@ export interface components {
              * @default false
              */
             include_recent: boolean;
+            /**
+             * Domain
+             * @description LEARN-6 — cross-domain content plane. Omit for the current LSAT-only ranking. A host plane (cfa|quant|excel) routes over host content via the unified cross-domain ability.
+             */
+            domain?: ("cfa" | "quant" | "excel") | null;
         };
         /** NoteBody */
         NoteBody: {
@@ -4250,6 +6020,13 @@ export interface components {
              */
             reason: string;
         };
+        /** PacingBudgetBody */
+        PacingBudgetBody: {
+            /** Q Type */
+            q_type: string;
+            /** Target Seconds */
+            target_seconds?: number | null;
+        };
         /** PageBody */
         PageBody: {
             /** Title */
@@ -4270,6 +6047,36 @@ export interface components {
             body?: string | null;
             /** Tags */
             tags?: string[] | null;
+        };
+        /**
+         * PassageJobBody
+         * @description Start a passage-first RC generation job.
+         *
+         *     ``q_type`` is the LEAD RC question type (the one the coach asked to backfill);
+         *     the runner fills out a varied 3-4 question set around it. ``count`` caps the
+         *     number of questions attached to the single generated passage.
+         */
+        PassageJobBody: {
+            /**
+             * Q Type
+             * @default MainPoint
+             */
+            q_type: string;
+            /**
+             * Count
+             * @default 4
+             */
+            count: number;
+            /**
+             * Priority
+             * @default 0
+             */
+            priority: number;
+            /**
+             * Max Retries
+             * @default 0
+             */
+            max_retries: number;
         };
         /** PlaylistCreate */
         PlaylistCreate: {
@@ -4363,10 +6170,70 @@ export interface components {
             /** Sources */
             sources?: string[] | null;
         };
+        /**
+         * PrepTestSummary
+         * @description One row of ``GET /api/preptests`` (the PrepTest list view).
+         *
+         *     Mirrors the dict built in ``routers.content.list_preptests`` from
+         *     ``queries.bulk_preptest_stats``. ``id``/``date_admin`` are nullable because
+         *     the underlying ``PrepTest`` columns are ``Optional``.
+         */
+        PrepTestSummary: {
+            /** Id */
+            id: number | null;
+            /** Name */
+            name: string;
+            /** Source */
+            source: string;
+            /** Date Admin */
+            date_admin: string | null;
+            /** Is Official */
+            is_official: boolean;
+            /** Section Count */
+            section_count: number;
+            /** Completed Sections */
+            completed_sections: number;
+        };
         /** PriorityBody */
         PriorityBody: {
             /** Priority */
             priority: number;
+        };
+        /**
+         * ProgressSnapshotIn
+         * @description One host snapshot in the canonical cross-domain shape.
+         *
+         *     Mirrors the host's ``CrossDomainReviewCard`` / ``CrossDomainAttempt`` /
+         *     ``CrossDomainMastery`` (``src/lib/dataDictionary.ts`` §1-§4) — read
+         *     permissively: only the routing fields (``crossId`` / ``domain`` / ``kind``)
+         *     are required; the rest of the canonical record is carried verbatim in
+         *     ``payload`` so the engine reads the host's exact vocabulary without lossy
+         *     re-projection here.
+         */
+        ProgressSnapshotIn: {
+            /** Crossid */
+            crossId: string;
+            /** Domain */
+            domain: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "review" | "attempt" | "mastery";
+            /** Observedat */
+            observedAt?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * ProgressUpdatesBody
+         * @description A batch of host progress snapshots to UPSERT.
+         */
+        ProgressUpdatesBody: {
+            /** Snapshots */
+            snapshots?: components["schemas"]["ProgressSnapshotIn"][];
         };
         /** RationaleBody */
         RationaleBody: {
@@ -4533,6 +6400,34 @@ export interface components {
             };
         };
         /**
+         * SessionSummary
+         * @description One row of ``GET /api/sessions`` (the enriched study-session history).
+         *
+         *     Mirrors the dict built in ``routers.sessions.list_sessions``. Several fields
+         *     are ``None`` when the session has no relevant attempts (e.g. no blind-review
+         *     answers, no official timed questions) or has not ended yet.
+         */
+        SessionSummary: {
+            /** Id */
+            id: number | null;
+            /** Type */
+            type: string;
+            /** Started */
+            started: string;
+            /** Ended */
+            ended: string | null;
+            /** Scaled Score */
+            scaled_score: number | null;
+            /** Question Count */
+            question_count: number;
+            /** Duration Sec */
+            duration_sec: number | null;
+            /** Br Accuracy */
+            br_accuracy: number | null;
+            /** Official Only Score */
+            official_only_score: number | null;
+        };
+        /**
          * SessionType
          * @enum {string}
          */
@@ -4560,6 +6455,321 @@ export interface components {
             /** Desired Retention */
             desired_retention?: number | null;
         };
+        /**
+         * SharedStudyProfileOut
+         * @description The reconciled shared study profile (inline ``response_model``).
+         *
+         *     Mirrors the host's ``SharedStudyProfile`` TS type
+         *     (``src/lib/types/StudyProfile.ts``): the reconciled scalars plus the
+         *     host-owned fields, the winning side, and the timestamp the arbiter ordered
+         *     by. ``has_plan`` stays true when an active LSAT ``StudyPlan`` exists (parity
+         *     with ``GET /api/study/plan``).
+         */
+        SharedStudyProfileOut: {
+            /**
+             * Has Plan
+             * @default false
+             */
+            has_plan: boolean;
+            /**
+             * Target Score
+             * @default 165
+             */
+            target_score: number;
+            /** Exam Date */
+            exam_date?: string | null;
+            /**
+             * Daily Minutes
+             * @default 60
+             */
+            daily_minutes: number;
+            /** Target Level */
+            target_level?: string | null;
+            /** Rest Days */
+            rest_days?: number[];
+            /** Mock Cadence Days */
+            mock_cadence_days?: number | null;
+            /** Topic Weights */
+            topic_weights?: {
+                [key: string]: number;
+            };
+            /**
+             * Last Writer
+             * @default merge
+             */
+            last_writer: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * SrsParamsOut
+         * @description The backend's effective FSRS parameters (py-fsrs). ``weights`` are the
+         *     per-user optimized weights when present, else the empty list (host then keeps
+         *     its ts-fsrs library defaults / local fit). ``source`` always "backend" so the
+         *     host can label where the params came from.
+         */
+        SrsParamsOut: {
+            /** Weights */
+            weights?: number[];
+            /** Desired Retention */
+            desired_retention: number;
+            /**
+             * Source
+             * @default backend
+             */
+            source: string;
+        };
+        /**
+         * StudyArtifactCreate
+         * @description Create a study artifact. ``type`` maps to the model's ``kind`` column;
+         *     ``topic`` (when given) is prepended to ``tags`` as the canonical topic tag.
+         */
+        StudyArtifactCreate: {
+            /**
+             * Type
+             * @default note
+             */
+            type: string;
+            /** Title */
+            title: string;
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Source Kind
+             * @default manual
+             */
+            source_kind: string;
+            /** Topic */
+            topic?: string | null;
+            /** Tags */
+            tags?: string[];
+            /** Q Type */
+            q_type?: string | null;
+            /** Question Id */
+            question_id?: number | null;
+            /** Attempt Id */
+            attempt_id?: number | null;
+            /** Passage Id */
+            passage_id?: number | null;
+            /** Workspace Id */
+            workspace_id?: number | null;
+            /**
+             * Visibility
+             * @default local
+             */
+            visibility: string;
+            /**
+             * Official Firewall
+             * @default false
+             */
+            official_firewall: boolean;
+            /**
+             * Cloud Allowed
+             * @default true
+             */
+            cloud_allowed: boolean;
+            /**
+             * Export Eligible
+             * @default true
+             */
+            export_eligible: boolean;
+            /** Meta */
+            meta?: {
+                [key: string]: unknown;
+            };
+        };
+        /** StudyArtifactDeleteOut */
+        StudyArtifactDeleteOut: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Deleted Id */
+            deleted_id: number;
+        };
+        /**
+         * StudyArtifactListOut
+         * @description BC2 pagination envelope for the list endpoint.
+         */
+        StudyArtifactListOut: {
+            /** Items */
+            items?: components["schemas"]["StudyArtifactOut"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset: number;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+        };
+        /**
+         * StudyArtifactOut
+         * @description Serialized study artifact. ``type`` mirrors the model's ``kind`` column;
+         *     ``topic`` mirrors the first tag (the canonical topic) while ``tags`` carries
+         *     the full list.
+         */
+        StudyArtifactOut: {
+            /** Id */
+            id: number;
+            /** Type */
+            type: string;
+            /** Kind */
+            kind: string;
+            /** Title */
+            title: string;
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Source Kind
+             * @default manual
+             */
+            source_kind: string;
+            /** Q Type */
+            q_type?: string | null;
+            /** Question Id */
+            question_id?: number | null;
+            /** Attempt Id */
+            attempt_id?: number | null;
+            /** Passage Id */
+            passage_id?: number | null;
+            /** Workspace Id */
+            workspace_id?: number | null;
+            /**
+             * Visibility
+             * @default local
+             */
+            visibility: string;
+            /**
+             * Official Firewall
+             * @default false
+             */
+            official_firewall: boolean;
+            /**
+             * Cloud Allowed
+             * @default true
+             */
+            cloud_allowed: boolean;
+            /**
+             * Export Eligible
+             * @default true
+             */
+            export_eligible: boolean;
+            /** Topic */
+            topic?: string | null;
+            /** Tags */
+            tags?: string[];
+            /** Meta */
+            meta?: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * StudyArtifactUpdate
+         * @description Partial update. Only fields explicitly provided are changed; everything
+         *     else is left as-is (additive / backward-compatible PUT semantics).
+         */
+        StudyArtifactUpdate: {
+            /** Type */
+            type?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Body */
+            body?: string | null;
+            /** Summary */
+            summary?: string | null;
+            /** Source Kind */
+            source_kind?: string | null;
+            /** Topic */
+            topic?: string | null;
+            /** Tags */
+            tags?: string[] | null;
+            /** Q Type */
+            q_type?: string | null;
+            /** Question Id */
+            question_id?: number | null;
+            /** Attempt Id */
+            attempt_id?: number | null;
+            /** Passage Id */
+            passage_id?: number | null;
+            /** Workspace Id */
+            workspace_id?: number | null;
+            /** Visibility */
+            visibility?: string | null;
+            /** Official Firewall */
+            official_firewall?: boolean | null;
+            /** Cloud Allowed */
+            cloud_allowed?: boolean | null;
+            /** Export Eligible */
+            export_eligible?: boolean | null;
+            /** Meta */
+            meta?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * StudyProfileBody
+         * @description A write to the shared study profile (``PUT /api/study/profile``).
+         *
+         *     Every field is optional so either side can write only what it owns: the LSAT
+         *     UI sends the scalars (``target_score`` / ``exam_date`` / ``daily_minutes``);
+         *     the host bridge can additionally send the host-owned ``target_level`` /
+         *     ``rest_days`` / ``mock_cadence_days`` / ``topic_weights``. Unsent fields keep
+         *     their current reconciled value rather than being zeroed.
+         */
+        StudyProfileBody: {
+            /** Target Score */
+            target_score?: number | null;
+            /** Exam Date */
+            exam_date?: string | null;
+            /** Daily Minutes */
+            daily_minutes?: number | null;
+            /** Target Level */
+            target_level?: string | null;
+            /** Rest Days */
+            rest_days?: number[] | null;
+            /** Mock Cadence Days */
+            mock_cadence_days?: number | null;
+            /** Topic Weights */
+            topic_weights?: {
+                [key: string]: number;
+            } | null;
+            /** Last Writer */
+            last_writer?: string | null;
+        };
         /** TagBody */
         TagBody: {
             /**
@@ -4572,6 +6782,14 @@ export interface components {
              * @default true
              */
             only_research: boolean;
+        };
+        /** TagsBody */
+        TagsBody: {
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
         };
         /** TodayFeedbackBody */
         TodayFeedbackBody: {
@@ -4653,6 +6871,97 @@ export interface components {
              * @default true
              */
             auto_reply: boolean;
+            /**
+             * Streaming
+             * @default false
+             */
+            streaming: boolean;
+        };
+        /**
+         * TurnStreamBody
+         * @description Mirrors ``adaptivity_routes.TurnBody`` so the streaming + sync paths share a
+         *     request shape; ``auto_reply`` defaults on (a user turn elicits a Socratic
+         *     nudge). ``role`` is constrained to the two persisted roles.
+         */
+        TurnStreamBody: {
+            /**
+             * Role
+             * @default user
+             * @enum {string}
+             */
+            role: "user" | "assistant";
+            /** Content */
+            content: string;
+            /**
+             * Auto Reply
+             * @default true
+             */
+            auto_reply: boolean;
+        };
+        /**
+         * UnifiedDueCard
+         * @description One LSAT due card on the canonical cross-domain shape.
+         *
+         *     Field names + coercion rules mirror the host's ``CrossDomainReviewCard``
+         *     (``src/lib/dataDictionary.ts`` §1-§2) so the host can rank/merge these with
+         *     its own local cards using one vocabulary. ``difficulty`` is the host 3-bucket
+         *     enum (1-2 -> foundation, 3 -> intermediate, 4-5 -> advanced); ``overdueSeconds``
+         *     is the LEARN-2 ranking primary (how long the card has been due).
+         */
+        UnifiedDueCard: {
+            /** Crossid */
+            crossId: string;
+            /**
+             * Domain
+             * @default lsat
+             * @constant
+             */
+            domain: "lsat";
+            /** Questioncrossid */
+            questionCrossId: string;
+            /** Title */
+            title: string;
+            /**
+             * Difficulty
+             * @enum {string}
+             */
+            difficulty: "foundation" | "intermediate" | "advanced";
+            /** Empiricaldifficulty */
+            empiricalDifficulty?: number | null;
+            /** Dueat */
+            dueAt?: string | null;
+            /** Itemtype */
+            itemType?: string | null;
+            /** Origin */
+            origin?: string | null;
+            /**
+             * Overdueseconds
+             * @default 0
+             */
+            overdueSeconds: number;
+            /** Utilityscore */
+            utilityScore?: number | null;
+        };
+        /** UnifiedDueResponse */
+        UnifiedDueResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Due Count
+             * @default 0
+             */
+            due_count: number;
+            /** Items */
+            items?: components["schemas"]["UnifiedDueCard"][];
+            /** Utility Model */
+            utility_model?: string | null;
+            /** Review Strategy */
+            review_strategy?: {
+                [key: string]: unknown;
+            };
         };
         /** ValidationError */
         ValidationError: {
@@ -4662,10 +6971,6 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
         };
         /** ValidatorRunBody */
         ValidatorRunBody: {
@@ -4689,6 +6994,17 @@ export interface components {
             meta?: {
                 [key: string]: unknown;
             };
+        };
+        /** WeaknessIndexResponse */
+        WeaknessIndexResponse: {
+            /** Meta */
+            meta: {
+                [key: string]: unknown;
+            };
+            /** Items */
+            items: {
+                [key: string]: unknown;
+            }[];
         };
         /** WorkspaceBody */
         WorkspaceBody: {
@@ -4954,7 +7270,12 @@ export interface operations {
     };
     list_preptests_api_preptests_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optional: cap the number of items returned (default: all). */
+                limit?: number | null;
+                /** @description Optional: skip this many items from the start (default: 0). */
+                offset?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4967,7 +7288,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["PrepTestSummary"][];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -4988,13 +7309,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Uniform backend error envelope */
+            /** @description Validation Error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -5425,7 +7746,12 @@ export interface operations {
     };
     list_sessions_api_sessions_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optional: cap the number of items returned (default: all). */
+                limit?: number | null;
+                /** @description Optional: skip this many items from the start (default: 0). */
+                offset?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5438,7 +7764,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SessionSummary"][];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -5459,13 +7785,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Uniform backend error envelope */
+            /** @description Validation Error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -6483,6 +8809,66 @@ export interface operations {
             };
         };
     };
+    model_keep_alive_api_ai_model_keep_alive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeepAliveBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     coach_chat_api_ai_coach_chat_post: {
         parameters: {
             query?: never;
@@ -6561,7 +8947,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["DashboardAnalytics"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -6608,6 +8994,10 @@ export interface operations {
                 source?: string;
                 /** @description restrict to the last N days */
                 days?: number | null;
+                /** @description Optional: cap the number of items returned (default: all). */
+                limit?: number | null;
+                /** @description Optional: skip this many items from the start (default: 0). */
+                offset?: number | null;
             };
             header?: never;
             path?: never;
@@ -6621,7 +9011,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["ByTypeRow"][];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -6725,6 +9115,8 @@ export interface operations {
             query?: {
                 /** @description restrict to the last N days */
                 days?: number | null;
+                /** @description ANL-3 — evidence plane for the careless-vs-concept blind-review gap. Omit (or 'lsat') for the unchanged LSAT-only view; 'host' for the host planes; 'all' to merge both; or a specific host plane (cfa|quant|excel). */
+                domain?: string | null;
             };
             header?: never;
             path?: never;
@@ -6738,7 +9130,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["BlindReviewGapResponse"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -6962,6 +9354,10 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                /** @description Optional: cap the number of items returned (default: all). */
+                limit?: number | null;
+                /** @description Optional: skip this many items from the start (default: 0). */
+                offset?: number | null;
             };
             header?: never;
             path?: never;
@@ -6975,7 +9371,143 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["ActivityDay"][];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    cross_domain_api_analytics_cross_domain_get: {
+        parameters: {
+            query?: {
+                /** @description trend / accuracy window (default 30 days) */
+                days?: number;
+                /** @description optional host-side (CFA/Quant) attempt count */
+                host_attempts?: number | null;
+                /** @description optional host-side correct count */
+                host_correct?: number | null;
+                /** @description optional host-side study minutes in the window */
+                host_study_minutes?: number | null;
+                /** @description optional host-side current streak (days) */
+                host_streak_days?: number | null;
+                /** @description optional: cap the merged weakest-types list (default: all) */
+                weakest_limit?: number | null;
+                /** @description optional: skip this many weakest-types rows */
+                weakest_offset?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrossDomainAnalytics"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    weakness_index_api_analytics_weakness_index_get: {
+        parameters: {
+            query?: {
+                /** @description ANL-2 — evidence plane for the unified weakness index. Omit (or 'all') to merge LSAT + every host plane; 'lsat' for LSAT only; 'host' for the host planes; or a specific host plane (cfa|quant|excel). */
+                domain?: string | null;
+                /** @description restrict to the last N days */
+                days?: number | null;
+                /** @description Optional: cap the number of items returned (default: all). */
+                limit?: number | null;
+                /** @description Optional: skip this many items from the start (default: 0). */
+                offset?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeaknessIndexResponse"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -7729,6 +10261,62 @@ export interface operations {
             };
         };
     };
+    srs_params_api_srs_params_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SrsParamsOut"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     create_cards_api_srs_cards_post: {
         parameters: {
             query?: never;
@@ -7791,7 +10379,10 @@ export interface operations {
     };
     concept_gap_queue_api_srs_concept_gap_queue_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description LEARN-5 — also append HOST concept-gap rows (from HostProgressSnapshot review snapshots, DATA-4a) projected onto the canonical CrossDomainReviewCard shape. Default false → the response is byte-for-byte the LSAT-only queue (backward compatible). */
+                include_host?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7825,13 +10416,135 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Uniform backend error envelope */
+            /** @description Validation Error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    blind_review_note_api_srs_attempts__attempt_id__blind_review_note_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attempt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlindReviewNoteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    concept_gap_cards_api_srs_concept_gap_cards_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ConceptGapCardsBody"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -7903,7 +10616,10 @@ export interface operations {
     };
     leeches_api_srs_leeches_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description LEARN-5 — also append HOST leech rows (from HostProgressSnapshot review snapshots, DATA-4a) projected onto the canonical CrossDomainReviewCard shape. Default false → the response is byte-for-byte the LSAT-only queue (backward compatible). */
+                include_host?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7937,13 +10653,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Uniform backend error envelope */
+            /** @description Validation Error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -8835,6 +11551,181 @@ export interface operations {
             };
         };
     };
+    generation_quality_check_api_gen_generation_quality_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenQualityBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenQualityReport"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    generation_quality_metrics_api_gen_generation_quality_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenQualityMetrics"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    generation_audit_log_api_gen_generation_audit_log_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                kind?: ("generate" | "validate" | "firewall") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenAuditLog"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     calibrate_difficulty_api_gen_calibrate_difficulty_post: {
         parameters: {
             query?: never;
@@ -9673,7 +12564,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["BankStats"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -9716,7 +12607,12 @@ export interface operations {
     };
     sources_api_bank_sources_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optional: cap the number of items returned (default: all). */
+                limit?: number | null;
+                /** @description Optional: skip this many items from the start (default: 0). */
+                offset?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9729,7 +12625,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["DatasetSource"][];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -9750,13 +12646,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Uniform backend error envelope */
+            /** @description Validation Error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -10898,6 +13794,313 @@ export interface operations {
             };
         };
     };
+    create_backup_api_export_backup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["BackupBody"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    validate_api_export_validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvelopeBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    import_backup_api_export_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvelopeBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_exports_api_export_list_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    history_api_export_history_get: {
+        parameters: {
+            query: {
+                export_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     get_plan_api_study_plan_get: {
         parameters: {
             query?: never;
@@ -11016,7 +14219,9 @@ export interface operations {
     };
     today_api_study_today_get: {
         parameters: {
-            query?: never;
+            query?: {
+                include_host?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11030,6 +14235,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_profile_api_study_profile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedStudyProfileOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -11070,6 +14331,66 @@ export interface operations {
             };
         };
     };
+    put_profile_api_study_profile_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StudyProfileBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedStudyProfileOut"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     today_feedback_api_study_today_feedback_post: {
         parameters: {
             query?: never;
@@ -11090,6 +14411,667 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    due_unified_api_study_due_unified_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnifiedDueResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    post_progress_updates_api_sync_progress_updates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProgressUpdatesBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    post_fsrs_write_back_api_sync_fsrs_write_back_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FsrsWriteBackBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_fsrs_write_back_log_api_sync_fsrs_write_back_log_get: {
+        parameters: {
+            query?: {
+                cross_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_artifacts_api_study_artifacts__get: {
+        parameters: {
+            query?: {
+                question_id?: number | null;
+                topic?: string | null;
+                type?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyArtifactListOut"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_artifact_api_study_artifacts__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StudyArtifactCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyArtifactOut"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_artifacts_api_study_artifacts_get: {
+        parameters: {
+            query?: {
+                question_id?: number | null;
+                topic?: string | null;
+                type?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyArtifactListOut"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_artifact_api_study_artifacts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StudyArtifactCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyArtifactOut"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_artifact_api_study_artifacts__artifact_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyArtifactOut"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    update_artifact_api_study_artifacts__artifact_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StudyArtifactUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyArtifactOut"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    delete_artifact_api_study_artifacts__artifact_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyArtifactDeleteOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -11664,6 +15646,305 @@ export interface operations {
             };
         };
     };
+    search_annotations_api_annotations_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_backlinks_api_annotations_backlinks__target__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_annotation_explanation_api_annotations__annotation_id__explanation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                annotation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    save_annotation_explanation_api_annotations__annotation_id__explanation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                annotation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExplanationBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    save_annotation_tags_api_annotations__annotation_id__tags_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                annotation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagsBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     status_api_observability_status_get: {
         parameters: {
             query?: never;
@@ -11841,7 +16122,361 @@ export interface operations {
             };
         };
     };
+    cloud_budget_api_observability_cloud_budget_get: {
+        parameters: {
+            query?: {
+                input_tokens?: number | null;
+                output_tokens?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     runtime_evidence_api_observability_runtime_evidence_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    sqlite_health_api_observability_sqlite_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    trust_status_api_observability_trust_status_get: {
+        parameters: {
+            query?: {
+                tier?: "dev" | "release" | "packaged";
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    health_aggregated_api_observability_health_aggregated_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    schema_versions_api_observability_schema_versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    relocation_status_api_observability_relocation_status_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -12614,6 +17249,8 @@ export interface operations {
                 section_type?: components["schemas"]["SectionType"] | null;
                 days?: number | null;
                 persist?: boolean;
+                /** @description LEARN-1 — cross-domain ability plane. Omit (default) for the current LSAT-only matrix/estimate. A host plane reads that domain's attempt snapshots (DATA-4a) and returns a single unified estimate. */
+                domain?: ("cfa" | "quant" | "excel") | null;
             };
             header?: never;
             path?: never;
@@ -13380,6 +18017,302 @@ export interface operations {
             };
         };
     };
+    add_turn_stream_api_conversations__conversation_id__turns_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TurnStreamBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    conversation_evidence_api_conversations__conversation_id__evidence_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    pacing_budget_api_content_pacing_budget_get: {
+        parameters: {
+            query?: {
+                source?: "official" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    set_pacing_budget_api_content_pacing_budget_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PacingBudgetBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    weak_type_suggestions_api_content_weak_type_suggestions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     health_api_content_health_get: {
         parameters: {
             query?: never;
@@ -13423,6 +18356,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    content_audit_log_api_content_audit_log_get: {
+        parameters: {
+            query?: {
+                entity?: string | null;
+                entity_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -15509,6 +20502,66 @@ export interface operations {
             };
         };
     };
+    cross_domain_grounding_api_notebook_grounding_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrossDomainGroundingBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     list_chat_sessions_api_notebook_chat_sessions_get: {
         parameters: {
             query?: never;
@@ -16516,6 +21569,182 @@ export interface operations {
             header?: never;
             path: {
                 page_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_passage_job_api_generation_passages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PassageJobBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    passage_questions_api_generation_passages__passage_id__questions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                passage_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    passage_job_progress_api_generation_passages__job_id__progress_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
             };
             cookie?: never;
         };

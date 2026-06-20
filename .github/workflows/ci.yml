@@ -303,6 +303,14 @@ jobs:
       - name: OpenAPI contract drift check
         run: node scripts/export-lsat-openapi.mjs --check
 
+      # audit M18 — CLIENT-drift gate. The check above only diffs live-vs-baseline
+      # (backend side); this fails when the committed typed client (its codegen
+      # input src/domains/lsat/_meta/openapi.json + api.gen.ts) is BEHIND the live
+      # backend — the gap that let the client silently rot 41 paths behind, so a
+      # backend field rename on those routes shipped green and only broke at runtime.
+      - name: Client contract drift check
+        run: node scripts/export-lsat-openapi.mjs --client
+
       # Per-route response-schema field-removal snapshot (QA-3) runs in the
       # backend's own pytest gate, alongside the launch-readiness contract asserts.
       - name: Backend OpenAPI contract tests
