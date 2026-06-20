@@ -246,10 +246,16 @@ function PassageFirstGenerator() {
   const [count, setCount] = useState(4);
   const [job, setJob] = useState<{ id: number; status: string; pct: number } | null>(null);
   const pollRef = useRef<number | undefined>(undefined);
+  // Guards every post-await state write / interval creation. Without it, a job
+  // started just before unmount would resolve AFTER cleanup ran (so there is no
+  // interval to clear yet) and install a permanent interval + setState on a dead
+  // component. Set false in the cleanup below; checked after each await.
+  const mountedRef = useRef(true);
   const busy = job != null && !TERMINAL.has(job.status);
 
   useEffect(
     () => () => {
+      mountedRef.current = false;
       if (pollRef.current) window.clearInterval(pollRef.current);
     },
     [],
@@ -258,12 +264,18 @@ function PassageFirstGenerator() {
   async function start() {
     try {
       const res = await api.createPassageJob(qType, count);
+      if (!mountedRef.current) return; // unmounted while the create was in flight
       setJob({ id: res.job_id, status: res.status, pct: 0 });
       toast.success(`Queued passage-first job #${res.job_id}`);
       if (pollRef.current) window.clearInterval(pollRef.current);
       pollRef.current = window.setInterval(async () => {
         try {
           const p = await api.passageJobProgress(res.job_id);
+          if (!mountedRef.current) {
+            if (pollRef.current) window.clearInterval(pollRef.current);
+            pollRef.current = undefined;
+            return;
+          }
           setJob({ id: res.job_id, status: p.status, pct: Math.round(p.progress_pct ?? 0) });
           if (TERMINAL.has(p.status)) {
             if (pollRef.current) window.clearInterval(pollRef.current);
@@ -277,6 +289,7 @@ function PassageFirstGenerator() {
         } catch {
           if (pollRef.current) window.clearInterval(pollRef.current);
           pollRef.current = undefined;
+          if (!mountedRef.current) return; // unmounted during the failing poll
           setJob(null);
           toast.error("Lost contact with the passage-generation job");
         }

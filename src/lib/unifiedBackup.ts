@@ -83,9 +83,12 @@ export async function exportUnifiedBackup(
 
 /**
  * Restore a unified backup from raw file text. Validates the envelope (schema +
- * checksum + official-content firewall) BEFORE any write, restores the LSAT half
- * via the backend, then re-applies the host half to Dexie (the backend never
- * writes the host store). `mode` defaults to 'merge' (non-destructive). Throws
+ * checksum + official-content firewall) BEFORE any write, then applies the HOST
+ * half to Dexie FIRST (it self-validates + takes a rollback snapshot) and only
+ * then restores the LSAT half via the backend (which never writes the host
+ * store) — so a bad host half fails fast before the backend is touched, and a
+ * backend failure after the host is applied is reported as a precise partial
+ * state. `mode` defaults to 'merge' (non-destructive). Throws
  * {@link UnifiedBackupError} on a bad file, invalid envelope, or down backend.
  */
 export async function importUnifiedBackup(
