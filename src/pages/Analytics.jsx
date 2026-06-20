@@ -723,12 +723,18 @@ export default function Analytics() {
       {(() => {
         const CONFIDENCE_X = { low: 25, medium: 50, high: 75 };
         // CFA: host confidence buckets (low/medium/high), accuracy already 0–100.
-        const cfaData = (summary?.confidenceCalibration || []).map((row) => ({
-          label: `CFA · ${row.confidence}`,
-          x: CONFIDENCE_X[row.confidence] ?? 50,
-          y: row.accuracy ?? 0,
-          attempts: row.attempts ?? 0,
-        }));
+        // audit (LOW) — skip zero-attempt buckets like the LSAT series below;
+        // confidenceCalibrationSummary always returns all three bands, and an
+        // unused band plots at (conf%, 0%) — a phantom point far below the 1:1
+        // line that reads as "severely overconfident" when there's simply no data.
+        const cfaData = (summary?.confidenceCalibration || [])
+          .filter((row) => (row.attempts ?? 0) > 0)
+          .map((row) => ({
+            label: `CFA · ${row.confidence}`,
+            x: CONFIDENCE_X[row.confidence] ?? 50,
+            y: row.accuracy ?? 0,
+            attempts: row.attempts ?? 0,
+          }));
         // LSAT: sidecar confidence bands (sure/likely/guess). Accuracy is 0–1 here,
         // so scale to 0–100; skip empty bands (null accuracy). Color-coded violet.
         const lsatData = lsatCalibration

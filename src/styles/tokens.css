@@ -388,8 +388,13 @@
      set data-domain="lsat" on /lsat/*. Dark-theme defaults; light block below
      tightens for AA on white. */
   [data-domain="lsat"] {
-    --accent:        hsl(262 83% 60%);       /* #8B5CF6 */
-    --accent-hover:  hsl(258 92% 70%);       /* #A78BFA */
+    /* audit (LOW) — --accent is used as TEXT (links/headings/eyebrows) on dark
+       card/panel surfaces, where #8B5CF6 measured ~4.0:1 (sub-AA). Use the lighter
+       violet the LSAT dark theme + host --accent-hover already use (#A78BFA ≈
+       6.2:1 on #141D2B). The button fill stays --accent-strong (#6D28D9, white
+       text 6.6:1); light-theme overrides below are unchanged. */
+    --accent:        hsl(258 92% 70%);       /* #A78BFA — AA as text on dark surfaces */
+    --accent-hover:  hsl(255 95% 80%);       /* #C4B5FD — lighter violet, hover distinction */
     --accent-strong: #6D28D9;                /* A3 button fill — violet-700, white text 6.6:1 */
     --surface-soft:  rgba(139, 92, 246, 0.12);
     --color-accent:      var(--accent);

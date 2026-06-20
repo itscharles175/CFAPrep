@@ -204,8 +204,17 @@ function cardFromReviewItem(previous: ReviewItem | undefined, now: Date): Card {
   }
 
   const dueDate = new Date(previous.dueAt);
-  // Estimate last_review as the day the previous interval started
-  const lastReview = new Date(dueDate.getTime() - previous.intervalDays * DAY_MS);
+  // audit (LOW) — anchor last_review to the PERSISTED lastResultAt (the true
+  // last-review timestamp) instead of reconstructing it from dueAt − intervalDays.
+  // The reconstruction is only valid while dueAt === lastResultAt + intervalDays;
+  // an external dueAt edit (FSRS write-back / unified restore / manual) desyncs
+  // them and the reconstructed date can land AFTER `now`, making ts-fsrs HARD-THROW
+  // "Invalid delta_t" on scheduleReview — the hot path of every graded answer.
+  // Clamp ≤ now as belt-and-suspenders so f.next() is never handed a future anchor.
+  const reconstructed = previous.lastResultAt
+    ? new Date(previous.lastResultAt)
+    : new Date(dueDate.getTime() - previous.intervalDays * DAY_MS);
+  const lastReview = reconstructed.getTime() > now.getTime() ? new Date(now.getTime()) : reconstructed;
 
   return {
     due: dueDate,

@@ -66,8 +66,11 @@ export function StudySessionCard({
         borderRadius: 'var(--radius-lg, 12px)',
         boxShadow: 'var(--elevation-2)',
         // A slightly more opaque backdrop so content scrolling *under* the
-        // sticky card stays legible behind it.
+        // sticky card stays legible behind it. audit (LOW) — pair the -webkit-
+        // prefix so the saturate applies in the Tauri WebKit WebView too (every
+        // other backdrop-filter site in the codebase pairs them).
         backdropFilter: 'saturate(140%)',
+        WebkitBackdropFilter: 'saturate(140%)',
       }}
     >
       <SessionTabs
