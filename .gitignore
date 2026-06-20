@@ -73,7 +73,9 @@ services/lsat-backend/data/
 
 # UA7 visual-regression baselines are machine-specific (font hinting / AA differs
 # across OS + headless vs system Chrome), so committing host-captured PNGs would
-# make the CI gate (Linux Chromium) fail on first run. The gate bootstraps a fresh
-# baseline when none exists, so CI self-seeds; commit OS-matched baselines later if
-# durable cross-run regression detection is wanted.
+# make the CI gate (Linux Chromium) fail on first run — hence gitignored.
+# audit M19: the gate no longer SILENTLY self-seeds in CI. When no baseline is
+# present it now logs a loud "visual-regression gate is INACTIVE" warning (not a
+# green pass), and the moment baselines DO exist (restore a Linux-generated set via
+# actions/cache, keyed on the routes+tokens) a missing/changed shot FAILS the run.
 tests/visual-baselines/

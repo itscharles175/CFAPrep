@@ -267,7 +267,10 @@ jobs:
         with:
           name: studyvault-${{ matrix.os }}${{ steps.onb.outputs.rag_enabled == 'true' && '' || '-norag' }}
           path: ${{ matrix.artifact-glob }}
-          if-no-files-found: warn
+          # audit M20 — fail the build if the installer glob matched nothing
+          # (a bad glob / empty Tauri bundle dir) instead of publishing a release
+          # with missing installers.
+          if-no-files-found: error
           retention-days: 30
 
   release:
@@ -290,4 +293,6 @@ jobs:
         with:
           files: bundles/**/*
           generate_release_notes: true
-          fail_on_unmatched_files: false
+          # audit M20 — fail rather than publish a green release whose asset glob
+          # matched nothing (paired with if-no-files-found:error on upload above).
+          fail_on_unmatched_files: true

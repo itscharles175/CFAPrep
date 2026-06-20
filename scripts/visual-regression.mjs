@@ -52,7 +52,7 @@
  * QA tooling) — no new package is added.
  */
 
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { preview } from 'vite';
 import { chromium } from 'playwright-core';
@@ -145,9 +145,30 @@ async function compareToBaseline({ id, theme, viewport, screenshot }) {
   await writeFile(screenshotPath, screenshot);
 
   const hasBaseline = await fileExists(baselinePath);
-  if (!hasBaseline || UPDATE_BASELINES) {
+  if (UPDATE_BASELINES) {
     await writeFile(baselinePath, screenshot);
     return { outcome: hasBaseline ? 'updated' : 'bootstrapped', name, baselinePath, screenshotPath };
+  }
+  if (!hasBaseline) {
+    // audit M19 — once baselines are committed (the gate is "live"), a MISSING
+    // baseline in CI is a FAILURE, not a silent self-seed. Previously every fresh
+    // CI checkout (baselines gitignored) bootstrapped and passed, so visual
+    // regressions were structurally false-green. Locally — or before any baseline
+    // is committed — keep bootstrapping so a dev can seed them.
+    if (isCI && baselinesCommitted) {
+      return {
+        outcome: 'diff',
+        name,
+        baselinePath,
+        screenshotPath,
+        reason:
+          'baseline missing in CI — a new/renamed shot must be reviewed and committed ' +
+          '(re-baseline locally with the update flag, then commit tests/visual-baselines/)',
+        ratio: 1,
+      };
+    }
+    await writeFile(baselinePath, screenshot);
+    return { outcome: 'bootstrapped', name, baselinePath, screenshotPath };
   }
 
   const baselineBuffer = await readFile(baselinePath);
@@ -186,6 +207,18 @@ await access('dist/index.html').catch(() => {
 
 await mkdir(BASELINE_DIR, { recursive: true });
 await mkdir(REPORT_DIR, { recursive: true });
+
+// audit M19 — gate state. `baselinesCommitted` is true when the baseline dir
+// already holds PNGs at startup (i.e. they're committed to the repo), which makes
+// the gate "live": a missing baseline in CI then fails instead of self-seeding.
+const isCI = !!process.env.CI && process.env.CI !== 'false';
+const baselinesCommitted = (await readdir(BASELINE_DIR).catch(() => [])).some((f) => f.endsWith('.png'));
+if (isCI && !baselinesCommitted && !UPDATE_BASELINES) {
+  console.warn(
+    'WARNING: no committed visual baselines found — the visual-regression gate is INACTIVE ' +
+      '(bootstrapping, not comparing). Commit tests/visual-baselines/ to make it enforce.',
+  );
+}
 
 const server = await preview({
   preview: {

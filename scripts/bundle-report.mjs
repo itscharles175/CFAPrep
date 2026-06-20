@@ -16,13 +16,18 @@ const thresholds = [
   { label: 'Quant route chunk', pattern: /^QuantModule-.*\.js$/, maxBytes: 250_000, maxGzipBytes: 80_000, required: true },
   { label: 'KaTeX', pattern: /^katex-.*\.js$/, maxBytes: 300_000, maxGzipBytes: 95_000, required: true },
   { label: 'Quant/Recharts payload', pattern: /^(recharts-vendor|Analytics)-.*\.js$/, maxBytes: 430_000, maxGzipBytes: 130_000, required: false },
+  // audit M21 — the largest single shipped asset (~21.6MB) is a .wasm that the
+  // gate never scanned (it filtered to .js/.css only), so an ML-asset size
+  // regression slipped through. Budget it explicitly. gzip cap is generous since
+  // wasm compresses poorly and the offline footprint is what matters.
+  { label: 'ONNX runtime wasm', pattern: /^ort-wasm.*\.wasm$/, maxBytes: 24_000_000, maxGzipBytes: 9_000_000, required: false },
 ];
 
 async function getAssets() {
   const names = await readdir(ASSET_DIR);
   return Promise.all(
     names
-      .filter((name) => name.endsWith('.js') || name.endsWith('.css'))
+      .filter((name) => name.endsWith('.js') || name.endsWith('.css') || name.endsWith('.wasm'))
       .map(async (name) => {
         const filePath = path.join(ASSET_DIR, name);
         const file = await stat(filePath);

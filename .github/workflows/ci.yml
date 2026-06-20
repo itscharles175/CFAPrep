@@ -154,6 +154,14 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
+      # audit H5 — the offline/PWA regression suite (service-worker readiness,
+      # offline reload, offline deep-routes, PWA update prompt) — the gate for this
+      # offline-first app's CENTRAL invariant — was never invoked by any workflow,
+      # so a broken SW or update path could ship green. Run it here, reusing this
+      # job's production build + Playwright Chromium. (Audit H5.)
+      - name: Offline + PWA regression
+        run: npm run browser:regression
+
       - name: Visual regression check
         run: npm run visual:regression
 
