@@ -1,12 +1,14 @@
 /**
  * FSRS parameter fitting from a user's own review history.
  *
- * ts-fsrs ships the FSRS-4.5 algorithm with `default_w` (19 weights) and a
- * `request_retention` knob (default 0.9).  The reference Python optimizer
- * does full gradient descent over all 19 weights; that is overkill for a
- * single-user local app.  This module instead does a coordinate-descent
- * search over a small principled subset, evaluated against the user's own
- * `questionResults` history.
+ * ts-fsrs ships the FSRS-6 algorithm with `default_w` (21 weights, incl. the
+ * w[20] decay term) and a `request_retention` knob (default 0.9).  The reference
+ * Python optimizer does full gradient descent over all weights; that is overkill
+ * for a single-user local app.  This module instead does a coordinate-descent
+ * search over a small principled subset (the hard/easy multipliers + decay),
+ * evaluated against the user's own `questionResults` history. The searched
+ * indices are length-guarded against default_w so a future weight-count change
+ * skips the fit rather than mis-indexing (audit LOW — comments were FSRS-4.5/19w).
  *
  * Output:
  *   { ok: boolean

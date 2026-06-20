@@ -881,8 +881,12 @@ export default function Analytics() {
               <div className="analytics-row" key={row.confidence}>
                 <span>{row.confidence}</span>
                 <strong>{row.attempts}</strong>
-                <span>{pct(row.accuracy)}</span>
-                <span>{row.calibrationGap > 0 ? '+' : ''}{row.calibrationGap}</span>
+                {/* audit LOW — a never-used confidence band has attempts=0 but
+                    accuracyFor([])=0 and calibrationGap=+100, fabricating an
+                    alarming "0% / +100 overconfident" row from absent data. Dash
+                    the derived stats when there are no attempts. */}
+                <span>{row.attempts > 0 ? pct(row.accuracy) : '—'}</span>
+                <span>{row.attempts > 0 ? `${row.calibrationGap > 0 ? '+' : ''}${row.calibrationGap}` : '—'}</span>
               </div>
             ))}
           </div>
@@ -894,7 +898,9 @@ export default function Analytics() {
               <div className="analytics-row" key={row.difficulty}>
                 <span>{row.difficulty}</span>
                 <strong>{row.attempts}</strong>
-                <span>{pct(row.accuracy)}</span>
+                {/* audit LOW — dash accuracy for an unused difficulty tier rather
+                    than show a fabricated 0%. */}
+                <span>{row.attempts > 0 ? pct(row.accuracy) : '—'}</span>
               </div>
             ))}
           </div>

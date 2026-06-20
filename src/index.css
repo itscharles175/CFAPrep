@@ -203,7 +203,7 @@
   --bg-hover: hsl(213 27% 84%);           /* #CBD5E1 */
   --text-primary: hsl(222.2 47.4% 11.2%); /* #0F172A */
   --text-secondary: hsl(215.3 25% 26.7%); /* #334155 */
-  --text-muted: hsl(215.3 25% 26.7%);     /* #334155 */
+  --text-muted: hsl(215 19% 41%);         /* #5B6B82 — audit LOW: distinct from --text-secondary (was identical), ~6.6:1 on white (AA) */
   --accent: hsl(224.3 76.3% 48%);         /* #1D4ED8 */
   --accent-hover: hsl(225.9 70.7% 40.2%); /* #1E40AF */
   --exam: hsl(38.3 93% 28%);              /* #8A5A05 */
@@ -1249,7 +1249,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .status-badge-success { color: var(--excel); background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.24); }
 .status-badge-warning,
 .status-badge-ops { color: var(--ops); background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.26); }
-.status-badge-danger { color: var(--red-500); background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.26); }
+.status-badge-danger { color: var(--danger); background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.26); } /* audit LOW: use the theme-tuned --danger token (like .badge-red/.stat-cell-danger) — raw --red-500 was ~4.0:1 (sub-AA) on the tint */
 .status-badge-vault { color: var(--vault); background: rgba(20,184,166,0.12); border-color: rgba(20,184,166,0.26); }
 .status-badge-quant { color: var(--quant); background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.24); }
 .status-badge-excel { color: var(--excel); background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.24); }

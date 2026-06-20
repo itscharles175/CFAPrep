@@ -289,7 +289,7 @@
       --bg-hover: hsl(213 27% 84%);           /* #CBD5E1 */
       --text-primary: hsl(222.2 47.4% 11.2%); /* #0F172A */
       --text-secondary: hsl(215.3 25% 26.7%); /* #334155 */
-      --text-muted: hsl(215.3 25% 26.7%);     /* #334155 */
+      --text-muted: hsl(215 19% 41%);         /* #5B6B82 — audit LOW: distinct muted tier (system-light), ~6.6:1 on white */
       --accent: hsl(224.3 76.3% 48%);         /* #1D4ED8 */
       --accent-hover: hsl(225.9 70.7% 40.2%); /* #1E40AF */
       --exam: hsl(38.3 93% 28%);              /* #8A5A05 */
