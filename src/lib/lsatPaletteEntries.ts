@@ -13,9 +13,6 @@
  * `routeManifest` re-export; the LSAT "Recents" are read straight from the
  * localStorage key the LSAT recents writer owns (`lsatlab.commandRecents`),
  * matched against `lsatSearchRoutes` rather than via any LSAT import.
- *
- * FLAG GATING: callers gate every row built here behind `LSAT_UNIFIED_SHELL`
- * (default OFF), so the running default palette is byte-for-byte unchanged.
  */
 
 import { lsatAppRoutes, lsatSearchRoutes, type SearchRoute } from '../routes/routeManifest';

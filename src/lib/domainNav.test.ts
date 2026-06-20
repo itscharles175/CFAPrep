@@ -5,7 +5,6 @@ import {
   isLsatPath,
   navigateDomain,
   setActiveDomain,
-  startStyleIsolation,
 } from './domainNav';
 
 function makeSheet(domain?: string): HTMLStyleElement {
@@ -59,15 +58,6 @@ describe('setActiveDomain — CSS isolation toggling', () => {
     setActiveDomain('lsat');
     expect(shared.disabled).toBe(false);
     shared.remove();
-  });
-});
-
-describe('startStyleIsolation — observer attribution', () => {
-  it('stamps a newly injected sheet with the active domain', async () => {
-    startStyleIsolation('host');
-    const s = makeSheet(); // untagged; the observer should attribute it
-    await new Promise((r) => setTimeout(r, 0)); // flush the MutationObserver
-    expect(s.getAttribute('data-sv-domain')).toBe('host');
   });
 });
 

@@ -1,17 +1,17 @@
 /*
  * Domain chunk prefetch (Plan UC3).
  *
- * StudyVault lazy-splits its two sub-apps at the React root (src/main.jsx):
- * the CFA/Quant/Excel `host` entry and the vendored `lsat` entry each resolve
- * via a separate `import()` only when their domain is first mounted. That keeps
- * the initial download lean, but it also means the first cross-domain hop pays
- * the full chunk-download cost inline (a brief DomainFallback blank).
+ * StudyVault lazy-splits its two planes under the unified root (<UnifiedRoot>):
+ * the CFA/Quant/Excel host shell (`../App`) and the vendored LSAT plane
+ * (`<LsatUnifiedMount>`) each resolve via a separate `import()` only when their
+ * route is first mounted. That keeps the initial download lean, but it also means
+ * the first cross-domain hop pays the full chunk-download cost inline.
  *
- * `prefetchDomainChunk` lets the UI WARM the inactive domain's chunk ahead of
- * that hop — e.g. on hover/focus of a cross-domain link, or idle after first
- * paint — so the eventual `import()` in main.jsx resolves from the module cache
- * instantly. It maps each domain to the SAME module specifier main.jsx lazy()s,
- * so the bundler dedupes them into one chunk (no duplicate fetch).
+ * `prefetchDomainChunk` lets the UI WARM the inactive plane's chunk ahead of that
+ * hop — e.g. on hover/focus of a cross-domain link, or idle after first paint —
+ * so the eventual `import()` resolves from the module cache instantly. It maps
+ * each domain to the SAME module the unified root lazy()s, so the bundler dedupes
+ * them into one chunk (no duplicate fetch).
  *
  * Contract: pure side-effect (a warm fetch), returns nothing, and NEVER throws
  * or rejects — a failed prefetch is a non-event (the real `import()` at mount
@@ -36,12 +36,17 @@ export function prefetchDomainChunk(domain: Domain): Promise<void> {
   let load: Promise<unknown>;
   switch (domain) {
     case 'lsat':
-      // Extensionless: strict tsc forbids a .tsx specifier (TS5097); the bundler
-      // still resolves this to the same LsatRoot module/chunk as main.jsx.
-      load = import('../domains/lsat/LsatRoot');
+      // K4-13: the unified shell mounts the LSAT plane via <LsatUnifiedMount>
+      // (the legacy LsatRoot was removed). Warm that chunk. Extensionless: strict
+      // tsc forbids a .tsx specifier (TS5097); the bundler still resolves this to
+      // the same module/chunk <UnifiedRoot> lazy()s.
+      load = import('../components/LsatUnifiedMount');
       break;
     case 'host':
-      load = import('../host-entry.jsx');
+      // K4-13: <UnifiedRoot> lazy-loads the host shell as `../App`. Warming that
+      // module (host-entry.jsx imports the same App, so it shares the chunk) keeps
+      // a cross-domain hop into the host instant.
+      load = import('../App');
       break;
     default:
       // Unknown domain: nothing to warm. Resolve quietly.

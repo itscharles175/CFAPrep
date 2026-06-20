@@ -1,14 +1,13 @@
 /*
- * K4-7 — <UnifiedRoot>: the flag-ON application root (Phase 1 of Keystone K4:
- * full UI unification).
+ * K4-7 — <UnifiedRoot>: the application root (Keystone K4: full UI unification).
  *
- * DORMANT BY DEFAULT. src/main.jsx renders this ONLY when `LSAT_UNIFIED_SHELL` is
- * ON. With the flag OFF (default) main.jsx keeps its legacy `StudyVaultRoot`
- * split-shell (HostApp vs LsatRoot swap) byte-for-byte — this file is unreached.
+ * THE ONLY ROOT as of the K4-13 cutover. src/main.jsx renders this directly; the
+ * legacy `StudyVaultRoot` split-shell (HostApp vs LsatRoot swap) and the
+ * `LSAT_UNIFIED_SHELL` flag have been removed.
  *
- * What changes when the flag is ON: instead of TWO sub-apps each owning their own
- * `<BrowserRouter>` and being swapped in/out on a cross-domain hop, there is ONE
- * host `<BrowserRouter>` that routes BOTH planes. A top-level `<Routes>` selects:
+ * Instead of TWO sub-apps each owning their own `<BrowserRouter>` and being
+ * swapped in/out on a cross-domain hop, there is ONE host `<BrowserRouter>` that
+ * routes BOTH planes. A top-level `<Routes>` selects:
  *
  *   - `/lsat` + `/lsat/*`  -> <LsatUnifiedMount/>  (LSAT providers + startup +
  *                              the LSAT App re-based on /lsat inside SharedLayout)
@@ -21,11 +20,9 @@
  * the shared `runHostStartupOnce`) since the legacy HostApp is not mounted on
  * this path.
  *
- * NOTE: the style-isolation observer (lib/domainNav) that the legacy path uses to
- * disable the inactive domain's CSS is INTENTIONALLY not driven here — under the
- * unified shell both design systems are meant to coexist in one document (the K4
- * reskin reconciles them). This is flag-ON-only and verified by a later
- * supervised pass; flag-OFF behavior is unaffected.
+ * NOTE: there is no style-isolation observer here — under the unified shell both
+ * design systems coexist in one document (the K4 reskin reconciles them), and the
+ * legacy `startStyleIsolation` helper was removed in the K4-13 cutover.
  */
 
 import { lazy, Suspense, useEffect } from 'react';

@@ -14,7 +14,6 @@ import {
 import { cfaTopics, excelModules, quantModules } from '../../data/catalog';
 import { appRoutes } from '../../routes/routeManifest';
 import type { AppRoute } from '../../routes/routeManifest';
-import { useFeatureFlag } from '../../lib/featureFlags';
 import { buildLsatNavGroups, type LsatNavMode } from '../../lib/lsatNavSection';
 
 type LucideIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
@@ -158,13 +157,11 @@ function SidebarSection({ label, icon: Icon, basePath, items, collapsed, onNavig
  * Renders the vendored LSAT surface (from `lsatAppRoutes`) as ONE collapsible
  * host Sidebar section, its rows grouped by `navGroup` (Practice / Insight /
  * Setup) via `buildLsatNavGroups`, honoring the active `mode` (Test Mode hides
- * the `hideInTest` rows). It mounts ONLY when `LSAT_UNIFIED_SHELL` is on — the
- * caller already flag-gates it, so the default render never includes this.
+ * the `hideInTest` rows).
  *
- * The section header soft-navigates cross-domain to `/lsat` (the LSAT plane has
- * no host router yet — that's K4-7), and the rows do too; in this dormant phase
- * the section is a styled, byte-additive nav block that the legacy shell never
- * shows.
+ * The section header navigates to `/lsat` and the rows to their `/lsat/*` paths
+ * inside the one host router (K4-7 unified the router; K4-13 made it the only
+ * shell).
  */
 function LsatSidebarSection({
   collapsed,
@@ -237,9 +234,8 @@ interface SidebarProps {
   onToggle?: () => void;
   onNavigate?: () => void;
   /**
-   * K4-6: active LSAT mode (study/test). Only consumed by the flag-gated LSAT
-   * section (when `LSAT_UNIFIED_SHELL` is on) to hide `hideInTest` rows in Test
-   * Mode. Defaults to 'study'; the legacy render ignores it entirely.
+   * K4-6: active LSAT mode (study/test). Consumed by the LSAT section to hide
+   * `hideInTest` rows in Test Mode. Defaults to 'study'.
    */
   lsatMode?: LsatNavMode;
   /**
@@ -265,11 +261,6 @@ export default function Sidebar({
   onClose,
   lsatMode = 'study',
 }: SidebarProps) {
-  // K4-6: gate the LSAT section behind `LSAT_UNIFIED_SHELL` (default OFF). When
-  // off, every branch below is identical to today's render — no LSAT section,
-  // no extra section label. The hook reads synchronously (pre-paint) so there's
-  // no flash, and re-renders live if a dev flips the flag.
-  const lsatShell = useFeatureFlag('LSAT_UNIFIED_SHELL');
   // UB4: swipe-to-close. We track the pointer-down origin and, on release,
   // close the drawer when the gesture is a deliberate leftward swipe. Falls back
   // to `onNavigate` so the current shell (which uses onNavigate to close) works
@@ -373,15 +364,11 @@ export default function Sidebar({
           })}
         </div>
 
-        {/* K4-6: the unified shell's 4th nav section — the merged LSAT surface.
-            Flag-gated (default OFF) so the legacy render is byte-for-byte
-            unchanged; only `LSAT_UNIFIED_SHELL` on mounts it. */}
-        {lsatShell && (
-          <>
-            {!collapsed && <div className="sidebar-section-label">LSAT Lab</div>}
-            <LsatSidebarSection collapsed={collapsed} mode={lsatMode} onNavigate={onNavigate} />
-          </>
-        )}
+        {/* K4: the unified shell's 4th nav section — the merged LSAT surface.
+            Always rendered (the unified shell is the only shell as of the K4-13
+            cutover). */}
+        {!collapsed && <div className="sidebar-section-label">LSAT Lab</div>}
+        <LsatSidebarSection collapsed={collapsed} mode={lsatMode} onNavigate={onNavigate} />
       </nav>
     </aside>
   );

@@ -18,7 +18,6 @@ import DomainIndicator from '../DomainIndicator';
 import NavBackButton from '../NavBackButton';
 import { pushHistory } from '../../lib/navigationHistory';
 import { labelForPath } from '../../lib/navigationCrumbs';
-import { useFeatureFlag } from '../../lib/featureFlags';
 import { lsatRecentEntries, lsatRouteEntries } from '../../lib/lsatPaletteEntries';
 
 // K4-6: the LSAT shell's study/test mode, surfaced in the unified TopBar.
@@ -144,9 +143,8 @@ interface TopBarProps {
   onMenuToggle?: () => void;
   /**
    * K4-6: active LSAT mode + setter, supplied ONLY by the unified shell
-   * (<SharedLayout>). The study/test mode toggle renders solely when
-   * `LSAT_UNIFIED_SHELL` is on AND both are provided — so the legacy host shell
-   * (which passes neither) never shows it, even were the flag flipped on.
+   * (<SharedLayout>). The study/test mode toggle renders solely when both are
+   * provided — so the host App's own TopBar (which passes neither) never shows it.
    */
   lsatMode?: LsatShellMode;
   onLsatModeChange?: (mode: LsatShellMode) => void;
@@ -156,10 +154,10 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   const navigate = useNavigate();
   const location = useLocation();
   const activeDomain = activeDomainForPath(location.pathname);
-  // K4-6: gate the LSAT mode toggle behind the unified-shell flag (default OFF)
-  // AND the presence of the mode props. Read synchronously (pre-paint, no flash).
-  const lsatShell = useFeatureFlag('LSAT_UNIFIED_SHELL');
-  const showModeToggle = lsatShell && lsatMode != null && typeof onLsatModeChange === 'function';
+  // K4-6: the LSAT study/test mode toggle renders only where the unified shell
+  // (<SharedLayout>) passes the mode props — i.e. it is shown for the LSAT plane
+  // and omitted everywhere the host App renders TopBar without them.
+  const showModeToggle = lsatMode != null && typeof onLsatModeChange === 'function';
   const { theme, cycleTheme } = useTheme();
   const summary = useProgressSummary();
   const [activePathway] = useLevel3Pathway() as [string, (next: string) => void];
@@ -181,20 +179,18 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   const searchRef = useRef<HTMLDivElement | null>(null);
   const searchItems = useMemo(() => buildSearchItems({ level3Pathway: activePathway }), [activePathway]);
   // K4-cmd — fold the LSAT route vocabulary + the LSAT palette's cmdk Recents
-  // into the host palette so ONE ⌘K serves both planes. Gated on
-  // `LSAT_UNIFIED_SHELL` (default OFF): when the flag is off these arrays are
-  // empty, so the spread below leaves `commandItems` byte-for-byte identical to
-  // the pre-K4-cmd palette. Test Mode (from the shell's `lsatMode` prop) hides
-  // the LSAT routes the manifest marks `hideInTest`. The entries are `external`,
-  // so they soft-navigate cross-domain via `goToResult` → `navigateDomain`.
+  // into the host palette so ONE ⌘K serves both planes. Test Mode (from the
+  // shell's `lsatMode` prop) hides the LSAT routes the manifest marks
+  // `hideInTest`. The entries are `external`, so they soft-navigate cross-domain
+  // via `goToResult` → `navigateDomain`.
   const lsatTestMode = lsatMode === 'test';
   const lsatRoutes = useMemo<SearchResultItem[]>(
-    () => (lsatShell ? lsatRouteEntries({ testMode: lsatTestMode }) : []),
-    [lsatShell, lsatTestMode],
+    () => lsatRouteEntries({ testMode: lsatTestMode }),
+    [lsatTestMode],
   );
   const lsatRecents = useMemo<SearchResultItem[]>(
-    () => (lsatShell ? lsatRecentEntries({ testMode: lsatTestMode }) : []),
-    [lsatShell, lsatTestMode],
+    () => lsatRecentEntries({ testMode: lsatTestMode }),
+    [lsatTestMode],
   );
   const commandItems = useMemo<SearchResultItem[]>(
     () => [
@@ -461,10 +457,10 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
         <NavBackButton onSameDomainBack={() => navigate(-1)} />
         <NavigationBreadcrumb className="topbar-breadcrumb" />
         <DomainIndicator className="topbar-domain" />
-        {/* K4-6: unified-shell study/test mode toggle. Mirrors the legacy LSAT
-            shell's ModeToggle but lives in the host TopBar. Flag-gated + props-
-            gated (see `showModeToggle`), so the legacy render never includes it.
-            A segmented radio group: each button toggles the LSAT shell's mode. */}
+        {/* K4-6: unified-shell study/test mode toggle, living in the host TopBar.
+            Props-gated (see `showModeToggle`) so it shows only where SharedLayout
+            passes the LSAT mode. A segmented radio group: each button toggles the
+            LSAT shell's mode. */}
         {showModeToggle && (
           <div className="topbar-mode-toggle" role="group" aria-label="App mode">
             {(['study', 'test'] as const).map((m) => (

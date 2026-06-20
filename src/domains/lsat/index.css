@@ -339,7 +339,10 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    /* K4-12: the `bg-background`/`text-foreground` body apply was removed in the
+       final K4 cutover. The LSAT plane is always mounted INSIDE the host shell
+       now, so it inherits bg/text from the host shell rather than clobbering the
+       host's palette with the LSAT Tailwind tokens. */
     font-family: theme("fontFamily.sans");
     font-feature-settings: "rlig" 1, "calt" 1;
     /* R8: engage Newsreader's optical-size (opsz) axis + Geist's so large serif

@@ -3,31 +3,21 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 /*
- * K4-13a — "doubled chrome" resolution proof.
+ * K4-13 — "doubled chrome" resolution proof (final cutover).
  *
- * The LSAT <AppShell> is the layout route element that renders the LSAT plane's
- * own outer chrome (its Sidebar + header). When the LSAT App is mounted INSIDE
- * the host <SharedLayout> (the flag-ON unified shell), SharedLayout already
- * supplies the one sidebar/topbar — so AppShell must render CHROMELESS, leaving
- * only the page content. In legacy mode (the default, no unified provider) it
- * must render its FULL chrome exactly as before.
+ * The LSAT <AppShell> is the layout route element for the LSAT plane. As of the
+ * K4-13 cutover the LSAT App is ALWAYS mounted INSIDE the host <SharedLayout>,
+ * which supplies the one sidebar/topbar — so AppShell renders CHROMELESS,
+ * leaving only the scrollable page content (+ scroll restoration). The legacy
+ * full-chrome shell and the `unified` dispatch were removed.
  *
- * These tests render the REAL AppShell + the real ChromelessShell/FullChromeShell
- * structure (so the dispatch + the chrome landmarks are genuinely exercised) and
- * assert on the presence/absence of the LSAT shell's nav surfaces. The data layer
- * (react-query hooks) and the lazy command palette are stubbed to keep the render
- * light + deterministic — none of them are the chrome we assert on, and the real
- * structural landmarks (aside/header/nav/skip-link) still render.
+ * This renders the REAL AppShell structure and asserts the LSAT shell's own nav
+ * surfaces are ABSENT (SharedLayout supplies them) while the routed page content
+ * + the scroll region survive. The command palette is stubbed only to keep the
+ * render light + deterministic.
  */
 
-// Data hooks → empty, synchronous. Strips react-query networking from the render.
-vi.mock("@lsat/lib/hooks", () => ({
-  useDashboard: () => ({ data: undefined }),
-  useSrsDue: () => ({ data: undefined }),
-}));
-
-// Command palette → trivial passthrough provider + no-op hook, so the full
-// shell's ⌘K affordance renders without pulling in the lazy cmdk dialog.
+// Command palette → trivial passthrough provider + no-op hook.
 vi.mock("@lsat/components/command-palette", () => ({
   CommandPaletteProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useCommandPalette: () => ({ open: false, setOpen: () => {}, toggle: () => {}, register: () => () => {} }),
@@ -35,47 +25,27 @@ vi.mock("@lsat/components/command-palette", () => ({
 
 import { AppShell } from "@lsat/components/app-shell";
 import { CommandPaletteProvider } from "@lsat/components/command-palette";
-import { UnifiedShellContext } from "@lsat/lib/unifiedShellContext";
 
-function renderShell(unified: boolean) {
+function renderShell() {
   return render(
-    <UnifiedShellContext.Provider value={{ unified }}>
-      <MemoryRouter initialEntries={["/srs"]}>
-        <CommandPaletteProvider>
-          <Routes>
-            <Route element={<AppShell />}>
-              <Route
-                path="/srs"
-                element={<div data-testid="page-content">SRS page</div>}
-              />
-            </Route>
-          </Routes>
-        </CommandPaletteProvider>
-      </MemoryRouter>
-    </UnifiedShellContext.Provider>,
+    <MemoryRouter initialEntries={["/srs"]}>
+      <CommandPaletteProvider>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route
+              path="/srs"
+              element={<div data-testid="page-content">SRS page</div>}
+            />
+          </Route>
+        </Routes>
+      </CommandPaletteProvider>
+    </MemoryRouter>,
   );
 }
 
-describe("AppShell doubled-chrome (K4-13a)", () => {
-  it("LEGACY (default): renders the full LSAT shell chrome — sidebar, header, nav, skip link", () => {
-    renderShell(false);
-
-    // The routed page still renders inside the shell's content region.
-    expect(screen.getByTestId("page-content")).toBeInTheDocument();
-
-    // FULL chrome present: the persistent Sidebar + the top header are both here.
-    expect(screen.getByRole("complementary", { name: "Sidebar" })).toBeInTheDocument();
-    expect(screen.getByRole("banner")).toBeInTheDocument();
-    // The shell's own primary nav rail + brand lockup + skip link.
-    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
-    expect(screen.getAllByText("LSAT Lab").length).toBeGreaterThan(0);
-    expect(
-      screen.getByRole("link", { name: "Skip to main content" }),
-    ).toBeInTheDocument();
-  });
-
-  it("UNIFIED: renders chromeless — NO second sidebar/header/nav/skip link, page content only", () => {
-    renderShell(true);
+describe("AppShell chromeless (K4-13)", () => {
+  it("renders chromeless — NO sidebar/header/nav/skip link, page content only", () => {
+    renderShell();
 
     // The routed page content still renders (scroll region preserved).
     expect(screen.getByTestId("page-content")).toBeInTheDocument();

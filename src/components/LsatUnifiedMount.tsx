@@ -1,14 +1,13 @@
 /*
- * K4-7 — <LsatUnifiedMount>: the flag-ON unified mount for the vendored LSAT
- * surface (Phase 1 of Keystone K4: full UI unification).
+ * K4-7 — <LsatUnifiedMount>: the unified mount for the vendored LSAT surface
+ * (Keystone K4: full UI unification).
  *
- * DORMANT BY DEFAULT. Nothing renders this unless `LSAT_UNIFIED_SHELL` is ON.
- * With the flag OFF, src/main.jsx keeps its legacy split-shell behavior
- * byte-for-byte (LsatRoot under its own `<BrowserRouter basename="/lsat">`); this
- * file is never reached. See src/lib/featureFlags.ts + src/components/SharedLayout.tsx.
+ * This is THE LSAT mount as of the K4-13 cutover: <UnifiedRoot> routes `/lsat/*`
+ * here, mounting the LSAT plane inside the host <SharedLayout> (one host router,
+ * one set of chrome). See src/components/UnifiedRoot.tsx + SharedLayout.tsx.
  *
- * WHAT THIS REPLACES (flag-ON only): the legacy `src/domains/lsat/LsatRoot.tsx`
- * mounted the LSAT plane as a SELF-CONTAINED sub-app — its OWN BrowserRouter, its
+ * WHAT THIS REPLACED: the removed `src/domains/lsat/LsatRoot.tsx` mounted the
+ * LSAT plane as a SELF-CONTAINED sub-app — its OWN BrowserRouter, its
  * OWN provider stack, and its OWN startup side-effects — that the host swapped in
  * (and OUT, unmounting it) on a cross-domain hop. Under the unified shell the LSAT
  * routes live INSIDE the host's single `<BrowserRouter>` and are persistently

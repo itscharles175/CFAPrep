@@ -1,14 +1,13 @@
 /*
- * K4-cmd — unified ⌘K palette (host TopBar).
+ * K4-cmd / K4-13 — unified ⌘K palette (host TopBar).
  *
- * Pins the two guarantees of folding the LSAT vocabulary into the host palette:
- *   1. flag OFF (default) → the palette is unchanged: NO LSAT route rows appear,
- *      so the running default behavior is byte-for-byte identical.
- *   2. flag ON (LSAT_UNIFIED_SHELL) → the LSAT routes surface as first-class,
- *      `external`, /lsat-prefixed rows (badged "LSAT"), navigable from one ⌘K.
+ * The LSAT vocabulary is folded into the host palette unconditionally (the
+ * `LSAT_UNIFIED_SHELL` flag was removed in the K4-13 cutover): the LSAT routes
+ * surface as first-class, `external`, /lsat-prefixed rows (badged "LSAT"),
+ * navigable from one ⌘K.
  *
  * The TopBar pulls in a lot of host context (theme, progress, catalog, content
- * search); we stub those to isolate the palette composition + flag gate.
+ * search); we stub those to isolate the palette composition.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
@@ -27,7 +26,6 @@ vi.mock('../../domains/cfa/cfaLevel3Pathways', () => ({ level3TopicBelongsToPath
 vi.mock('./NotificationCenter', () => ({ NotificationCenter: () => null }));
 
 import TopBar from './TopBar';
-import { setFeatureFlag, __resetFeatureFlagCache } from '../../lib/featureFlags';
 
 function renderTopBar(path = '/lsat/practice') {
   return render(
@@ -44,41 +42,14 @@ async function openPalette() {
 }
 
 beforeEach(() => {
-  __resetFeatureFlagCache();
-  setFeatureFlag('LSAT_UNIFIED_SHELL', null);
   localStorage.clear();
 });
 
 afterEach(() => {
-  setFeatureFlag('LSAT_UNIFIED_SHELL', null);
-  __resetFeatureFlagCache();
   vi.clearAllMocks();
 });
 
-describe('unified palette — flag OFF (legacy rollback)', () => {
-  beforeEach(() => {
-    // K4-13 flipped the compiled default ON, so the legacy/OFF behavior must now
-    // be requested explicitly (the unset default would resolve to ON).
-    __resetFeatureFlagCache();
-    setFeatureFlag('LSAT_UNIFIED_SHELL', false);
-  });
-
-  it('surfaces no LSAT route rows when searching the LSAT vocabulary', async () => {
-    renderTopBar();
-    const input = await openPalette();
-    await userEvent.type(input, 'srs');
-    const listbox = screen.getByRole('listbox', { name: /command palette results/i });
-    // No row navigates into the /lsat plane.
-    expect(within(listbox).queryByText('SRS')).toBeNull();
-  });
-});
-
-describe('unified palette — flag ON (LSAT_UNIFIED_SHELL)', () => {
-  beforeEach(() => {
-    __resetFeatureFlagCache();
-    setFeatureFlag('LSAT_UNIFIED_SHELL', true);
-  });
-
+describe('unified palette', () => {
   it('surfaces LSAT routes as first-class palette rows', async () => {
     renderTopBar();
     const input = await openPalette();

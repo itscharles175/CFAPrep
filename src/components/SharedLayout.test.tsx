@@ -1,22 +1,18 @@
 /*
- * K4-6 — render tests for the unified host shell (Phase 1 of Keystone K4).
+ * K4-6 / K4-13 — render tests for the unified host shell.
  *
- * Two contracts pinned here:
- *   1. With `LSAT_UNIFIED_SHELL` ON, <SharedLayout> mounts the host shell with
- *      the LSAT 4th Sidebar section (built from `lsatAppRoutes`, grouped by
- *      navGroup) AND the TopBar study/test mode toggle, and renders its children.
- *   2. With the flag OFF (the default), <Sidebar> and <TopBar> render NO LSAT
- *      section and NO mode toggle — the running app is unchanged.
+ * The unified shell is the only shell as of the K4-13 cutover (the
+ * `LSAT_UNIFIED_SHELL` flag was removed), so these pin its unconditional
+ * contract: <SharedLayout> mounts the host shell with the LSAT 4th Sidebar
+ * section (built from `lsatAppRoutes`, grouped by navGroup) AND the TopBar
+ * study/test mode toggle, and renders its children.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import SharedLayout from './SharedLayout';
-import Sidebar from './Layout/Sidebar';
-import TopBar from './Layout/TopBar';
 import { ThemeProvider } from '../context/ThemeContext';
-import { __resetFeatureFlagCache, setFeatureFlag } from '../lib/featureFlags';
 import { clearHistory } from '../lib/navigationHistory';
 
 function renderWithShell(node: React.ReactNode, path = '/') {
@@ -30,21 +26,14 @@ function renderWithShell(node: React.ReactNode, path = '/') {
 beforeEach(() => {
   localStorage.clear();
   clearHistory();
-  __resetFeatureFlagCache();
 });
 
 afterEach(() => {
-  setFeatureFlag('LSAT_UNIFIED_SHELL', null);
   localStorage.clear();
   clearHistory();
-  __resetFeatureFlagCache();
 });
 
-describe('SharedLayout (K4-6) — flag ON', () => {
-  beforeEach(() => {
-    setFeatureFlag('LSAT_UNIFIED_SHELL', true);
-  });
-
+describe('SharedLayout (K4-6) — unified shell', () => {
   it('mounts the host shell with the LSAT section and renders children', () => {
     renderWithShell(<SharedLayout>{<div>Routed content</div>}</SharedLayout>);
 
@@ -93,34 +82,5 @@ describe('SharedLayout (K4-6) — flag ON', () => {
     // 'Practice' (not hideInTest) survives; 'SRS' (hideInTest) is hidden.
     expect(await screen.findByRole('link', { name: 'Practice' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'SRS' })).toBeNull();
-  });
-});
-
-describe('Sidebar/TopBar (K4-6) — flag OFF (legacy rollback)', () => {
-  beforeEach(() => {
-    // K4-13 flipped the compiled default ON, so the legacy/OFF render must now be
-    // requested explicitly (the unset default would resolve to ON).
-    setFeatureFlag('LSAT_UNIFIED_SHELL', false);
-    __resetFeatureFlagCache();
-  });
-
-  it('Sidebar renders NO LSAT section when the flag is off', () => {
-    renderWithShell(
-      <Sidebar collapsed={false} onToggle={() => {}} onNavigate={() => {}} />,
-    );
-    // The CFA/Quant/Excel domains + Tools render as today; no LSAT section.
-    expect(screen.getByRole('link', { name: /CFA Program/i })).toBeInTheDocument();
-    expect(screen.queryByText('LSAT Lab')).toBeNull();
-    expect(screen.queryByRole('link', { name: /^LSAT$/i })).toBeNull();
-  });
-
-  it('TopBar renders NO mode toggle when the flag is off', () => {
-    renderWithShell(<TopBar collapsed={false} />);
-    expect(screen.queryByRole('group', { name: 'App mode' })).toBeNull();
-  });
-
-  it('TopBar renders NO mode toggle even with mode props when the flag is off', () => {
-    renderWithShell(<TopBar collapsed={false} lsatMode="study" onLsatModeChange={() => {}} />);
-    expect(screen.queryByRole('group', { name: 'App mode' })).toBeNull();
   });
 });

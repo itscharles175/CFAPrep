@@ -10,21 +10,19 @@
  * the host's dark palette (verified: host bg flips light when LSAT CSS is
  * present).
  *
- * To get SOFT navigation (no full reload, no white flash, shared window) while
- * keeping each app's mature router untouched, src/main.jsx mounts ONE React
- * root that swaps which sub-app is rendered, and this module keeps only the
- * ACTIVE domain's CSS live:
+ * K4-13 NOTE: the legacy split-shell + its CSS style-isolation observer
+ * (startStyleIsolation) were removed in the final cutover — under the unified
+ * shell both design systems coexist in one document (the K4 reskin reconciles
+ * them). What remains here is the cross-domain navigation surface still used by
+ * the unified shell:
  *
- *   - startStyleIsolation() installs a <head> MutationObserver that stamps every
- *     dynamically-injected stylesheet (<link>/<style>) with the domain that was
- *     active when it loaded — so even lazily code-split per-page CSS is
- *     attributed correctly, with no brittle filename matching.
- *   - setActiveDomain(d) flips `disabled` so sheets tagged for the other domain
- *     go inert. Untagged sheets that existed before isolation started stay live
- *     as a shared base.
+ *   - setActiveDomain(d) flips `disabled` on any stylesheet still tagged with
+ *     `data-sv-domain` so sheets attributed to the other domain go inert. (No
+ *     observer tags new sheets anymore; this is now a no-op unless some sheet
+ *     carries the attribute, but navigateDomain still calls it defensively.)
  *
  * navigateDomain() performs the actual cross-domain hop via the History API and
- * notifies the root to re-render + re-isolate.
+ * notifies the root to re-render.
  */
 
 import { pushHistory } from './navigationHistory';
@@ -70,40 +68,11 @@ export function domainForPath(pathname: string): Domain {
   return isLsatPath(pathname) ? 'lsat' : 'host';
 }
 
-let activeDomain: Domain = 'host';
-let observer: MutationObserver | null = null;
-
-function isSheet(node: Node): node is HTMLLinkElement | HTMLStyleElement {
-  if (!(node instanceof Element)) return false;
-  return (
-    node.tagName === 'STYLE' ||
-    (node.tagName === 'LINK' && (node as HTMLLinkElement).rel === 'stylesheet')
-  );
-}
-
-function stamp(node: Node): void {
-  if (isSheet(node) && !node.hasAttribute(SHEET_ATTR)) {
-    node.setAttribute(SHEET_ATTR, activeDomain);
-    // A sheet injected for the inactive domain (rare ordering) starts inert.
-    node.disabled = node.getAttribute(SHEET_ATTR) !== activeDomain;
-  }
-}
-
-/** Begin attributing every injected stylesheet to the active domain. Call once,
- *  before the first sub-app's lazy chunk (and its CSS) loads. */
-export function startStyleIsolation(initial: Domain): void {
-  if (observer || typeof document === 'undefined') return;
-  activeDomain = initial;
-  observer = new MutationObserver((mutations) => {
-    for (const m of mutations) m.addedNodes.forEach(stamp);
-  });
-  observer.observe(document.head, { childList: true });
-}
-
 /** Make `domain` the only live design system: enable its sheets, disable the
- *  other domain's. Call on every cross-domain swap (and at startup). */
+ *  other domain's. Called on every cross-domain hop (defensive — no observer
+ *  tags sheets under the unified shell, so this only affects any sheet still
+ *  carrying the `data-sv-domain` attribute). */
 export function setActiveDomain(domain: Domain): void {
-  activeDomain = domain;
   if (typeof document === 'undefined') return;
   document.head.querySelectorAll<HTMLLinkElement | HTMLStyleElement>(`[${SHEET_ATTR}]`).forEach((el) => {
     el.disabled = el.getAttribute(SHEET_ATTR) !== domain;

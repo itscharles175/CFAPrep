@@ -1,13 +1,11 @@
 /*
- * K4-6 — <SharedLayout>: the unified host shell (Phase 1 of Keystone K4: full
- * UI unification).
+ * K4-6 — <SharedLayout>: the unified host shell (Keystone K4: full UI
+ * unification).
  *
- * This is the component the unified app WILL render once K4-7 unifies the
- * router. Today it is built, flag-gated, and importable — but DORMANT: nothing
- * in the running app mounts it (the `LSAT_UNIFIED_SHELL` flag defaults OFF, so
- * the legacy LSAT shell stays active via src/main.jsx and the host shell renders
- * App.jsx exactly as before). It does NOT replace the router; it renders its
- * `children` (or a routed <Outlet/>) inside the host chrome.
+ * As of the K4-13 cutover this is the LSAT plane's chrome: <LsatUnifiedMount>
+ * wraps the LSAT App in it (host Sidebar + TopBar) inside the one host router.
+ * It does NOT own the router; it renders its `children` (or a routed <Outlet/>)
+ * inside the host chrome.
  *
  * Composition (host-styled, reusing the existing host shell pieces):
  *   - the host <Sidebar> with its 4th, LSAT-aware section (built from K4-5's
