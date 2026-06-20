@@ -333,23 +333,28 @@ input:focus, select:focus, textarea:focus {
    with a 2px offset gap. Reads the shared --ring / --ring-offset tokens. */
 input:focus-visible, select:focus-visible, textarea:focus-visible {
   border-color: var(--accent);
+  /* D4 (UIv2) — explicit `outline: none` so form controls NEVER fall back to the
+     UA default focus outline. Their focus ring is the box-shadow below (or, for a
+     wrapped control like .topbar-search whose input sets box-shadow:none, the
+     wrapper's :focus-within accent border). Previously a bare global
+     `:focus-visible { outline: 3px }` rule supplied this outline-suppression-plus-
+     ring implicitly; removing that orphan (below) without this line surfaced the
+     UA default outline on raw inputs. */
+  outline: none;
   box-shadow: 0 0 0 var(--ring-offset) var(--bg-primary),
     0 0 0 calc(var(--ring-offset) + 2px) hsl(var(--ring));
 }
 
-:focus-visible {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 3px;
-}
-
-/* UC1: Global accent focus ring for keyboard navigation. Scoped off form
-   controls (which keep their own border + box-shadow focus treatment above)
-   so it does not fight existing component focus styles.
-   UA3: the ring now reads the canonical --ring (HSL triplet) + --ring-offset
-   tokens — the same vocabulary as the LSAT domain's :focus-visible rule
-   (src/domains/lsat/index.css). Visually unchanged in the default app (--ring
-   resolves to the accent and --ring-offset is 2px), but the ring is now
-   theme/offset-driven through one shared token pair. */
+/* D4 (UIv2) — ONE focus-ring system, three INTENTIONAL tiers, all reading the
+   shared --ring (HSL triplet) + --ring-offset tokens so colour/offset is single-
+   sourced. Removed here: a bare `:focus-visible { outline: 3px solid
+   var(--focus-ring) }` orphan that predated the tiers — for every non-form element
+   it was overridden by the more-specific rule below, and for form controls it
+   leaked a SECOND ring (outline) on top of their box-shadow ring. With the explicit
+   `outline: none` added above, deleting it leaves a clean single ring per tier:
+     • Form controls (rule above): accent border + box-shadow ring; no outline.
+     • Buttons (.btn:focus-visible, later): `outline:none` + box-shadow ring.
+     • Everything else (this rule): a 2px `outline` ring with --ring-offset. */
 *:focus-visible:not(input):not(select):not(textarea) {
   outline: 2px solid hsl(var(--ring));
   outline-offset: var(--ring-offset);

@@ -25,6 +25,17 @@ export default {
       screens: { "2xl": "1400px" },
     },
     extend: {
+      // D3 (UIv2) — Tailwind↔host-token BRIDGE (verified, not a divergence).
+      // Every color utility below resolves to a shared CSS variable
+      // `hsl(var(--token))` defined in tokens.css / unified-palette.css, so
+      // `text-muted`, `bg-card`, `border`, `text-accent`, etc. render the SAME
+      // value as the host's own token consumers — there is no parallel palette to
+      // reconcile. (A prior survey worried `text-muted` would drift when the
+      // per-domain accent switches; it can't — `--muted-foreground` is a neutral,
+      // not accent-derived. Only `--accent`/`--accent-strong` re-tint per domain.)
+      // No host component uses a raw Tailwind palette colour (text-gray-*, etc.) —
+      // verified by grep — so nothing bypasses the bridge. `fontSize` below is the
+      // single-sourced design type scale (docs/07 §2.2), [size, line-height] tuples.
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
