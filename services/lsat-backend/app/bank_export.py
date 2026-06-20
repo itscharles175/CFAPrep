@@ -25,6 +25,7 @@ from typing import Any, Optional
 from sqlmodel import Session, select
 
 from . import backup, config
+from .dataset_normalizers import clamp_difficulty
 from .models import (
     AnswerChoice,
     Annotation,
@@ -534,7 +535,7 @@ def _commit_question(session: Session, payload: dict[str, Any], *,
         existing.section_id = existing.section_id or section_id
         existing.passage_id = existing.passage_id or passage_id
         existing.q_type = payload.get("q_type", existing.q_type)
-        existing.difficulty = int(payload.get("difficulty", existing.difficulty) or 3)
+        existing.difficulty = clamp_difficulty(payload.get("difficulty"), existing.difficulty)
         existing.quarantined = bool(payload.get("quarantined", existing.quarantined))
         existing.approved = bool(payload.get("approved", existing.approved))
         # swarm #46: the existing-row path deliberately never writes ``source`` —
@@ -551,7 +552,7 @@ def _commit_question(session: Session, payload: dict[str, Any], *,
         stem=payload.get("stem", ""),
         prompt=payload.get("prompt", ""),
         correct_answer=payload.get("correct_answer", "A"),
-        difficulty=int(payload.get("difficulty", 3) or 3),
+        difficulty=clamp_difficulty(payload.get("difficulty")),
         q_type=payload.get("q_type", "Inference"),
         source=_clamp_import_source(payload.get("source", "sample")),
         external_id=payload.get("external_id"),

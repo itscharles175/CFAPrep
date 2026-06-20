@@ -35,6 +35,17 @@ def test_flags_answer_not_in_choices():
     assert "choice_count" in kinds
 
 
+def test_flags_duplicate_choice_labels():
+    # audit H2 — five choices all labelled "A" used to collapse to the set {"A"}
+    # and slip past the gate (len==5, ans in labels), then commit marked every
+    # one is_correct, corrupting official scoring. The gate must flag them.
+    q = _q("A")
+    q["choices"] = [{"label": "A", "text": "t"} for _ in range(5)]
+    issues = import_pdf.commit_issues(_parsed(q))
+    kinds = {i["kind"] for i in issues}
+    assert "duplicate_labels" in kinds
+
+
 def test_no_sections_flagged():
     issues = import_pdf.commit_issues({"name": "x", "sections": []})
     assert any(i["kind"] == "no_sections" for i in issues)

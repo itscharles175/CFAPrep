@@ -36,6 +36,7 @@ from . import config, embeddings, gen_validators, llm, rc_intelligence
 
 log = logging.getLogger("lsatlab.generation")
 from .ai import strip_think
+from .dataset_normalizers import clamp_difficulty
 from .db import engine
 from .models import (
     LR_TYPES,
@@ -2346,7 +2347,7 @@ def _persist_candidate(session: Session, cand: dict, q_type: str,
         stem=cand.get("stem", ""),
         prompt=cand.get("prompt", ""),
         correct_answer=cand.get("correct_answer", "A"),
-        difficulty=int(cand.get("difficulty", 3) or 3),
+        difficulty=clamp_difficulty(cand.get("difficulty")),
         q_type=q_type,
         source=QuestionSource.ai_generated,
         parent_question_id=parent.id if parent else None,

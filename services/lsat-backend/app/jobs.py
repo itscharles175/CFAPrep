@@ -254,12 +254,20 @@ def enqueue(session: Session, q_type: str, count: int,
             parent_question_id: Optional[int] = None,
             status: GenStatus = GenStatus.queued,
             priority: int = 0,
-            max_retries: int = 0) -> int:
-    """Insert a generation job and return its id."""
+            max_retries: int = 0,
+            passage_first: bool = False) -> int:
+    """Insert a generation job and return its id.
+
+    audit M8 — ``passage_first`` is set at INSERT time (atomically with the
+    queued status) rather than flipped in a second commit by the caller. The
+    worker selects any queued job, so a poll landing between two commits could
+    pick a passage-first job while the flag was still False and run the legacy
+    per-question pipeline instead of one shared RC passage."""
     job = GenJob(q_type=q_type, count=count, status=status,
                  parent_question_id=parent_question_id,
                  priority=priority,
                  max_retries=max_retries,
+                 passage_first=passage_first,
                  progress_pct=0.0,
                  updated_at=datetime.now(timezone.utc))
     session.add(job)

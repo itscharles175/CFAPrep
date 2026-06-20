@@ -36,6 +36,7 @@ from typing import Any, Callable, Optional
 from sqlmodel import Session
 
 from . import config, gen_validators, llm, rc_intelligence
+from .dataset_normalizers import clamp_difficulty
 from .models import (
     RC_TYPES,
     AnswerChoice,
@@ -356,7 +357,7 @@ def _persist_question_for_passage(
         stem=cand.get("stem", ""),
         prompt=cand.get("prompt", ""),
         correct_answer=cand.get("correct_answer", "A"),
-        difficulty=int(cand.get("difficulty", 3) or 3),
+        difficulty=clamp_difficulty(cand.get("difficulty")),
         q_type=q_type,
         source=QuestionSource.ai_generated,
         quarantined=not accepted,

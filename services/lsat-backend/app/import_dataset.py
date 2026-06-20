@@ -382,7 +382,7 @@ def commit_records(session: Session, spec: DatasetSpec,
                             stem=rec.get("stem", "") if rec.get("section_type") == "LR" else "",
                             prompt=rec.get("prompt", ""),
                             correct_answer=rec.get("correct_answer", "A"),
-                            difficulty=int(rec.get("difficulty", 3) or 3),
+                            difficulty=dn.clamp_difficulty(rec.get("difficulty")),
                             q_type=rec.get("q_type_hint") or _default_q_type(
                                 rec.get("section_type", "LR")
                             ),

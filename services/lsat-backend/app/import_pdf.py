@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 
 from . import llm
 from .ai import strip_think
+from .dataset_normalizers import clamp_difficulty
 from .models import (
     AnswerChoice,
     Annotation,
@@ -480,7 +481,20 @@ def commit_issues(parsed: dict) -> list[dict]:
             loc = f"Section {si + 1} Q{qi + 1}"
             ans = (q.get("correct_answer") or "").strip().upper()
             choices = q.get("choices", []) or []
-            labels = {(c.get("label") or "").strip().upper() for c in choices}
+            label_list = [(c.get("label") or "").strip().upper() for c in choices]
+            labels = set(label_list)
+            # audit H2 — `labels` is a SET, so five choices all labelled "A" used
+            # to collapse to {"A"} and pass `ans in labels` + len==5, then
+            # commit_structure marked EVERY label-matching choice is_correct=True,
+            # silently corrupting official scoring. Flag duplicate labels so a
+            # malformed OCR parse can't enter the scored bank without an explicit
+            # force + visible issue.
+            if len(labels) != len(label_list):
+                issues.append({
+                    "kind": "duplicate_labels", "where": loc,
+                    "detail": f"{loc}: choices have duplicate labels "
+                              f"({', '.join(label_list) or 'none'}); each of A–E must appear once.",
+                })
             if ans not in _VALID_ANSWERS:
                 issues.append({
                     "kind": "missing_answer", "where": loc,
@@ -728,7 +742,7 @@ def commit_structure(session: Session, parsed: dict,
                         stem=q.get("stem", ""),
                         prompt=q.get("prompt", ""),
                         correct_answer=q.get("correct_answer", "A"),
-                        difficulty=int(q.get("difficulty", 3) or 3),
+                        difficulty=clamp_difficulty(q.get("difficulty")),
                         q_type=q.get("q_type", "Inference"),
                         source=src,
                         approved=True,

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
@@ -52,7 +52,8 @@ class AttemptCreate(BaseModel):
     flagged: bool = False
     confidence: Optional[Confidence] = None
     # 1.2 — optional process-of-elimination trace captured during the attempt.
-    choice_events: list[ChoiceEvent] = []
+    # audit M9 — bound it; a single question can't accrue thousands of POE events.
+    choice_events: list[ChoiceEvent] = Field(default_factory=list, max_length=500)
     # 5.2 — optional client-generated idempotency token. When present, replaying
     # the same write (offline retry, double-fire on section finish) returns the
     # existing attempt instead of inserting a duplicate. Additive/optional.
@@ -61,7 +62,9 @@ class AttemptCreate(BaseModel):
 
 class AttemptBatch(BaseModel):
     """5.2 — a list of attempts written in one request (finish-a-section flush)."""
-    attempts: list[AttemptCreate] = []
+    # audit M9 — bound the batch so a malformed/huge payload can't exhaust the
+    # local worker. A real section flush is dozens of attempts, not thousands.
+    attempts: list[AttemptCreate] = Field(default_factory=list, max_length=1000)
 
 
 class BlindReview(BaseModel):

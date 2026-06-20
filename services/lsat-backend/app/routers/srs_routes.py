@@ -58,7 +58,9 @@ class ReviewBody(BaseModel):
 
 
 class BulkCardsBody(BaseModel):
-    question_ids: list[int]
+    # audit (SRS cap) — bound bulk card creation so a huge id list can't pin the
+    # local SQLite thread with per-id lookups.
+    question_ids: list[int] = Field(max_length=5000)
 
 
 class BlindReviewNoteBody(BaseModel):

@@ -52,10 +52,11 @@ class PassageJobBody(BaseModel):
 def create_passage_job(body: PassageJobBody, session: Session = Depends(get_session)):
     """Queue a passage-first RC job. The durable worker drains it; returns at once.
 
-    Enqueues a normal gen job and flips its ``passage_first`` flag so
+    Enqueues a gen job WITH ``passage_first=True`` set atomically at insert so
     ``generation.run_job`` dispatches to the passage-first orchestrator (generate
-    ONE passage, then attach a varied question set). The flag is set on the row
-    after enqueue so the existing ``jobs.enqueue`` signature is untouched.
+    ONE passage, then attach a varied question set). audit M8: the flag is no
+    longer flipped in a second commit — that left a window where the worker could
+    grab the queued job before the flag was set and run the wrong pipeline.
     """
     jid = jobs.enqueue(
         session,
@@ -63,12 +64,8 @@ def create_passage_job(body: PassageJobBody, session: Session = Depends(get_sess
         body.count,
         priority=body.priority,
         max_retries=body.max_retries,
+        passage_first=True,
     )
-    job = session.get(GenJob, jid)
-    if job is not None:
-        job.passage_first = True
-        session.add(job)
-        session.commit()
     return {
         "job_id": jid,
         "status": GenStatus.queued.value,

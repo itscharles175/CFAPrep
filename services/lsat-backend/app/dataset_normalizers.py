@@ -28,6 +28,27 @@ import unicodedata
 from collections.abc import Iterable, Iterator
 from typing import Any, Optional, TypedDict
 
+
+def clamp_difficulty(value: Any, default: int = 3) -> int:
+    """Coerce a difficulty to the valid 1–5 band (audit M7/M10).
+
+    Model output and imported/backup payloads can carry an out-of-range integer
+    (e.g. ``difficulty: 999`` from a hallucinating generator). adaptivity reads
+    ``(difficulty - 3)`` into the ability estimate, so an out-of-range value
+    silently poisons adaptive selection — CLAMP it to 1–5 at every persist site.
+
+    Behaviour is otherwise identical to the prior ``int(value or default)`` idiom
+    it replaces: a falsy value (None/0/"") yields ``default``, and a NON-numeric
+    value still raises ``ValueError`` — deliberately, so a genuinely malformed
+    record (e.g. ``difficulty: "NOT-A-NUMBER"``) aborts the atomic import/restore
+    transaction rather than silently importing with a default."""
+    if not value:
+        return default
+    d = int(value)  # raises ValueError on a non-numeric string, as int(...) always did
+    if d <= 0:
+        return default
+    return max(1, min(5, d))
+
 _LABELS = ["A", "B", "C", "D", "E"]
 
 
