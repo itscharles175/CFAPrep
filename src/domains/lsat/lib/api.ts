@@ -259,9 +259,20 @@ async function request<T>(
   }
 
   if (!res.ok) {
+    const envelope = (body ?? null) as
+      | { message?: unknown; detail?: unknown }
+      | null;
     let message = res.statusText;
-    const detailPayload = (body as { detail?: unknown } | null)?.detail;
-    if (typeof detailPayload === "string") {
+    const detailPayload = envelope?.detail;
+    // Contract fix: the backend wraps EVERY error in {code, message, detail,
+    // request_id, retryable} (main.py _error_response). The curated human text
+    // lives in the top-level `message` — read it FIRST so a 500/422 surfaces
+    // "Internal server error"/"Validation error" rather than degrading to the
+    // bare HTTP reason phrase. Fall back to a string/structured detail, then
+    // statusText. (Legacy {detail}-only responses resolve exactly as before.)
+    if (typeof envelope?.message === "string" && envelope.message) {
+      message = envelope.message;
+    } else if (typeof detailPayload === "string") {
       message = detailPayload || message;
     } else if (detailPayload && typeof detailPayload === "object") {
       // Structured detail (e.g. the D1 integrity gate). Keep a readable
@@ -1334,6 +1345,22 @@ export const api = {
     request<{ enqueued: boolean; job_id?: number; status?: string; reason?: string }>(
       "/api/gen/for-type",
       { method: "POST", json: { q_type: qType, count, activate } },
+    ),
+  // LSAT-5 — passage-first RC generation: one coherent RC passage + a varied
+  // question set attached to it, drained by the durable worker like any gen job.
+  // Backend: services/lsat-backend/app/routers/passage_routes.py.
+  createPassageJob: (qType: string, count = 4) =>
+    request<{ job_id: number; status: string; passage_first: boolean; q_type: string; count: number }>(
+      "/api/generation/passages",
+      { method: "POST", json: { q_type: qType, count } },
+    ),
+  passageJobProgress: (jobId: number) =>
+    request<{ id?: number; status: string; progress_pct?: number; accepted?: number; quarantined?: number; passage_first?: boolean }>(
+      `/api/generation/passages/${jobId}/progress`,
+    ),
+  passageQuestions: (passageId: number) =>
+    request<{ passage_id: number; passage: string; topic: string; type: string; questions: unknown[]; count: number }>(
+      `/api/generation/passages/${passageId}/questions`,
     ),
   quarantineTriage: (questionId: number) =>
     request<QuarantineTriage>(`/api/gen/quarantine/${questionId}/triage`),

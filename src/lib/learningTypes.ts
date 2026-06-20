@@ -552,7 +552,7 @@ export interface VaultHealthReport extends VaultHealthSnapshot {
   };
 }
 
-export type VaultRollbackReason = 'import-replace' | 'repair' | 'reset' | 'source-clear' | 'manual';
+export type VaultRollbackReason = 'import-replace' | 'import-merge' | 'repair' | 'reset' | 'source-clear' | 'manual';
 
 export interface RollbackSnapshot {
   id: string;

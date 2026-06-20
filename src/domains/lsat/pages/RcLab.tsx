@@ -1,4 +1,5 @@
-import { Clock, Map, RefreshCw, SearchCheck } from "lucide-react";
+import { Clock, Map, RefreshCw, SearchCheck, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PageSection } from "@lsat/components/page-layout";
@@ -118,6 +119,8 @@ export default function RcLab() {
         </CardContent>
       </Card>
 
+      <PassageFirstGenerator />
+
       <PageSection title="Passage maps" eyebrow="Structure">
         <div className="grid gap-3">
           {(maps.data?.data ?? []).map((map) => (
@@ -218,6 +221,126 @@ function Metric({ label, value }: { label: string; value: string | number }) {
           <p className="text-xs uppercase tracking-normal">{label}</p>
         </div>
         <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// LSAT-5 — passage-first RC generation, wired into the UI (the backend endpoints
+// existed + were tested but had no consumer). Starts a job, polls its progress,
+// and toasts on completion; the generated questions land in the bank for review.
+const RC_LEAD_TYPES = [
+  "MainPoint",
+  "PrimaryPurpose",
+  "Inference",
+  "Detail",
+  "Function",
+  "Tone",
+  "Structure",
+  "Analogy",
+];
+const TERMINAL = new Set(["done", "failed", "cancelled"]);
+
+function PassageFirstGenerator() {
+  const [qType, setQType] = useState("MainPoint");
+  const [count, setCount] = useState(4);
+  const [job, setJob] = useState<{ id: number; status: string; pct: number } | null>(null);
+  const pollRef = useRef<number | undefined>(undefined);
+  const busy = job != null && !TERMINAL.has(job.status);
+
+  useEffect(
+    () => () => {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+    },
+    [],
+  );
+
+  async function start() {
+    try {
+      const res = await api.createPassageJob(qType, count);
+      setJob({ id: res.job_id, status: res.status, pct: 0 });
+      toast.success(`Queued passage-first job #${res.job_id}`);
+      if (pollRef.current) window.clearInterval(pollRef.current);
+      pollRef.current = window.setInterval(async () => {
+        try {
+          const p = await api.passageJobProgress(res.job_id);
+          setJob({ id: res.job_id, status: p.status, pct: Math.round(p.progress_pct ?? 0) });
+          if (TERMINAL.has(p.status)) {
+            if (pollRef.current) window.clearInterval(pollRef.current);
+            pollRef.current = undefined;
+            if (p.status === "done") {
+              toast.success(`Passage generated — ${p.accepted ?? 0} question(s) added to the bank`);
+            } else {
+              toast.error(`Passage generation ${p.status}`);
+            }
+          }
+        } catch {
+          if (pollRef.current) window.clearInterval(pollRef.current);
+          pollRef.current = undefined;
+          setJob(null);
+          toast.error("Lost contact with the passage-generation job");
+        }
+      }, 2500);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not start passage generation");
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Icon as={Sparkles} size="sm" />
+          Passage-first generation
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Generate one coherent RC passage with a varied question set built around a
+          lead question type. The durable worker drains the job; new questions land in
+          the bank for review.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-sm">
+            <span className="mb-1 block text-muted-foreground">Lead question type</span>
+            <select
+              value={qType}
+              onChange={(e) => setQType(e.target.value)}
+              disabled={busy}
+              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              {RC_LEAD_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-muted-foreground">Questions</span>
+            <input
+              type="number"
+              min={1}
+              max={8}
+              value={count}
+              disabled={busy}
+              onChange={(e) => setCount(Math.max(1, Math.min(8, Number(e.target.value) || 1)))}
+              className="w-20 rounded-md border bg-background px-2 py-1.5 text-sm"
+            />
+          </label>
+          <Button size="sm" onClick={start} disabled={busy}>
+            <Icon as={Sparkles} size="sm" />
+            {busy ? "Generating…" : "Generate"}
+          </Button>
+        </div>
+        {job && (
+          <div className="space-y-1">
+            <Progress value={job.pct} aria-label={`Passage generation ${job.pct}%`} />
+            <p className="text-xs text-muted-foreground tabular-nums">
+              Job #{job.id} · {job.status} · {job.pct}%
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

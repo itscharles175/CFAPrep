@@ -105,6 +105,27 @@ export async function importUnifiedBackup(
   }
   const envelope = parsed as UnifiedExportEnvelope;
 
+  // Data-safety: apply the HOST half FIRST. importVaultData validates the payload
+  // (and takes a rollback snapshot) before writing, so a malformed/oversized host
+  // half fails fast WITHOUT the backend having committed the LSAT half. This
+  // replaces the prior LSAT-first order, whose failure mode was: backend 200 →
+  // host write throws → LSAT restored, host not, user told a flat "failed". The
+  // two halves can't be made truly atomic across a Dexie write + a remote POST, so
+  // we order the local (primary, rollback-able) write first and report the precise
+  // partial state if the LSAT half then can't be reached.
+  let hostApplied = false;
+  if (envelope.hostData && typeof envelope.hostData === 'object') {
+    try {
+      await importVaultData(envelope.hostData, opts.mode ?? 'merge');
+      hostApplied = true;
+    } catch (err) {
+      throw new UnifiedBackupError(
+        `The host half of this backup could not be restored (${err instanceof Error ? err.message : 'invalid data'}). ` +
+          'Nothing was changed on the LSAT backend.',
+      );
+    }
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 30000);
   let exportId = envelope.exportId;
@@ -117,23 +138,24 @@ export async function importUnifiedBackup(
       body: JSON.stringify({ envelope }),
     });
     if (!res.ok) {
-      throw new UnifiedBackupError(`The LSAT backend responded ${res.status} restoring the backup.`);
+      throw new UnifiedBackupError(
+        hostApplied
+          ? `Your host data was restored, but the LSAT backend responded ${res.status}, so the LSAT bank was NOT restored. Run the restore again once the backend is healthy.`
+          : `The LSAT backend responded ${res.status} restoring the backup.`,
+      );
     }
     const data = (await res.json()) as { export_id?: string; counts?: Record<string, number> };
     if (typeof data.export_id === 'string') exportId = data.export_id;
     if (data.counts && typeof data.counts === 'object') counts = data.counts;
   } catch (err) {
     if (err instanceof UnifiedBackupError) throw err;
-    throw new UnifiedBackupError(SIDECAR_DOWN_HINT);
+    throw new UnifiedBackupError(
+      hostApplied
+        ? 'Your host data was restored, but the LSAT backend was unreachable, so the LSAT bank was NOT restored. Start the backend and run the restore again to finish.'
+        : SIDECAR_DOWN_HINT,
+    );
   } finally {
     clearTimeout(timer);
-  }
-
-  // The backend restored only the LSAT bank; apply the host half to Dexie here.
-  let hostApplied = false;
-  if (envelope.hostData && typeof envelope.hostData === 'object') {
-    await importVaultData(envelope.hostData, opts.mode ?? 'merge');
-    hostApplied = true;
   }
 
   return { exportId, counts, hostApplied };

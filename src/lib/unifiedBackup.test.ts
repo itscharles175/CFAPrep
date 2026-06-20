@@ -94,4 +94,33 @@ describe('importUnifiedBackup', () => {
     expect(result.hostApplied).toBe(false);
     expect(importVaultData).not.toHaveBeenCalled();
   });
+
+  it('applies the host half BEFORE the backend, and reports a precise partial state when the backend then fails', async () => {
+    const envelope = buildUnifiedEnvelope({ preptests: [] }, { schemaVersion: 11, lessonProgress: [{ id: 'a' }] });
+    const order: string[] = [];
+    importVaultData.mockImplementation(async () => {
+      order.push('host');
+    });
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      order.push('backend');
+      return { ok: false, status: 503 };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    // Backend fails AFTER the host half is durably applied → the error names the
+    // partial state instead of a flat "failed", and host was written first.
+    await expect(importUnifiedBackup(JSON.stringify(envelope))).rejects.toThrowError(/host data was restored/i);
+    expect(order).toEqual(['host', 'backend']);
+    expect(importVaultData).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails fast WITHOUT committing the LSAT half when the host half is invalid', async () => {
+    const envelope = buildUnifiedEnvelope({ preptests: [] }, { schemaVersion: 11, lessonProgress: [{ id: 'a' }] });
+    importVaultData.mockRejectedValue(new Error('corrupt host vault'));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(importUnifiedBackup(JSON.stringify(envelope))).rejects.toThrowError(
+      /host half of this backup could not be restored/i,
+    );
+    expect(fetchMock).not.toHaveBeenCalled(); // LSAT backend never contacted
+  });
 });

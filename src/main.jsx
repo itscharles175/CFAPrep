@@ -98,21 +98,27 @@ function RootCrashFallback({ error, reset }) {
           >
             Reload
           </button>
-          <button
-            type="button"
-            onClick={reset}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 8,
-              border: '1px solid rgba(148,163,184,0.4)',
-              background: 'transparent',
-              color: BOOT_FG,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Try again
-          </button>
+          {/* "Try again" (a soft boundary reset) only helps for a transient
+              RENDER crash. For a chunk-load failure React re-throws the SAME
+              cached rejected import on reset, so only a hard Reload recovers —
+              hide the misleading button in that case. */}
+          {!isChunkError && (
+            <button
+              type="button"
+              onClick={reset}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 8,
+                border: '1px solid rgba(148,163,184,0.4)',
+                background: 'transparent',
+                color: BOOT_FG,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Try again
+            </button>
+          )}
         </div>
         {error?.message ? (
           <pre

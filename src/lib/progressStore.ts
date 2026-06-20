@@ -2153,7 +2153,14 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
     });
     throw new Error(validation.errors.join(' '));
   }
-  const rollbackSnapshot = importOptions.mode === 'replace' ? await createRollbackSnapshot('import-replace') : undefined;
+  // Data-safety: snapshot for BOTH modes. A merge bulkPut still overwrites local
+  // rows whose primary key collides with the imported file (settings, notes,
+  // bookmarks, reviewItems, masterySnapshots are keyed), so merging a stale/foreign
+  // backup over newer local progress was previously unrecoverable (snapshot was
+  // replace-only). Now every import is rollback-able.
+  const rollbackSnapshot = await createRollbackSnapshot(
+    importOptions.mode === 'replace' ? 'import-replace' : 'import-merge',
+  );
   const mergeStores = importOptions.mode === 'merge' ? remapMergeIds(exportPayload.stores) : exportPayload.stores;
   const storesToWrite =
     importOptions.mode === 'merge' && importOptions.conflictPolicy === 'keep-existing'
@@ -4111,48 +4118,33 @@ export async function repairVaultData() {
 
 export async function resetVaultData(scope: 'attempts' | 'progress' | 'full' = 'full') {
   const rollbackSnapshot = await createRollbackSnapshot('reset');
+  // Data-safety: each branch's clears run inside ONE rw transaction so an
+  // interruption (tab close, IndexedDB error mid-Promise.all) can't leave the
+  // vault partially wiped. The 'full' branch in particular clears rollbackSnapshots
+  // and re-puts the snapshot in the SAME transaction — previously a non-atomic
+  // clear+re-put across two awaits could lose the only rollback point on a crash.
+  const ATTEMPT_TABLES = [
+    db.quizAttempts, db.questionResults, db.reviewItems, db.masterySnapshots,
+    db.mockAttempts, db.vignetteAttempts, db.constructedResponseAttempts,
+    db.formulaDrillAttempts, db.skillLabAttempts, db.reviewEvents,
+    db.confidenceCalibration, db.flashcardAttempts, db.resultArtifacts,
+    db.mockSectionState, db.studySessions, db.learningEvents,
+  ];
   if (scope === 'attempts') {
-    await Promise.all([
-      db.quizAttempts.clear(),
-      db.questionResults.clear(),
-      db.reviewItems.clear(),
-      db.masterySnapshots.clear(),
-      db.mockAttempts.clear(),
-      db.vignetteAttempts.clear(),
-      db.constructedResponseAttempts.clear(),
-      db.formulaDrillAttempts.clear(),
-      db.skillLabAttempts.clear(),
-      db.reviewEvents.clear(),
-      db.confidenceCalibration.clear(),
-      db.flashcardAttempts.clear(),
-      db.resultArtifacts.clear(),
-      db.mockSectionState.clear(),
-      db.studySessions.clear(),
-      db.learningEvents.clear(),
-    ]);
+    await db.transaction('rw', ATTEMPT_TABLES, async () => {
+      await Promise.all(ATTEMPT_TABLES.map((t) => t.clear()));
+    });
   } else if (scope === 'progress') {
-    await Promise.all([
-      db.lessonProgress.clear(),
-      db.quizAttempts.clear(),
-      db.questionResults.clear(),
-      db.reviewItems.clear(),
-      db.masterySnapshots.clear(),
-      db.mockAttempts.clear(),
-      db.vignetteAttempts.clear(),
-      db.constructedResponseAttempts.clear(),
-      db.formulaDrillAttempts.clear(),
-      db.skillLabAttempts.clear(),
-      db.reviewEvents.clear(),
-      db.confidenceCalibration.clear(),
-      db.flashcardAttempts.clear(),
-      db.resultArtifacts.clear(),
-      db.mockSectionState.clear(),
-      db.studySessions.clear(),
-      db.learningEvents.clear(),
-    ]);
+    const tables = [db.lessonProgress, ...ATTEMPT_TABLES];
+    await db.transaction('rw', tables, async () => {
+      await Promise.all(tables.map((t) => t.clear()));
+    });
   } else {
-    await Promise.all([...STORE_NAMES, ...SOURCE_STORE_NAMES].map((storeName) => db[storeName].clear()));
-    await db.rollbackSnapshots.put(rollbackSnapshot);
+    const tables = [...STORE_NAMES, ...SOURCE_STORE_NAMES].map((storeName) => db[storeName]);
+    await db.transaction('rw', tables, async () => {
+      await Promise.all(tables.map((t) => t.clear()));
+      await db.rollbackSnapshots.put(rollbackSnapshot);
+    });
   }
 
   emitProgressChange();
