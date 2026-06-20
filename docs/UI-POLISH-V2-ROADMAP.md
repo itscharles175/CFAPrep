@@ -1,6 +1,8 @@
 # UI Polish v2 — Refinement Roadmap
 
-> Status: **in progress** (executing waves in order).
+> Status: **complete** — all 5 waves executed/dispositioned (2026-06-20). 13 genuine
+> fixes shipped + verified; the rest found already-built, intentional-as-is, or
+> deferred-with-cause (D1 inline-px cleanup → H2 lint rule). See per-wave notes below.
 > Scope: a refinement pass over an already-polished app. Grounded in three code
 > surveys (host UI, LSAT UI, design system) + a live visual pass (host dashboard,
 > LSAT plane, dark mode, mobile width) on 2026-06-20.
@@ -102,8 +104,13 @@ Effort: ⚡ quick · ◐ medium · ⬣ large.
   - ✅ **D4** — DONE (commit 800856c, after a first attempt was reverted). Consolidated the focus system to 3 documented tiers + removed the orphaned `:focus-visible{outline}` rule; the fix was adding an explicit `outline:none` to `input/select/textarea:focus-visible` so removing the orphan can't surface a UA-default outline on raw inputs (the regression the first attempt hit). Browser-verified: inputs render no outline (outline-style:none), topbar shows its :focus-within accent border, general elements keep the 2px ring.
   - ✅ **D3** — DONE (commit 800856c) as a VERIFIED NON-GAP + documentation. The divergence doesn't exist: every Tailwind colour utility resolves to `hsl(var(--token))` (config + unified-palette.css), `--muted-foreground` isn't accent-derived, and no host component uses a raw Tailwind palette colour (grep-verified). Documented the bridge in tailwind.config.js; no restyle (forcing one would manufacture a regression).
   - **D1** — DEFERRED (low value): most flagged px are SVG attribute numbers (correct as numbers); the few inline layout px are marginal.
-- **Wave 4 — motion & delight:** E1, E2, E3, E4, F1, F3, F4, F5, G1–G6.
-- **Wave 5 — guardrails:** H1, H2.
+- **Wave 4 — motion & delight:** mostly already-handled by prior waves. Commit `9437a03`.
+  - ✅ **E1** — `prefers-reduced-motion` now caps `animation-iteration-count: 1` so infinite animations (shimmer/pulse/aurora/route-progress) don't loop at 1ms into a flicker. Genuine fix.
+  - ✅ **G6** — /style token gallery names are click-to-copy.
+  - ⊘ Already-handled / intentional: E2 (LSAT tabs use a deliberate forceMount keep-alive — instant by design, a fade would undo it); G2 (StatNumber count-up already exists where it fits; KPI band uses unit-strings); E3/E4/F1/F3/G3 (Wave-2 micro-interactions + UB4 responsive + UC5 charts + LSAT PageTransition); F4 (reviewDeepLinkFlash keyframe exists); F5 (Playwright a11y-check.mjs IS the contrast gate); G1/G4/G5 (larger bespoke features — left as solid-as-is).
+- **Wave 5 — guardrails:**
+  - ✅ **H1** — VERIFIED ALREADY BUILT: `scripts/visual-regression.mjs` (UA7) pixel-diffs curated routes × light/dark × desktop/mobile against committed baselines (host + LSAT). NOTE: the A3/A4/D4 visual changes intentionally shift those baselines — `tests/visual-baselines/` must be regenerated (run the script with the Playwright suite in CI) as the deliberate re-baseline step.
+  - ⚠️ **H2** — DEFERRED. A lint rule banning raw hex / inline px in `style=` props would error on existing inline styles (the D1 cleanup it depends on was deferred as low-value), so a blanket rule breaks `eslint .`. Land it as a dedicated pass AFTER the D1 cleanup.
 
 Each item: GitNexus impact before edits → change → frontend gate (`tsc` host+lsat,
 `eslint`, `vitest`, `vite build`) → `detect_changes` → commit. Backend/Rust gates
