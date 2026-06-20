@@ -50,6 +50,8 @@ import {
 } from "@lsat/components/global-loading-bar";
 import { OfflineBanner } from "@lsat/components/offline-banner";
 import { AiPrereqBanner } from "@lsat/components/ai-prereq-banner";
+import { Button } from "@lsat/components/ui/button";
+import { IllustrationError } from "@lsat/components/illustrations";
 import { ErrorBoundary } from "@lsat/components/error-boundary";
 import {
   canonicalRoutePath,
@@ -632,29 +634,30 @@ export default function App() {
           fallback={(_err, reset) => {
             const resume = getResume();
             return (
-              <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-                <p className="text-sm text-muted-foreground">Something went wrong during this session.</p>
-                <div className="flex gap-2">
-                  <button
-                    className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
-                    onClick={reset}
-                  >
+              <div
+                role="alert"
+                className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center"
+              >
+                <IllustrationError />
+                <div className="space-y-1">
+                  <p className="text-base font-semibold">Something went wrong during this session</p>
+                  <p className="max-w-md text-sm text-muted-foreground">
+                    Your answers so far are saved. Retry this screen, resume where you
+                    left off, or reload the app.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <Button size="sm" onClick={reset}>
                     Retry
-                  </button>
+                  </Button>
                   {resume && (
-                    <a
-                      href={resume.path}
-                      className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
-                    >
-                      Resume {resume.label}
-                    </a>
+                    <Button asChild variant="outline" size="sm">
+                      <a href={resume.path}>Resume {resume.label}</a>
+                    </Button>
                   )}
-                  <button
-                    className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
-                    onClick={() => window.location.reload()}
-                  >
+                  <Button variant="ghost" size="sm" onClick={() => window.location.reload()}>
                     Reload page
-                  </button>
+                  </Button>
                 </div>
               </div>
             );

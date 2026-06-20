@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import FormulaBlock from '../components/FormulaBlock';
-import { InlineCluster, PageHeader, Panel, StatusBadge } from '../components/ui/Primitives';
+import { EmptyPanel, InlineCluster, PageHeader, Panel, StatusBadge } from '../components/ui/Primitives';
 import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { buildFormulaLibrary } from '../lib/formulaLibrary';
@@ -76,9 +76,21 @@ export default function FormulaLibrary() {
         }}
       />
 
-      <div className="grid-2">
-        {filtered.map((f) => <FormulaCard key={`${f.category}-${f.name}`} formula={f} />)}
-      </div>
+      {filtered.length ? (
+        <div className="grid-2">
+          {filtered.map((f) => <FormulaCard key={`${f.category}-${f.name}`} formula={f} />)}
+        </div>
+      ) : (
+        <EmptyPanel
+          title="No formulas match your search"
+          description={
+            search
+              ? `Nothing matched “${search}”. Try a different term, or pick another category.`
+              : 'No formulas in this category yet.'
+          }
+          tone="study"
+        />
+      )}
     </div>
   );
 }

@@ -105,7 +105,12 @@ export default function Flashcards() {
           )}
         </Panel>
       ) : (
-        <EmptyPanel title="No cards in this filter yet" tone="study" />
+        <EmptyPanel
+          title="No cards in this filter yet"
+          description="Flashcards are built from your bookmarked formulas and objectives, plus the error patterns from questions you miss. Bookmark a few items or answer some questions to start your deck."
+          action={<Link to="/vault" className="btn btn-secondary">Open Notes &amp; Bookmarks</Link>}
+          tone="study"
+        />
       )}
     </div>
   );
