@@ -55,7 +55,14 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('unified palette — flag OFF (default)', () => {
+describe('unified palette — flag OFF (legacy rollback)', () => {
+  beforeEach(() => {
+    // K4-13 flipped the compiled default ON, so the legacy/OFF behavior must now
+    // be requested explicitly (the unset default would resolve to ON).
+    __resetFeatureFlagCache();
+    setFeatureFlag('LSAT_UNIFIED_SHELL', false);
+  });
+
   it('surfaces no LSAT route rows when searching the LSAT vocabulary', async () => {
     renderTopBar();
     const input = await openPalette();

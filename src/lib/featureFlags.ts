@@ -2,12 +2,14 @@
  * K4-6 — tiny typed feature-flag registry (Phase 1 of Keystone K4: full UI
  * unification).
  *
- * The only flag today is `LSAT_UNIFIED_SHELL`, which gates the dormant unified
- * host shell (<SharedLayout> + the host Sidebar's LSAT section + the TopBar mode
- * toggle). It DEFAULTS OFF, so the running app is byte-for-byte unchanged: the
- * legacy LSAT shell stays active (src/main.jsx) and the host shell renders
- * exactly as before. Flipping it on (for dev / a later K4-7 router unify) is the
- * only thing that wakes the new branches.
+ * The only flag today is `LSAT_UNIFIED_SHELL`, which gates the unified host
+ * shell (<SharedLayout> + the host Sidebar's LSAT section + the TopBar mode
+ * toggle + the merged router/providers). As of K4-13 (Phase 3 cutover) it
+ * DEFAULTS ON: the app boots into the unified shell (LSAT under the host
+ * Sidebar/TopBar via UnifiedRoot). The legacy split-shell still exists and is
+ * one flip away — set the localStorage key `sv.flags.LSAT_UNIFIED_SHELL` to
+ * '0' (or `window.__SV_FLAGS__`) to roll back to it — until the legacy shell is
+ * deleted in the final K4-13 step.
  *
  * Resolution is SYNCHRONOUS at module load (pre-paint), so a flag read during
  * the first render never flashes the wrong shell. Three layered sources, highest
@@ -30,11 +32,12 @@ import { useSyncExternalStore } from 'react';
 export const FEATURE_FLAG_DEFAULTS = {
   /**
    * K4: the unified host shell (host Sidebar + TopBar host the LSAT surface as a
-   * 4th nav section + mode toggle, and <SharedLayout> can wrap the merged
-   * router). OFF by default — both shells coexist for instant rollback; nothing
-   * mounts the new branches until this is flipped on.
+   * 4th nav section + mode toggle, and <SharedLayout> wraps the merged router).
+   * ON by default as of the K4-13 cutover — the app boots into the unified
+   * shell. The legacy split-shell remains for instant rollback (set
+   * `sv.flags.LSAT_UNIFIED_SHELL` = '0') until it is deleted in the final step.
    */
-  LSAT_UNIFIED_SHELL: false,
+  LSAT_UNIFIED_SHELL: true,
 } as const;
 
 export type FeatureFlag = keyof typeof FEATURE_FLAG_DEFAULTS;

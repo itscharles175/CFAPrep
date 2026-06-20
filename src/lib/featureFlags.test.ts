@@ -27,9 +27,9 @@ afterEach(() => {
 });
 
 describe('featureFlags', () => {
-  it('LSAT_UNIFIED_SHELL defaults OFF', () => {
-    expect(FEATURE_FLAG_DEFAULTS.LSAT_UNIFIED_SHELL).toBe(false);
-    expect(isFeatureEnabled('LSAT_UNIFIED_SHELL')).toBe(false);
+  it('LSAT_UNIFIED_SHELL defaults ON (K4-13 cutover)', () => {
+    expect(FEATURE_FLAG_DEFAULTS.LSAT_UNIFIED_SHELL).toBe(true);
+    expect(isFeatureEnabled('LSAT_UNIFIED_SHELL')).toBe(true);
   });
 
   it('a localStorage override flips the flag (synchronous read)', () => {
@@ -50,10 +50,11 @@ describe('featureFlags', () => {
   });
 
   it('memoizes the resolved value within a session', () => {
-    expect(isFeatureEnabled('LSAT_UNIFIED_SHELL')).toBe(false);
-    // Mutating storage WITHOUT resetting the cache must not change the read.
-    localStorage.setItem('sv.flags.LSAT_UNIFIED_SHELL', '1');
-    expect(isFeatureEnabled('LSAT_UNIFIED_SHELL')).toBe(false);
+    expect(isFeatureEnabled('LSAT_UNIFIED_SHELL')).toBe(true); // compiled default ON, now cached
+    // Mutating storage WITHOUT resetting the cache must not change the read
+    // (even to the opposite of the default).
+    localStorage.setItem('sv.flags.LSAT_UNIFIED_SHELL', '0');
+    expect(isFeatureEnabled('LSAT_UNIFIED_SHELL')).toBe(true);
   });
 
   it('setFeatureFlag persists to localStorage, updates the cache, and clears with null', () => {
@@ -63,7 +64,7 @@ describe('featureFlags', () => {
 
     setFeatureFlag('LSAT_UNIFIED_SHELL', null);
     expect(localStorage.getItem('sv.flags.LSAT_UNIFIED_SHELL')).toBeNull();
-    // Cleared override -> falls back to the compiled-in default (OFF).
-    expect(isFeatureEnabled('LSAT_UNIFIED_SHELL')).toBe(false);
+    // Cleared override -> falls back to the compiled-in default (ON as of K4-13).
+    expect(isFeatureEnabled('LSAT_UNIFIED_SHELL')).toBe(true);
   });
 });

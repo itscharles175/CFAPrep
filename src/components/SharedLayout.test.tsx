@@ -96,7 +96,14 @@ describe('SharedLayout (K4-6) — flag ON', () => {
   });
 });
 
-describe('Sidebar/TopBar (K4-6) — flag OFF (default)', () => {
+describe('Sidebar/TopBar (K4-6) — flag OFF (legacy rollback)', () => {
+  beforeEach(() => {
+    // K4-13 flipped the compiled default ON, so the legacy/OFF render must now be
+    // requested explicitly (the unset default would resolve to ON).
+    setFeatureFlag('LSAT_UNIFIED_SHELL', false);
+    __resetFeatureFlagCache();
+  });
+
   it('Sidebar renders NO LSAT section when the flag is off', () => {
     renderWithShell(
       <Sidebar collapsed={false} onToggle={() => {}} onNavigate={() => {}} />,
