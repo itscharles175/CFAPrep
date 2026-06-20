@@ -2,6 +2,7 @@ export {
   exportVaultData,
   createRollbackSnapshot,
   getRollbackSnapshots,
+  restoreRollbackSnapshot,
   importVaultData,
   migrateVaultData,
   getVaultImportHistory,

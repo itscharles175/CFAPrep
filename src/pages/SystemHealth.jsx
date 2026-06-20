@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Boxes, CloudCog, Database, Download, Gauge, HardDrive, KeyRound, Mic2, Network, RefreshCw, ServerCog, ShieldCheck, Terminal, Upload, WifiOff, Wrench } from 'lucide-react';
+import { Boxes, CloudCog, Database, Download, Gauge, HardDrive, History, KeyRound, Mic2, Network, RefreshCw, ServerCog, ShieldCheck, Terminal, Upload, WifiOff, Wrench } from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
-import { exportVaultData, getVaultHealthReport, importVaultData, previewVaultRepair } from '../lib/learning';
+import { exportVaultData, getVaultHealthReport, importVaultData, previewVaultRepair, restoreRollbackSnapshot } from '../lib/learning';
 // AUDIT-2 — unified {host, lsat} backup/restore (DATA-5 wired into the UI).
 import { exportUnifiedBackup, importUnifiedBackup, UnifiedBackupError } from '../lib/unifiedBackup';
 import { decryptVaultBackup, encryptVaultBackup } from '../lib/encryptedBackup';
@@ -955,6 +955,37 @@ export default function SystemHealth() {
     setMessage('Plaintext backup exported from the advanced path. Prefer encrypted backups for normal vault moves.');
   }
 
+  // audit M1 — consume the rollback snapshots that were previously write-only.
+  // A snapshot is captured before every import/repair/reset; this restores the
+  // most recent one (and importVaultData captures a fresh rollback point first,
+  // so the restore is itself reversible).
+  async function handleRestoreLatestSnapshot() {
+    const latest = vaultHealth?.rollbackSnapshots?.[0];
+    if (!latest) {
+      toast.info('No rollback snapshot', 'One is captured automatically before every import, repair, or reset.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `Restore the vault from the snapshot taken at ${latest.createdAt}${latest.reason ? ` (${latest.reason})` : ''}? ` +
+          'This replaces current local data — a fresh rollback point is captured first.',
+      )
+    ) {
+      return;
+    }
+    try {
+      await restoreRollbackSnapshot(latest.id);
+      const report = await getVaultHealthReport();
+      setVaultHealth(report);
+      setMessage(`Vault restored from the ${latest.reason || 'manual'} snapshot taken at ${latest.createdAt}.`);
+      toast.success('Vault restored', `Rolled back to the snapshot from ${latest.createdAt}.`);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Restore failed.';
+      setMessage(detail);
+      toast.error('Restore failed', detail);
+    }
+  }
+
   // AUDIT-2 — unified {host, lsat} backup. Bundles the Dexie host vault AND the
   // LSAT bank into one checksummed envelope (official content firewalled out).
   // Needs the LSAT backend; surfaces a clear message when it's offline.
@@ -1813,6 +1844,14 @@ export default function SystemHealth() {
           </div>
           <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={handleRepairPreview}><Wrench size={16} /> Repair Preview</button>
+            <button
+              className="btn btn-secondary"
+              onClick={handleRestoreLatestSnapshot}
+              disabled={!vaultHealth?.rollbackSnapshots?.length}
+              title="Restore the vault from the most recent automatic rollback snapshot"
+            >
+              <History size={16} /> Restore Snapshot
+            </button>
             <button className="btn btn-secondary" onClick={handlePersistStorage}>Persist Storage</button>
             <button className="btn btn-secondary" onClick={handlePlaintextBackup}><Download size={16} /> Plaintext Export</button>
           </div>

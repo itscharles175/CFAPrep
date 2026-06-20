@@ -32,7 +32,10 @@ import {
   recordStudyEvent,
   recordVignetteAttempt,
   rebuildLearningIndexes,
+  repairVaultData,
   resetVaultData,
+  restoreRollbackSnapshot,
+  db,
   saveNote,
   saveMockSectionState,
   saveResultArtifact,
@@ -172,6 +175,97 @@ describe('local vault progress store', () => {
     expect((await getProgressSummary()).questionsAnswered).toBe(0);
 
     await importVaultData(exported, 'replace');
+    expect((await getProgressSummary()).questionsAnswered).toBe(1);
+  });
+
+  it('rejects a backup from a newer schema version instead of down-converting it (audit M5)', async () => {
+    const exported = await exportVaultData();
+    const result = validateVaultData({ ...exported, schemaVersion: VAULT_SCHEMA_VERSION + 1 });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/newer app version/i);
+  });
+
+  it('rejects a backup carrying unknown data stores instead of silently dropping them (audit M5)', async () => {
+    const exported = await exportVaultData();
+    const result = validateVaultData({ ...exported, stores: { ...exported.stores, futureOnlyStore: [{ id: 'x' }] } });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/unknown data store/i);
+  });
+
+  it('repair filters malformed rows and re-checksums so the replace-import is accepted (audit M2)', async () => {
+    await recordQuizAttempt({
+      domain: 'cfa',
+      topic: 'portfolio',
+      title: 'Portfolio Management',
+      mode: 'mock-section',
+      score: 1,
+      total: 1,
+      elapsedSeconds: 20,
+      answers: [
+        {
+          questionId: 'pm-1',
+          learningObjective: 'pm-lo1',
+          objectiveTitle: 'Build portfolio risk and return intuition',
+          correct: true,
+          confidence: 'high',
+          errorCategory: 'none',
+          difficulty: 'foundation',
+          selected: 1,
+          correctIndex: 1,
+        },
+      ],
+    });
+    // Inject a corrupt questionResult (no learningObjective) that repair must drop.
+    await db.questionResults.add({
+      id: 'corrupt-row',
+      domain: 'cfa',
+      topic: 'portfolio',
+      questionId: 'broken',
+      learningObjective: '',
+      correct: false,
+      confidence: 'low',
+      errorCategory: 'concept',
+      difficulty: 'foundation',
+      createdAt: new Date().toISOString(),
+    } as never);
+    const before = await db.questionResults.count();
+    // Previously threw (stale checksum rejected the filtered payload); now resolves.
+    await expect(repairVaultData()).resolves.toBeDefined();
+    const after = await db.questionResults.count();
+    expect(after).toBeLessThan(before);
+    expect((await getProgressSummary()).questionsAnswered).toBe(1);
+  });
+
+  it('restores the vault from a rollback snapshot (audit M1)', async () => {
+    await recordQuizAttempt({
+      domain: 'cfa',
+      topic: 'equity',
+      title: 'Equity',
+      mode: 'mock-section',
+      score: 1,
+      total: 1,
+      elapsedSeconds: 15,
+      answers: [
+        {
+          questionId: 'eq-1',
+          learningObjective: 'eq-lo1',
+          objectiveTitle: 'Value equity securities',
+          correct: true,
+          confidence: 'medium',
+          errorCategory: 'none',
+          difficulty: 'foundation',
+          selected: 0,
+          correctIndex: 0,
+        },
+      ],
+    });
+    expect((await getProgressSummary()).questionsAnswered).toBe(1);
+    // resetVaultData snapshots the 1-attempt state BEFORE clearing.
+    await resetVaultData('full');
+    expect((await getProgressSummary()).questionsAnswered).toBe(0);
+    const resetSnapshot = (await getRollbackSnapshots()).find((snap) => snap.reason === 'reset');
+    expect(resetSnapshot).toBeDefined();
+    await restoreRollbackSnapshot(resetSnapshot!.id);
     expect((await getProgressSummary()).questionsAnswered).toBe(1);
   });
 

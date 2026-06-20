@@ -790,7 +790,16 @@ export async function recordQuestionResult(
   },
 ) {
   const normalized = normalizeQuestionResult(result, nowIso());
-  const review = await persistQuestionResult(normalized);
+  // Data-safety: persistQuestionResult writes 5 stores; wrap them in ONE rw
+  // transaction (matching recordQuizAttempt and the other recorders) so an
+  // interruption can't leave a questionResult without its review/event/
+  // calibration/mastery rows. This is the lone single-result path that was
+  // previously unprotected (audit M4).
+  const review = await db.transaction(
+    'rw',
+    [db.questionResults, db.reviewItems, db.reviewEvents, db.confidenceCalibration, db.masterySnapshots],
+    () => persistQuestionResult(normalized),
+  );
   emitProgressChange();
   return review;
 }
@@ -1786,6 +1795,27 @@ export function validateVaultData(payload: unknown): { valid: boolean; errors: s
   }
 
   if (isObject(payload) && payload.app !== 'QuantVault') errors.push('Payload is not a QuantVault export.');
+  // Data-safety (audit M5): migrateVaultData copies only known STORE_NAMES and
+  // forces schemaVersion, so a backup from a NEWER build would silently drop its
+  // unknown stores and re-checksum the down-converted payload (hiding the loss).
+  // Refuse a forward-incompatible import outright, and refuse any backup carrying
+  // store keys this build doesn't know, rather than downgrade-and-drop.
+  if (isObject(payload)) {
+    if (typeof payload.schemaVersion === 'number' && payload.schemaVersion > VAULT_SCHEMA_VERSION) {
+      errors.push(
+        `This backup is from a newer app version (vault schema v${payload.schemaVersion} > v${VAULT_SCHEMA_VERSION}). Update the app before importing it.`,
+      );
+    }
+    if (isObject(payload.stores)) {
+      const knownStores = STORE_NAMES as readonly string[];
+      const unknownStores = Object.keys(payload.stores).filter((key) => !knownStores.includes(key));
+      if (unknownStores.length) {
+        errors.push(
+          `Backup contains ${unknownStores.length} unknown data store(s) (${unknownStores.join(', ')}) this app version cannot import without losing them.`,
+        );
+      }
+    }
+  }
   if (isObject(payload) && typeof payload.checksum === 'string') {
     if (!checksumMatchesPayload(payload, payload.checksum)) {
       errors.push('Vault export checksum does not match its payload.');
@@ -2096,6 +2126,22 @@ function sourceVaultRowCounts(sourceVault?: CfaSourceVaultStores): Record<string
 
 export async function getRollbackSnapshots(limit = 10): Promise<RollbackSnapshot[]> {
   return db.rollbackSnapshots.orderBy('createdAt').reverse().limit(limit).toArray();
+}
+
+/**
+ * Restore the vault from a previously-captured rollback snapshot (audit M1).
+ * Snapshots are written before every reset/import/repair but were never
+ * consumable — this is the missing recovery half of that safety net. The
+ * snapshot payload is a checksummed VaultExport, so the replace-import below
+ * validates it like any backup and (because importVaultData itself snapshots
+ * first) the restore is itself rollback-able.
+ */
+export async function restoreRollbackSnapshot(id: string): Promise<void> {
+  const snapshot = await db.rollbackSnapshots.get(id);
+  if (!snapshot) throw new Error(`Rollback snapshot "${id}" was not found.`);
+  if (!snapshot.payload) throw new Error(`Rollback snapshot "${id}" has no payload to restore from.`);
+  await importVaultData(snapshot.payload, 'replace');
+  emitProgressChange();
 }
 
 export async function createRollbackSnapshot(reason: VaultRollbackReason = 'manual'): Promise<RollbackSnapshot> {
@@ -4090,8 +4136,13 @@ export async function repairVaultData() {
   const exported = await exportVaultData();
   const seenNotes = new Set<string>();
   const seenBookmarks = new Set<string>();
-  const repaired: VaultExport = {
-    ...exported,
+  // audit M2: rebuild the export WITHOUT its (now-stale) checksum after filtering,
+  // then re-checksum the filtered payload. Previously `repaired` kept the original
+  // export's checksum, so importVaultData's validation rejected it the moment any
+  // row was filtered — i.e. repair failed in exactly the case it exists to fix.
+  const { checksum: _staleChecksum, ...exportedWithoutChecksum } = exported;
+  const repaired: VaultExport = withChecksum({
+    ...exportedWithoutChecksum,
     stores: {
       ...exported.stores,
       questionResults: exported.stores.questionResults.filter(
@@ -4109,9 +4160,9 @@ export async function repairVaultData() {
         return true;
       }),
     },
-  };
+  });
+  // importVaultData already rebuilds the learning indexes internally; no second pass.
   await importVaultData(repaired, 'replace');
-  await rebuildLearningIndexes({ emit: false });
   await getVaultHealthReport();
   return previewVaultImport(repaired);
 }
