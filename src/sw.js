@@ -4,7 +4,7 @@
  * In production, Vite replaces __WB_MANIFEST with the actual file list.
  * In development, this SW is not registered.
  */
-import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
+import { precacheAndRoute, cleanupOutdatedCaches, matchPrecache } from 'workbox-precaching';
 import { registerRoute } from 'workbox-routing';
 import { CacheFirst, StaleWhileRevalidate, NetworkFirst } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
@@ -51,10 +51,16 @@ registerRoute(
     } catch {
       const offlineCache = await caches.open(OFFLINE_CONTENT_CACHE);
       const url = new URL(request.url);
+      // Prod-readiness fix: the SPA shell is precached under a REVISIONED key
+      // (`index.html?__WB_REVISION__=…`), so a bare `caches.match('/index.html')`
+      // misses it — a cold-offline deep-link (e.g. /dashboard, /lsat) then fell
+      // through to Response.error() = blank document. matchPrecache() resolves the
+      // revisioned key; offline.html (also precached) is the final styled fallback.
       return (
         (await offlineCache.match(request)) ||
         (await offlineCache.match(url.pathname)) ||
-        (await caches.match('/index.html')) ||
+        (await matchPrecache('index.html')) ||
+        (await matchPrecache('offline.html')) ||
         Response.error()
       );
     }

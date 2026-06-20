@@ -49,7 +49,32 @@ const HostShell = lazy(() => import('../App'));
 const LsatUnifiedMount = lazy(() => import('./LsatUnifiedMount'));
 
 function RootFallback() {
-  return <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #080B10)' }} />;
+  // A calm centered spinner (not a bare blank div) so the on-demand load of the
+  // host shell or the LSAT plane reads as "loading", never as a blank/broken
+  // screen — the symptom reported on first navigation into /lsat/* before that
+  // chunk has compiled. Self-contained inline + one-off keyframe so it renders
+  // identically whether or not app CSS has finished loading.
+  return (
+    <div
+      role="status"
+      aria-label="Loading"
+      style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg-primary, #080B10)' }}
+    >
+      <style>{'@keyframes qv-route-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.qv-route-ring{animation:none!important}}'}</style>
+      <span
+        className="qv-route-ring"
+        aria-hidden="true"
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: '50%',
+          border: '3px solid rgba(148,163,184,0.25)',
+          borderTopColor: 'var(--accent-strong, #2563EB)',
+          animation: 'qv-route-spin 0.8s linear infinite',
+        }}
+      />
+    </div>
+  );
 }
 
 export default function UnifiedRoot() {

@@ -260,7 +260,12 @@ export async function openPassagePopout(payload: {
   text: string;
 }): Promise<void> {
   setJSON(POPOUT_PASSAGE_KEY, { ...payload, at: Date.now() });
-  const route = "/popout/passage";
+  // The pop-out opens a FRESH document at the app origin root (a real new window /
+  // WebviewWindow), so the URL must carry the LSAT plane's `/lsat` basename — a
+  // bare "/popout/passage" lands in the host plane (UnifiedRoot routes only
+  // `/lsat/*` to the LSAT app), yielding a 404/blank window. The PassagePopout
+  // page lives at `/lsat/popout/passage` under the unified shell.
+  const route = "/lsat/popout/passage";
   if (isTauri()) {
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");

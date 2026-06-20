@@ -1,4 +1,5 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 // G7 — lazy-load the cmdk dialog body so cmdk (~35 KB) is excluded from the
 // initial bundle and only fetched the first time the palette is opened.
@@ -117,13 +118,20 @@ export function CommandPaletteProvider({
           true, so a brief null while the chunk loads is invisible to the user
           (the keyboard shortcut triggers the load; the palette appears once
           the chunk resolves, typically <100 ms on first open). */}
-      <Suspense fallback={null}>
-        <CommandPaletteDialog
-          open={open}
-          onOpenChange={setOpen}
-          grouped={grouped}
-        />
-      </Suspense>
+      {/* Crash-isolation: the cmdk chunk is fetched on first ⌘K and can go stale
+          after a deploy. Without a boundary here, a rejected import bubbles past
+          both LSAT route boundaries to the root boundary and tears the whole app
+          down on a benign keypress. The palette is non-essential chrome, so a
+          failed chunk degrades to "⌘K does nothing once" (fallback={null}). */}
+      <ErrorBoundary name="command-palette" fallback={() => null}>
+        <Suspense fallback={null}>
+          <CommandPaletteDialog
+            open={open}
+            onOpenChange={setOpen}
+            grouped={grouped}
+          />
+        </Suspense>
+      </ErrorBoundary>
     </Ctx.Provider>
   );
 }

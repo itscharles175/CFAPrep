@@ -261,7 +261,16 @@ export default function MockExam() {
   const [reviewMode, setReviewMode] = useState(false);
   const [report, setReport] = useState(null);
   const mockStateId = `${level === 'level3' ? `cfa-${level}-${activePathway}-mixed-mock` : `cfa-${level}-mixed-mock`}${generatedView ? '-generated' : ''}`;
-  const item = items[current];
+  // Prod-readiness: `current` can outrun `items` when the set shrinks (e.g.
+  // "Regenerate from curriculum" replaces a generated mock with a shorter one
+  // without resetting current). Clamp the lookup in-render so the runner can
+  // never dereference an undefined item (which threw on item.type), and sync the
+  // state on the next tick so nav/counters stay consistent.
+  const safeCurrent = items.length ? Math.min(current, items.length - 1) : 0;
+  const item = items[safeCurrent];
+  useEffect(() => {
+    if (items.length && current > items.length - 1) setCurrent(items.length - 1);
+  }, [items.length, current]);
   const questionRows = useMemo(() => items.flatMap(questionRowsFromItem), [items]);
   const constructedItems = useMemo(() => items.filter((mockItem) => mockItem.type === 'constructed-response').map((mockItem) => mockItem.constructed), [items]);
   const answeredQuestions = questionRows.filter((question) => selected[question.id] !== undefined).length;

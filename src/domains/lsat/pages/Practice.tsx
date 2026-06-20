@@ -29,7 +29,7 @@ export default function Practice() {
   const qc = useQueryClient();
   const pts = usePrepTests();
   const srs = useSrsDue();
-  const due = srs.data?.data.due_count ?? 0;
+  const due = srs.data?.data?.due_count ?? 0;
   const list = pts.data?.data ?? [];
   const primaryId = list[0]?.id ?? 1;
   const primary = usePrepTest(primaryId);
@@ -129,7 +129,7 @@ export default function Practice() {
           )}
         </CardHeader>
         <CardContent className="space-y-2">
-          {detail?.sections.length ? (
+          {detail?.sections?.length ? (
             detail.sections.map((s) => (
               <div
                 key={s.id}

@@ -362,9 +362,16 @@ export default function App() {
           {/* UB6: shared "?" keyboard-help overlay — owns its own open state
               (the `?` key and the TopBar help button both reach it). */}
           <KeyboardHelp />
-          <Suspense fallback={null}>
-            <PwaInstallPrompt />
-          </Suspense>
+          {/* Crash-isolation: this optional install banner is a lazy chunk that
+              can go stale after a deploy. It sits OUTSIDE the route ErrorBoundary,
+              so without its own boundary a rejected import would bubble to the
+              root boundary and replace the whole app. It's non-essential, so a
+              failed chunk degrades to nothing (fallback={() => null}). */}
+          <ErrorBoundary name="pwa-install-prompt" fallback={() => null}>
+            <Suspense fallback={null}>
+              <PwaInstallPrompt />
+            </Suspense>
+          </ErrorBoundary>
         </div>
         </OfflineProvider>
       </ToastProvider>
