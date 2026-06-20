@@ -40,6 +40,13 @@
   --text-muted: hsl(215 20% 65%);         /* #94A3B8 (slate-400) */
   --accent: hsl(213.1 93.9% 67.8%);       /* #60A5FA (blue-400) */
   --accent-hover: hsl(211.7 96.4% 78.4%); /* #93C5FD */
+  /* A3 (UIv2) — primary-button FILL accent. Distinct from --accent (which is
+     tuned LIGHT for text/borders on dark surfaces and would fail white-on-fill
+     contrast). --accent-strong is a saturated, white-text-safe fill, re-tinted
+     per domain in tokens.css ([data-domain]). Theme-independent like the raw
+     --blue-* it replaces, so the primary button reads the same in light + dark.
+     Default = blue-500 (#3B82F6), identical to today's button start color. */
+  --accent-strong: #3B82F6;               /* blue-500 — white text 3.7:1 (= current button) */
   --exam: hsl(39.5 60% 57.8%);            /* #D4A853 (gold) */
   --study: hsl(188.7 94.5% 42.7%);        /* #06B6D4 (cyan-500) */
   --vault: hsl(173.4 80.4% 40%);          /* #14B8A6 (teal-500) */
@@ -1066,12 +1073,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--blue-500), var(--blue-600));
+  /* A3 (UIv2) — fill + shadow derive from --accent-strong so the primary button
+     re-tints per domain (cfa blue · excel green · quant magenta · lsat violet)
+     instead of a hardcoded blue. color-mix darkens the gradient's far stop and
+     tints the shadow from the same token, so one variable drives all three. */
+  background: linear-gradient(135deg, var(--accent-strong), color-mix(in srgb, var(--accent-strong) 80%, #000));
   color: white;
-  box-shadow: 0 2px 8px rgba(59,130,246,0.3);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent-strong) 32%, transparent);
 }
 .btn-primary:hover {
-  box-shadow: 0 4px 16px rgba(59,130,246,0.4);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent-strong) 42%, transparent);
   transform: translateY(-1px);
 }
 /* UA4: the primary press should win over its hover lift — drop the -1px lift and
@@ -1079,7 +1090,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
    bounce. Keeps the focus ring (which composes via box-shadow, set above). */
 .btn-primary:not(:disabled):active {
   transform: scale(0.97);
-  box-shadow: 0 2px 8px rgba(59,130,246,0.3);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent-strong) 32%, transparent);
 }
 
 .btn-secondary {

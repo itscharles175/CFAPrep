@@ -192,7 +192,14 @@
     --ring-offset: 2px;
 
     /* ─────────────────────────────────────────────────────────────
-     * 7. Z-INDEX
+     * 7. Z-INDEX — D5 (UIv2): one scale, never raw values.
+     *   --z-base     (0)   content flow; the default.
+     *   --z-overlay  (50)  in-page sticky/overlay chrome and mobile scrim.
+     *   --z-dropdown (100) popovers, dropdowns, tooltips, fixed sidebar/topbar.
+     *   --z-modal    (200) dialogs and full-screen sheets (above all page chrome).
+     *   --z-toast    (300) transient notifications (always on top, even of modals).
+     * Pick the band by ROLE, not by trial. New stacking contexts read a token;
+     * a raw z-index outside this scale is a smell to flag in review.
      * ───────────────────────────────────────────────────────────── */
 
     --z-base:     0;
@@ -349,6 +356,7 @@
   [data-domain="cfa"] {
     --accent:        hsl(213.1 93.9% 67.8%); /* #60A5FA */
     --accent-hover:  hsl(211.7 96.4% 78.4%); /* #93C5FD */
+    --accent-strong: #3B82F6;                /* A3 button fill — blue-500, white text 3.7:1 */
     --surface-soft:  rgba(96, 165, 250, 0.06);
     --color-accent:      var(--accent);
     --color-accent-soft: var(--surface-soft);
@@ -359,6 +367,7 @@
   [data-domain="excel"] {
     --accent:        hsl(142.1 76.2% 36.3%); /* #16A34A */
     --accent-hover:  hsl(142 69% 58%);       /* #4ADE80 */
+    --accent-strong: #15803D;                /* A3 button fill — green-700, white text 4.5:1 */
     --surface-soft:  rgba(22, 163, 74, 0.12);
     --color-accent:      var(--accent);
     --color-accent-soft: var(--surface-soft);
@@ -368,6 +377,7 @@
   [data-domain="quant"] {
     --accent:        hsl(270 95.2% 75.3%);   /* #C084FC */
     --accent-hover:  hsl(268.6 100% 91.8%);  /* #E9D5FF */
+    --accent-strong: #A21CAF;                /* A3 button fill — magenta-700, white text 5.5:1 */
     --surface-soft:  rgba(192, 132, 252, 0.12);
     --color-accent:      var(--accent);
     --color-accent-soft: var(--surface-soft);
@@ -380,6 +390,7 @@
   [data-domain="lsat"] {
     --accent:        hsl(262 83% 60%);       /* #8B5CF6 */
     --accent-hover:  hsl(258 92% 70%);       /* #A78BFA */
+    --accent-strong: #6D28D9;                /* A3 button fill — violet-700, white text 6.6:1 */
     --surface-soft:  rgba(139, 92, 246, 0.12);
     --color-accent:      var(--accent);
     --color-accent-soft: var(--surface-soft);
