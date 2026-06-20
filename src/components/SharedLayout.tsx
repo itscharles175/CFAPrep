@@ -24,6 +24,9 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Layout/Sidebar';
 import TopBar, { type LsatShellMode } from './Layout/TopBar';
+import { ThemeProvider } from '../context/ThemeContext';
+import { ToastProvider } from '../context/ToastContext';
+import { OfflineProvider } from '../context/OfflineContext';
 
 interface SharedLayoutProps {
   /** Optional content. When omitted, a routed <Outlet/> is rendered (so this can
@@ -65,7 +68,18 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
     return undefined;
   }, [location.pathname]);
 
+  // K4 cutover fix: SharedLayout is the LSAT plane's host chrome, and the host
+  // <Sidebar>/<TopBar> it renders consume host contexts — TopBar's `useTheme()`
+  // (and any host shared primitive's `useToast`/`useOfflineStatus`). On /lsat the
+  // host <App/> is NOT mounted, so these providers must live here or `useTheme()`
+  // throws and blanks the whole page. SharedLayout is /lsat-only (the host App
+  // renders its own chrome directly), so this never double-wraps the host route.
+  // They read the same shared `qv-theme` store as LsatUnifiedMount's LSAT
+  // ThemeProvider, so the two theme adapters stay in lockstep (UA2).
   return (
+    <ThemeProvider>
+    <ToastProvider>
+    <OfflineProvider>
     <div className="app-layout">
       <a href="#main" className="skip-to-main">
         Skip to main content
@@ -96,5 +110,8 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
         {children ?? <Outlet />}
       </main>
     </div>
+    </OfflineProvider>
+    </ToastProvider>
+    </ThemeProvider>
   );
 }

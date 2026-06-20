@@ -51,11 +51,13 @@ export default function UnifiedRoot() {
     <BrowserRouter>
       <Suspense fallback={<RootFallback />}>
         <Routes>
-          {/* The LSAT plane: its splat captures every /lsat/* URL and hands it to
-              the re-based LSAT router inside <LsatUnifiedMount>. The bare /lsat
-              entry is matched by the same element (its inner Router maps "/" to
-              "/lsat"). */}
-          <Route path="/lsat" element={<LsatUnifiedMount />} />
+          {/* The LSAT plane: ONE splat route captures the bare /lsat AND every
+              /lsat/* URL (the splat matches the empty remainder), handing it to
+              the re-based LSAT router inside <LsatUnifiedMount>. The `/*` is
+              required so the matched pathnameBase stays "/lsat" while descendant
+              routing continues below it — a bare `path="/lsat"` would set an exact
+              base with no splat and RR would refuse to render the LSAT App's
+              descendant <Routes>. */}
           <Route path="/lsat/*" element={<LsatUnifiedMount />} />
           {/* Everything else is the host shell, which owns its own <Routes>. */}
           <Route path="/*" element={<HostShell />} />

@@ -54,7 +54,10 @@ vi.mock('@lsat/lib/offlineQueue', () => ({
   startAutoFlush: () => startAutoFlush(),
 }));
 
-import LsatUnifiedMount, { RebasedLsatRouter } from './LsatUnifiedMount';
+import LsatUnifiedMount from './LsatUnifiedMount';
+// RebasedLsatRouter moved to its own module in the K4 unified-shell fix; import it
+// from there. (See RebasedLsatRouter.test.tsx for the nested-route regression guard.)
+import { RebasedLsatRouter } from './RebasedLsatRouter';
 
 beforeEach(() => {
   vi.clearAllMocks();
