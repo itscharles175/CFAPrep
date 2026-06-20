@@ -86,9 +86,16 @@ Effort: ⚡ quick · ◐ medium · ⬣ large.
 
 ## Rollout (in order)
 
-- **Wave 1 — visible quick wins:** C1, A1, A6, B4, E5, C3, F2.
-- **Wave 2 — state trifecta:** B1, B2, B3.
-- **Wave 3 — cohesion & tokens:** A2, A3, A4, A5, D1, D2, D3, D4, D5.
+- **Wave 1 — visible quick wins:** C1, A1, A6, B4, E5, C3, F2. ✅ SHIPPED (commit f2bddc0).
+  - Genuine fixes: C1 (dup Dashboard buttons), A6 (banner de-stack), B4 (SRS spinner + Dashboard busy label), F2 (calibration scatter aria-label).
+  - Verified already-satisfied (no change): A1 (data-domain on `<body>`), E5/C3 (Panel interactive + focus-visible).
+- **Wave 2 — state trifecta:** B1, B2, B3. ✅ SHIPPED (commit 54dc244).
+  - Genuine fixes: B3 (LSAT exam error-boundary → design language), B2 (Flashcards empty CTA + FormulaLibrary no-results EmptyPanel; both browser-verified).
+  - Verified already-satisfied: B1 (host + LSAT skeletons already carry role=status/aria-busy).
+- **Wave 3 — cohesion & tokens:** A2, A3, A4, A5, D1, D2, D3, D4, D5. ⏳ NEEDS APPROACH DECISION.
+  - A3 (button re-tint) requires a NEW per-domain `--accent-strong` button-fill token (— can't reuse `--accent`: it's light-tuned for text and would fail white-text contrast on quant/default). AA-gate via the WCAG suite.
+  - A4: only 3 real `PageLayout` holdouts (Analytics, Explanation, Import) per the call graph — not the surveyed 5.
+  - A2 (type-voice serif↔sans) is a subjective brand decision; D3 (Tailwind↔token) + D4 (focus consolidation) are regression-prone hub refactors; A5/D1/D5 are low-value mechanical/docs.
 - **Wave 4 — motion & delight:** E1, E2, E3, E4, F1, F3, F4, F5, G1–G6.
 - **Wave 5 — guardrails:** H1, H2.
 
