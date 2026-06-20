@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   getCommandRecents,
   pushCommandRecent,
@@ -652,7 +652,11 @@ export default function App() {
                   </Button>
                   {resume && (
                     <Button asChild variant="outline" size="sm">
-                      <a href={resume.path}>Resume {resume.label}</a>
+                      {/* Adversarial-verify fix: a raw <a href> ignores the LSAT
+                          router basename (/lsat) and full-reloads to a host-root
+                          404; getResume() returns basename-relative paths, so use
+                          <Link> for correct client-side navigation. */}
+                      <Link to={resume.path}>Resume {resume.label}</Link>
                     </Button>
                   )}
                   <Button variant="ghost" size="sm" onClick={() => window.location.reload()}>

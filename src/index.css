@@ -46,7 +46,7 @@
      per domain in tokens.css ([data-domain]). Theme-independent like the raw
      --blue-* it replaces, so the primary button reads the same in light + dark.
      Default = blue-500 (#3B82F6), identical to today's button start color. */
-  --accent-strong: #3B82F6;               /* blue-500 — white text 3.7:1 (= current button) */
+  --accent-strong: #2563EB;               /* blue-600 — white text 5.2:1 (WCAG AA; was blue-500 #3B82F6 @ 3.7:1) */
   --exam: hsl(39.5 60% 57.8%);            /* #D4A853 (gold) */
   --study: hsl(188.7 94.5% 42.7%);        /* #06B6D4 (cyan-500) */
   --vault: hsl(173.4 80.4% 40%);          /* #14B8A6 (teal-500) */
@@ -2748,7 +2748,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 
 .topbar-search:focus-within {
+  /* D4 follow-up — the inner <input> sets box-shadow:none + outline:none (the
+     wrapper owns the focus treatment), so give the wrapper a real ring here, not
+     just a 1px border-colour swap, matching the shared --ring/--ring-offset
+     vocabulary used by inputs/buttons. */
   border-color: var(--accent);
+  box-shadow: 0 0 0 var(--ring-offset) var(--bg-primary),
+    0 0 0 calc(var(--ring-offset) + 2px) hsl(var(--ring));
 }
 
 .topbar-search input {

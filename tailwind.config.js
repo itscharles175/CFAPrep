@@ -25,17 +25,22 @@ export default {
       screens: { "2xl": "1400px" },
     },
     extend: {
-      // D3 (UIv2) — Tailwind↔host-token BRIDGE (verified, not a divergence).
-      // Every color utility below resolves to a shared CSS variable
-      // `hsl(var(--token))` defined in tokens.css / unified-palette.css, so
-      // `text-muted`, `bg-card`, `border`, `text-accent`, etc. render the SAME
-      // value as the host's own token consumers — there is no parallel palette to
-      // reconcile. (A prior survey worried `text-muted` would drift when the
-      // per-domain accent switches; it can't — `--muted-foreground` is a neutral,
-      // not accent-derived. Only `--accent`/`--accent-strong` re-tint per domain.)
-      // No host component uses a raw Tailwind palette colour (text-gray-*, etc.) —
-      // verified by grep — so nothing bypasses the bridge. `fontSize` below is the
-      // single-sourced design type scale (docs/07 §2.2), [size, line-height] tuples.
+      // D3 (UIv2) — Tailwind colour utilities are var()-driven (no hardcoded
+      // palette): each resolves to `hsl(var(--token))`. The SOURCE OF TRUTH for
+      // this shadcn vocabulary (--background/foreground/card/muted/primary/
+      // destructive + their -foreground / secondary / popover / input / info / ring
+      // variants) is the LSAT domain stylesheet src/domains/lsat/index.css (loaded
+      // via LsatUnifiedMount); src/styles/unified-palette.css MIRRORS the core ones
+      // (--background/foreground/card/muted/primary/destructive) to host values so
+      // /lsat and the host share them. The only per-domain re-tint is --accent /
+      // --accent-strong; neutrals like --muted-foreground never drift. No host
+      // component uses a raw Tailwind palette colour (text-gray-* etc.) —
+      // grep-verified — so nothing bypasses the var() tokens.
+      // CAVEAT (pre-existing, flagged not fixed): the LSAT-only members above
+      // (e.g. --muted-foreground, --secondary, --input, the *-foreground set) are
+      // undefined until @lsat/index.css loads, so host-plane code should prefer the
+      // host .qv-*/semantic tokens or the mirrored core ones. `fontSize` below is
+      // the single-sourced design type scale (docs/07 §2.2).
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
