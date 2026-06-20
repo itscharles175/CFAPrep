@@ -311,6 +311,7 @@ describe('cross-domain bridge factory (DATA-2)', () => {
               confidence: 'high',
               errorCategory: 'none',
               difficulty: 'foundation',
+              createdAt: '2026-06-15T00:00:00.000Z',
             } as QuestionResult & { id: number },
           ];
         },
@@ -325,11 +326,13 @@ describe('cross-domain bridge factory (DATA-2)', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0].crossId).toBe('cfa:review:r1');
     const attempts = await bridge.attempts();
-    expect(attempts[0].crossId).toBe('quant:attempt:5'); // uses the row's own id
+    // audit M6 — content-stable crossId (questionId@createdAt), NOT the Dexie row
+    // id, so a merge-import that re-keys the row can't double-count it.
+    expect(attempts[0].crossId).toBe('quant:attempt:q-1@2026-06-15T00:00:00.000Z');
     expect(await bridge.mastery()).toEqual([]);
   });
 
-  it('falls back to the array index when a question-result row has no id', async () => {
+  it('keys the attempt crossId on content (questionId@createdAt), stable across DB re-keying (audit M6)', async () => {
     const bridge = createCrossDomainBridge({
       questionResults: {
         async toArray() {
@@ -343,13 +346,14 @@ describe('cross-domain bridge factory (DATA-2)', () => {
               confidence: 'low',
               errorCategory: 'none',
               difficulty: 'intermediate',
+              createdAt: '2026-06-16T00:00:00.000Z',
             } as QuestionResult,
           ];
         },
       },
     });
     const attempts = await bridge.attempts();
-    expect(attempts[0].crossId).toBe('cfa:attempt:0');
+    expect(attempts[0].crossId).toBe('cfa:attempt:q@2026-06-16T00:00:00.000Z');
   });
 
   it('tolerates missing stores', async () => {

@@ -25,12 +25,13 @@
  * legacy `startStyleIsolation` helper was removed in the K4-13 cutover.
  */
 
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { runHostStartupOnce } from '../lib/hostStartup';
 import ErrorBoundary from './ErrorBoundary';
 import { DOMAIN_NAV_EVENT } from '../lib/domainNav';
+import { fetchDataSchemaAlignment } from '../lib/dataDictionary';
 // AUDIT-1 — activate the cross-domain feed. These two host→backend sync hooks
 // (DATA-4a read-only progress feed + DATA-4b FSRS write-back) were fully built +
 // backend-tested but never mounted, so the LSAT sidecar's HostProgressSnapshot
@@ -125,8 +126,35 @@ export default function UnifiedRoot() {
   // progress + FSRS scheduling are mirrored into the LSAT sidecar for the unified
   // ability/plan engine. Both are route-independent (Dexie-backed) and degrade to
   // a no-op when the sidecar is unreachable.
-  useSyncProgress();
-  useSyncFsrsWriteBack();
+  //
+  // audit M3 — gate the WRITE path on the DATA-3 schema-version handshake. The
+  // data dictionary's contract is that cross-domain writes are suppressed when
+  // host and backend speak incompatible cross-domain schema versions (a shared
+  // field's MEANING changed), but `crossDomainWritesEnabled` was only read for
+  // display in System Health — the push fired regardless, so a version-mismatched
+  // host kept corrupting the backend mirror the unified engine reads. Start
+  // DISABLED, enable only once the handshake confirms alignment, and re-check on
+  // an interval so a late sidecar start (or an upgrade) flips it on/off correctly.
+  const [crossDomainWritesEnabled, setCrossDomainWritesEnabled] = useState(false);
+  useEffect(() => {
+    let active = true;
+    const check = () =>
+      fetchDataSchemaAlignment()
+        .then((alignment) => {
+          if (active) setCrossDomainWritesEnabled(alignment.crossDomainWritesEnabled);
+        })
+        .catch(() => {
+          if (active) setCrossDomainWritesEnabled(false);
+        });
+    void check();
+    const id = setInterval(check, 5 * 60 * 1000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, []);
+  useSyncProgress({ enabled: crossDomainWritesEnabled });
+  useSyncFsrsWriteBack({ enabled: crossDomainWritesEnabled });
 
   return (
     <BrowserRouter>

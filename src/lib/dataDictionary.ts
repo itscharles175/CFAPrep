@@ -407,11 +407,15 @@ export function createCrossDomainBridge(stores: CrossDomainSourceStores): {
     },
     async attempts(): Promise<CrossDomainAttempt[]> {
       const rows = (await stores.questionResults?.toArray()) ?? [];
-      return rows.map((row, index) => {
-        // `QuestionResult` carries no `id`, but the on-disk Dexie row does
-        // (auto-increment). Use it when present so the cross id is stable across
-        // snapshots; otherwise fall back to the array index.
-        const nativeId = (row as QuestionResult & { id?: number }).id ?? index;
+      return rows.map((row) => {
+        // audit M6 — derive a CONTENT-stable native id from (questionId, createdAt)
+        // rather than the Dexie auto-increment row id (or array index). questionResults
+        // are append-only, so that pair is effectively unique. Using the row id meant
+        // a merge-import — which strips and reassigns auto-increment ids — gave every
+        // historical attempt a NEW crossId, and the backend's idempotent UPSERT then
+        // stored BOTH copies, double-counting attempts/accuracy in the cross-domain
+        // rollup. The content key is invariant across DB re-keying.
+        const nativeId = `${row.questionId}@${row.createdAt ?? ''}`;
         return questionResultToCanonical(row, nativeId);
       });
     },

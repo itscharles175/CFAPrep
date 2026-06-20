@@ -216,10 +216,36 @@ export class ApiError extends Error {
   }
 }
 
+// audit M17 — every non-streaming endpoint funnels through request(), which had
+// NO signal and NO timeout, so a wedged-but-connected sidecar (stuck model,
+// SQLite lock, deadlocked worker) left the promise pending forever: React Query
+// stayed isLoading, mutation buttons span, and an unmount couldn't cancel the
+// in-flight fetch. Default every request to a 30s timeout and accept a caller
+// AbortSignal; a timeout behaves like offline (TypeError → withFallback samples),
+// while a caller abort propagates as AbortError for clean cancellation.
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+function combineAbortSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
+  const anyFn = (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any;
+  if (typeof anyFn === "function") return anyFn([a, b]);
+  // Fallback for environments without AbortSignal.any.
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (a.aborted || b.aborted) controller.abort();
+  a.addEventListener("abort", onAbort);
+  b.addEventListener("abort", onAbort);
+  return controller.signal;
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit & {
     json?: unknown;
+    /** audit M17 — caller cancellation (e.g. React Query's queryFn signal or an
+     *  unmount). Combined with the default timeout below. */
+    signal?: AbortSignal;
+    /** audit M17 — per-request timeout override (ms); defaults to 30s. */
+    timeoutMs?: number;
     /**
      * 5.1 — when provided, the JSON response is `.parse()`d against this zod
      * schema before being returned. A mismatch throws `ApiValidationError`
@@ -229,15 +255,29 @@ async function request<T>(
     validate?: z.ZodType<T>;
   },
 ): Promise<T> {
-  const { json, headers, validate, ...rest } = init ?? {};
-  const res = await fetch(`${PREFIX}${path}`, {
-    ...rest,
-    headers: {
-      ...(json !== undefined ? { "Content-Type": "application/json" } : {}),
-      ...(headers ?? {}),
-    },
-    body: json !== undefined ? JSON.stringify(json) : rest.body,
-  });
+  const { json, headers, validate, signal: callerSignal, timeoutMs, ...rest } = init ?? {};
+  const timeoutSignal = AbortSignal.timeout(timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  const signal = callerSignal ? combineAbortSignals(callerSignal, timeoutSignal) : timeoutSignal;
+  let res: Response;
+  try {
+    res = await fetch(`${PREFIX}${path}`, {
+      ...rest,
+      signal,
+      headers: {
+        ...(json !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(headers ?? {}),
+      },
+      body: json !== undefined ? JSON.stringify(json) : rest.body,
+    });
+  } catch (err) {
+    // A timeout against a wedged sidecar behaves like offline → surface a
+    // TypeError so withFallback samples (same as a refused connection). A caller
+    // abort (unmount/navigation) propagates as-is so React Query cancels quietly.
+    if (timeoutSignal.aborted && !callerSignal?.aborted) {
+      throw new TypeError(`Request to ${path} timed out after ${timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  }
   if (res.status === 204) return undefined as T;
 
   // A reachable LSAT Lab backend ALWAYS answers /api with JSON (even errors carry
