@@ -59,14 +59,9 @@ import { TooltipProvider } from '@lsat/components/ui/tooltip';
 import LsatApp from '@lsat/App';
 import { applyDensity, applyHighContrast, applyMeasureCh } from '@lsat/lib/prefs';
 import { startAutoFlush } from '@lsat/lib/offlineQueue';
-import { UnifiedShellContext } from '@lsat/lib/unifiedShellContext';
 import { LSAT_ROUTE_PREFIX } from '../lib/lsatNavigate';
 import SharedLayout from './SharedLayout';
 import '@lsat/index.css';
-
-/** K4-13a — the unified-shell signal value, hoisted to a module constant so the
- *  context Provider gets a STABLE reference (never a fresh object per render). */
-const UNIFIED_SHELL_VALUE = { unified: true } as const;
 
 /** Mirrors `LsatRoot.makeQueryClient` exactly so the unified path's data-layer
  *  behavior (retry/refetch/throwOnError policy) matches the legacy path. */
@@ -220,23 +215,13 @@ export default function LsatUnifiedMount() {
                   the HOST router context (above RebasedLsatRouter) so its Sidebar /
                   TopBar / breadcrumb / `data-domain` accent read the FULL host
                   pathname ("/lsat/srs"), not the basename-stripped "/srs" the LSAT
-                  App sees. K4-13a: the LSAT App now renders CHROMELESS inside this
-                  (its AppShell drops its own Sidebar/header, GlobalChrome drops its
-                  Titlebar) via the UnifiedShellContext below — so there is exactly
-                  ONE sidebar/topbar/titlebar, supplied by SharedLayout. */}
+                  App sees. The LSAT App renders CHROMELESS (its AppShell is the
+                  bare MainScrollArea + Outlet, GlobalChrome no longer renders a
+                  Titlebar) — so SharedLayout supplies the one sidebar/topbar. */}
               <SharedLayout>
-                {/* K4-13a — signal the LSAT App that it is mounted INSIDE the
-                    host SharedLayout so it renders CHROMELESS (no second
-                    sidebar/topbar/titlebar). SharedLayout supplies the one set
-                    of chrome; the LSAT App keeps its providers + scroll
-                    restoration + page content. The default context value is
-                    `{ unified: false }`, so the legacy LsatRoot path (which has
-                    no provider) is unchanged. */}
-                <UnifiedShellContext.Provider value={UNIFIED_SHELL_VALUE}>
-                  <RebasedLsatRouter>
-                    <LsatApp />
-                  </RebasedLsatRouter>
-                </UnifiedShellContext.Provider>
+                <RebasedLsatRouter>
+                  <LsatApp />
+                </RebasedLsatRouter>
               </SharedLayout>
             </TooltipProvider>
           </MotionProvider>

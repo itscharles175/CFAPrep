@@ -20,7 +20,6 @@ export default defineConfig({
         // served + runtime-cached on first use; this just keeps the install
         // footprint small. (Plan S3.)
         globIgnores: [
-          '**/LsatRoot*',
           '**/lsat-*',
           '**/kokoro*',
           '**/transformers*',
