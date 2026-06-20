@@ -144,6 +144,20 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
+      # audit M19 — restore Linux-generated visual baselines so the gate ENFORCES
+      # (a missing/changed shot fails) rather than silently self-seeding on every
+      # run. First run misses → visual-regression.mjs bootstraps them + this cache
+      # saves them under the routes+tokens key; subsequent runs restore + enforce.
+      # A routes/token change rotates the key, so a now-stale baseline correctly
+      # diffs and prompts a deliberate rebaseline (UPDATE_VISUAL_BASELINES=1).
+      - name: Restore/seed visual baselines
+        uses: actions/cache@v4
+        with:
+          path: tests/visual-baselines
+          key: visual-baselines-${{ runner.os }}-${{ hashFiles('src/routes/routeManifest.ts', 'src/styles/tokens.css', 'src/index.css') }}
+          restore-keys: |
+            visual-baselines-${{ runner.os }}-
+
       # visual:regression launches headless Chromium via playwright-core. There is
       # no system browser on the runner, so install Playwright's managed Chromium
       # (with its Linux system libs); a11y-helpers.mjs resolves it via
