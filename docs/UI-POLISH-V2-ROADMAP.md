@@ -92,10 +92,16 @@ Effort: ⚡ quick · ◐ medium · ⬣ large.
 - **Wave 2 — state trifecta:** B1, B2, B3. ✅ SHIPPED (commit 54dc244).
   - Genuine fixes: B3 (LSAT exam error-boundary → design language), B2 (Flashcards empty CTA + FormulaLibrary no-results EmptyPanel; both browser-verified).
   - Verified already-satisfied: B1 (host + LSAT skeletons already carry role=status/aria-busy).
-- **Wave 3 — cohesion & tokens:** A2, A3, A4, A5, D1, D2, D3, D4, D5. ⏳ NEEDS APPROACH DECISION.
-  - A3 (button re-tint) requires a NEW per-domain `--accent-strong` button-fill token (— can't reuse `--accent`: it's light-tuned for text and would fail white-text contrast on quant/default). AA-gate via the WCAG suite.
-  - A4: only 3 real `PageLayout` holdouts (Analytics, Explanation, Import) per the call graph — not the surveyed 5.
-  - A2 (type-voice serif↔sans) is a subjective brand decision; D3 (Tailwind↔token) + D4 (focus consolidation) are regression-prone hub refactors; A5/D1/D5 are low-value mechanical/docs.
+- **Wave 3 — cohesion & tokens:** partial. Commits `e0f8e88` (A3+D5), `5788afd` (A4).
+  - ✅ **A3** — per-domain `--accent-strong` button-fill token; primary buttons re-tint cfa/excel/quant/lsat. Browser-verified, all 4 AA-safe for white text.
+  - ✅ **D5** — z-index scale documented with role-based usage guide.
+  - ✅ **A4** — LSAT `PageLayout` delegates its header to the host `PageHeader`; unifies 6 straggler pages (Analytics, Explanation, Import, TypeAnalytics, SessionHistory, NotFound) onto the host voice in one edit. Browser-verified on Analytics.
+  - ⊘ **A2** — SUBSUMED by A4: the unified type-voice IS the host PageHeader's (sans + badge); A4 completed the migration the K4 reskin started. No separate change.
+  - ⊘ **A5** — NON-GAP: AppShell `p-3 sm:p-6` is already the 4px token scale (Tailwind spacing == design tokens).
+  - ⊘ **D2** — NON-GAP: the section-runner `"yellow"/"green"` are highlighter-color ENUM KEYS, not CSS colors (intentionally fixed across themes).
+  - ⚠️ **D4** — ATTEMPTED → REVERTED. Removing the "orphan" `:focus-visible` outline rule regressed raw `<input>` focus (the base `outline:none` reset is class-based, so raw inputs like the topbar search relied on that rule and fell back to browser-default outlines). The rule is load-bearing. DEFER to a dedicated pass gated by the Playwright a11y suite (not runnable in this env).
+  - ⚠️ **D3** — DEFERRED. The color side is already reconciled by `unified-palette.css` (LSAT vocab → host values); muted text isn't accent-derived so domain-switching doesn't break it. The only residual (Tailwind text-size utilities' embedded line-heights vs host `--lh-*`) is a systemic typography change across 21+ files × 2 planes — regression-prone, and the visual-regression suite isn't runnable here. DEFER to a dedicated visual-regression-gated pass.
+  - **D1** — DEFERRED (low value): most flagged px are SVG attribute numbers (correct as numbers); the few inline layout px are marginal.
 - **Wave 4 — motion & delight:** E1, E2, E3, E4, F1, F3, F4, F5, G1–G6.
 - **Wave 5 — guardrails:** H1, H2.
 
