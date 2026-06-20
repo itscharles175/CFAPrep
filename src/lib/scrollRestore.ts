@@ -6,13 +6,15 @@
 // for a subtler reason captured in the Wave-5 roadmap (UX-1):
 //
 //   StudyVault soft-swaps domains via the History API (lib/domainNav's
-//   `navigateDomain` → `pushState` + DOMAIN_NAV_EVENT). main.jsx then unmounts
-//   the host sub-app and mounts the LSAT one (and vice-versa). Because that hop
-//   never round-trips through the browser's native back/forward, the browser's
-//   own scroll restoration never fires — so returning from /lsat to /today (or
-//   the dashboard) snaps to the top of a freshly-mounted tree, losing the user's
-//   place. Persisting the position ourselves and restoring it on mount closes
-//   that gap.
+//   `navigateDomain` → `pushState` + DOMAIN_NAV_EVENT). Under the K4-13 unified
+//   shell there is ONE persistent host <BrowserRouter> (see UnifiedRoot); the
+//   cross-domain hop swaps which plane the top-level <Routes> renders (it does
+//   NOT unmount a sub-app), and UnifiedRoot's CrossDomainNavBridge re-syncs the
+//   router to the pushed URL. Because that hop never round-trips through the
+//   browser's native back/forward, the browser's own scroll restoration never
+//   fires — so returning from /lsat to /today (or the dashboard) snaps to the top
+//   of the re-rendered tree, losing the user's place. Persisting the position
+//   ourselves and restoring it on mount closes that gap.
 //
 // Two differences from the LSAT port, both dictated by the host's layout:
 //   - The host scrolls the DOCUMENT (`.main-content` has `min-height: 100vh`
@@ -119,8 +121,9 @@ export interface UseScrollRestorationOptions {
  *     return to.
  *
  * Implemented imperatively rather than via React Router's `ScrollRestoration`
- * because the host's cross-domain swap happens OUTSIDE the router (main.jsx
- * unmounts the whole sub-app), so the router never observes the hop.
+ * because the cross-domain hop is driven by `navigateDomain`'s pushState, which
+ * the router only observes indirectly (via UnifiedRoot's CrossDomainNavBridge),
+ * so RR's own scroll-restoration timing isn't a reliable anchor for it.
  */
 export function useScrollRestoration(path: string, { ready = true }: UseScrollRestorationOptions = {}): void {
   // The latest path/ready in a ref so the unmount-flush below can read them

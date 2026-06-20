@@ -324,7 +324,8 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   // UX-4 — record every host route change on the shared cross-domain trail so
   // the unified Back button + breadcrumb stay accurate. `pushHistory` de-dupes a
   // repeat of the current path, so this is safe alongside the cross-domain
-  // recording in navigateDomain and the popstate seed in main.jsx.
+  // recording in navigateDomain (whose hop is re-synced to the single router by
+  // UnifiedRoot's CrossDomainNavBridge).
   useEffect(() => {
     pushHistory({ path: location.pathname, domain: 'host', label: labelForPath(location.pathname) });
   }, [location.pathname]);

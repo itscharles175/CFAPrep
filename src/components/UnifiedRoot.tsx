@@ -26,8 +26,11 @@
  */
 
 import { lazy, Suspense, useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { runHostStartupOnce } from '../lib/hostStartup';
+import ErrorBoundary from './ErrorBoundary';
+import { DOMAIN_NAV_EVENT } from '../lib/domainNav';
 // AUDIT-1 — activate the cross-domain feed. These two host→backend sync hooks
 // (DATA-4a read-only progress feed + DATA-4b FSRS write-back) were fully built +
 // backend-tested but never mounted, so the LSAT sidecar's HostProgressSnapshot
@@ -77,6 +80,42 @@ function RootFallback() {
   );
 }
 
+// audit H3 — bridge cross-domain navigation INTO the single router.
+// navigateDomain() does window.history.pushState + dispatches DOMAIN_NAV_EVENT,
+// but a raw pushState is invisible to React-Router (it only observes native
+// popstate), so cross-domain hops (Dashboard LSAT card, ⌘K jump, NotificationCenter
+// rows, cross-domain Back) changed the URL while the mounted plane stayed put
+// until a reload. This listener re-syncs RR to the just-pushed location with
+// { replace: true } so the pushState entry isn't duplicated — RR re-renders the
+// correct plane immediately and stays the authority for history state.
+function CrossDomainNavBridge() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const handler = () => {
+      navigate(window.location.pathname + window.location.search + window.location.hash, { replace: true });
+    };
+    window.addEventListener(DOMAIN_NAV_EVENT, handler);
+    return () => window.removeEventListener(DOMAIN_NAV_EVENT, handler);
+  }, [navigate]);
+  return null;
+}
+
+// audit H4 — per-plane crash isolation. The host App and the LSAT App each wrap
+// their inner routed content in a boundary, but the SHARED layers between the
+// root and those inner boundaries (SharedLayout chrome, the LSAT provider stack,
+// RebasedLsatRouter) had none — a throw there escaped to the root main.jsx
+// boundary and white-screened the whole app. Wrapping each plane here resets the
+// crash on route change so a transient render error in one plane's chrome can't
+// take down the other plane or force a hard reload.
+function PlaneBoundary({ name, children }: { name: string; children: ReactNode }) {
+  const { pathname } = useLocation();
+  return (
+    <ErrorBoundary name={name} level="page" resetKey={pathname}>
+      {children}
+    </ErrorBoundary>
+  );
+}
+
 export default function UnifiedRoot() {
   useEffect(() => {
     runHostStartupOnce();
@@ -91,6 +130,7 @@ export default function UnifiedRoot() {
 
   return (
     <BrowserRouter>
+      <CrossDomainNavBridge />
       <Suspense fallback={<RootFallback />}>
         <Routes>
           {/* The LSAT plane: ONE splat route captures the bare /lsat AND every
@@ -100,9 +140,9 @@ export default function UnifiedRoot() {
               routing continues below it — a bare `path="/lsat"` would set an exact
               base with no splat and RR would refuse to render the LSAT App's
               descendant <Routes>. */}
-          <Route path="/lsat/*" element={<LsatUnifiedMount />} />
+          <Route path="/lsat/*" element={<PlaneBoundary name="lsat-plane"><LsatUnifiedMount /></PlaneBoundary>} />
           {/* Everything else is the host shell, which owns its own <Routes>. */}
-          <Route path="/*" element={<HostShell />} />
+          <Route path="/*" element={<PlaneBoundary name="host-plane"><HostShell /></PlaneBoundary>} />
         </Routes>
       </Suspense>
     </BrowserRouter>

@@ -9,7 +9,7 @@
  * planes stubbed and asserts the split + the one-time host startup.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 
 const runHostStartupOnce = vi.fn();
 vi.mock('../lib/hostStartup', () => ({ runHostStartupOnce: () => runHostStartupOnce() }));
@@ -48,6 +48,21 @@ describe('UnifiedRoot route split', () => {
     render(<UnifiedRoot />);
     expect(await screen.findByTestId('host-shell')).toBeInTheDocument();
     expect(screen.queryByTestId('lsat-mount')).not.toBeInTheDocument();
+  });
+
+  it('swaps the rendered plane on a cross-domain navigateDomain hop (audit H3)', async () => {
+    window.history.pushState({}, '', '/');
+    render(<UnifiedRoot />);
+    expect(await screen.findByTestId('host-shell')).toBeInTheDocument();
+    // navigateDomain() does pushState + dispatches DOMAIN_NAV_EVENT; the
+    // CrossDomainNavBridge must re-sync the single router so the plane swaps
+    // WITHOUT a reload (the bug: URL changed but the view stayed put).
+    act(() => {
+      window.history.pushState({}, '', '/lsat/srs');
+      window.dispatchEvent(new Event('studyvault:navigate'));
+    });
+    expect(await screen.findByTestId('lsat-mount')).toBeInTheDocument();
+    expect(screen.queryByTestId('host-shell')).not.toBeInTheDocument();
   });
 
   it('runs the one-time host startup exactly once', async () => {
