@@ -132,9 +132,9 @@ export default function Srs() {
             <Button
               variant="outline"
               onClick={() => void generateGapCards()}
-              disabled={generatingGaps}
+              loading={generatingGaps}
             >
-              <Sparkles className="h-4 w-4" />
+              {!generatingGaps && <Sparkles className="h-4 w-4" />}
               {generatingGaps ? "Building…" : "Build gap cards"}
             </Button>
           }

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { ServerOff } from "lucide-react";
 import { SystemNotice } from "@lsat/components/system-notice";
 import { useAiHealth } from "@lsat/lib/hooks";
+import { getOfflineStatus, subscribeOfflineStatus } from "@lsat/lib/offline";
 import { isAiPrereqDismissed, setAiPrereqDismissed } from "@lsat/lib/prefs";
 
 // Active local-provider labels, consistent with model-routing-card.tsx.
@@ -34,12 +35,24 @@ export function AiPrereqBanner() {
   const h = data?.data;
   const [dismissed, setDismissed] = useState(() => isAiPrereqDismissed());
 
+  // A6 — de-stack the system notices. When the backend is unreachable the
+  // <OfflineBanner> already says "Backend offline — showing sample data", which
+  // is the same root cause as our `usingSample` branch. Showing both stacks two
+  // identical warnings. So suppress ourselves while offline and let OfflineBanner
+  // own that case; we remain the ONLY banner for our unique signal — backend UP
+  // but the active AI provider down (`providerDown`) — and never double up.
+  const { offline } = useSyncExternalStore(
+    subscribeOfflineStatus,
+    getOfflineStatus,
+    () => ({ offline: false, queueDepth: 0 }),
+  );
+
   // Live AI is off when the backend itself is unreachable (sample-data mode) OR
   // the active provider is unreachable. Prefer the generic `ok`; fall back to the
   // legacy `ollama` boolean only on an older backend that omits `ok`.
   const providerDown = h?.ok === false || (h?.ok === undefined && h?.ollama === false);
   const aiOff = usingSample === true || providerDown;
-  if (!aiOff || dismissed) return null;
+  if (!aiOff || dismissed || offline) return null;
 
   const provider = h?.provider ?? "ollama";
   const providerLabel = PROVIDER_LABEL[provider] ?? "Ollama";

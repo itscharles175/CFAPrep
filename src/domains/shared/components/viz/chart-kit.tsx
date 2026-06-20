@@ -682,6 +682,8 @@ export interface CalibrationScatterProps {
   diagonal?: boolean;
   height?: number;
   className?: string;
+  /** Accessible name for the chart (sets role="img" + aria-label on the frame). */
+  ariaLabel?: string;
 }
 
 /** visx calibration scatter with a 1:1 diagonal (recharts ScatterChart compat). */
@@ -692,11 +694,12 @@ export function CalibrationScatter({
   diagonal = true,
   height = 240,
   className,
+  ariaLabel,
 }: CalibrationScatterProps) {
   const [hover, setHover] = useState<{ left: number; top: number; pt: ScatterPoint; series: string } | null>(null);
   const margin = { ...MARGIN, right: 24, left: 40 };
   return (
-    <ChartFrame height={height} className={className}>
+    <ChartFrame height={height} className={className} ariaLabel={ariaLabel}>
       {(width) => {
         const innerW = Math.max(0, width - margin.left - margin.right);
         const innerH = Math.max(0, height - margin.top - margin.bottom);

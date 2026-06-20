@@ -777,6 +777,7 @@ export default function Analytics() {
                   xLabel="Confidence %"
                   yLabel="Accuracy %"
                   height={240}
+                  ariaLabel={`Confidence calibration (${domain === 'cfa' ? 'CFA' : domain === 'lsat' ? 'LSAT' : 'all domains'}): each marker plots confidence % against accuracy %, with a 1:1 diagonal marking perfect calibration.`}
                 />
               </>
             )}

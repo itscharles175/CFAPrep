@@ -438,6 +438,7 @@ export default function Dashboard() {
             <button className="btn btn-secondary" onClick={handleExport}><Download size={16} /> Export</button>
             <button className="btn btn-secondary" onClick={() => setExportDialogOpen(true)}><Lock size={16} /> Encrypted Export</button>
             <button className="btn btn-primary" onClick={() => importRef.current?.click()}><Upload size={16} /> Import</button>
+            <input ref={importRef} type="file" accept="application/json,.json" onChange={handleImport} style={{ display: 'none' }} />
           </>
         }
       />
@@ -603,8 +604,8 @@ export default function Dashboard() {
           actions={
             <>
               <button className="btn btn-secondary" onClick={() => { setExportDialogOpen(false); setExportPassphrase(''); setExportPassphraseConfirm(''); setIncludeSourceExport(false); }}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleEncryptedExport} disabled={exportBusy || exportPassphrase.length < 8 || exportPassphrase !== exportPassphraseConfirm}>
-                Create Backup
+              <button className="btn btn-primary" onClick={handleEncryptedExport} disabled={exportBusy || exportPassphrase.length < 8 || exportPassphrase !== exportPassphraseConfirm} aria-busy={exportBusy || undefined}>
+                {exportBusy ? 'Creating…' : 'Create Backup'}
               </button>
             </>
           }
@@ -631,18 +632,11 @@ export default function Dashboard() {
         </Dialog>
       )}
 
-      {/* Today */}
+      {/* Today — backup actions live in the page hero (PageHeader) only; this
+          section is study recommendations, not vault ops. */}
       <PageSection
         title="Today"
         subtitle="Adaptive local recommendations from your review queue and mastery snapshots"
-        actions={
-          <>
-            <button className="btn btn-secondary" onClick={handleExport}><Download size={16} /> Export</button>
-            <button className="btn btn-secondary" onClick={() => setExportDialogOpen(true)}><Lock size={16} /> Encrypted Export</button>
-            <button className="btn btn-secondary" onClick={() => importRef.current?.click()}><Upload size={16} /> Import</button>
-            <input ref={importRef} type="file" accept="application/json,.json" onChange={handleImport} style={{ display: 'none' }} />
-          </>
-        }
       >
 
         {!summary.indexedDbAvailable && (
