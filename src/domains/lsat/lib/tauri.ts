@@ -27,37 +27,67 @@ export interface BackendStatus {
   message: string;
 }
 
-/** vNext — native backend supervision status, browser-safe. */
+// AUDIT-3 — under the unified shell the LSAT backend is a SUPERVISED SIDECAR: the
+// Rust supervisor in src-tauri owns its lifecycle (ordered startup BA2, health-
+// poll + auto-respawn BA1, log ring BA8) and exposes `get_sidecar_status` /
+// `get_sidecar_logs` / `get_system_health_aggregated`. The standalone LSAT-Lab
+// native commands this module historically invoked — `get_backend_status`,
+// `restart_backend`, `export_backend_logs`, `app_log_dir` — are NOT registered in
+// the CFAPrep crate, so they used to reject and SILENTLY no-op in the packaged app
+// (the diagnostics "Native backend" card rendered dead). These now read the
+// supervisor's status instead. Several other LSAT-Lab native affordances
+// (openFocusTimer, openNotebookOS, quickCaptureNote, playAudioBriefing,
+// emitFirewallBlocked, saveReport, take_launch_file, mica_active) likewise have no
+// command in this shell and remain intentional, guarded no-ops below.
+
+/** Minimal mirror of the supervisor's per-sidecar status row (snake_case wire). */
+interface SupervisorSidecarRow {
+  name: string;
+  ready?: boolean;
+  healthy?: boolean;
+}
+
+/** vNext — native backend supervision status, browser-safe. Projects the LSAT
+ *  backend's row from the supervisor's `get_sidecar_status` onto BackendStatus.
+ *  Returns null in the browser or if the supervisor command is unavailable. */
 export async function getBackendStatus(): Promise<BackendStatus | null> {
   if (!isTauri()) return null;
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<BackendStatus>("get_backend_status");
+    const rows = await invoke<SupervisorSidecarRow[]>("get_sidecar_status");
+    const row = Array.isArray(rows)
+      ? rows.find((r) => typeof r?.name === "string" && r.name.toLowerCase().includes("lsat"))
+      : undefined;
+    if (!row) return null;
+    const ready = row.ready === true;
+    return {
+      managed: "LSAT backend (supervised)",
+      port_open: row.healthy === true,
+      healthy: ready,
+      // The supervisor auto-restarts a down sidecar (BA1); there is no manual
+      // restart command, so the card shows status without a (broken) Restart button.
+      restartable: false,
+      degraded: ready ? undefined : true,
+      message: ready
+        ? "Supervised by the desktop shell."
+        : "Sidecar not ready — the supervisor auto-restarts it.",
+    };
   } catch {
     return null;
   }
 }
 
-/** vNext — restart the managed sidecar/dev backend when LSATLab owns it. */
+/** vNext — the supervisor owns restarts (auto-respawn on health failure); there is
+ *  no manual restart command, so this simply re-reads the supervised status. */
 export async function restartBackend(): Promise<BackendStatus | null> {
-  if (!isTauri()) return null;
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<BackendStatus>("restart_backend");
-  } catch {
-    return null;
-  }
+  return getBackendStatus();
 }
 
-/** vNext — reveal where backend/native logs live. */
+/** vNext — reveal where backend/native logs live. The supervisor exposes a log
+ *  ring (`get_sidecar_logs`) rather than a directory path; fall back to the app
+ *  log dir when the shell provides one. */
 export async function exportBackendLogs(): Promise<string | null> {
-  if (!isTauri()) return null;
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<string>("export_backend_logs");
-  } catch {
-    return getAppLogDir();
-  }
+  return getAppLogDir();
 }
 
 /** vNext — open the native focus-timer affordance. */

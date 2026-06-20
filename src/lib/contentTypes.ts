@@ -473,17 +473,6 @@ export interface Reading {
   examples?: ReadingExample[];
 }
 
-/** @deprecated Use ReadingExample for new content bundles. */
-export interface Example {
-  id: string;
-  topic: string;
-  title: string;
-  prompt: string;
-  walkthrough: string;
-  formulaName?: string;
-  tags: string[];
-}
-
 export interface Vignette {
   id: string;
   topic: string;

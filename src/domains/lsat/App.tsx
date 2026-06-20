@@ -703,6 +703,19 @@ export default function App() {
                 </LazyPage>
               }
             />
+            {/* AUDIT-4 — a malformed /lsat full-bleed URL (e.g. /lsat/exam with no
+                id) matches the full-bleed prefix but no concrete route above; without
+                this catch-all it rendered blank. Mirror the shelled branch's 404. */}
+            <Route
+              path="*"
+              element={
+                <PageTransition>
+                  <LazyPage fallback={<LoadingState />}>
+                    <NotFound />
+                  </LazyPage>
+                </PageTransition>
+              }
+            />
           </Routes>
         </AnimatePresence>
         </Suspense>
