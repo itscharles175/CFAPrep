@@ -79,7 +79,17 @@ export interface SyncFsrsResult {
   sent: number;
   /** Cards the backend applied the incoming state to, when reported. */
   applied?: number;
-  /** Reconciled authoritative state per card (for the host to reconcile its store). */
+  /**
+   * Reconciled authoritative state per card after last-write-wins. INFORMATIONAL
+   * ONLY — surfaced for diagnostics/observability, NOT a directive to overwrite
+   * host scheduling. The host's Dexie review cards are the sole source of truth
+   * for the host plane; the backend `HostProgressSnapshot` only ever mirrors what
+   * the host sent (it never independently schedules host cards). A `kept_existing`
+   * resolution therefore means a STALE replay was correctly ignored (e.g. an
+   * interval tick racing a newer push), so converging the host onto the mirror
+   * value would regress the host's own newer state. Consume this for surfacing
+   * (e.g. a sync-health badge), never to write back into the host store.
+   */
   reconciled?: FsrsReconciledCard[];
   /** Human-readable status for diagnostics/logging. */
   detail: string;

@@ -28,6 +28,16 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { runHostStartupOnce } from '../lib/hostStartup';
+// AUDIT-1 — activate the cross-domain feed. These two host→backend sync hooks
+// (DATA-4a read-only progress feed + DATA-4b FSRS write-back) were fully built +
+// backend-tested but never mounted, so the LSAT sidecar's HostProgressSnapshot
+// mirror stayed empty and every cross-domain read (weakness-index host plane,
+// study/today?include_host, leeches, blind-review-gap) returned LSAT-only data.
+// Mounting them here — the one always-mounted root — turns the feed on: a push on
+// mount + a ~5-min catch-up interval, fully degrading (a down sidecar is a silent
+// no-op, never throws). The hooks own no React state, so they cause no re-renders.
+import { useSyncProgress } from '../hooks/useSyncProgress';
+import { useSyncFsrsWriteBack } from '../hooks/useSyncFsrsWriteBack';
 // Host CSS world — same imports host-entry.jsx makes for the legacy host branch,
 // so the host shell paints identically under the unified root.
 import '../index.css';
@@ -46,6 +56,13 @@ export default function UnifiedRoot() {
   useEffect(() => {
     runHostStartupOnce();
   }, []);
+
+  // Cross-domain sync feed (AUDIT-1). Mounted once at the root so the host plane's
+  // progress + FSRS scheduling are mirrored into the LSAT sidecar for the unified
+  // ability/plan engine. Both are route-independent (Dexie-backed) and degrade to
+  // a no-op when the sidecar is unreachable.
+  useSyncProgress();
+  useSyncFsrsWriteBack();
 
   return (
     <BrowserRouter>
