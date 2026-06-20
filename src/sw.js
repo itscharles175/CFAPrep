@@ -24,9 +24,13 @@ cleanupOutdatedCaches();
 // means we never reach out to any third-party origin, so no runtime cache
 // for them is needed.
 
-// Cache images
+// Cache images — SAME-ORIGIN ONLY (audit M12). A cross-origin image (e.g. a
+// tracker pixel smuggled into model/imported markdown) must neither be fetched
+// through our cache nor persisted; the offline app only ever needs its own
+// bundled/app-origin images. Cross-origin image requests fall through to the
+// network default (and the markdown renderer already blocks remote <img> src).
 registerRoute(
-  ({ request }) => request.destination === 'image',
+  ({ request, url }) => request.destination === 'image' && url.origin === self.location.origin,
   new CacheFirst({
     cacheName: 'images',
     plugins: [

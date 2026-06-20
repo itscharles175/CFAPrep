@@ -61,6 +61,16 @@ export default function AiMarkdown({
           code: ({ children }) => (
             <code className="rounded bg-muted px-1 py-0.5 text-xs">{children}</code>
           ),
+          // audit M12 — NEVER auto-load a remote image from model/imported
+          // markdown. `![](https://tracker/x.png)` would otherwise fire a
+          // third-party request (and the SW would cache it), leaking that the
+          // app ran + breaking the offline/no-tracking promise. Allow only inline
+          // data: URIs; drop any http(s) src to a non-fetching placeholder.
+          img: ({ src, alt }) => {
+            const s = typeof src === "string" ? src : "";
+            if (s.startsWith("data:")) return <img src={s} alt={typeof alt === "string" ? alt : ""} />;
+            return <span className="text-muted-foreground">[image omitted]</span>;
+          },
         }}
       >
         {prepared}

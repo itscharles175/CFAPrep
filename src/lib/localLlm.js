@@ -209,8 +209,40 @@ export async function saveLlmSettings(settings) {
   return merged;
 }
 
+/** audit M11 — is this host a loopback or private-LAN address (i.e. safe to send
+ *  prompts/source text to without breaking the offline/no-cloud promise)? A
+ *  self-hosted model on another box on your LAN is fine; a public host is not. */
+function isLocalLlmHost(hostname) {
+  const h = (hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
+  if (/^127\./.test(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  return false;
+}
+
 function normalizeBaseUrl(baseUrl) {
-  return (baseUrl || DEFAULT_LLM_SETTINGS.baseUrl).trim().replace(/\/+$/, '');
+  const raw = (baseUrl || DEFAULT_LLM_SETTINGS.baseUrl).trim().replace(/\/+$/, '');
+  // audit M11 — the base URL is user-settable AND restored verbatim from a backup
+  // (progressStore imports the settings store wholesale), so a crafted backup or
+  // setting could otherwise redirect every generation — prompt + grounded source
+  // text — to a REMOTE endpoint, silently breaking the offline/no-cloud promise.
+  // Only loopback + private-LAN hosts may receive traffic; anything else falls
+  // back to the safe localhost default (a public model server must be reached via
+  // an explicit LAN IP, not a public host).
+  try {
+    const parsed = new URL(raw);
+    if (!isLocalLlmHost(parsed.hostname)) {
+      console.warn(
+        `[localLlm] Ignoring non-local model endpoint "${raw}" — falling back to ${DEFAULT_LLM_SETTINGS.baseUrl} to preserve offline-only operation.`,
+      );
+      return DEFAULT_LLM_SETTINGS.baseUrl;
+    }
+  } catch {
+    return DEFAULT_LLM_SETTINGS.baseUrl;
+  }
+  return raw;
 }
 
 export async function checkLlmConnection(settings) {

@@ -1,6 +1,18 @@
 import type { DashboardAnalytics, BlindReviewGap, WeakType } from "./types";
 import { pct } from "./utils";
 
+/** audit M13 — escape dynamic, externally-influenceable values before they go
+ *  into the downloaded text/html report. `q_type` is a free-text DB column that
+ *  can be set by generation/tagging or injected via a backup import, so an
+ *  unescaped `<img src=x onerror=...>` would execute when the user opens the
+ *  exported file. (The sibling br-worksheet-export.ts already does this.) */
+function escapeHtml(value: unknown): string {
+  return String(value ?? "").replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string),
+  );
+}
+
 /** R4-G10 — inline SVG bar chart for email-ready reports. */
 function buildTrendSvg(points: { date: string; score: number }[]): string {
   if (points.length < 2) return "";
@@ -39,7 +51,7 @@ export function buildWeeklyReportHtml(opts: {
     .slice(0, 5)
     .map(
       (w) =>
-        `<li>${w.q_type}: ${pct(w.accuracy)} accuracy · ${Math.round(w.avg_time_ms / 1000)}s avg</li>`,
+        `<li>${escapeHtml(w.q_type)}: ${pct(w.accuracy)} accuracy · ${Math.round(w.avg_time_ms / 1000)}s avg</li>`,
     )
     .join("");
   const gapNote = gap
@@ -50,7 +62,7 @@ export function buildWeeklyReportHtml(opts: {
   const trendRows = trendSlice
     .map(
       (t) =>
-        `<tr><td>${t.date}</td><td style="text-align:right"><strong>${t.score}</strong></td></tr>`,
+        `<tr><td>${escapeHtml(t.date)}</td><td style="text-align:right"><strong>${escapeHtml(t.score)}</strong></td></tr>`,
     )
     .join("");
   const trendTable = trendRows
@@ -66,7 +78,7 @@ export function buildWeeklyReportHtml(opts: {
 <style>body{font-family:system-ui,sans-serif;max-width:640px;margin:2rem auto;line-height:1.5;color:#111}
 h1{font-size:1.5rem}ul{padding-left:1.25rem}.muted{color:#555;font-size:0.875rem}</style></head><body>
 <h1>Weekly study summary</h1>
-<p class="muted">Generated ${generatedAt}</p>
+<p class="muted">Generated ${escapeHtml(generatedAt)}</p>
 <p>Predicted score: <strong>${predicted}</strong> (Δ ${delta} over 30d)</p>
 <p>Streak: <strong>${streakDays}</strong> days</p>
 ${gapNote}
