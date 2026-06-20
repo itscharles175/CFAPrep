@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
-import { Icon } from "@lsat/components/ui/icon";
 import { cn } from "@lsat/lib/utils";
+import { PageHeader } from "@/components/ui/Primitives";
 
 export type PageWidth = "md" | "lg" | "xl" | "2xl" | "full";
 
@@ -13,18 +13,22 @@ const widthClass: Record<PageWidth, string> = {
 };
 
 /**
- * R9 (docs/19 F4.1) — the page-header system. Every screen routes through this,
- * so it carries the app's editorial identity: an optional uppercase `eyebrow`
- * overline, an optional `icon` in a calm graphite chip, and the title in the
- * serif `.type-display` voice (Newsreader optical sizing). All new props are
- * optional, so the 19 existing call sites keep working unchanged.
+ * A4 (UIv2) — the page header now DELEGATES to the host <PageHeader>. The K4
+ * reskin moved 14 LSAT pages onto the host header (StatusBadge eyebrow + host sans
+ * title + subtitle + ActionBar); the last three on this component (Analytics,
+ * Explanation, Import) were the only screens still rendering the legacy serif
+ * `.type-display` title + overline eyebrow. Delegating here closes that seam for
+ * all three at once with no call-site churn, while preserving this component's
+ * content WIDTH-WRAPPER (mx-auto max-w-* + vertical rhythm) so nothing below the
+ * header shifts. The `eyebrow` maps to PageHeader's badge; `description` to its
+ * subtitle. `icon` is accepted for call-site compatibility but no longer rendered
+ * — the unified host header carries a badge, not an icon chip.
  */
 export function PageLayout({
   title,
   description,
   actions,
   eyebrow,
-  icon,
   width = "lg",
   children,
   className,
@@ -32,9 +36,9 @@ export function PageLayout({
   title: string;
   description?: string;
   actions?: React.ReactNode;
-  /** Uppercase overline label above the title (e.g. "LIBRARY"). */
+  /** Uppercase overline label above the title (rendered as a host StatusBadge). */
   eyebrow?: string;
-  /** A lucide icon rendered in a calm chip beside the title. */
+  /** Accepted for API compatibility; the unified host header renders no icon. */
   icon?: LucideIcon;
   width?: PageWidth;
   children: React.ReactNode;
@@ -50,31 +54,7 @@ export function PageLayout({
         className,
       )}
     >
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          {icon && (
-            <span className="mt-1 inline-flex shrink-0 items-center justify-center rounded-card bg-surface-2 p-2 text-muted-foreground">
-              <Icon as={icon} size="md" />
-            </span>
-          )}
-          <div className="space-y-1">
-            {eyebrow && (
-              <p className="type-overline text-muted-foreground">{eyebrow}</p>
-            )}
-            <h1 className="type-display text-3xl leading-tight [text-wrap:balance]">
-              {title}
-            </h1>
-            {description && (
-              <p className="max-w-prose text-sm text-muted-foreground">
-                {description}
-              </p>
-            )}
-          </div>
-        </div>
-        {actions && (
-          <div className="flex shrink-0 items-center gap-2">{actions}</div>
-        )}
-      </header>
+      <PageHeader eyebrow={eyebrow} title={title} subtitle={description} actions={actions} />
       {children}
     </div>
   );
