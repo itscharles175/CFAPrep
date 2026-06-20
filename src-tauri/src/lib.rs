@@ -30,6 +30,18 @@ mod relocation;
 struct SupervisedSidecar {
     spec: SidecarSpec,
     child: Child,
+    /// audit (LOW) — crash-loop backoff bookkeeping. A sidecar that dies on every
+    /// launch (corrupt store, occupied port, missing model) would otherwise be
+    /// respawned on a fixed cadence forever (log churn + repeated doomed launches).
+    consecutive_failures: u32,
+    /// When set, the supervisor skips respawn attempts until this instant.
+    backoff_until: Option<std::time::Instant>,
+}
+
+impl SupervisedSidecar {
+    fn new(spec: SidecarSpec, child: Child) -> Self {
+        Self { spec, child, consecutive_failures: 0, backoff_until: None }
+    }
 }
 
 /// Managed supervisor state. Holds every sidecar we launched alongside the spec
@@ -824,7 +836,7 @@ fn spawn_sidecars_with_specs<L: SidecarLauncher>(
             Ok(mut child) => {
                 log::info!("sidecar: {} started (pid {})", spec.name, child.id());
                 attach_log_capture(&spec.name, &mut child, logs);
-                kids.push(SupervisedSidecar { spec, child });
+                kids.push(SupervisedSidecar::new(spec, child));
             }
             Err(e) => log::error!("sidecar: {} failed to start: {e}", spec.name),
         }
@@ -938,6 +950,7 @@ fn supervise_once<L: SidecarLauncher>(
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
+    let now = std::time::Instant::now();
     for slot in guard.iter_mut() {
         // A sidecar that exposes a readiness port is "down" when that port is
         // not accepting connections. Port-less sidecars (the worker) are only
@@ -949,10 +962,31 @@ fn supervise_once<L: SidecarLauncher>(
             .unwrap_or(false);
         let process_exited = matches!(slot.child.try_wait(), Ok(Some(_)));
 
-        if port_down || process_exited {
+        if !(port_down || process_exited) {
+            // Healthy — clear any crash-loop backoff so a future blip retries promptly.
+            slot.consecutive_failures = 0;
+            slot.backoff_until = None;
+            continue;
+        }
+        // Down. audit (LOW) — respect exponential backoff so a sidecar that fails
+        // on every launch isn't respawned on every 7s sweep forever.
+        if let Some(until) = slot.backoff_until {
+            if now < until {
+                continue;
+            }
+        }
+        {
             let name = slot.spec.name.clone();
+            slot.consecutive_failures = slot.consecutive_failures.saturating_add(1);
+            // 14s, 28s, 56s, … capped at 5 min; shift exponent capped to avoid overflow.
+            let backoff_secs = 7u64
+                .saturating_mul(1u64 << slot.consecutive_failures.min(6))
+                .min(300);
+            slot.backoff_until = Some(now + std::time::Duration::from_secs(backoff_secs));
             log::warn!(
-                "sidecar: {name} appears down (port_down={port_down}, exited={process_exited}); respawning"
+                "sidecar: {name} appears down (port_down={port_down}, exited={process_exited}); \
+                 respawn attempt #{} (next backoff {backoff_secs}s)",
+                slot.consecutive_failures
             );
             // Reap the old handle (and its uv grandchildren, audit M15) so we
             // don't leak a zombie on Unix or orphan the Python workers on Windows.
@@ -1779,7 +1813,7 @@ mod tests {
         let _ = child.wait();
 
         let state: Mutex<Vec<SupervisedSidecar>> =
-            Mutex::new(vec![SupervisedSidecar { spec, child }]);
+            Mutex::new(vec![SupervisedSidecar::new(spec, child)]);
 
         let logs = SidecarLogs::default();
         let respawned = supervise_once(&launcher, &state, &logs);
@@ -1813,7 +1847,7 @@ mod tests {
         };
         let child = spawn_long_lived_child();
         let state: Mutex<Vec<SupervisedSidecar>> =
-            Mutex::new(vec![SupervisedSidecar { spec, child }]);
+            Mutex::new(vec![SupervisedSidecar::new(spec, child)]);
 
         let logs = SidecarLogs::default();
         let respawned = supervise_once(&launcher, &state, &logs);
