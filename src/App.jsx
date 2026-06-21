@@ -45,6 +45,10 @@ const StyleGallery = lazy(() => import('./pages/StyleGallery'));
 // LEARN-5 — standalone unified leech + concept-gap remediation page. Registered
 // additively below (its own /leeches route); not part of the typed routeManifest.
 const LeechesAndGaps = lazy(() => import('./pages/LeechesAndGaps'));
+// Wave 6 — host preferences page (appearance / density / reading aids via
+// <ReadingSettings/>). Registered additively below (its own /settings route),
+// same as /leeches; kept out of the typed routeManifest to stay least-invasive.
+const Settings = lazy(() => import('./pages/Settings'));
 const PwaInstallPrompt = lazy(() => import('./components/PwaInstallPrompt'));
 
 /*
@@ -343,6 +347,9 @@ export default function App() {
                       page. Registered here additively (its own route) rather than
                       via the typed routeManifest. */}
                   <Route path="/leeches" element={<LeechesAndGaps />} />
+                  {/* Wave 6 — host preferences page (appearance / density /
+                      reading aids). Additive route, same as /leeches above. */}
+                  <Route path="/preferences" element={<Settings />} />
                   <Route
                     path="*"
                     element={

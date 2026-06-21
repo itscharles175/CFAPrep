@@ -362,6 +362,16 @@ export default function Sidebar({
               </NavLink>
             );
           })}
+          {/* Wave 6 — Preferences (appearance / density / reading aids). The page is
+              registered additively (its own /preferences route in App.jsx), so it
+              isn't in `sidebarToolRoutes` (which is derived from the typed
+              manifest); link it directly, matching the NavLink rows above.
+              Named "Preferences" (not "Settings") to avoid colliding with the
+              LSAT Setup group's own "Settings" link. */}
+          <NavLink to="/preferences" onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+            <Settings />
+            {!collapsed && <span>Preferences</span>}
+          </NavLink>
         </div>
 
         {/* K4: the unified shell's 4th nav section — the merged LSAT surface.

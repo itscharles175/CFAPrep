@@ -460,6 +460,7 @@ export const commandRoutes: CommandRoute[] = [
   { id: 'action:backup', title: 'Export Vault Backup', subtitle: 'Download all local data as JSON', path: '/vault', keywords: ['export backup vault json local data'], action: 'backup' },
   { id: 'action:repair', title: 'Repair Local Vault', subtitle: 'Rebuild indexes and clean corrupted rows', path: '/review', keywords: ['repair vault rebuild indexes corrupted rows'], action: 'repair' },
   { id: 'action:theme', title: 'Toggle Theme', subtitle: 'Switch light or dark mode', path: '/', keywords: ['toggle theme light dark'], action: 'theme' },
+  { id: 'command:preferences', title: 'Open Preferences', subtitle: 'Appearance, layout density, and reading aids', path: '/preferences', keywords: ['settings preferences appearance theme reading density dyslexia bionic spacing accessibility'] },
   { id: 'command:style', title: 'Open Style Gallery', subtitle: 'Tokens, primitives, and the visual system', path: '/style', keywords: ['style gallery tokens primitives design system colors typography'] },
 ];
 
