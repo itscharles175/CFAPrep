@@ -2,6 +2,15 @@ import { getStorage } from './storage';
 import { packExcerpts, pickBudget, renderExcerpts } from './contextBudget';
 import { streamSse, isStreamTimeout } from './streamingClient';
 import { stripThink } from './stripThink';
+// Wave 2 SLICE A — host-LLM determinism contract + structured-output engine +
+// content-quality gate + prompt registry. The STRUCTURED (JSON-producing)
+// generators below route through these; the creative/streaming paths
+// (explain / critique / narrate / summarize / generateText / streamText) keep
+// their warmer sampling and free-prose output untouched.
+import { withDeterminism } from './llm/determinism';
+import { generateStructured, StructuredOutputError } from './llm/structured';
+import { gateBatch } from './llm/contentGate';
+import { renderPrompt } from './llm/promptRegistry';
 
 // Local-LLM integration. Targets an OpenAI-compatible chat endpoint exposed by a
 // local model server (Ollama at :11434/v1, LM Studio at :1234/v1). No cloud, no
@@ -259,42 +268,54 @@ export async function checkLlmConnection(settings) {
   }
 }
 
-function extractJsonArray(text) {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced ? fenced[1] : text;
-  const start = candidate.indexOf('[');
-  const end = candidate.lastIndexOf(']');
-  const slice = start >= 0 && end > start ? candidate.slice(start, end + 1) : candidate;
-  try {
-    const parsed = JSON.parse(slice);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
+// (The former `extractJsonArray` JSON-array scraper was superseded by the
+// structured engine's balanced-value extractor in src/lib/llm/structured.js —
+// `extractJsonText` — which the JSON generators now route through.)
 
-export async function generateQuestionsFromCurriculum({ settings, topicTitle, chunks, count = 3, signal }) {
+// Wave 2 SLICE A — shared transport for STRUCTURED generations.
+//
+// Performs ONE chat completion against the local server with the determinism
+// contract applied (fixed seed + pinned sampling via `withDeterminism`) and the
+// structured engine's `response_format` spliced in. Returns the RAW assistant
+// text (think-tags stripped at the engine layer). All the existing reliability
+// guards are preserved: dedup (signature keyed on the FINAL deterministic body
+// incl. response_format, so two identical structured calls still coalesce),
+// cancellable timeout, and the SAME actionable CORS / status error strings.
+//
+// This is the `request` transport handed to `generateStructured`: it receives
+// `{ responseFormat, systemSuffix }` and is free to use them. We append the
+// systemSuffix to the system message so weak servers that ignore response_format
+// still get a strong "JSON only" nudge.
+//
+// @param {object} params
+// @param {object} params.settings
+// @param {Array<{role,content}>} params.messages   - base messages (system, user)
+// @param {object} params.responseFormat            - from buildResponseFormat
+// @param {string} params.systemSuffix              - JSON-only instruction
+// @param {number} params.timeoutMs
+// @param {AbortSignal} [params.signal]
+// @returns {Promise<string>} raw assistant text
+function structuredCompletion({ settings, messages, responseFormat, systemSuffix, timeoutMs, signal }) {
   const base = normalizeBaseUrl(settings?.baseUrl);
   const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
-  const packed = packCurriculumChunks(settings, chunks);
-  const context = packed.text;
-  if (!context) throw new Error('No curriculum text available to ground generation.');
-
-  const system =
-    'You are a CFA exam tutor. Using ONLY the provided curriculum excerpts, write exam-style practice multiple-choice questions. ' +
-    'Respond with a JSON array and nothing else. Each element must be an object: ' +
-    '{"question": string, "options": [string, string, string], "correct": integer (0-based index of the correct option), "explanation": string}.';
-  const user = `Topic: ${topicTitle}\n\nWrite ${count} questions grounded strictly in these excerpts:\n\n${context}`;
-
   const endpoint = `${base}/chat/completions`;
-  const body = {
-    model,
-    temperature: 0.3,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-  };
+
+  // Append the JSON-only instruction to the (first) system message so even a
+  // server that drops response_format is steered toward clean JSON.
+  const withSuffix = (messages || []).map((m) =>
+    m.role === 'system' && systemSuffix ? { ...m, content: `${m.content}\n\n${systemSuffix}` } : m,
+  );
+
+  // Determinism contract: fixed seed + pinned temperature/top_p. response_format
+  // is part of the body so identical structured calls share a dedup signature.
+  const body = withDeterminism(
+    {
+      model,
+      messages: withSuffix,
+      ...(responseFormat ? { response_format: responseFormat } : {}),
+    },
+  );
+
   const signature = requestSignature(endpoint, body);
 
   return dedupeRequest(signature, async () => {
@@ -307,13 +328,10 @@ export async function generateQuestionsFromCurriculum({ settings, topicTitle, ch
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        { timeoutMs: LLM_TIMEOUT_GENERATION_MS, callerSignal: signal },
+        { timeoutMs, callerSignal: signal },
       );
     } catch (error) {
       if (error?.isLlmTimeout) throw error;
-      // Browser fetch to a different port is cross-origin. LM Studio and Ollama
-      // both ship with CORS disabled by default; the fetch fails as a TypeError
-      // long before any HTTP status. Make that fix actionable.
       if (error?.name === 'AbortError') throw error;
       throw new Error(
         `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
@@ -322,22 +340,73 @@ export async function generateQuestionsFromCurriculum({ settings, topicTitle, ch
     }
     if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
     const data = await response.json();
-    // AI-8 — strip reasoning traces BEFORE extraction so a leading <think> block
-    // can't break JSON parsing nor leak chain-of-thought into question fields.
-    const content = stripThink(data?.choices?.[0]?.message?.content || '');
-    const parsed = extractJsonArray(content);
-    if (!parsed) throw new Error('The model did not return parseable questions. Try a more capable local model.');
-
-    return parsed
-      .filter((item) => item && typeof item.question === 'string' && Array.isArray(item.options) && item.options.length >= 2)
-      .map((item, index) => ({
-        id: `ai-${index + 1}`,
-        question: item.question,
-        options: item.options.map((option) => String(option)),
-        correct: Number.isInteger(item.correct) && item.correct >= 0 && item.correct < item.options.length ? item.correct : 0,
-        explanation: typeof item.explanation === 'string' ? item.explanation : '',
-      }));
+    // The structured engine strips <think> before parsing; return raw here.
+    return data?.choices?.[0]?.message?.content || '';
   });
+}
+
+export async function generateQuestionsFromCurriculum({ settings, topicTitle, chunks, count = 3, signal }) {
+  const packed = packCurriculumChunks(settings, chunks);
+  const context = packed.text;
+  if (!context) throw new Error('No curriculum text available to ground generation.');
+
+  // AI-3 — prompt + schema from the versioned registry (prompt_version stampable).
+  const rendered = renderPrompt('cfa.questions', { topicTitle, count, context });
+
+  let parsed;
+  try {
+    // AI-1 — determinism contract + structured engine: validate -> repair ->
+    // extract against the registry schema. <think> stripping happens inside.
+    parsed = await generateStructured({
+      schema: rendered.schema,
+      jsonSchema: rendered.jsonSchema,
+      schemaName: rendered.schemaName,
+      request: ({ responseFormat, systemSuffix }) =>
+        structuredCompletion({
+          settings,
+          messages: rendered.messages,
+          responseFormat,
+          systemSuffix,
+          timeoutMs: LLM_TIMEOUT_GENERATION_MS,
+          signal,
+        }),
+    });
+  } catch (error) {
+    // Re-throw transport errors (timeout / CORS / status) unchanged so existing
+    // error-matching keeps working; only schema failure maps to the legacy
+    // "parseable" message the UI + tests expect.
+    if (error?.isStructuredOutputError || error instanceof StructuredOutputError) {
+      throw new Error('The model did not return parseable questions. Try a more capable local model.', { cause: error });
+    }
+    throw error;
+  }
+
+  // Legacy normalization (preserved): an out-of-range / non-integer `correct`
+  // index is clamped to 0 BEFORE the gate. This is the historical contract — a
+  // model that mis-indexes still yields a usable item rather than being dropped.
+  // The gate then runs on the NORMALIZED index, so it only quarantines the
+  // genuinely unrecoverable failures (blank/duplicate options, empty stem,
+  // meta-options, ungrounded content) rather than re-flagging the clamp.
+  const normalized = parsed.map((item) => ({
+    ...item,
+    options: item.options.map((option) => String(option)),
+    correct:
+      Number.isInteger(item.correct) && item.correct >= 0 && item.correct < item.options.length ? item.correct : 0,
+  }));
+
+  // AI-2 — universal content gate: quarantine MCQs that fail option sanity or
+  // aren't grounded in the curriculum, instead of emitting them.
+  const { accepted } = gateBatch({ kind: 'mcq', items: normalized, context });
+
+  return accepted.map((item, index) => ({
+    id: `ai-${index + 1}`,
+    question: item.question,
+    options: item.options,
+    correct: item.correct,
+    explanation: typeof item.explanation === 'string' ? item.explanation : '',
+    // AI-3 — stamp which prompt produced this for eval reproducibility.
+    prompt_version: `${rendered.id}@${rendered.version}`,
+  }));
 }
 
 /**
@@ -498,8 +567,6 @@ export async function critiqueConstructedResponse({ settings, prompt, response, 
  * }>}
  */
 export async function gradeConstructedResponseStructured({ settings, prompt, response, rubric, signal }) {
-  const base = normalizeBaseUrl(settings?.baseUrl);
-  const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
   const safeRubric = Array.isArray(rubric) ? rubric : [];
   if (safeRubric.length === 0) {
     throw new Error('No rubric criteria provided.');
@@ -509,67 +576,39 @@ export async function gradeConstructedResponseStructured({ settings, prompt, res
     .map((c) => `  - id: "${c.id}", label: "${c.label}", max ${c.maxPoints} pt${c.maxPoints !== 1 ? 's' : ''}${c.description ? `, guidance: ${c.description}` : ''}`)
     .join('\n');
 
-  const system =
-    'You are a CFA Level III rubric grader. Return ONLY a JSON object — no prose, no markdown fences. Shape:\n' +
-    '{\n' +
-    '  "criteria": [\n' +
-    '    { "id": "<rubric id>", "verdict": "Met"|"Partial"|"Missed", "score": <number ≤ maxPoints>, "evidence": "<1-2 sentences grounded in the candidate text>", "improvement": "<one concrete suggestion>" }\n' +
-    '  ],\n' +
-    '  "summary": "<2-3 sentences on the overall response — what was strong, what was the biggest weakness>"\n' +
-    '}\n' +
-    'Score conservatively — Level III graders do not inflate. Met = full credit, Partial = at most 60% of maxPoints, Missed = 0.';
+  // AI-3 — system/user prompt + schema from the versioned registry.
+  const rendered = renderPrompt('cfa.rubricGrade', { prompt, criteriaBlock, response });
 
-  const user =
-    `Prompt:\n${prompt}\n\nRubric criteria:\n${criteriaBlock}\n\nCandidate response:\n${response}\n\nReturn the JSON now.`;
-
-  const endpoint = `${base}/chat/completions`;
-  const requestBody = {
-    model,
-    temperature: 0.15,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-  };
-  const signature = requestSignature(endpoint, requestBody);
-
-  return dedupeRequest(signature, async () => {
-  let fetchResponse;
-  try {
-    fetchResponse = await fetchWithTimeout(
-      endpoint,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      },
-      { timeoutMs: LLM_TIMEOUT_CHAT_MS, callerSignal: signal },
-    );
-  } catch (error) {
-    if (error?.isLlmTimeout) throw error;
-    if (error?.name === 'AbortError') throw error;
-    throw new Error(
-      `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
-      { cause: error },
-    );
-  }
-  if (!fetchResponse.ok) throw new Error(`Local model server responded ${fetchResponse.status}.`);
-  const data = await fetchResponse.json();
-  // AI-8 — strip reasoning traces BEFORE the JSON match so braces inside a
-  // <think> block can't corrupt the grade, nor leak into evidence/summary text.
-  const content = stripThink(data?.choices?.[0]?.message?.content || '');
-
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('The model did not return a JSON grade. Try a more capable local model.');
-  }
   let parsed;
   try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch (err) {
-    throw new Error(`Could not parse rubric grade JSON: ${err.message}`, { cause: err });
+    // AI-1 — determinism contract + structured engine: validate -> repair ->
+    // extract the { criteria, summary } object against the registry schema.
+    parsed = await generateStructured({
+      schema: rendered.schema,
+      jsonSchema: rendered.jsonSchema,
+      schemaName: rendered.schemaName,
+      request: ({ responseFormat, systemSuffix }) =>
+        structuredCompletion({
+          settings,
+          messages: rendered.messages,
+          responseFormat,
+          systemSuffix,
+          timeoutMs: LLM_TIMEOUT_CHAT_MS,
+          signal,
+        }),
+    });
+  } catch (error) {
+    // Map a structured-engine failure to the legacy JSON-grade message the UI +
+    // tests expect; transport errors (timeout / CORS / status) pass through.
+    if (error?.isStructuredOutputError || error instanceof StructuredOutputError) {
+      throw new Error('The model did not return a JSON grade. Try a more capable local model.', { cause: error });
+    }
+    throw error;
   }
 
+  // Everything below is the SAME downstream normalization as before — verdict
+  // mapping, score clamping, fill-missing-criteria, overall synthesis — now
+  // operating on the schema-validated { criteria, summary } object.
   const rubricById = new Map(safeRubric.map((c) => [c.id, c]));
   const rawCriteria = Array.isArray(parsed?.criteria) ? parsed.criteria : [];
   const seen = new Set();
@@ -638,7 +677,6 @@ export async function gradeConstructedResponseStructured({ settings, prompt, res
     overall: { verdict, percent, total, max, summary },
     criteria,
   };
-  });
 }
 
 /**
@@ -825,68 +863,48 @@ export async function saveCachedTopicSummary(level, topic, summary) {
  * @returns {Promise<Array<{ id: string, front: string, back: string, locator?: string }>>}
  */
 export async function generateFlashcardsFromCurriculum({ settings, topicTitle, chunks, count = 6, signal }) {
-  const base = normalizeBaseUrl(settings?.baseUrl);
-  const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
   const packed = packCurriculumChunks(settings, chunks);
   const context = packed.text;
   if (!context) throw new Error('No curriculum text available to ground generation.');
 
-  const system =
-    'You are a CFA tutor. Using ONLY the provided curriculum excerpts, write concise flashcards. ' +
-    'Front = a focused prompt (definition / formula / scenario). ' +
-    'Back = a precise 1-3 sentence answer + a citation locator if obvious from the excerpts. ' +
-    'Respond with a JSON array — no prose.';
-  const user = `Topic: ${topicTitle}\n\nWrite ${count} flashcards grounded strictly in these excerpts:\n\n${context}`;
+  // AI-3 — prompt + schema from the versioned registry.
+  const rendered = renderPrompt('cfa.flashcards', { topicTitle, count, context });
 
-  const endpoint = `${base}/chat/completions`;
-  const body = {
-    model,
-    temperature: 0.3,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-  };
-  const signature = requestSignature(endpoint, body);
-
-  return dedupeRequest(signature, async () => {
-    let response;
-    try {
-      response = await fetchWithTimeout(
-        endpoint,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-        { timeoutMs: LLM_TIMEOUT_GENERATION_MS, callerSignal: signal },
-      );
-    } catch (error) {
-      if (error?.isLlmTimeout) throw error;
-      if (error?.name === 'AbortError') throw error;
-      throw new Error(
-        `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
-        { cause: error },
-      );
+  let parsed;
+  try {
+    // AI-1 — determinism contract + structured engine (validate -> repair).
+    parsed = await generateStructured({
+      schema: rendered.schema,
+      jsonSchema: rendered.jsonSchema,
+      schemaName: rendered.schemaName,
+      request: ({ responseFormat, systemSuffix }) =>
+        structuredCompletion({
+          settings,
+          messages: rendered.messages,
+          responseFormat,
+          systemSuffix,
+          timeoutMs: LLM_TIMEOUT_GENERATION_MS,
+          signal,
+        }),
+    });
+  } catch (error) {
+    if (error?.isStructuredOutputError || error instanceof StructuredOutputError) {
+      throw new Error('The model did not return parseable flashcards. Try a more capable local model.', { cause: error });
     }
-    if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
-    const data = await response.json();
-    // AI-8 — strip reasoning traces BEFORE extraction so a leading <think> block
-    // can't break JSON parsing nor leak chain-of-thought into card front/back.
-    const content = stripThink(data?.choices?.[0]?.message?.content || '');
-    const parsed = extractJsonArray(content);
-    if (!parsed) throw new Error('The model did not return parseable flashcards. Try a more capable local model.');
+    throw error;
+  }
 
-    return parsed
-      .filter((item) => item && typeof item.front === 'string' && item.front.trim() && typeof item.back === 'string' && item.back.trim())
-      .slice(0, count)
-      .map((item, index) => ({
-        id: `flash-${index + 1}`,
-        front: item.front.trim(),
-        back: item.back.trim(),
-        ...(typeof item.locator === 'string' && item.locator.trim() ? { locator: item.locator.trim() } : {}),
-      }));
-  });
+  // AI-2 — content gate: quarantine empty/trivial or ungrounded cards.
+  const { accepted } = gateBatch({ kind: 'flashcard', items: parsed, context });
+
+  return accepted.slice(0, count).map((item, index) => ({
+    id: `flash-${index + 1}`,
+    front: item.front.trim(),
+    back: item.back.trim(),
+    ...(typeof item.locator === 'string' && item.locator.trim() ? { locator: item.locator.trim() } : {}),
+    // AI-3 — stamp the producing prompt for eval reproducibility.
+    prompt_version: `${rendered.id}@${rendered.version}`,
+  }));
 }
 
 /**

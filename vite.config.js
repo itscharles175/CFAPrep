@@ -63,6 +63,72 @@ export default defineConfig({
     },
   },
   test: {
+    // v8 coverage instrumentation (TEST-5, now always on in CI) roughly doubles
+    // per-test runtime, pushing the heavier component + property suites past
+    // vitest's 5s default timeout. Raise the ceiling so the always-coverage CI run
+    // is stable; fast tests still finish fast. Inherited by both projects via
+    // `extends: true`.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
+    // TEST-5 (Wave 2 measurement substrate): coverage is a ROOT-level concern in a
+    // vitest `projects` setup — it instruments the whole run, and thresholds are
+    // global, not per-project. We measure the HOST surface (`src/**`, minus the
+    // vendored LSAT subtree, tests, types and generated/data literals) and enforce
+    // a NON-DECREASING FLOOR a few points below the measured numbers so it ratchets
+    // up over time without going flaky. CI runs `npm run test:ci` (the `host`
+    // project) with `--coverage`; the floor below is what fails the build. Measured
+    // 2026-06-20 on `--project host` with this exact include/exclude + `all:true`:
+    // stmts 51.69 / branches 40.61 / funcs 52.47 / lines 53.06 → floors set a few
+    // points under each (whole numbers, so normal churn never trips them).
+    coverage: {
+      provider: 'v8',
+      // `text` for the CI log, `json-summary` for a machine-readable artifact other
+      // tools (and a future ratchet script) can read without re-parsing prose.
+      reporter: ['text', 'json-summary'],
+      reportsDirectory: './dist/reports/coverage',
+      // Persist the report files even when the run has failing tests — otherwise
+      // vitest computes coverage (and still enforces the floor) but skips WRITING
+      // the json-summary, so CI couldn't upload the measurement artifact on a red
+      // run. The floor is enforced regardless; this only affects the saved report.
+      reportOnFailure: true,
+      // Only the host application surface. `all: true` so untested host modules
+      // count against the floor (otherwise coverage only reflects imported files
+      // and silently inflates as tests are deleted).
+      all: true,
+      include: ['src/**'],
+      exclude: [
+        // Vendored LSAT subtree — it has its own `lsat` project + CI gate; folding
+        // it in here would make the host floor depend on LSAT churn.
+        'src/domains/lsat/**',
+        // Test/spec/setup files measure nothing about the product.
+        'src/**/*.{test,spec}.{js,jsx,ts,tsx}',
+        'src/**/__tests__/**',
+        'src/**/__integration__/**',
+        'src/**/__mocks__/**',
+        'src/setupTests.{js,ts}',
+        // Type-only declarations have no runtime to cover.
+        'src/**/*.d.ts',
+        'src/**/types.ts',
+        'src/**/*.types.ts',
+        // Generated clients (codegen output — not authored, not our coverage to own).
+        'src/**/api.gen.ts',
+        // Static content/data literals (CFA packs, catalogs) are data, not logic.
+        'src/data/**',
+        'src/**/*Packs.{js,ts}',
+        'src/domains/cfa/**/*Packs.{js,ts}',
+        // Pure entry/bootstrap shims with no branching worth a floor.
+        'src/main.jsx',
+        'src/sw.js',
+      ],
+      // NON-DECREASING FLOOR (TEST-5). Set a few points below the measured numbers
+      // so normal refactors don't trip it; raise these as coverage climbs.
+      thresholds: {
+        statements: 48,
+        branches: 37,
+        functions: 49,
+        lines: 50,
+      },
+    },
     // Two vitest projects share this one config (and its `resolve.alias` +
     // react plugin via `extends: true`) so the vendored LSAT subtree runs on
     // the host's single hoisted toolchain (React 19 / vitest 4) — there is no

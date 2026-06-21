@@ -34,8 +34,15 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
-      - name: Unit tests
-        run: npm run test:ci
+      # TEST-5 (Wave 2 measurement substrate): run the host suite WITH v8 coverage so
+      # the non-decreasing coverage floor configured in vite.config.js
+      # (`test.coverage.thresholds`) is ENFORCED on every PR — a drop below the floor
+      # exits non-zero and fails this job. `npm run test:ci` already emits the JUnit
+      # report; `--` forwards `--coverage` through npm to vitest, which adds the v8
+      # text + json-summary reporters (the latter uploaded with the other reports
+      # below). Offline + hermetic — no sidecar/LLM needed.
+      - name: Unit tests (with coverage floor)
+        run: npm run test:ci -- --coverage
 
       - name: Build production bundle
         run: npm run build
@@ -63,6 +70,13 @@ jobs:
       # assertions only (no prose linting). node-only, runs inline. (Plan DX-1.)
       - name: Docs-drift gate
         run: node scripts/check-docs-drift.mjs
+
+      # RAG-1 (Wave 2 measurement substrate) — offline retrieval-eval floor.
+      # scripts/rag-eval.mjs computes recall@k / precision@k / MRR / nDCG over
+      # committed golden fixtures and FAILS if any metric drops below the
+      # documented floor, so a retrieval regression can't ship green. node-only.
+      - name: RAG retrieval-eval floor
+        run: node scripts/rag-eval.mjs
 
       - name: Audit dependencies
         run: npm audit --omit=dev --audit-level=high
