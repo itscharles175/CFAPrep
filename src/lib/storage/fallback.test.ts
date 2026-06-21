@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createReadThroughDriver } from './fallbackDriver';
 import type {
+  KeyedTable,
   MasterySnapshotStore,
   QuestionResultStore,
   ReviewItemStore,
@@ -73,6 +74,7 @@ function makeFakeDriver(name: 'dexie' | 'surrealdb', seed: {
   reviewItems?: ReviewItem[];
   questionResults?: QuestionResult[];
   masterySnapshots?: MasterySnapshot[];
+  tables?: Record<string, Array<{ id: string } & Record<string, unknown>>>;
 } = {}) {
   const state = { down: false };
   const calls = { reads: 0, writes: 0 };
@@ -81,6 +83,9 @@ function makeFakeDriver(name: 'dexie' | 'surrealdb', seed: {
   const reviewMap = new Map<string, ReviewItem>((seed.reviewItems ?? []).map((r) => [r.id, r]));
   const qrRows: QuestionResult[] = [...(seed.questionResults ?? [])];
   const masteryMap = new Map<string, MasterySnapshot>((seed.masterySnapshots ?? []).map((s) => [s.id, s]));
+  const tableMaps = new Map<string, Map<string, { id: string } & Record<string, unknown>>>(
+    Object.entries(seed.tables ?? {}).map(([n, rows]) => [n, new Map(rows.map((r) => [r.id, r]))]),
+  );
 
   function read<T>(fn: () => T): Promise<T> {
     calls.reads += 1;
@@ -130,6 +135,37 @@ function makeFakeDriver(name: 'dexie' | 'surrealdb', seed: {
     reviewItems,
     questionResults,
     masterySnapshots,
+    table<T>(tableName: string): KeyedTable<T> {
+      if (!tableMaps.has(tableName)) tableMaps.set(tableName, new Map());
+      const m = tableMaps.get(tableName)!;
+      const rows = () => [...m.values()] as unknown as T[];
+      const keyOf = (r: unknown) => (r as { id: string }).id;
+      return {
+        get: (key) => read(() => m.get(String(key)) as unknown as T | undefined),
+        bulkGet: (keys) => read(() => keys.map((k) => m.get(String(k)) as unknown as T | undefined)),
+        put: (row) => write(() => { m.set(keyOf(row), row as { id: string } & Record<string, unknown>); }),
+        bulkPut: (rs) => write(() => { rs.forEach((r) => m.set(keyOf(r), r as { id: string } & Record<string, unknown>)); }),
+        add: (row) => write(() => { m.set(keyOf(row), row as { id: string } & Record<string, unknown>); }),
+        delete: (key) => write(() => { m.delete(String(key)); }),
+        bulkDelete: (keys) => write(() => { keys.forEach((k) => m.delete(String(k))); }),
+        toArray: () => read(() => rows()),
+        count: () => read(() => m.size),
+        clear: () => write(() => { m.clear(); }),
+        whereEquals: (field, value) => read(() => rows().filter((r) => (r as Record<string, unknown>)[field] === value)),
+        whereAnyOf: (field, values) => read(() => rows().filter((r) => values.includes((r as Record<string, unknown>)[field]))),
+        orderedBy: (field, opts) => read(() => {
+          let arr = [...rows()].sort((a, b) => {
+            const av = (a as Record<string, unknown>)[field] as never;
+            const bv = (b as Record<string, unknown>)[field] as never;
+            return av < bv ? -1 : av > bv ? 1 : 0;
+          });
+          if (opts?.desc) arr.reverse();
+          if (opts?.offset) arr = arr.slice(opts.offset);
+          if (opts?.limit != null) arr = arr.slice(0, opts.limit);
+          return arr;
+        }),
+      };
+    },
   };
 
   return { driver, state, calls };
@@ -205,6 +241,33 @@ describe('createReadThroughDriver', () => {
 
     // No write reached the Dexie cache.
     expect(fallback.calls.writes).toBe(0);
+  });
+
+  // DATA-1 Phase 2: the generic table() primitive must also be read-through, so a
+  // progressStore reroute through getStorage().table() survives a SurrealDB outage
+  // (and doesn't throw "driver does not implement table()" on cutover).
+  it('exposes a read-through table(): primary while healthy, cache on outage, writes primary-only', async () => {
+    type Row = { id: string; v: string };
+    const p = makeFakeDriver('surrealdb', { tables: { lessonProgress: [{ id: 'lp1', v: 'from-surreal' }] } });
+    const f = makeFakeDriver('dexie', { tables: { lessonProgress: [{ id: 'lp1', v: 'from-dexie-cache' }] } });
+    const wrapped = createReadThroughDriver(p.driver, f.driver);
+
+    expect(wrapped.table).toBeDefined();
+    const t = wrapped.table!<Row>('lessonProgress');
+
+    // Healthy -> primary, cache untouched.
+    expect((await t.get('lp1'))?.v).toBe('from-surreal');
+    expect(f.calls.reads).toBe(0);
+
+    // Outage -> falls back to the Dexie cache, wrapper goes degraded.
+    p.state.down = true;
+    expect((await t.get('lp1'))?.v).toBe('from-dexie-cache');
+    expect((await t.toArray()).map((r) => r.v)).toEqual(['from-dexie-cache']);
+    expect(wrapped.degraded).toBe(true);
+
+    // A write while down rejects (primary-only) and never silently lands in cache.
+    await expect(t.put({ id: 'lp2', v: 'x' })).rejects.toThrow(/surrealdb write failed/);
+    expect(f.calls.writes).toBe(0);
   });
 
   it('routes writes to the primary only while healthy', async () => {

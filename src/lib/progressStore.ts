@@ -74,6 +74,33 @@ import {
 // failure returns `{ ok: false, items: [] }`, so the host nudge simply omits the
 // LSAT rows rather than erroring.
 import { fetchUnifiedDue, type UnifiedReviewItem } from './lsatReviewBridge';
+// DATA-1 Phase 2 — route cleanly-mappable direct Dexie accesses through the
+// generic keyed-table primitive. `getStorage()` returns the active driver (Dexie
+// by default), and `dexieDriver.table(name)` is a 1:1 pass-through over
+// `db.table(name)`, so each rerouted `getStorage().table('<store>').<op>(...)`
+// is behaviourally identical to the `db.<store>.<op>(...)` it replaces today.
+// The import is type-and-runtime safe despite the storage→progressStore cycle:
+// `getStorage` is only ever *called* from inside async functions, never at
+// module-evaluation time, so the `db` Dexie instance is already constructed by
+// the time any rerouted op runs.
+import { getStorage } from './storage';
+import type { KeyedTable } from './storage/types';
+
+/**
+ * DATA-1 Phase 2 — resolve the active driver's generic keyed-table primitive for
+ * `name`. `StorageDriver.table` is declared OPTIONAL on the interface (callers
+ * feature-detect it), but BOTH shipped drivers (`dexie`, `surrealdb`) provide it,
+ * and the Dexie default is a 1:1 pass-through over `db.table(name)`. This thin
+ * wrapper asserts its presence so each rerouted call site stays a clean,
+ * behaviour-identical replacement for the `db.<store>.<op>(...)` it supersedes.
+ */
+function vaultTable<T>(name: string): KeyedTable<T> {
+  const driver = getStorage();
+  if (!driver.table) {
+    throw new Error(`Active storage driver '${driver.name}' does not implement table().`);
+  }
+  return driver.table<T>(name);
+}
 
 export const PROGRESS_EVENT = 'quantvault:progress';
 const PROGRESS_CHANNEL = 'quantvault:progress-channel';
@@ -590,7 +617,16 @@ function normalizeQuestionResult(
 
 async function updateMasterySnapshot(result: QuestionResultRow, review: ReviewItem) {
   const id = objectiveId(result.domain, result.topic, result.learningObjective);
+  // DATA-1 Phase 3: updateMasterySnapshot runs INSIDE the rw transactions opened
+  // by persistQuestionResult's callers (recordQuestionResult / recordQuizAttempt /
+  // recordMockAttempt / …). Rerouting these db.* ops through the primitive's extra
+  // async wrapper would risk detaching them from Dexie's transaction zone, losing
+  // atomicity — so the whole function stays on direct db.* until the primitive
+  // models transactions.
   const existing = await db.masterySnapshots.get(id);
+  // DATA-1 Phase 3: `.where('learningObjective').equals(v).filter(fn).toArray()`
+  // also chains a JS `.filter()` between the indexed equality and the read, which
+  // KeyedTable.whereEquals (a bare `.equals().toArray()`) cannot express.
   const objectiveResults = await db.questionResults
     .where('learningObjective')
     .equals(result.learningObjective)
@@ -610,6 +646,7 @@ async function updateMasterySnapshot(result: QuestionResultRow, review: ReviewIt
         : 'flat'
     : 'new';
 
+  // DATA-1 Phase 3: this put() is inside the caller's rw transaction (see above).
   await db.masterySnapshots.put({
     id,
     domain: result.domain,
@@ -627,6 +664,11 @@ async function updateMasterySnapshot(result: QuestionResultRow, review: ReviewIt
 }
 
 async function persistQuestionResult(result: QuestionResultRow) {
+  // DATA-1 Phase 3: every caller invokes this inside an rw transaction
+  // (recordQuestionResult / recordQuizAttempt / recordFlashcardResult /
+  // recordMockAttempt / recordVignetteAttempt / recordConstructedResponseAttempt /
+  // recordFormulaDrillAttempt / recordSkillLabAttempt), so all db.* ops below
+  // must stay direct to remain inside that atomic transaction.
   const id = objectiveId(result.domain, result.topic, result.learningObjective);
   const previous = await db.reviewItems.get(id);
   const review = buildReviewItem(result, previous);
@@ -688,7 +730,7 @@ export function progressId(domain: DomainId, moduleId: string) {
 }
 
 export async function getLessonProgress(domain: DomainId, moduleId: string) {
-  return db.lessonProgress.get(progressId(domain, moduleId));
+  return vaultTable<LessonProgress>('lessonProgress').get(progressId(domain, moduleId));
 }
 
 export async function recordModuleVisit({
@@ -703,10 +745,11 @@ export async function recordModuleVisit({
   path: string;
 }) {
   const id = progressId(domain, moduleId);
-  const existing = await db.lessonProgress.get(id);
+  const lessonProgressTable = vaultTable<LessonProgress>('lessonProgress');
+  const existing = await lessonProgressTable.get(id);
   const timestamp = nowIso();
 
-  await db.lessonProgress.put({
+  await lessonProgressTable.put({
     id,
     domain,
     moduleId,
@@ -721,7 +764,7 @@ export async function recordModuleVisit({
   });
 
   emitProgressChange();
-  return db.lessonProgress.get(id);
+  return lessonProgressTable.get(id);
 }
 
 export async function setModuleCompleted({
@@ -738,10 +781,11 @@ export async function setModuleCompleted({
   completed: boolean;
 }) {
   const id = progressId(domain, moduleId);
-  const existing = await db.lessonProgress.get(id);
+  const lessonProgressTable = vaultTable<LessonProgress>('lessonProgress');
+  const existing = await lessonProgressTable.get(id);
   const timestamp = nowIso();
 
-  await db.lessonProgress.put({
+  await lessonProgressTable.put({
     id,
     domain,
     moduleId,
@@ -756,7 +800,7 @@ export async function setModuleCompleted({
   });
 
   emitProgressChange();
-  return db.lessonProgress.get(id);
+  return lessonProgressTable.get(id);
 }
 
 export async function toggleModuleCompleted({
@@ -770,7 +814,7 @@ export async function toggleModuleCompleted({
   title: string;
   path: string;
 }) {
-  const existing = await db.lessonProgress.get(progressId(domain, moduleId));
+  const existing = await vaultTable<LessonProgress>('lessonProgress').get(progressId(domain, moduleId));
   return setModuleCompleted({
     domain,
     moduleId,
@@ -795,6 +839,8 @@ export async function recordQuestionResult(
   // interruption can't leave a questionResult without its review/event/
   // calibration/mastery rows. This is the lone single-result path that was
   // previously unprotected (audit M4).
+  // DATA-1 Phase 3: stays on db.transaction + direct db.* — the primitive can't
+  // model multi-table atomicity.
   const review = await db.transaction(
     'rw',
     [db.questionResults, db.reviewItems, db.reviewEvents, db.confidenceCalibration, db.masterySnapshots],
@@ -838,6 +884,8 @@ export async function recordQuizAttempt({
     ),
   );
 
+  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
+  // db.* for atomicity (the primitive can't model transactions).
   await db.transaction(
     'rw',
     [
@@ -884,12 +932,12 @@ export async function recordQuizAttempt({
 }
 
 export async function getDueReviews(date = new Date(), options: Level3PathwayQuery = {}) {
-  const reviewItems = await db.reviewItems.toArray();
+  const reviewItems = await vaultTable<ReviewItem>('reviewItems').toArray();
   return rankReviewItems(reviewItems.filter((item) => level3TopicRowAllowed(item, options.level3Pathway)), date).filter((item) => isDue(item, date));
 }
 
 export async function getMasterySummary(options: Level3PathwayQuery = {}) {
-  const snapshots = await db.masterySnapshots.toArray();
+  const snapshots = await vaultTable<MasterySnapshot>('masterySnapshots').toArray();
   const visibleSnapshots = snapshots.filter((snapshot) => level3TopicRowAllowed(snapshot, options.level3Pathway));
   const ranked = [...visibleSnapshots].sort((a, b) => a.score - b.score || b.lastAttemptAt.localeCompare(a.lastAttemptAt));
   return {
@@ -902,11 +950,15 @@ export async function getMasterySummary(options: Level3PathwayQuery = {}) {
 }
 
 export async function getNextRecommendation(options: Level3PathwayQuery = {}) {
-  const [dueReviews, mastery, lessonProgress] = await Promise.all([
+  const [dueReviews, mastery, lessonProgressRows] = await Promise.all([
     getDueReviews(new Date(), options),
     getMasterySummary(options),
-    db.lessonProgress.orderBy('lastVisitedAt').reverse().first(),
+    // `.orderBy('lastVisitedAt').reverse().first()` → desc-ordered read capped at
+    // 1 row, then `[0]` (undefined when empty, exactly like Dexie `.first()`).
+    // `lastVisitedAt` is a declared index on lessonProgress.
+    vaultTable<LessonProgress>('lessonProgress').orderedBy('lastVisitedAt', { desc: true, limit: 1 }),
   ]);
+  const lessonProgress = lessonProgressRows[0];
 
   return nextRecommendation({
     dueReviews,
@@ -1002,19 +1054,21 @@ export async function getProgressSummary() {
       notes,
       bookmarks,
     ] = await Promise.all([
-      db.lessonProgress.toArray(),
-      db.quizAttempts.orderBy('createdAt').reverse().toArray(),
-      db.mockAttempts.orderBy('createdAt').reverse().toArray(),
-      db.vignetteAttempts.orderBy('createdAt').reverse().toArray(),
-      db.constructedResponseAttempts.orderBy('createdAt').reverse().toArray(),
-      db.formulaDrillAttempts.orderBy('createdAt').reverse().toArray(),
-      db.skillLabAttempts.orderBy('createdAt').reverse().toArray(),
-      db.flashcardAttempts.orderBy('createdAt').reverse().toArray(),
-      db.studySessions.toArray(),
-      db.reviewItems.toArray(),
-      db.masterySnapshots.toArray(),
-      db.notes.toArray(),
-      db.bookmarks.toArray(),
+      // `createdAt` is a declared index on each attempt store, so the desc reads
+      // below map faithfully to orderedBy(field, { desc: true }).
+      vaultTable<LessonProgress>('lessonProgress').toArray(),
+      vaultTable<QuizAttemptRow>('quizAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<MockAttempt>('mockAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<VignetteAttempt>('vignetteAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<ConstructedResponseAttempt>('constructedResponseAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<FormulaDrillAttempt>('formulaDrillAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<SkillLabAttempt>('skillLabAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<FlashcardAttempt>('flashcardAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<StudySession>('studySessions').toArray(),
+      vaultTable<ReviewItem>('reviewItems').toArray(),
+      vaultTable<MasterySnapshot>('masterySnapshots').toArray(),
+      vaultTable<VaultNote>('notes').toArray(),
+      vaultTable<VaultBookmark>('bookmarks').toArray(),
     ]);
 
     const completed = lessonProgress.filter((row) => row.completed);
@@ -1212,7 +1266,7 @@ function noteIdFor({
 }
 
 export async function getNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName' | 'artifactId'>) {
-  return db.notes.get(noteIdFor(target));
+  return vaultTable<VaultNote>('notes').get(noteIdFor(target));
 }
 
 export async function saveNote({
@@ -1227,7 +1281,8 @@ export async function saveNote({
   path,
 }: Omit<VaultNote, 'id' | 'createdAt' | 'updatedAt'>) {
   const id = noteIdFor({ type, domain, moduleId, questionId, formulaName, artifactId });
-  const existing = await db.notes.get(id);
+  const notesTable = vaultTable<VaultNote>('notes');
+  const existing = await notesTable.get(id);
   const timestamp = nowIso();
   const note: VaultNote = {
     id,
@@ -1244,14 +1299,14 @@ export async function saveNote({
     updatedAt: timestamp,
   };
 
-  await db.notes.put(note);
+  await notesTable.put(note);
   if (artifactId) await attachArtifactToNote(artifactId, id);
   emitProgressChange();
   return note;
 }
 
 export async function deleteNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName' | 'artifactId'>) {
-  await db.notes.delete(noteIdFor(target));
+  await vaultTable<VaultNote>('notes').delete(noteIdFor(target));
   emitProgressChange();
 }
 
@@ -1268,7 +1323,7 @@ function bookmarkIdFor({
 export async function getBookmark(
   target: Pick<VaultBookmark, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName'>,
 ) {
-  return db.bookmarks.get(bookmarkIdFor(target));
+  return vaultTable<VaultBookmark>('bookmarks').get(bookmarkIdFor(target));
 }
 
 export async function toggleBookmark({
@@ -1281,10 +1336,11 @@ export async function toggleBookmark({
   path,
 }: Omit<VaultBookmark, 'id' | 'createdAt'>) {
   const id = bookmarkIdFor({ type, domain, moduleId, questionId, formulaName });
-  const existing = await db.bookmarks.get(id);
+  const bookmarksTable = vaultTable<VaultBookmark>('bookmarks');
+  const existing = await bookmarksTable.get(id);
 
   if (existing) {
-    await db.bookmarks.delete(id);
+    await bookmarksTable.delete(id);
     emitProgressChange();
     return null;
   }
@@ -1301,7 +1357,7 @@ export async function toggleBookmark({
     createdAt: nowIso(),
   };
 
-  await db.bookmarks.put(bookmark);
+  await bookmarksTable.put(bookmark);
   emitProgressChange();
   return bookmark;
 }
@@ -1564,46 +1620,46 @@ export async function exportVaultData(options: VaultExportOptions = {}): Promise
     bookmarks,
     settings,
   ] = await Promise.all([
-    db.lessonProgress.toArray(),
-    db.quizAttempts.toArray(),
-    db.questionResults.toArray(),
-    db.reviewItems.toArray(),
-    db.masterySnapshots.toArray(),
-    db.mockAttempts.toArray(),
-    db.vignetteAttempts.toArray(),
-    db.constructedResponseAttempts.toArray(),
-    db.formulaDrillAttempts.toArray(),
-    db.skillLabAttempts.toArray(),
-    db.studySessions.toArray(),
-    db.studyPlanSettings.toArray(),
-    db.contentVersions.toArray(),
-    db.reviewEvents.toArray(),
-    db.confidenceCalibration.toArray(),
-    db.flashcardAttempts.toArray(),
-    db.resultArtifacts.toArray(),
-    db.mockSectionState.toArray(),
-    db.learningEvents.toArray(),
-    db.vaultHealthSnapshots.toArray(),
-    db.rollbackSnapshots.toArray(),
-    db.calculatorScenarios.toArray(),
-    db.releaseRunHistory.toArray(),
-    db.importJobs.toArray(),
-    db.sourceBundleManifests.toArray(),
-    db.psychometricStats.toArray(),
-    db.mockBlueprints.toArray(),
-    db.notes.toArray(),
-    db.bookmarks.toArray(),
-    db.settings.toArray(),
+    vaultTable<LessonProgress>('lessonProgress').toArray(),
+    vaultTable<QuizAttemptRow>('quizAttempts').toArray(),
+    vaultTable<QuestionResultRow>('questionResults').toArray(),
+    vaultTable<ReviewItem>('reviewItems').toArray(),
+    vaultTable<MasterySnapshot>('masterySnapshots').toArray(),
+    vaultTable<MockAttempt>('mockAttempts').toArray(),
+    vaultTable<VignetteAttempt>('vignetteAttempts').toArray(),
+    vaultTable<ConstructedResponseAttempt>('constructedResponseAttempts').toArray(),
+    vaultTable<FormulaDrillAttempt>('formulaDrillAttempts').toArray(),
+    vaultTable<SkillLabAttempt>('skillLabAttempts').toArray(),
+    vaultTable<StudySession>('studySessions').toArray(),
+    vaultTable<StudyPlanSettings>('studyPlanSettings').toArray(),
+    vaultTable<ContentVersion>('contentVersions').toArray(),
+    vaultTable<ReviewEvent>('reviewEvents').toArray(),
+    vaultTable<ConfidenceCalibration>('confidenceCalibration').toArray(),
+    vaultTable<FlashcardAttempt>('flashcardAttempts').toArray(),
+    vaultTable<ResultArtifact>('resultArtifacts').toArray(),
+    vaultTable<MockSectionState>('mockSectionState').toArray(),
+    vaultTable<LearningEventEnvelope>('learningEvents').toArray(),
+    vaultTable<VaultHealthSnapshot>('vaultHealthSnapshots').toArray(),
+    vaultTable<RollbackSnapshot>('rollbackSnapshots').toArray(),
+    vaultTable<CalculatorScenario>('calculatorScenarios').toArray(),
+    vaultTable<ReleaseRunHistory>('releaseRunHistory').toArray(),
+    vaultTable<ImportJob>('importJobs').toArray(),
+    vaultTable<SourceBundleManifest>('sourceBundleManifests').toArray(),
+    vaultTable<PsychometricStats>('psychometricStats').toArray(),
+    vaultTable<MockBlueprint>('mockBlueprints').toArray(),
+    vaultTable<VaultNote>('notes').toArray(),
+    vaultTable<VaultBookmark>('bookmarks').toArray(),
+    vaultTable<SettingRow>('settings').toArray(),
   ]);
 
   const sourceVault: CfaSourceVaultStores | undefined = options.includeSourceVault
     ? {
-        sourceDocuments: await db.sourceDocuments.toArray(),
-        sourceChunks: await db.sourceChunks.toArray(),
-        sourceIndexes: await db.sourceIndexes.toArray(),
-        sourceIngestionRuns: await db.sourceIngestionRuns.toArray(),
-        sourceLinks: await db.sourceLinks.toArray(),
-        sourceLinkOverrides: await db.sourceLinkOverrides.toArray(),
+        sourceDocuments: await vaultTable<CfaSourceDocument>('sourceDocuments').toArray(),
+        sourceChunks: await vaultTable<CfaSourceChunk>('sourceChunks').toArray(),
+        sourceIndexes: await vaultTable<CfaSourceIndex>('sourceIndexes').toArray(),
+        sourceIngestionRuns: await vaultTable<CfaSourceIngestionRun>('sourceIngestionRuns').toArray(),
+        sourceLinks: await vaultTable<CfaSourceLink>('sourceLinks').toArray(),
+        sourceLinkOverrides: await vaultTable<CfaSourceLinkOverride>('sourceLinkOverrides').toArray(),
       }
     : undefined;
 
@@ -1970,6 +2026,8 @@ function normalizeVaultImportOptions(options: 'merge' | 'replace' | VaultImportO
 }
 
 function primaryKeyPathForStore(storeName: (typeof STORE_NAMES)[number]) {
+  // DATA-1 Phase 3: reads Dexie schema metadata (`schema.primKey.keyPath`), which
+  // is not part of the KeyedTable surface — stays on direct db.*.
   const keyPath = db[storeName].schema.primKey.keyPath;
   return typeof keyPath === 'string' ? keyPath : null;
 }
@@ -1985,7 +2043,7 @@ async function filterKeepExisting(stores: VaultDataStores): Promise<VaultDataSto
       const keyPath = primaryKeyPathForStore(storeName);
       const rows = stores[storeName];
       const keys = rows.map((row) => rowKey(row, keyPath));
-      const existing = await db[storeName].bulkGet(keys.filter((key) => key !== undefined) as any[]);
+      const existing = await vaultTable(storeName).bulkGet(keys.filter((key) => key !== undefined) as any[]);
       const existingKeys = new Set<unknown>(
         existing
           .filter(Boolean)
@@ -2012,7 +2070,7 @@ async function detectImportConflicts(stores: VaultDataStores) {
       if (!keyPath) return [storeName, 0] as const;
       const keys = stores[storeName].map((row) => rowKey(row, keyPath)).filter((key) => key !== undefined) as any[];
       if (!keys.length) return [storeName, 0] as const;
-      const existing = await db[storeName].bulkGet(keys);
+      const existing = await vaultTable(storeName).bulkGet(keys);
       return [storeName, existing.filter(Boolean).length] as const;
     }),
   );
@@ -2078,7 +2136,8 @@ async function appendVaultImportHistory({
   encrypted: boolean;
 }) {
   const key = 'vault:import-history';
-  const existing = await db.settings.get(key);
+  const settingsTable = vaultTable<SettingRow>('settings');
+  const existing = await settingsTable.get(key);
   const current = Array.isArray(existing?.value) ? (existing.value as VaultImportHistoryEntry[]) : [];
   const entry: VaultImportHistoryEntry = {
     exportId: exportPayload.exportId,
@@ -2091,7 +2150,7 @@ async function appendVaultImportHistory({
     conflictPolicy,
     encrypted,
   };
-  await db.settings.put({
+  await settingsTable.put({
     key,
     updatedAt: nowIso(),
     value: [entry, ...current].slice(0, 20),
@@ -2099,7 +2158,7 @@ async function appendVaultImportHistory({
 }
 
 export async function getVaultImportHistory(): Promise<VaultImportHistoryEntry[]> {
-  const existing = await db.settings.get('vault:import-history');
+  const existing = await vaultTable<SettingRow>('settings').get('vault:import-history');
   return Array.isArray(existing?.value) ? (existing.value as VaultImportHistoryEntry[]) : [];
 }
 
@@ -2125,7 +2184,9 @@ function sourceVaultRowCounts(sourceVault?: CfaSourceVaultStores): Record<string
 }
 
 export async function getRollbackSnapshots(limit = 10): Promise<RollbackSnapshot[]> {
-  return db.rollbackSnapshots.orderBy('createdAt').reverse().limit(limit).toArray();
+  // `createdAt` is a declared index on rollbackSnapshots, so the desc+limit read
+  // maps faithfully to orderedBy.
+  return vaultTable<RollbackSnapshot>('rollbackSnapshots').orderedBy('createdAt', { desc: true, limit });
 }
 
 /**
@@ -2137,7 +2198,7 @@ export async function getRollbackSnapshots(limit = 10): Promise<RollbackSnapshot
  * first) the restore is itself rollback-able.
  */
 export async function restoreRollbackSnapshot(id: string): Promise<void> {
-  const snapshot = await db.rollbackSnapshots.get(id);
+  const snapshot = await vaultTable<RollbackSnapshot>('rollbackSnapshots').get(id);
   if (!snapshot) throw new Error(`Rollback snapshot "${id}" was not found.`);
   if (!snapshot.payload) throw new Error(`Rollback snapshot "${id}" has no payload to restore from.`);
   await importVaultData(snapshot.payload, 'replace');
@@ -2167,9 +2228,12 @@ export async function createRollbackSnapshot(reason: VaultRollbackReason = 'manu
     sourceRowCounts: sourceVaultRowCounts(exported.sourceVault),
     payload: rollbackPayload,
   };
-  await db.rollbackSnapshots.put(snapshot);
-  const staleSnapshots = await db.rollbackSnapshots.orderBy('createdAt').reverse().offset(10).toArray();
-  await Promise.all(staleSnapshots.map((stale) => db.rollbackSnapshots.delete(stale.id)));
+  const rollbackSnapshotsTable = vaultTable<RollbackSnapshot>('rollbackSnapshots');
+  await rollbackSnapshotsTable.put(snapshot);
+  // `.orderBy('createdAt').reverse().offset(10).toArray()` → desc read skipping
+  // the 10 newest; `createdAt` is a declared index on rollbackSnapshots.
+  const staleSnapshots = await rollbackSnapshotsTable.orderedBy('createdAt', { desc: true, offset: 10 });
+  await Promise.all(staleSnapshots.map((stale) => rollbackSnapshotsTable.delete(stale.id)));
   return snapshot;
 }
 
@@ -2183,7 +2247,7 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
   const encrypted = isEncryptedVaultExport(payload);
   const validation = validateVaultData(exportPayload);
   if (!validation.valid) {
-    await db.importJobs.put({
+    await vaultTable<ImportJob>('importJobs').put({
       id: importJobId,
       startedAt: importStartedAt,
       completedAt: nowIso(),
@@ -2213,6 +2277,9 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
       ? await filterKeepExisting(mergeStores)
       : mergeStores;
 
+  // DATA-1 Phase 3: multi-table atomic import — the primitive does not model
+  // db.transaction, so the block (and the clear()/bulkPut() db.* ops inside it)
+  // stays direct to preserve all-or-nothing import semantics.
   await db.transaction(
     'rw',
     [
@@ -2310,7 +2377,7 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
     conflictPolicy: importOptions.conflictPolicy,
     encrypted,
   });
-  await db.importJobs.put({
+  await vaultTable<ImportJob>('importJobs').put({
     id: importJobId,
     startedAt: importStartedAt,
     completedAt: nowIso(),
@@ -2340,7 +2407,8 @@ export async function recordSession({
   score = 0,
 }: Omit<StudySession, 'id'>) {
   const timestamp = nowIso();
-  await db.studySessions.add({
+  // `studySessions` is an auto-id (`++id`) store, so the backend assigns the key.
+  await vaultTable<StudySession>('studySessions').add({
     domain,
     topic,
     mode,
@@ -2358,6 +2426,8 @@ export async function recordStudyEvent(event: Omit<StudySession, 'id'>) {
 }
 
 export async function recordLearningEventEnvelope(envelope: LearningEventEnvelope) {
+  // DATA-1 Phase 3: multi-table atomic write (learningEvents + studySessions +
+  // reviewEvents); kept on db.transaction + direct db.* to preserve atomicity.
   await db.transaction('rw', [db.learningEvents, db.studySessions, db.reviewEvents], async () => {
     await db.learningEvents.put(envelope);
     await db.studySessions.add({
@@ -2387,7 +2457,7 @@ export async function recordContentVersion(version: Omit<ContentVersion, 'update
     ...version,
     updatedAt: nowIso(),
   };
-  await db.contentVersions.put(row);
+  await vaultTable<ContentVersion>('contentVersions').put(row);
   emitProgressChange();
   return row;
 }
@@ -2424,18 +2494,19 @@ export async function saveResultArtifact({
     objectiveIds,
     createdAt: nowIso(),
   };
-  await db.resultArtifacts.put(artifact);
+  await vaultTable<ResultArtifact>('resultArtifacts').put(artifact);
   emitProgressChange();
   return artifact;
 }
 
 export async function getResultArtifacts(type?: ResultArtifact['type']) {
-  const artifacts = await db.resultArtifacts.orderBy('createdAt').reverse().toArray();
+  // `createdAt` is a declared index on resultArtifacts.
+  const artifacts = await vaultTable<ResultArtifact>('resultArtifacts').orderedBy('createdAt', { desc: true });
   return type ? artifacts.filter((artifact) => artifact.type === type) : artifacts;
 }
 
 export async function deleteResultArtifact(id: string) {
-  await db.resultArtifacts.delete(id);
+  await vaultTable<ResultArtifact>('resultArtifacts').delete(id);
   emitProgressChange();
 }
 
@@ -2447,23 +2518,24 @@ export async function saveMockSectionState(state: Omit<MockSectionState, 'update
     updatedAt: timestamp,
     expiresAt: expires,
   };
-  await db.mockSectionState.put(row);
+  await vaultTable<MockSectionState>('mockSectionState').put(row);
   emitProgressChange();
   return row;
 }
 
 export async function getMockSectionState(id = 'cfa-level1-mixed-mock') {
-  const state = await db.mockSectionState.get(id);
+  const mockSectionStateTable = vaultTable<MockSectionState>('mockSectionState');
+  const state = await mockSectionStateTable.get(id);
   if (!state) return null;
   if (new Date(state.expiresAt).getTime() < Date.now()) {
-    await db.mockSectionState.delete(id);
+    await mockSectionStateTable.delete(id);
     return null;
   }
   return state;
 }
 
 export async function clearMockSectionState(id = 'cfa-level1-mixed-mock') {
-  await db.mockSectionState.delete(id);
+  await vaultTable<MockSectionState>('mockSectionState').delete(id);
   emitProgressChange();
 }
 
@@ -2507,6 +2579,8 @@ export async function recordFlashcardResult({
     timestamp,
   );
 
+  // DATA-1 Phase 3: multi-table atomic recorder (attempt + persistQuestionResult's
+  // 5 stores + session); kept on db.transaction + direct db.* for atomicity.
   await db.transaction(
     'rw',
     [
@@ -2560,9 +2634,9 @@ export async function getReadinessByTopic(dateOrOptions: Date | Level3PathwayQue
   const date = dateOrOptions instanceof Date ? dateOrOptions : new Date();
   const options = dateOrOptions instanceof Date ? maybeOptions : dateOrOptions;
   const [snapshots, reviewItems, results] = await Promise.all([
-    db.masterySnapshots.toArray(),
-    db.reviewItems.toArray(),
-    db.questionResults.toArray(),
+    vaultTable<MasterySnapshot>('masterySnapshots').toArray(),
+    vaultTable<ReviewItem>('reviewItems').toArray(),
+    vaultTable<QuestionResultRow>('questionResults').toArray(),
   ]);
   const grouped = new Map<string, MasterySnapshot[]>();
   snapshots.filter((snapshot) => level3TopicRowAllowed(snapshot, options.level3Pathway)).forEach((snapshot) => {
@@ -2626,7 +2700,7 @@ export async function getReadinessByTopic(dateOrOptions: Date | Level3PathwayQue
 }
 
 export async function forecastReviewLoad(days = 14, date = new Date(), options: Level3PathwayQuery = {}): Promise<RetentionForecast[]> {
-  const reviewItems = await db.reviewItems.toArray();
+  const reviewItems = await vaultTable<ReviewItem>('reviewItems').toArray();
   const visibleItems = reviewItems.filter((item) => level3TopicRowAllowed(item, options.level3Pathway));
   return Array.from({ length: days }, (_, index) => {
     const day = new Date(date);
@@ -2775,7 +2849,7 @@ const DEFAULT_STUDY_PLAN_SETTINGS: StudyPlanSettings = {
 };
 
 export async function getStudyPlanSettings(): Promise<StudyPlanSettings> {
-  const existing = await db.studyPlanSettings.get('local-study-plan');
+  const existing = await vaultTable<StudyPlanSettings>('studyPlanSettings').get('local-study-plan');
   return {
     ...DEFAULT_STUDY_PLAN_SETTINGS,
     ...existing,
@@ -2802,7 +2876,7 @@ export async function saveStudyPlanSettings({
     topicWeights: topicWeights || existing.topicWeights || {},
     updatedAt: nowIso(),
   };
-  await db.studyPlanSettings.put(settings);
+  await vaultTable<StudyPlanSettings>('studyPlanSettings').put(settings);
   emitProgressChange();
   return settings;
 }
@@ -2951,16 +3025,17 @@ export async function getReviewInbox(options: Level3PathwayQuery = {}): Promise<
   ] = await Promise.all([
     getDueReviews(new Date(), options),
     getMasterySummary(options),
-    db.questionResults.orderBy('createdAt').reverse().toArray(),
-    db.bookmarks.toArray(),
-    db.lessonProgress.toArray(),
+    // `createdAt` is a declared index on each of these stores.
+    vaultTable<QuestionResultRow>('questionResults').orderedBy('createdAt', { desc: true }),
+    vaultTable<VaultBookmark>('bookmarks').toArray(),
+    vaultTable<LessonProgress>('lessonProgress').toArray(),
     getReadinessByTopic(options),
-    db.mockAttempts.orderBy('createdAt').reverse().toArray(),
-    db.vignetteAttempts.orderBy('createdAt').reverse().toArray(),
-    db.constructedResponseAttempts.orderBy('createdAt').reverse().toArray(),
-    db.formulaDrillAttempts.orderBy('createdAt').reverse().toArray(),
-    db.skillLabAttempts.orderBy('createdAt').reverse().toArray(),
-    db.resultArtifacts.orderBy('createdAt').reverse().toArray(),
+    vaultTable<MockAttempt>('mockAttempts').orderedBy('createdAt', { desc: true }),
+    vaultTable<VignetteAttempt>('vignetteAttempts').orderedBy('createdAt', { desc: true }),
+    vaultTable<ConstructedResponseAttempt>('constructedResponseAttempts').orderedBy('createdAt', { desc: true }),
+    vaultTable<FormulaDrillAttempt>('formulaDrillAttempts').orderedBy('createdAt', { desc: true }),
+    vaultTable<SkillLabAttempt>('skillLabAttempts').orderedBy('createdAt', { desc: true }),
+    vaultTable<ResultArtifact>('resultArtifacts').orderedBy('createdAt', { desc: true }),
   ]);
   const visibleResults = results.filter((result) => level3TopicRowAllowed(result, options.level3Pathway));
   const visibleBookmarks = bookmarks.filter((item) => level3TopicRowAllowed({ topic: item.moduleId }, options.level3Pathway));
@@ -3222,7 +3297,7 @@ function confidenceCalibrationSummary(rows: ConfidenceCalibration[]): Confidence
 }
 
 export async function getConfidenceCalibration(): Promise<ConfidenceCalibrationSummary[]> {
-  return confidenceCalibrationSummary(await db.confidenceCalibration.toArray());
+  return confidenceCalibrationSummary(await vaultTable<ConfidenceCalibration>('confidenceCalibration').toArray());
 }
 
 export async function getAnalyticsSummary(options: Level3PathwayQuery = {}): Promise<AnalyticsSummary> {
@@ -3238,16 +3313,16 @@ export async function getAnalyticsSummary(options: Level3PathwayQuery = {}): Pro
     artifacts,
     confidenceCalibrationRows,
   ] = await Promise.all([
-    db.questionResults.toArray(),
-    db.studySessions.toArray(),
-    db.mockAttempts.toArray(),
-    db.vignetteAttempts.toArray(),
-    db.constructedResponseAttempts.toArray(),
-    db.formulaDrillAttempts.toArray(),
-    db.skillLabAttempts.toArray(),
-    db.flashcardAttempts.toArray(),
-    db.resultArtifacts.toArray(),
-    db.confidenceCalibration.toArray(),
+    vaultTable<QuestionResultRow>('questionResults').toArray(),
+    vaultTable<StudySession>('studySessions').toArray(),
+    vaultTable<MockAttempt>('mockAttempts').toArray(),
+    vaultTable<VignetteAttempt>('vignetteAttempts').toArray(),
+    vaultTable<ConstructedResponseAttempt>('constructedResponseAttempts').toArray(),
+    vaultTable<FormulaDrillAttempt>('formulaDrillAttempts').toArray(),
+    vaultTable<SkillLabAttempt>('skillLabAttempts').toArray(),
+    vaultTable<FlashcardAttempt>('flashcardAttempts').toArray(),
+    vaultTable<ResultArtifact>('resultArtifacts').toArray(),
+    vaultTable<ConfidenceCalibration>('confidenceCalibration').toArray(),
   ]);
   const visibleResults = results.filter((result) => level3TopicRowAllowed(result, options.level3Pathway));
   const visibleSessions = sessions.filter((session) => level3TopicRowAllowed(session, options.level3Pathway));
@@ -3426,6 +3501,8 @@ export async function recordMockAttempt({
     topicMap.set(answer.topic, row);
   });
 
+  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
+  // db.* for atomicity (the primitive can't model transactions).
   await db.transaction(
     'rw',
     [
@@ -3501,6 +3578,8 @@ export async function recordVignetteAttempt({
     ),
   );
 
+  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
+  // db.* for atomicity (the primitive can't model transactions).
   await db.transaction(
     'rw',
     [
@@ -3587,6 +3666,8 @@ export async function recordConstructedResponseAttempt({
     ),
   );
 
+  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
+  // db.* for atomicity (the primitive can't model transactions).
   await db.transaction(
     'rw',
     [
@@ -3663,6 +3744,8 @@ export async function recordFormulaDrillAttempt({
     timestamp,
   );
 
+  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
+  // db.* for atomicity (the primitive can't model transactions).
   await db.transaction(
     'rw',
     [
@@ -3728,6 +3811,8 @@ export async function recordSkillLabAttempt({
     ),
   );
 
+  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
+  // db.* for atomicity (the primitive can't model transactions).
   await db.transaction(
     'rw',
     [
@@ -3772,10 +3857,11 @@ export async function recordSkillLabAttempt({
 }
 
 export async function attachArtifactToNote(artifactId: string, noteId: string) {
-  const artifact = await db.resultArtifacts.get(artifactId);
+  const resultArtifactsTable = vaultTable<ResultArtifact>('resultArtifacts');
+  const artifact = await resultArtifactsTable.get(artifactId);
   if (!artifact) return null;
   const updated = { ...artifact, noteId };
-  await db.resultArtifacts.put(updated);
+  await resultArtifactsTable.put(updated);
   emitProgressChange();
   return updated;
 }
@@ -3802,7 +3888,7 @@ export function exportMockSummary(attempt: MockAttempt | VignetteAttempt | Const
 }
 
 export async function getReadinessByObjective(options: Level3PathwayQuery = {}): Promise<ObjectiveReadiness[]> {
-  const snapshots = await db.masterySnapshots.toArray();
+  const snapshots = await vaultTable<MasterySnapshot>('masterySnapshots').toArray();
   return snapshots
     .filter((snapshot) => level3TopicRowAllowed(snapshot, options.level3Pathway))
     .map((snapshot) => ({
@@ -3841,12 +3927,12 @@ function topWeaknessSignals(signals: ObjectiveReadinessV2['weaknessSignals'], li
 export async function getReadinessByObjectiveV2(options: Level3PathwayQuery = {}): Promise<ObjectiveReadinessV2[]> {
   const [objectives, reviewItems, results, settings, constructedResponseAttempts, artifacts, skillLabAttempts] = await Promise.all([
     getReadinessByObjective(options),
-    db.reviewItems.toArray(),
-    db.questionResults.toArray(),
+    vaultTable<ReviewItem>('reviewItems').toArray(),
+    vaultTable<QuestionResultRow>('questionResults').toArray(),
     getStudyPlanSettings(),
-    db.constructedResponseAttempts.toArray(),
-    db.resultArtifacts.toArray(),
-    db.skillLabAttempts.toArray(),
+    vaultTable<ConstructedResponseAttempt>('constructedResponseAttempts').toArray(),
+    vaultTable<ResultArtifact>('resultArtifacts').toArray(),
+    vaultTable<SkillLabAttempt>('skillLabAttempts').toArray(),
   ]);
   const visibleResults = results.filter((result) => level3TopicRowAllowed(result, options.level3Pathway));
   const visibleReviews = reviewItems.filter((item) => level3TopicRowAllowed(item, options.level3Pathway));
@@ -3965,20 +4051,25 @@ export function getExamPlan() {
 }
 
 export async function getNotes() {
-  return db.notes.orderBy('updatedAt').reverse().toArray();
+  // `updatedAt` is a declared index on notes.
+  return vaultTable<VaultNote>('notes').orderedBy('updatedAt', { desc: true });
 }
 
 export async function getBookmarks() {
-  return db.bookmarks.orderBy('createdAt').reverse().toArray();
+  // `createdAt` is a declared index on bookmarks.
+  return vaultTable<VaultBookmark>('bookmarks').orderedBy('createdAt', { desc: true });
 }
 
 export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean } = {}) {
-  const results = (await db.questionResults.toArray())
+  const results = (await vaultTable<QuestionResultRow>('questionResults').toArray())
     .filter((row) => row.domain && row.topic && row.questionId && row.learningObjective && isValidIsoDate(row.createdAt))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const groupedResults = new Map<string, QuestionResultRow[]>();
   const latestReviewById = new Map<string, ReviewItem>();
 
+  // DATA-1 Phase 3: multi-table atomic rebuild (clear + repopulate reviewItems /
+  // masterySnapshots / reviewEvents / confidenceCalibration in one transaction);
+  // kept on db.transaction + direct db.* so a crash can't leave indexes half-built.
   await db.transaction('rw', [db.reviewItems, db.masterySnapshots, db.reviewEvents, db.confidenceCalibration], async () => {
     await Promise.all([
       db.reviewItems.clear(),
@@ -4103,12 +4194,13 @@ export async function getVaultHealthReport(): Promise<VaultHealthReport> {
   const exported = await exportVaultData();
   const validation = validateVaultData(exported);
   const snapshot = buildVaultHealthSnapshot(exported, validation.errors);
+  // Each ordering field below is a declared index on its store.
   const [rollbackSnapshots, importJobs, sourceBundleManifests, calculatorScenarios, releaseRunHistory] = await Promise.all([
-    db.rollbackSnapshots.orderBy('createdAt').reverse().limit(10).toArray(),
-    db.importJobs.orderBy('startedAt').reverse().limit(10).toArray(),
-    db.sourceBundleManifests.orderBy('createdAt').reverse().limit(10).toArray(),
-    db.calculatorScenarios.orderBy('updatedAt').reverse().limit(10).toArray(),
-    db.releaseRunHistory.orderBy('generatedAt').reverse().limit(10).toArray(),
+    vaultTable<RollbackSnapshot>('rollbackSnapshots').orderedBy('createdAt', { desc: true, limit: 10 }),
+    vaultTable<ImportJob>('importJobs').orderedBy('startedAt', { desc: true, limit: 10 }),
+    vaultTable<SourceBundleManifest>('sourceBundleManifests').orderedBy('createdAt', { desc: true, limit: 10 }),
+    vaultTable<CalculatorScenario>('calculatorScenarios').orderedBy('updatedAt', { desc: true, limit: 10 }),
+    vaultTable<ReleaseRunHistory>('releaseRunHistory').orderedBy('generatedAt', { desc: true, limit: 10 }),
   ]);
   const report: VaultHealthReport = {
     ...snapshot,
@@ -4123,7 +4215,7 @@ export async function getVaultHealthReport(): Promise<VaultHealthReport> {
     releaseRunHistory,
     storageEstimate: await storageEstimate(),
   };
-  await db.vaultHealthSnapshots.put(snapshot);
+  await vaultTable<VaultHealthSnapshot>('vaultHealthSnapshots').put(snapshot);
   return report;
 }
 
@@ -4174,6 +4266,9 @@ export async function resetVaultData(scope: 'attempts' | 'progress' | 'full' = '
   // vault partially wiped. The 'full' branch in particular clears rollbackSnapshots
   // and re-puts the snapshot in the SAME transaction — previously a non-atomic
   // clear+re-put across two awaits could lose the only rollback point on a crash.
+  // DATA-1 Phase 3: these Dexie Table references AND the db.transaction blocks /
+  // .clear() calls below define multi-table atomic scopes the primitive can't
+  // model, so the whole function stays on direct db.*.
   const ATTEMPT_TABLES = [
     db.quizAttempts, db.questionResults, db.reviewItems, db.masterySnapshots,
     db.mockAttempts, db.vignetteAttempts, db.constructedResponseAttempts,

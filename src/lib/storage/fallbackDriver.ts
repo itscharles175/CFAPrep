@@ -2,6 +2,7 @@ import type {
   ChunkSearchOptions,
   ChunkSearchResult,
   ChunkStore,
+  KeyedTable,
   MasterySnapshotStore,
   QuestionResultStore,
   ReviewItemStore,
@@ -318,6 +319,46 @@ export function createReadThroughDriver(
     };
   }
 
+  // -------------------------------------------------------------------------
+  // table() — the DATA-1 generic keyed-table primitive, made read-through.
+  // The Phase-2 progressStore reroute calls getStorage().table(name); when
+  // SurrealDB is active getStorage() returns THIS wrapper, so it must expose
+  // table() too (else every rerouted call throws on cutover). Reads
+  // (get/bulkGet/toArray/count/whereEquals/whereAnyOf/orderedBy) fall back to
+  // the Dexie cache on a primary outage; writes (put/add/bulkPut/delete/
+  // bulkDelete/clear) stay on the primary — identical semantics to the named
+  // namespaces above. Only present when BOTH drivers implement table() (they
+  // do as of DATA-1 Phase 1).
+  // -------------------------------------------------------------------------
+  let tableFn: StorageDriver['table'];
+  if (primary.table && fallback.table) {
+    const primaryTable = primary.table.bind(primary);
+    const fallbackTable = fallback.table.bind(fallback);
+    tableFn = <T,>(name: string): KeyedTable<T> => {
+      const p = primaryTable<T>(name);
+      const f = fallbackTable<T>(name);
+      return {
+        get: (key) => readThrough(() => p.get(key), () => f.get(key)),
+        bulkGet: (keys) => readThrough(() => p.bulkGet(keys), () => f.bulkGet(keys)),
+        toArray: () => readThrough(() => p.toArray(), () => f.toArray()),
+        count: () => readThrough(() => p.count(), () => f.count()),
+        whereEquals: (field, value) =>
+          readThrough(() => p.whereEquals(field, value), () => f.whereEquals(field, value)),
+        whereAnyOf: (field, values) =>
+          readThrough(() => p.whereAnyOf(field, values), () => f.whereAnyOf(field, values)),
+        orderedBy: (field, opts) =>
+          readThrough(() => p.orderedBy(field, opts), () => f.orderedBy(field, opts)),
+        // Writes stay on the primary only (BA4: read availability, not write).
+        put: (row) => p.put(row),
+        bulkPut: (rows) => p.bulkPut(rows),
+        add: (row) => p.add(row),
+        delete: (key) => p.delete(key),
+        bulkDelete: (keys) => p.bulkDelete(keys),
+        clear: () => p.clear(),
+      };
+    };
+  }
+
   const wrapper: ReadThroughDriver = {
     name: primary.name,
     isReadThrough: true,
@@ -348,6 +389,7 @@ export function createReadThroughDriver(
     reviewItems,
     questionResults,
     masterySnapshots,
+    table: tableFn,
   };
 
   return wrapper;
