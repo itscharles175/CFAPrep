@@ -1,6 +1,8 @@
 import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import { applyTheme, getStoredTheme, migrateLegacyLsatTheme } from './lib/theme';
+import { bootstrapReadingPrefs } from './lib/reading/useReadingPrefs';
+import { bootstrapReadingTheme } from './lib/reading/readingTheme';
 import ErrorBoundary from './components/ErrorBoundary';
 
 // K4-13 (final cutover): StudyVault now boots a SINGLE unified root. The host
@@ -148,6 +150,13 @@ migrateLegacyLsatTheme();
 // Apply the stored theme to <html> BEFORE React mounts so the first paint shows
 // the correct palette (avoids a one-frame wrong-theme flash).
 applyTheme(getStoredTheme());
+// Wave 6 reading-craft bootstrap — apply the persisted density (UI-2), reading
+// theme (UI-3), and inclusive-reading prefs (A11Y-1) to <html> at the same point,
+// so the first paint already reflects the user's reading choices with no flash.
+// Both degrade to a no-op when nothing is stored. localStorage-backed (not Dexie),
+// so they're readable synchronously here before any IndexedDB scaffolding exists.
+bootstrapReadingTheme();
+bootstrapReadingPrefs();
 
 ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>

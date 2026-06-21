@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { localGroundedAnswer, retrieveChunks, verifyAnswerCitations } from './localRag';
+import {
+  localGroundedAnswer,
+  retrieveChunks,
+  retrieveConceptNeighborhood,
+  verifyAnswerCitations,
+} from './localRag';
 import { db } from './progressStore';
 import { getStorage } from './storage';
 import type { SourceChunkInput, ChunkSearchResult } from './storage/types';
+import { analyzeKnowledgeGraph } from './knowledge/graph';
 
 function chunk(id: string, text: string, extra: Partial<SourceChunkInput> = {}): SourceChunkInput {
   return {
@@ -288,5 +294,104 @@ describe('verifyAnswerCitations (RAG-4 unit)', () => {
       { useLlm: false },
     );
     expect(results[0].entailed).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CONTENT-7 — concept-grounded RAG over the knowledge-graph neighborhood
+// ---------------------------------------------------------------------------
+describe('CONTENT-7 — retrieveConceptNeighborhood + concept citations', () => {
+  // A tiny graph: l2:fi (seed) ← prereq l2:quant; l1:fi → l2:fi → l3:fi spiral.
+  const graph = analyzeKnowledgeGraph({
+    nodes: [
+      { id: 'l1:fi', label: 'FI I', topicId: 'fixed-income', level: 'level1' },
+      { id: 'l2:fi', label: 'FI II', topicId: 'fixed-income', level: 'level2' },
+      { id: 'l3:fi', label: 'FI III', topicId: 'fixed-income', level: 'level3' },
+      { id: 'l2:quant', label: 'Quant II', topicId: 'quant', level: 'level2' },
+    ],
+    edges: [
+      { from: 'l1:fi', to: 'l2:fi', relation: 'same-concept' },
+      { from: 'l2:fi', to: 'l3:fi', relation: 'same-concept' },
+      { from: 'l2:quant', to: 'l2:fi', relation: 'prerequisite' },
+    ],
+  });
+
+  beforeEach(async () => {
+    await db.sourceChunks.clear();
+    await getStorage().chunks!.bulkUpsert([
+      chunk('fi2', 'Level II fixed income duration and key rate duration analysis.', {
+        topic: 'fixed-income',
+        level: 'level2',
+      }),
+      chunk('fi1', 'Level I fixed income introduces duration as price sensitivity.', {
+        topic: 'fixed-income',
+        level: 'level1',
+      }),
+      chunk('q2', 'Level II quant covers regression and duration-style sensitivity math.', {
+        topic: 'quant',
+        level: 'level2',
+      }),
+    ]);
+  });
+
+  it('retrieves across the neighborhood and tags each chunk with concept + relation', async () => {
+    const tagged = await retrieveConceptNeighborhood({
+      question: 'duration',
+      domain: 'cfa',
+      conceptNeighborhood: { graph, seedId: 'l2:fi', maxHops: 1, perConceptLimit: 2 },
+    });
+    const byId = new Map(tagged.map((t) => [t.id, t]));
+    // Seed concept chunk present + tagged self.
+    expect(byId.get('fi2')?.relation).toBe('self');
+    expect(byId.get('fi2')?.conceptId).toBe('l2:fi');
+    // Prerequisite quant chunk present + tagged prerequisite.
+    expect(byId.get('q2')?.relation).toBe('prerequisite');
+    // Same-concept L1 sibling present.
+    expect(byId.get('fi1')).toBeDefined();
+  });
+
+  it('degrades to the seed concept alone when it has no neighbors', async () => {
+    const loneGraph = analyzeKnowledgeGraph({
+      nodes: [{ id: 'l2:fi', label: 'FI II', topicId: 'fixed-income', level: 'level2' }],
+      edges: [],
+    });
+    const tagged = await retrieveConceptNeighborhood({
+      question: 'duration',
+      domain: 'cfa',
+      conceptNeighborhood: { graph: loneGraph, seedId: 'l2:fi' },
+    });
+    expect(tagged.every((t) => t.conceptId === 'l2:fi')).toBe(true);
+    expect(tagged.map((t) => t.id)).toContain('fi2');
+  });
+
+  it('localGroundedAnswer emits relation-tagged conceptCitations when configured', async () => {
+    const generate = vi.fn(async () => ({ text: 'Duration is price sensitivity [1].' }));
+    const res = await localGroundedAnswer({
+      question: 'duration',
+      domain: 'cfa',
+      includeNotebookSources: false,
+      verifyCitations: false,
+      generate,
+      conceptNeighborhood: { graph, seedId: 'l2:fi', maxHops: 1, perConceptLimit: 2 },
+    });
+    expect(res.conceptCitations).toBeDefined();
+    expect(res.conceptCitations!.length).toBeGreaterThanOrEqual(1);
+    for (const c of res.conceptCitations!) {
+      expect(['self', 'prerequisite', 'dependent', 'same-concept']).toContain(c.relation);
+      expect(typeof c.conceptId).toBe('string');
+    }
+  });
+
+  it('does NOT emit conceptCitations on the historical (no-graph) path', async () => {
+    const generate = vi.fn(async () => ({ text: 'Answer [1].' }));
+    const res = await localGroundedAnswer({
+      question: 'duration',
+      domain: 'cfa',
+      includeNotebookSources: false,
+      verifyCitations: false,
+      generate,
+    });
+    expect(res.conceptCitations).toBeUndefined();
+    expect(res.citations.length).toBeGreaterThanOrEqual(1);
   });
 });

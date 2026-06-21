@@ -324,6 +324,19 @@
   }
 
   /* ─────────────────────────────────────────────────────────────
+   * 10b. DENSITY AXIS — UI-2 (Wave 6)
+   *
+   *   `[data-density="compact"]` on <html> (set by the reading engine from the
+   *   persisted preference) tightens the SPACE scale by ~25%. The AUTHORITATIVE
+   *   compact overrides live in index.css's unlayered :root[data-density="compact"]
+   *   (which wins the cascade over this @layer, exactly like the base --space-N
+   *   ramp), so they're stated there rather than here. This note keeps tokens.css
+   *   honest about the axis existing. Only the spacing axis re-tunes; typography,
+   *   color, radius, elevation, and motion are untouched — density is a breathing-
+   *   room control, not a re-skin.
+   * ───────────────────────────────────────────────────────────── */
+
+  /* ─────────────────────────────────────────────────────────────
    * 11. PER-DOMAIN ACCENT OVERRIDES
    *
    *   When App.jsx sets `data-domain="<id>"` on <body> for /cfa, /excel,

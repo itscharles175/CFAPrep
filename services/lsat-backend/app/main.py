@@ -27,6 +27,7 @@ from .routers import (
     adaptivity_routes,
     backup_routes,
     content,
+    content_factory_routes,
     content_health_routes,
     dataset_routes,
     search_routes,
@@ -405,6 +406,8 @@ for r in (
     srs_routes.router,
     drills.router,
     generation_routes.router,
+    # CONTENT-8 — coverage-driven content factory (gated, flag-gated, reversible).
+    content_factory_routes.router,
     import_routes.router,
     dataset_routes.router,
     error_log.router,

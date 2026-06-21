@@ -234,6 +234,103 @@
   --shadow-lg: 0 10px 34px rgba(15,23,42,0.14);
 }
 
+/* ===== Density axis — UI-2 (Wave 6) =====
+   `[data-density="compact"]` on <html> (set by the reading engine from the
+   persisted preference) tightens the SPACE scale ~25% so the app's hundreds of
+   `var(--space-N)` consumers re-flow with no per-component edits. Stated in the
+   unlayered :root so it wins the cascade over the @layer tokens base ramp (same
+   reason the base --space-N + --topbar-height live here). `comfortable` is the
+   default — no attribute, unmodified scale. Only spacing + chrome dimensions
+   re-tune; type/color/radius/elevation/motion are deliberately untouched. */
+:root[data-density="compact"] {
+  --space-1: 3px;
+  --space-2: 6px;
+  --space-3: 9px;
+  --space-4: 12px;
+  --space-5: 15px;
+  --space-6: 18px;
+  --space-8: 24px;
+  --space-10: 30px;
+  --space-12: 36px;
+  --space-16: 48px;
+  --topbar-height: 56px;
+}
+
+/* ===== Reading themes — UI-3 (Wave 6) =====
+   `[data-reading-theme]` is an ADDITIVE override axis layered on top of the base
+   [data-theme] palette (managed by src/lib/reading/readingTheme.ts), so it tunes
+   the reading surface without replacing light/dark. Only the surface + text +
+   border tokens are overridden — accents, status colors, and per-domain tints
+   pass through from the base palette underneath.
+
+   warm-paper: a sepia, reduced-blue-light reading surface for long sessions.
+   Verified AA: #3A2F23 text on the warm surface ≈ 9:1. */
+:root[data-reading-theme="warm-paper"] {
+  --bg-primary: hsl(40 38% 92%);          /* warm canvas */
+  --bg-secondary: hsl(40 44% 95%);        /* warm surface */
+  --bg-card: hsl(40 46% 96%);
+  --bg-hover: hsl(38 30% 86%);
+  --text-primary: hsl(28 26% 18%);        /* ~9:1 on the warm surface */
+  --text-secondary: hsl(28 18% 32%);
+  --text-muted: hsl(30 14% 42%);          /* ~4.7:1 (AA) */
+  --border: rgba(58, 47, 35, 0.14);
+  --border-hover: rgba(58, 47, 35, 0.26);
+  --input-bg: hsl(40 50% 97%);
+  --glass-bg: rgba(248, 241, 227, 0.94);
+  --glass-border: rgba(58, 47, 35, 0.14);
+  --surface-raised: hsl(40 46% 96%);
+  --surface-panel: hsl(40 44% 95%);
+  --surface-data: rgba(58, 47, 35, 0.05);
+  --chart-grid: rgba(58, 47, 35, 0.12);
+}
+
+/* high-contrast: maximal text/background separation + opaque borders for low-
+   vision users (targets WCAG AAA contrast). Light/AAA by default; the dark-base
+   variant below inverts to white-on-black so a deliberately-dark user isn't
+   flipped to light when they boost contrast. */
+:root[data-reading-theme="high-contrast"] {
+  --bg-primary: hsl(0 0% 100%);
+  --bg-secondary: hsl(0 0% 100%);
+  --bg-card: hsl(0 0% 100%);
+  --bg-hover: hsl(0 0% 90%);
+  --text-primary: hsl(0 0% 0%);
+  --text-secondary: hsl(0 0% 12%);
+  --text-muted: hsl(0 0% 24%);            /* ~12:1 on white (AAA) */
+  --accent: hsl(224 90% 36%);             /* deep blue, >7:1 on white */
+  --accent-hover: hsl(224 90% 28%);
+  --border: rgba(0, 0, 0, 0.85);
+  --border-hover: rgba(0, 0, 0, 1);
+  --input-bg: hsl(0 0% 100%);
+  --focus-ring: rgba(0, 0, 0, 0.6);
+  --glass-bg: hsl(0 0% 100%);
+  --glass-border: rgba(0, 0, 0, 0.85);
+  --surface-raised: hsl(0 0% 100%);
+  --surface-panel: hsl(0 0% 100%);
+  --surface-data: rgba(0, 0, 0, 0.06);
+  --chart-grid: rgba(0, 0, 0, 0.45);
+}
+:root[data-theme="dark"][data-reading-theme="high-contrast"] {
+  --bg-primary: hsl(0 0% 0%);
+  --bg-secondary: hsl(0 0% 4%);
+  --bg-card: hsl(0 0% 6%);
+  --bg-hover: hsl(0 0% 16%);
+  --text-primary: hsl(0 0% 100%);
+  --text-secondary: hsl(0 0% 90%);
+  --text-muted: hsl(0 0% 78%);            /* ~12:1 on black (AAA) */
+  --accent: hsl(210 100% 78%);            /* bright blue, >7:1 on black */
+  --accent-hover: hsl(210 100% 88%);
+  --border: rgba(255, 255, 255, 0.85);
+  --border-hover: rgba(255, 255, 255, 1);
+  --input-bg: hsl(0 0% 6%);
+  --focus-ring: rgba(255, 255, 255, 0.6);
+  --glass-bg: hsl(0 0% 4%);
+  --glass-border: rgba(255, 255, 255, 0.85);
+  --surface-raised: hsl(0 0% 6%);
+  --surface-panel: hsl(0 0% 4%);
+  --surface-data: rgba(255, 255, 255, 0.08);
+  --chart-grid: rgba(255, 255, 255, 0.45);
+}
+
 /* ===== Reset ===== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -373,6 +470,188 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     scroll-behavior: auto !important;
     transition-duration: 1ms !important;
   }
+}
+
+/* ===== View Transitions — UI-1 (Wave 6) =====
+   The startViewTransition() helper (src/lib/viewTransitions.ts) drives the API;
+   this is the styling for the default cross-route crossfade. It is GATED behind
+   prefers-reduced-motion: when the user asks for reduced motion we set both
+   pseudo-elements to `animation: none` so the transition snaps instantly (the
+   helper ALSO short-circuits to an instant DOM update, so this is belt-and-braces
+   for any transition started outside the helper). A modern-feature query keeps
+   the block inert on browsers without the API. */
+@supports (view-transition-name: none) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: var(--duration-base);
+    animation-timing-function: var(--ease-standard);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation: none !important;
+    }
+  }
+}
+
+/* ===== Inclusive reading engine — A11Y-1 (Wave 6) =====
+   CSS-variable + attribute driven; the controller (src/lib/reading/readingEngine)
+   stamps the [data-*] attributes on <html> from the persisted prefs. Each feature
+   is independent and additive. */
+
+/* Dyslexia-friendly font: weighted, high-legibility stack. We don't ship a
+   webfont (strict-offline) — we name OpenDyslexic / Comic Sans-class faces a user
+   may have installed, then fall back to the system UI font with widened tracking
+   and a heavier baseline weight, which materially helps legibility on its own. */
+:root[data-reading-font="dyslexic"] body {
+  font-family: 'OpenDyslexic', 'Comic Sans MS', 'Atkinson Hyperlegible',
+    var(--font-sans);
+  letter-spacing: 0.01em;
+  word-spacing: 0.04em;
+}
+
+/* WCAG 1.4.12 text-spacing: the SC's minimum overrides (line ≥1.5×, letter
+   ≥0.12×, word ≥0.16×, paragraph ≥2×). Scoped to flowing copy so it doesn't
+   distort tables, badges, code, or KaTeX. !important is intentional — 1.4.12 is a
+   user-override that must beat component line-heights. */
+:root[data-text-spacing="on"] p,
+:root[data-text-spacing="on"] li,
+:root[data-text-spacing="on"] dd,
+:root[data-text-spacing="on"] blockquote,
+:root[data-text-spacing="on"] .case-viewer-copy,
+:root[data-text-spacing="on"] .source-snippet p {
+  line-height: 1.5 !important;
+  letter-spacing: 0.12em !important;
+  word-spacing: 0.16em !important;
+}
+:root[data-text-spacing="on"] p + p {
+  margin-top: 2em !important;
+}
+
+/* Bionic reading: CSS-only emphasis hook. The optional deep DOM pass wraps
+   fixations in <b data-qv-bionic>; this rule makes BOTH that wrapper and any
+   existing emphasis read with a clear fixation weight when the mode is on, and a
+   touch of extra word-spacing so the anchors separate. The DOM pass is opt-in, so
+   on its own this simply firms up existing <strong>/<b> as reading anchors. */
+:root[data-bionic="on"] [data-qv-bionic] {
+  font-weight: var(--fw-bold);
+}
+:root[data-bionic="on"] p,
+:root[data-bionic="on"] li {
+  word-spacing: 0.05em;
+}
+
+/* Line-focus ruler: a full-width band centred on --qv-ruler-y (set by the engine
+   from the pointer's clientY). Pure overlay — pointer-events:none so it never
+   eats clicks. A soft dim above/below via a huge box-shadow spread anchors the
+   current line without a heavy mask. */
+:root[data-line-focus="on"] #qv-line-focus-ruler {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--qv-ruler-y, -100px);
+  height: 2.2em;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: var(--z-overlay);
+  border-top: 1px solid var(--border-hover);
+  border-bottom: 1px solid var(--border-hover);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: 0 0 0 100vh rgba(0, 0, 0, 0.18);
+}
+
+/* ===== Reading-settings controls — Wave 6 (ReadingSettings.tsx) ===== */
+.reading-toggle-list {
+  display: grid;
+  gap: var(--space-3);
+}
+.reading-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-data);
+}
+.reading-toggle-copy {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.reading-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--fw-semibold);
+}
+.reading-toggle-copy small {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.reading-toggle-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.reading-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 3px var(--space-2) 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface-data);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  transition: background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+.reading-switch-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+.reading-switch.active {
+  background: var(--surface-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.reading-switch.active .reading-switch-thumb {
+  background: var(--accent);
+}
+
+/* ===== Formula speak button — GAP-MATHA11Y-1 ===== */
+.formula-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.formula-speak {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.formula-speak[aria-pressed="true"] {
+  color: var(--accent);
+}
+/* KaTeX a11y: the visual HTML is aria-hidden (the MathML carries the semantics),
+   so make sure the MathML node itself is not display:none'd by KaTeX's default
+   CSS for screen readers — KaTeX already handles this, but we keep the visual
+   layer hidden from the a11y tree explicitly. */
+.katex-html[aria-hidden="true"] {
+  /* no visual change — purely an a11y-tree annotation. */
 }
 
 /* ===== Scrollbar ===== */

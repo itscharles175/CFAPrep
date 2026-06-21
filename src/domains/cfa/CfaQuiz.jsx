@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
 import { useLevel3Pathway } from './useLevel3Pathway';
@@ -20,6 +20,8 @@ import { explainWrongAnswer, getLlmSettings } from '../../lib/localLlm';
 import { useProgressSummary } from '../../hooks/useProgress';
 import { CommandHint, EmptyPanel, ProgressRail, QuestionStage, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
 import { SourceRail } from '../../components/SourceContext';
+import AccessibleQuestionRunner from '../../components/a11y/AccessibleQuestionRunner';
+import HandsFreeController from '../../components/a11y/HandsFreeController';
 
 function currentTimestampMs() {
   return Date.now();
@@ -126,6 +128,8 @@ export default function CfaQuiz() {
   const [errorCategory, setErrorCategory] = useState('none');
   // Map of question.id -> { state: 'loading'|'done'|'error', text?: string, error?: string }
   const [aiExplain, setAiExplain] = useState({});
+  // A11Y-2: imperative handle to the accessible runner (used for focus control).
+  const runnerRef = useRef(null);
 
   const safeCurrent = Math.min(current, Math.max(questions.length - 1, 0));
   const q = questions[safeCurrent];
@@ -515,90 +519,95 @@ export default function CfaQuiz() {
           footer={<CommandHint keys={['A-D', 'Enter']} label="select and confirm" />}
         >
 
-          <div className="quiz-options">
-            {q.options.map((opt, idx) => {
-              let cls = 'quiz-option';
-              if (confirmed && idx === q.correct) cls += ' correct';
-              else if (confirmed && idx === selected && idx !== q.correct) cls += ' incorrect';
-              else if (!confirmed && idx === selected) cls += ' selected';
-
-              return (
-                <button
-                  key={idx}
-                  type="button"
-                  className={cls}
-                  onClick={() => handleSelect(idx)}
-                  aria-pressed={idx === selected}
-                  aria-keyshortcuts={letters[idx]}
-                  disabled={confirmed}
-                >
-                  <span className="quiz-option-letter">{letters[idx]}</span>
-                  <span style={{ flex: 1, textAlign: 'left' }}>{opt}</span>
-                  {confirmed && idx === q.correct && <CheckCircle2 size={18} color="var(--success)" />}
-                  {confirmed && idx === selected && idx !== q.correct && <XCircle size={18} color="var(--danger)" />}
-                </button>
-              );
-            })}
-          </div>
-
-          {confirmed && (
-            <div className="quiz-explanation">
-              <h4>{selected === q.correct ? 'Correct' : 'Incorrect'}</h4>
-              <p className="qv-fs-sm qv-text-secondary qv-m-0" style={{ lineHeight: 1.6 }}>{q.explanation}</p>
-              {q.formula && <StatusBadge tone="accent" style={{ marginTop: 'var(--space-3)' }}>Related formula: {q.formula}</StatusBadge>}
-              <SourceRail
-                compact
-                limit={2}
-                title="Source Context"
-                subtitle="Shown after confirmation only."
-                target={sourceTargetForQuestion(q)}
-              />
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginTop: 'var(--space-5)' }}>
-                <div>
-                  <div className="qv-fs-xs qv-text-muted qv-mb-2 qv-fw-bold">
-                    CONFIDENCE
-                  </div>
-                  <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
-                    {confidenceOptions.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className={`btn ${confidence === item.id ? 'btn-primary' : 'btn-secondary'}`}
-                        onClick={() => setConfidence(item.id)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <label style={{ display: 'block' }}>
-                  <span className="qv-fs-xs qv-text-muted qv-mb-2 qv-fw-bold" style={{ display: 'block' }}>
-                    ERROR TYPE
-                  </span>
-                  <select
-                    value={errorCategory}
-                    onChange={(event) => setErrorCategory(event.target.value)}
-                    style={{
-                      width: '100%',
-                      minHeight: 44,
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--border)',
-                      background: 'var(--surface)',
-                      color: 'var(--text-primary)',
-                      padding: '0 var(--space-3)',
-                    }}
-                  >
-                    {errorOptions
-                      .filter((item) => q.errorCategories?.includes(item.id) || item.id === 'none')
-                      .map((item) => (
-                        <option key={item.id} value={item.id}>{item.label}</option>
-                      ))}
-                  </select>
-                </label>
-              </div>
-            </div>
+          {/* A11Y-3: hands-free study controls. Untimed quiz, so a voice answer
+              applies directly (testMode={false}); read-aloud uses local TTS. The
+              strip self-hides when the browser lacks speech APIs. */}
+          {!confirmed && (
+            <HandsFreeController
+              question={q.question}
+              options={q.options.map((opt, idx) => ({ letter: letters[idx], text: opt }))}
+              onSelect={handleSelect}
+              testMode={false}
+              preface={`Question ${safeCurrent + 1} of ${questions.length}.`}
+            />
           )}
+
+          {/* A11Y-2: the shared accessible radiogroup primitive replaces the
+              hand-rolled <button> list. Selection/confirmation stay controlled
+              here, so scoring/persistence/analytics are unchanged. The runner
+              also renders the correct/incorrect headline + explanation via its
+              aria-live region; the formula badge, source rail and confidence/
+              error controls follow as its children below that feedback. */}
+          <AccessibleQuestionRunner
+            ref={runnerRef}
+            groupLabel="Answer options"
+            question={q.question}
+            hideStem
+            options={q.options.map((opt, idx) => ({ id: idx, text: opt }))}
+            selectedIndex={selected}
+            onSelect={handleSelect}
+            confirmed={confirmed}
+            correctIndex={q.correct}
+            explanation={confirmed ? q.explanation : undefined}
+            letters={letters}
+          >
+            {confirmed && (
+              <div className="quiz-explanation">
+                {q.formula && <StatusBadge tone="accent" style={{ marginTop: 'var(--space-3)' }}>Related formula: {q.formula}</StatusBadge>}
+                <SourceRail
+                  compact
+                  limit={2}
+                  title="Source Context"
+                  subtitle="Shown after confirmation only."
+                  target={sourceTargetForQuestion(q)}
+                />
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginTop: 'var(--space-5)' }}>
+                  <div>
+                    <div className="qv-fs-xs qv-text-muted qv-mb-2 qv-fw-bold">
+                      CONFIDENCE
+                    </div>
+                    <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+                      {confidenceOptions.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`btn ${confidence === item.id ? 'btn-primary' : 'btn-secondary'}`}
+                          onClick={() => setConfidence(item.id)}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <label style={{ display: 'block' }}>
+                    <span className="qv-fs-xs qv-text-muted qv-mb-2 qv-fw-bold" style={{ display: 'block' }}>
+                      ERROR TYPE
+                    </span>
+                    <select
+                      value={errorCategory}
+                      onChange={(event) => setErrorCategory(event.target.value)}
+                      style={{
+                        width: '100%',
+                        minHeight: 44,
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface)',
+                        color: 'var(--text-primary)',
+                        padding: '0 var(--space-3)',
+                      }}
+                    >
+                      {errorOptions
+                        .filter((item) => q.errorCategories?.includes(item.id) || item.id === 'none')
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>{item.label}</option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            )}
+          </AccessibleQuestionRunner>
         </QuestionStage>
 
         <div className="qv-row-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-6)' }}>

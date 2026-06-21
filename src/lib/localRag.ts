@@ -43,6 +43,12 @@ import { reciprocalRankFusion } from './rag/fusion';
 import { rerankCandidates, type RerankGenerate } from './rag/reranker';
 import { embedText, type EmbedOptions } from './rag/embedder';
 import { entail, type EntailmentGenerate } from './rag/entailment';
+import {
+  conceptNeighborhood,
+  type ConceptNode,
+  type KnowledgeGraphAnalysis,
+  type NeighborhoodEntry,
+} from './knowledge/graph';
 
 export interface LocalRagCitation {
   /** 1-based index matching the [n] marker in the answer. */
@@ -71,6 +77,15 @@ export interface LocalRagAnswer {
    * surface this rather than presenting an unsupported answer as grounded.
    */
   grounded?: boolean;
+  /**
+   * CONTENT-7 — present ONLY when `conceptNeighborhood` retrieval was used. The
+   * same citations as {@link citations}, additionally tagged with the graph
+   * concept each came from and HOW it relates to the seed (relation + distance),
+   * so the UI can render relation-labelled citation chips ("prerequisite",
+   * "same concept (L3)", …). The plain {@link citations} array is always present
+   * for backward-compatible consumers.
+   */
+  conceptCitations?: ConceptCitation[];
 }
 
 export interface LocalRagOptions {
@@ -144,6 +159,56 @@ export interface LocalRagOptions {
    * determinism. Independent of {@link verifyCitations}.
    */
   entailUseLlm?: boolean;
+  /**
+   * CONTENT-7 — concept-grounded retrieval over the knowledge-graph
+   * NEIGHBORHOOD. When supplied, retrieval is widened beyond the seed
+   * concept(s) to their PREREQUISITE + SAME-CONCEPT-ACROSS-LEVEL neighbors
+   * (computed from the CONTENT-1 graph), and each hit is tagged with HOW it
+   * relates to the seed (`self` / `prerequisite` / `dependent` / `same-concept`)
+   * so citations can show the relation. DEFAULT OFF / ADDITIVE: when this is
+   * omitted, retrieval is byte-for-byte the historical path — the seam only
+   * lights up for callers that pass it. OFFLINE-GRACEFUL: a graph/topic with no
+   * neighbors degrades to the seed concept alone (i.e. the existing behaviour).
+   */
+  conceptNeighborhood?: ConceptNeighborhoodOptions;
+}
+
+/**
+ * CONTENT-7 — configuration for concept-neighborhood retrieval. The graph +
+ * seed are supplied by the caller (the page builds the graph from level
+ * summaries; tests pass a tiny one), keeping `localRag` free of any host data
+ * dependency.
+ */
+export interface ConceptNeighborhoodOptions {
+  /** The CONTENT-1 graph analysis (or the parts the neighborhood walk needs). */
+  graph: Pick<KnowledgeGraphAnalysis, 'forward' | 'reverse' | 'edges' | 'nodesById'>;
+  /** The seed concept node id to expand around (e.g. `level2:fixed-income`). */
+  seedId: string;
+  /** How many hops of neighbors to include. Default 1. */
+  maxHops?: number;
+  /**
+   * Per-concept chunk budget — how many top chunks to keep from EACH concept in
+   * the neighborhood before the lists are fused. Default 4. Keeps any single
+   * concept (especially the seed) from crowding the others out.
+   */
+  perConceptLimit?: number;
+  /**
+   * Map a concept node id to the retrieval filter for ITS chunks. The host
+   * stores chunks keyed by `topic` (bare id) + `level`; the default reads
+   * `node.topicId` / `node.level` off the graph node. Override for custom
+   * chunk-tagging schemes.
+   */
+  conceptFilter?: (node: ConceptNode) => { topic?: string; level?: string; domain?: string };
+}
+
+/** A relation-tagged citation for CONTENT-7 concept-grounded answers. */
+export interface ConceptCitation extends LocalRagCitation {
+  /** Which graph concept this chunk was retrieved under. */
+  conceptId: string;
+  /** How that concept relates to the seed concept. */
+  relation: NeighborhoodEntry['relation'];
+  /** Hops from the seed concept (0 = the seed itself). */
+  distance: number;
 }
 
 const SYSTEM_PROMPT = [
@@ -282,6 +347,122 @@ export async function retrieveChunks(opts: LocalRagOptions): Promise<ChunkSearch
   return merged.slice(0, limit);
 }
 
+/** A retrieved chunk tagged with the concept it came from + its relation (CONTENT-7). */
+export interface ConceptTaggedChunk extends ChunkSearchResult {
+  conceptId: string;
+  relation: NeighborhoodEntry['relation'];
+  distance: number;
+}
+
+/** Default concept→retrieval-filter: read the graph node's topic/level. */
+function defaultConceptFilter(node: ConceptNode): { topic?: string; level?: string } {
+  return {
+    ...(node.topicId ? { topic: node.topicId } : {}),
+    ...(node.level ? { level: node.level } : {}),
+  };
+}
+
+/**
+ * CONTENT-7 — retrieve chunks across the knowledge-graph NEIGHBORHOOD of a seed
+ * concept (prerequisite + same-concept-across-level), tagging each hit with the
+ * concept it came from and HOW that concept relates to the seed.
+ *
+ * Per-concept retrieval reuses the EXISTING {@link retrieveChunks} path (so the
+ * notebook union / hybrid / rerank knobs all carry through), then the per-concept
+ * lists are fused with reciprocal-rank fusion. The SEED concept's list is
+ * weighted highest and prerequisites above dependents, so the most relevant
+ * grounding still leads while conceptually-adjacent context fills in behind it.
+ *
+ * ADDITIVE + OFFLINE-GRACEFUL: this is a NEW function — it never changes
+ * `retrieveChunks`. A seed with no neighbors degrades to retrieving the seed
+ * concept alone, i.e. the historical single-concept result.
+ */
+export async function retrieveConceptNeighborhood(
+  opts: LocalRagOptions & { conceptNeighborhood: ConceptNeighborhoodOptions },
+): Promise<ConceptTaggedChunk[]> {
+  const cfg = opts.conceptNeighborhood;
+  const limit = opts.limit ?? 12;
+  const perConceptLimit = cfg.perConceptLimit ?? 4;
+  const filterFor = cfg.conceptFilter ?? defaultConceptFilter;
+  const neighborhood = conceptNeighborhood(cfg.graph, cfg.seedId, cfg.maxHops ?? 1);
+  // If the seed isn't in the graph, fall back to the seed concept alone using
+  // the caller-supplied domain/level/topic so we never return empty here.
+  const entries: NeighborhoodEntry[] = neighborhood.length
+    ? neighborhood
+    : [{ id: cfg.seedId, relation: 'self', distance: 0 }];
+
+  // Relation → fusion weight: seed leads, prerequisites (foundations) next, then
+  // dependents, then same-concept siblings.
+  const relationWeight = (relation: NeighborhoodEntry['relation']): number => {
+    switch (relation) {
+      case 'self':
+        return 4;
+      case 'prerequisite':
+        return 3;
+      case 'dependent':
+        return 2;
+      case 'same-concept':
+      default:
+        return 1.5;
+    }
+  };
+
+  const perConceptResults = await Promise.all(
+    entries.map(async (entry) => {
+      const node = cfg.graph.nodesById.get(entry.id);
+      const filter: { topic?: string; level?: string; domain?: string } = node ? filterFor(node) : {};
+      // Reuse the EXISTING retrieval path per concept; pass-through the caller's
+      // retrieval knobs (hybrid/rerank/notebook) but scope topic/level/domain to
+      // this concept. The seed concept keeps the caller's explicit topic/level if
+      // it had none on the node.
+      const conceptOpts: LocalRagOptions = {
+        ...opts,
+        // Don't recurse into the neighborhood inside the per-concept retrieve.
+        conceptNeighborhood: undefined,
+        limit: perConceptLimit,
+        domain: filter.domain ?? opts.domain,
+        topic: filter.topic ?? (entry.relation === 'self' ? opts.topic : undefined),
+        level: filter.level ?? (entry.relation === 'self' ? opts.level : undefined),
+      };
+      const chunks = await retrieveChunks(conceptOpts);
+      return { entry, chunks };
+    }),
+  );
+
+  // Tag each chunk with its concept + relation, keeping the BEST (nearest /
+  // strongest-relation) tag when the same chunk surfaces under multiple concepts.
+  const tagged = new Map<string, ConceptTaggedChunk>();
+  for (const { entry, chunks } of perConceptResults) {
+    for (const chunk of chunks) {
+      const existing = tagged.get(chunk.id);
+      if (
+        !existing ||
+        entry.distance < existing.distance ||
+        (entry.distance === existing.distance && relationWeight(entry.relation) > relationWeight(existing.relation))
+      ) {
+        tagged.set(chunk.id, {
+          ...chunk,
+          conceptId: entry.id,
+          relation: entry.relation,
+          distance: entry.distance,
+        });
+      }
+    }
+  }
+
+  // Fuse the per-concept ranked lists (rank-based, so incomparable per-concept
+  // score scales can't skew it), weighting by relation. Then map back to the
+  // tagged chunks and truncate to the overall limit.
+  const fused = reciprocalRankFusion(
+    perConceptResults.map(({ entry, chunks }) => ({
+      items: chunks.map((c) => ({ id: c.id, text: c.text })),
+      weight: relationWeight(entry.relation),
+    })),
+    { dedupeByText: true, limit },
+  );
+  return fused.map((row) => tagged.get(row.item.id)!).filter(Boolean);
+}
+
 /** One verified claim from the citation-faithfulness pass (RAG-4). */
 export interface CitationVerification {
   /** The citation [n] number the claim referenced. */
@@ -348,7 +529,16 @@ export async function verifyAnswerCitations(
  * chunks + the local LLM.  No open-notebook sidecar required.
  */
 export async function localGroundedAnswer(opts: LocalRagOptions): Promise<LocalRagAnswer> {
-  const retrievedChunks = await retrieveChunks(opts);
+  // CONTENT-7 — when a concept neighborhood is configured, retrieve across the
+  // knowledge-graph neighborhood (relation-tagged); otherwise use the historical
+  // single-concept path UNCHANGED. The tagged chunks are a superset of
+  // ChunkSearchResult, so all downstream packing/citation logic is identical.
+  const usingConceptGraph = Boolean(opts.conceptNeighborhood);
+  const retrievedChunks = usingConceptGraph
+    ? await retrieveConceptNeighborhood(
+        opts as LocalRagOptions & { conceptNeighborhood: ConceptNeighborhoodOptions },
+      )
+    : await retrieveChunks(opts);
   if (retrievedChunks.length === 0) {
     throw new Error(
       'No curriculum chunks matched this question. Ingest the relevant volume (System Health → Desktop Shell) or broaden the question.',
@@ -404,6 +594,25 @@ export async function localGroundedAnswer(opts: LocalRagOptions): Promise<LocalR
     score: entry.chunk.score,
   }));
 
+  // CONTENT-7 — when concept-graph retrieval was used, the kept chunks carry
+  // their concept + relation tags; surface them as relation-tagged citations
+  // alongside the plain list. (Plain `citations` stays for old consumers.)
+  const conceptCitations: ConceptCitation[] | undefined = usingConceptGraph
+    ? citationSource.map((entry) => {
+        const tagged = entry.chunk as Partial<ConceptTaggedChunk>;
+        return {
+          number: entry.number,
+          locator: entry.chunk.locator,
+          documentId: entry.chunk.documentId,
+          snippet: snippetOf(entry.chunk.text),
+          score: entry.chunk.score,
+          conceptId: tagged.conceptId ?? opts.conceptNeighborhood!.seedId,
+          relation: tagged.relation ?? 'self',
+          distance: tagged.distance ?? 0,
+        };
+      })
+    : undefined;
+
   // RAG-4 — citation-faithfulness verification (ON by default here). Each cited
   // claim must be entailed by the chunk(s) it cites; if any cited claim is NOT
   // supported we flag the answer as a grounding-REFUSAL (`grounded:false`) so the
@@ -442,5 +651,6 @@ export async function localGroundedAnswer(opts: LocalRagOptions): Promise<LocalR
     used: packed.kept.length,
     ...(verification !== undefined ? { verification } : {}),
     ...(grounded !== undefined ? { grounded } : {}),
+    ...(conceptCitations !== undefined ? { conceptCitations } : {}),
   };
 }

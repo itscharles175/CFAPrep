@@ -16,6 +16,13 @@ import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { fetchUnifiedDue, LSAT_REVIEW_PATH } from '../lib/lsatReviewBridge';
 import { useScrollRestoration } from '../lib/scrollRestore';
+// PSY-13 — ONE global cross-domain ranker over host + LSAT due cards.
+import { buildUnifiedDueQueue } from '../lib/dueQueue';
+// NAV-1 — durable Study Trail + cross-restart "resume where you left off".
+import { recordStudyContext, getResumeTarget, clearResumeHandle } from '../lib/studyTrail';
+// PSY-13 — read the Wave-5 ability snapshots to ability-weight the rank (read-only;
+// degrades to overdue-only when no snapshot is available).
+import { readLatestAbilitySnapshot } from '../lib/psychometrics/abilitySnapshots';
 
 const filters = [
   { value: 'all', label: 'All' },
@@ -67,6 +74,13 @@ export default function ReviewInbox() {
   // weighted) on the canonical shape; this inbox merges them with the host's own
   // local Dexie queue into one combined "due today" count. null = not yet loaded.
   const [lsatDue, setLsatDue] = useState(null);
+  // PSY-13 — per-plane ability snapshots (Wave-5) feeding the global ranker.
+  // null = not yet loaded; {} = loaded but no snapshots (ranker degrades to
+  // overdue-only). Read-only consumption of the psychometrics layer.
+  const [abilityByPlane, setAbilityByPlane] = useState(null);
+  // NAV-1 — the "resume where you left off" target restored across restarts.
+  // null = none / not yet resolved; dismissing it clears the boot-readable handle.
+  const [resumeTarget, setResumeTarget] = useState(null);
 
   // UX-1: restore the document scroll position on return to the inbox, incl.
   // after a cross-domain soft-hop (which bypasses native scroll restoration).
@@ -149,6 +163,57 @@ export default function ReviewInbox() {
     };
   }, [activePathway]);
 
+  // PSY-13 — load the per-plane ability snapshots once so the global ranker can
+  // ability-weight the merged queue. Read-only + fully degrading: a missing /
+  // unregistered snapshot store resolves to null per plane and the ranker falls
+  // back to overdue-only. Host planes share the host ability plane; LSAT is read
+  // separately. Never blocks render.
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      readLatestAbilitySnapshot('cfa'),
+      readLatestAbilitySnapshot('lsat'),
+    ]).then(([host, lsat]) => {
+      if (!active) return;
+      const next = {};
+      if (host) next.cfa = { theta: host.theta, uncertainty: host.uncertainty };
+      if (lsat) next.lsat = { theta: lsat.theta, uncertainty: lsat.uncertainty };
+      setAbilityByPlane(next);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // NAV-1 — on mount, resolve the cross-restart resume target (durable trail →
+  // boot-readable handle), THEN record the inbox as the current study context so
+  // a later restart can offer to return here. Order matters: read the prior
+  // target before overwriting it with this visit. Fully degrading + offline.
+  useEffect(() => {
+    let active = true;
+    getResumeTarget().then((target) => {
+      // Don't offer to resume the inbox itself — only a deeper study context.
+      if (active && target && target.route !== '/review') setResumeTarget(target);
+      void recordStudyContext({
+        domain: 'host',
+        route: '/review',
+        label: 'Review Inbox',
+        queryState: filterParam ? { filter: filterParam } : undefined,
+      });
+    });
+    return () => {
+      active = false;
+    };
+    // Record once per mount — the filter param is captured at mount time only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // NAV-1 — dismiss the resume affordance + clear the boot-readable handle.
+  const dismissResume = useCallback(() => {
+    clearResumeHandle();
+    setResumeTarget(null);
+  }, []);
+
   // UX-5 — filter changes flow through the URL so the active slice is a deep
   // link. We merge into the existing params (preserving any `item` target) and
   // drop the param entirely for the default "all" so the canonical URL stays
@@ -221,6 +286,28 @@ export default function ReviewInbox() {
   const lsatDueCount = lsatDue?.ok ? lsatDue.dueCount : 0;
   const combinedQueueCount = items.length + lsatDueCount;
 
+  // PSY-13 — ONE global ranking over BOTH planes. Replaces the host-first
+  // concatenation (host items, then LSAT appended) with a single pure ranker by
+  // overdue + ability-weighted utility. Same data sources, unified RANK. Host
+  // due-review rows + the LSAT bridge's already-canonical due cards go through
+  // `buildUnifiedDueQueue`; with no ability snapshot it degrades to overdue-only.
+  const unifiedRanked = buildUnifiedDueQueue(
+    {
+      hostRows: items
+        .filter((item) => item.type === 'due-review')
+        .map((item) => ({
+          id: item.id,
+          title: item.title,
+          path: item.path,
+          dueAt: item.dueAt,
+          topic: item.topic,
+          type: item.type,
+        })),
+      lsatCards: lsatDue?.ok ? lsatDue.items : [],
+    },
+    { ability: abilityByPlane || undefined, limit: 6 },
+  );
+
   return (
     <div className="page-container">
       <PageHeader
@@ -230,12 +317,87 @@ export default function ReviewInbox() {
         actions={<button className="btn btn-secondary" onClick={handleRepair}><Wrench size={16} /> Repair Vault</button>}
       />
 
+      {/* NAV-1 — cross-restart "resume where you left off". Surfaces the most
+          recent study context recorded before the app last closed (durable
+          studyTrail store → boot-readable localStorage handle). Dismiss clears
+          the handle so it doesn't nag. Offline + degrades to nothing. */}
+      {resumeTarget && (
+        <Surface tone="vault" status="vault" style={{ marginBottom: 'var(--space-6)' }}>
+          <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'center' }}>
+            <div>
+              <StatusBadge tone="accent">Resume</StatusBadge>
+              <h3 className="qv-mt-3 qv-mb-1">Pick up where you left off</h3>
+              <p className="qv-text-secondary qv-fs-sm qv-m-0">{resumeTarget.label}</p>
+            </div>
+            <div className="qv-flex" style={{ gap: 'var(--space-2)' }}>
+              <Link className="btn btn-primary btn-sm" to={resumeTarget.route} onClick={dismissResume}>
+                Resume
+              </Link>
+              <button className="btn btn-secondary btn-sm" onClick={dismissResume}>
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </Surface>
+      )}
+
       <div className="grid-4 page-metrics">
         <MetricCard label="Due Today" value={studyPlan?.dueToday ?? 0} detail="Scheduled review items" icon={CalendarClock} />
         <MetricCard label="Forecast" value={studyPlan?.forecastReviewCount ?? 0} detail="Next 14 days" icon={Activity} tone="warning" />
         <MetricCard label="Weakest Topic" value={weakest ? `${weakest.readinessScore}%` : '-'} detail={weakest?.topic || 'No attempts yet'} icon={Gauge} tone="success" />
         <MetricCard label="Queue" value={combinedQueueCount} detail={lsatDueCount > 0 ? `${items.length} local + ${lsatDueCount} LSAT` : 'Total actionable items'} icon={ListChecks} tone="accent" />
       </div>
+
+      {/* PSY-13 — ONE global cross-domain due queue: a single ranked list over
+          host + LSAT due cards (by overdue + ability-weighted utility), replacing
+          the old host-first concatenation. Rendered only when the unified ranker
+          has at least one card to interleave (i.e. there ARE cross-domain LSAT
+          cards merged in); otherwise the existing per-plane sections below carry
+          the single-plane case unchanged. */}
+      {unifiedRanked.length > 0 && lsatDue?.ok && lsatDue.items.length > 0 && (
+        <Surface tone="analytics" style={{ marginBottom: 'var(--space-6)' }}>
+          <StatusBadge tone="accent">Up next — all domains</StatusBadge>
+          <h3 className="qv-mt-3">Ranked across every domain</h3>
+          <p className="qv-text-secondary qv-fs-sm">
+            One queue ranked by how overdue each card is{abilityByPlane && Object.keys(abilityByPlane).length > 0 ? ', weighted by your ability frontier' : ''}.
+          </p>
+          <ul className="qv-text-secondary qv-fs-sm" style={{ margin: 0, paddingLeft: 0, listStyle: 'none' }}>
+            {unifiedRanked.map((card) => {
+              const overdueLabel =
+                card.overdueDays >= 1 ? `${Math.round(card.overdueDays)}d overdue` : 'due now';
+              const body = (
+                <span className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'baseline' }}>
+                  <span>
+                    <StatusBadge tone={card.plane === 'lsat' ? 'study' : 'vault'}>
+                      {card.plane.toUpperCase()}
+                    </StatusBadge>{' '}
+                    {card.title}
+                    {card.leech ? <span className="qv-text-muted"> · leech</span> : null}
+                  </span>
+                  <small className="qv-text-muted">{overdueLabel}</small>
+                </span>
+              );
+              return (
+                <li key={card.id} style={{ padding: 'var(--space-2) 0' }}>
+                  {card.path ? (
+                    card.plane === 'lsat' ? (
+                      <a href={card.path} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+                        {body}
+                      </a>
+                    ) : (
+                      <Link to={card.path} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+                        {body}
+                      </Link>
+                    )
+                  ) : (
+                    body
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </Surface>
+      )}
 
       {/* Phase 4.1 — cross-domain: LSAT reviews from the sidecar, merged in.
           Rendered only when the LSAT backend is reachable; the actual review

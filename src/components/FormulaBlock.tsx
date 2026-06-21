@@ -1,10 +1,21 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Volume2 } from 'lucide-react';
+import {
+  renderAccessibleMath,
+  speakableFromLatex,
+} from '../lib/reading/katexA11y';
 
 export interface FormulaBlockProps {
   latex: string;
   name?: string;
   description?: string;
   compact?: boolean;
+  /**
+   * GAP-MATHA11Y-1 — show a "speak formula" button that reads the linearised
+   * spoken form aloud via the Web Speech API (offline, OS voices). Opt-in so the
+   * existing render sites are visually unchanged; defaults off.
+   */
+  speakable?: boolean;
 }
 
 export default function FormulaBlock({
@@ -12,27 +23,40 @@ export default function FormulaBlock({
   name,
   description,
   compact = false,
+  speakable = false,
 }: FormulaBlockProps) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const [speaking, setSpeaking] = useState(false);
 
   useEffect(() => {
     let active = true;
-    if (!ref.current) return;
-    async function renderFormula() {
-      try {
-        const { default: katex } = await import('katex');
-        if (active && ref.current) {
-          katex.render(latex, ref.current, { displayMode: true, throwOnError: false });
-        }
-      } catch {
-        if (active && ref.current) ref.current.textContent = latex;
-      }
-    }
-    renderFormula();
+    const target = ref.current;
+    if (!target) return;
+    // GAP-MATHA11Y-1 — render with htmlAndMathml + role/aria so screen readers
+    // announce the formula semantically. Helper handles the lazy katex import and
+    // falls back to plain text on failure (never throws).
+    void renderAccessibleMath(latex, target, { displayMode: true }).then(() => {
+      if (!active) return;
+    });
     return () => {
       active = false;
     };
   }, [latex]);
+
+  // Offline spoken-formula playback via the browser's built-in speech synthesis
+  // (OS voices, no network). Cancels any in-flight utterance first so repeated
+  // presses don't queue. Silently inert if the API is unavailable.
+  function speak() {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const text = speakableFromLatex(latex);
+    if (!text) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    setSpeaking(true);
+    window.speechSynthesis.speak(utterance);
+  }
 
   return (
     <div
@@ -41,7 +65,22 @@ export default function FormulaBlock({
       tabIndex={0}
       aria-label={name ? `${name} formula` : 'Formula'}
     >
-      {name && <div className="formula-title">{name}</div>}
+      {(name || speakable) && (
+        <div className="formula-title-row">
+          {name && <div className="formula-title">{name}</div>}
+          {speakable && (
+            <button
+              type="button"
+              className="btn-icon btn-ghost formula-speak"
+              aria-label={`Speak ${name ? `${name} ` : ''}formula aloud`}
+              aria-pressed={speaking}
+              onClick={speak}
+            >
+              <Volume2 size={16} />
+            </button>
+          )}
+        </div>
+      )}
       <div ref={ref} className="formula-render" />
       {description && <div className="formula-description">{description}</div>}
     </div>

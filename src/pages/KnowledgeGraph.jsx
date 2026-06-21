@@ -5,6 +5,7 @@ import { PageHeader, SegmentedControl, StatusBadge, Surface } from '../component
 import { getCfaLevelSummaries } from '../domains/cfa/cfaSummary';
 import { getCfaSourceCoverageMap } from '../lib/cfaSourceVault';
 import { db } from '../lib/progressStore';
+import { analyzeKnowledgeGraph, buildCurriculumGraph } from '../lib/knowledge/graph';
 
 // Interactive curriculum knowledge-graph canvas.
 //
@@ -48,6 +49,14 @@ function masteryColor(score) {
   }
   const t = (clamped - 50) / 50;
   return blendHex('#f59e0b', '#34d399', t);
+}
+
+// CONTENT-1 — readiness overlay color for a propagated readiness in 0..1.
+// Reuses the same red→yellow→green ramp so the overlay reads consistently with
+// the mastery overlay; null (no node) falls back to muted.
+function readinessColor(readiness) {
+  if (readiness == null) return 'var(--text-muted, #94a3b8)';
+  return masteryColor(Math.round(Math.max(0, Math.min(1, readiness)) * 100));
 }
 
 function blendHex(a, b, t) {
@@ -154,6 +163,39 @@ export default function KnowledgeGraph() {
     return out;
   }, [nodesByLevel]);
 
+  // CONTENT-1 — prerequisite-aware knowledge graph: topo-order, critical path,
+  // and a readiness overlay where downstream readiness propagates from
+  // prerequisite mastery. Built from the SAME level summaries + per-topic
+  // mastery the canvas already uses, so it never diverges from what's drawn.
+  const knowledge = useMemo(() => {
+    const graphInput = buildCurriculumGraph({
+      levels: levels.map((level) => ({
+        id: level.id,
+        topics: level.topics.map((topic) => ({
+          id: topic.id,
+          label: topic.label,
+          weight: topic.weight,
+        })),
+      })),
+      masteryByTopic: masteryByTopic || undefined,
+    });
+    return analyzeKnowledgeGraph(graphInput);
+  }, [levels, masteryByTopic]);
+
+  const criticalPathSet = useMemo(
+    () => new Set(knowledge.criticalPath.path),
+    [knowledge],
+  );
+
+  // Critical-path edges (consecutive pairs along the path) so we can render the
+  // gating chain distinctly from the rest of the spiral.
+  const criticalEdgeSet = useMemo(() => {
+    const set = new Set();
+    const path = knowledge.criticalPath.path;
+    for (let i = 0; i < path.length - 1; i += 1) set.add(`${path[i]}->${path[i + 1]}`);
+    return set;
+  }, [knowledge]);
+
   const maxRows = Math.max(...LEVEL_COLUMNS.map((id) => (nodesByLevel[id] || []).length));
   const height = FIRST_ROW_Y + maxRows * ROW_HEIGHT + 40;
   const width = 1160;
@@ -191,6 +233,11 @@ export default function KnowledgeGraph() {
                 {allNodes.filter((n) => n.hasCurriculum).length} with curriculum
               </StatusBadge>
             )}
+            {knowledge.criticalPath.path.length > 1 && (
+              <StatusBadge tone="warning">
+                critical path · {knowledge.criticalPath.path.length} concepts
+              </StatusBadge>
+            )}
           </>
         }
         actions={
@@ -213,6 +260,7 @@ export default function KnowledgeGraph() {
               options={[
                 { value: 'coverage', label: 'Curriculum' },
                 { value: 'mastery', label: 'Mastery' },
+                { value: 'readiness', label: 'Readiness' },
               ]}
               value={colorMode}
               onChange={setColorMode}
@@ -247,9 +295,16 @@ export default function KnowledgeGraph() {
               </g>
             ))}
 
-            {/* Edges */}
+            {/* Edges — prerequisite spiral; the critical-path chain is drawn
+                solid + accented so the gating sequence stands out (CONTENT-1). */}
             {edges.map((edge) => {
               const isActive = hoverId === edge.from.id || hoverId === edge.to.id;
+              const isCritical = criticalEdgeSet.has(`${edge.from.id}->${edge.to.id}`);
+              const stroke = isActive
+                ? 'var(--accent, #60a5fa)'
+                : isCritical
+                  ? 'var(--warning, #f59e0b)'
+                  : 'var(--border, #334155)';
               return (
                 <line
                   key={edge.id}
@@ -257,10 +312,10 @@ export default function KnowledgeGraph() {
                   y1={edge.from.y}
                   x2={edge.to.x - edge.to.radius}
                   y2={edge.to.y}
-                  stroke={isActive ? 'var(--accent, #60a5fa)' : 'var(--border, #334155)'}
-                  strokeWidth={isActive ? 2 : 1}
-                  strokeDasharray={isActive ? '0' : '4 4'}
-                  opacity={isActive ? 0.95 : 0.45}
+                  stroke={stroke}
+                  strokeWidth={isActive ? 2 : isCritical ? 2 : 1}
+                  strokeDasharray={isActive || isCritical ? '0' : '4 4'}
+                  opacity={isActive ? 0.95 : isCritical ? 0.85 : 0.45}
                 />
               );
             })}
@@ -269,6 +324,14 @@ export default function KnowledgeGraph() {
             {allNodes.map((node) => {
               const isActive = hoverId === node.id;
               const matches = matchesFilter(node);
+              const readiness = knowledge.readiness.get(node.id)?.readiness ?? null;
+              const isCritical = criticalPathSet.has(node.id);
+              const fill =
+                colorMode === 'mastery'
+                  ? masteryColor(node.mastery)
+                  : colorMode === 'readiness'
+                    ? readinessColor(readiness)
+                    : nodeColor(node.hasCurriculum);
               return (
                 <Link
                   key={node.id}
@@ -282,11 +345,24 @@ export default function KnowledgeGraph() {
                   <g
                     style={{ cursor: 'pointer' }}
                   >
+                    {/* Critical-path nodes get an outer warning ring so the
+                        gating chain is visible in every overlay (CONTENT-1). */}
+                    {isCritical && (
+                      <circle
+                        cx={node.x}
+                        cy={node.y}
+                        r={node.radius + 4}
+                        fill="none"
+                        stroke="var(--warning, #f59e0b)"
+                        strokeWidth={2}
+                        opacity={matches ? 0.85 : 0.18}
+                      />
+                    )}
                     <circle
                       cx={node.x}
                       cy={node.y}
                       r={node.radius}
-                      fill={colorMode === 'mastery' ? masteryColor(node.mastery) : nodeColor(node.hasCurriculum)}
+                      fill={fill}
                       stroke={isActive ? 'var(--text-primary, #f8fafc)' : 'transparent'}
                       strokeWidth={2}
                       opacity={matches ? (isActive ? 1 : 0.85) : 0.18}
@@ -330,6 +406,24 @@ export default function KnowledgeGraph() {
                 <span>No curriculum yet — only authored questions available; ingest from System Health</span>
               </li>
             </ul>
+          ) : colorMode === 'readiness' ? (
+            <ul className="qv-stack-2 qv-mt-2" style={{ listStyle: 'none', padding: 0 }}>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: readinessColor(0.15) }} />
+                <span>Blocked — prerequisites are weak; shore up the upstream chain first</span>
+              </li>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: readinessColor(0.5) }} />
+                <span>Partly ready — foundations + own progress are mid-strength</span>
+              </li>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: readinessColor(0.85) }} />
+                <span>Ready — prerequisites are solid; this concept is unblocked to study</span>
+              </li>
+              <li className="qv-text-muted">
+                Readiness propagates downstream from prerequisite mastery: a concept can&apos;t be more ready than its weakest prerequisite.
+              </li>
+            </ul>
           ) : (
             <ul className="qv-stack-2 qv-mt-2" style={{ listStyle: 'none', padding: 0 }}>
               <li className="qv-row-2">
@@ -355,6 +449,10 @@ export default function KnowledgeGraph() {
               <svg width="40" height="14" viewBox="0 0 40 14"><line x1="0" y1="7" x2="40" y2="7" stroke="var(--border)" strokeDasharray="4 4" /></svg>
               <span>Dashed edge: same topic across consecutive levels (the curriculum spiral)</span>
             </li>
+            <li className="qv-row-2">
+              <svg width="40" height="14" viewBox="0 0 40 14"><line x1="0" y1="7" x2="40" y2="7" stroke="var(--warning, #f59e0b)" strokeWidth="2" /></svg>
+              <span>Solid amber edge + ring: the critical path — the longest prerequisite chain that gates the most downstream material</span>
+            </li>
             <li className="qv-text-muted">
               Node radius scales with authored question count. Click any node to open the topic; hover/focus to highlight its cross-level chain.
             </li>
@@ -374,6 +472,25 @@ export default function KnowledgeGraph() {
                 {' · Mastery: '}
                 {selected.mastery == null ? 'no snapshots' : `${selected.mastery}%`}
               </p>
+              {(() => {
+                const r = knowledge.readiness.get(selected.id);
+                if (!r) return null;
+                const prereqs = knowledge.reverse.get(selected.id) || [];
+                const weakest = r.weakestPrerequisite
+                  ? knowledge.nodesById.get(r.weakestPrerequisite)?.label
+                  : null;
+                return (
+                  <p className="muted-copy qv-mt-1" style={{ marginBottom: 0 }}>
+                    {'Readiness: '}
+                    {Math.round(r.readiness * 100)}%
+                    {prereqs.length
+                      ? ` · ${prereqs.length} prerequisite${prereqs.length === 1 ? '' : 's'}`
+                      : ' · no prerequisites (a root concept)'}
+                    {weakest ? ` · gated by ${weakest}` : ''}
+                    {criticalPathSet.has(selected.id) ? ' · on the critical path' : ''}
+                  </p>
+                );
+              })()}
               <Link
                 to={`/cfa/${selected.levelId}/${selected.topicId}`}
                 className="btn btn-secondary btn-sm qv-mt-2"

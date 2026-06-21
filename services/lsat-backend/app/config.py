@@ -214,6 +214,31 @@ DB_VACUUM_MIN_FREELIST_PAGES = int(
     _env("LSATLAB_DB_VACUUM_MIN_FREELIST_PAGES", "64") or "64"
 )
 
+# CONTENT-8 — coverage-driven content factory. OFF by default: the factory turns
+# coverage deficits + weak-topic analytics into GATED Tier-B generation jobs (it
+# never bypasses the validate_candidate gates; weak content fails closed and is
+# quarantined, never served). Flip to 1 to let ``POST /api/content-factory/plan?activate=true``
+# enqueue real jobs; with the flag OFF the route still PREVIEWS the plan (a pure,
+# no-write dry run) but refuses to enqueue. The dry-run preview is always available
+# regardless of the flag so the simulator/UI can show the plan offline.
+CONTENT_FACTORY_ENABLED = _env("LSATLAB_CONTENT_FACTORY", "0") not in (
+    "0", "false", "False",
+)
+# How many servable items a q_type should have before it's considered "covered".
+# A type below this floor is a coverage DEFICIT the factory can backfill.
+CONTENT_FACTORY_COVERAGE_FLOOR = int(
+    _env("LSATLAB_CONTENT_FACTORY_COVERAGE_FLOOR", "12") or "12"
+)
+# Hard ceiling on how many candidates a single factory plan may enqueue per type,
+# so a deep deficit can't queue an unbounded local batch.
+CONTENT_FACTORY_MAX_PER_TYPE = int(
+    _env("LSATLAB_CONTENT_FACTORY_MAX_PER_TYPE", "10") or "10"
+)
+# Hard ceiling on the number of distinct q_types one plan may target.
+CONTENT_FACTORY_MAX_TYPES = int(
+    _env("LSATLAB_CONTENT_FACTORY_MAX_TYPES", "6") or "6"
+)
+
 
 def gen_dedup_threshold_for(
     q_type: str | None, *, section_type: str = "LR",

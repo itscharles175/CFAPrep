@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from .. import adaptivity, study_plan
+from .. import adaptivity, analytics, study_plan
 from ..db import get_session
 from ..models import (
     ActivityEvent,
@@ -352,6 +352,298 @@ def put_profile(
     session.refresh(row)
 
     return _reconcile_profile(plan, row)
+
+
+# --- PSY-2 what-if exam-plan simulator (pure, non-mutating) -----------------
+#
+# A preview of how plan edits (time budget, topic mix, target date / score) would
+# move projected readiness — WITHOUT writing anything. It reuses the existing
+# readiness math (``analytics.forecast``, the same WLS-on-elapsed-days projection
+# + required-slope inversion the daily plan reads) so the preview is consistent
+# with the real forecast. ``exam_date`` and ``target_score`` are REAL forecast
+# inputs and feed it directly; ``daily_minutes`` and ``topic_mix`` don't feed the
+# regression, so their effect is modelled as a transparent, clearly-labelled
+# effective-slope adjustment on top of the fitted trend (a heuristic, never a
+# silent rewrite of history). Two consecutive simulate calls return the identical
+# body and the DB is never touched.
+
+# A doubling of the daily-minutes budget lifts the modelled improvement rate by
+# at most this fraction (diminishing returns: time helps, but not linearly and
+# not without bound). Halving it symmetrically slows the modelled rate.
+_SIM_MAX_TIME_SLOPE_GAIN = 0.5
+# Topic-mix concentration on weak types yields at most this fractional slope
+# lift (focusing practice where you're weakest is higher-yield, with a ceiling).
+_SIM_MAX_FOCUS_SLOPE_GAIN = 0.25
+# Clamp the modelled effective weekly slope to the same realistic ceiling the
+# forecast uses, so the simulator can't preview implausible gains.
+_SIM_MAX_WEEKLY_SLOPE = analytics._MAX_SLOPE_PER_DAY * 7
+
+
+class SimulateEdits(BaseModel):
+    """Proposed plan edits to preview. Every field optional — unset = unchanged."""
+
+    target_score: Optional[int] = Field(default=None, ge=120, le=180)
+    exam_date: Optional[str] = Field(default=None, max_length=20)  # ISO "YYYY-MM-DD"
+    daily_minutes: Optional[int] = Field(default=None, ge=5, le=600)
+    # Fraction of practice time directed at the weakest types (0..1). Higher =
+    # more concentrated on weak areas (modelled as a higher-yield slope lift).
+    weak_topic_focus: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class SimulateBody(BaseModel):
+    """A what-if request: the baseline is the active plan; ``edits`` is the patch.
+
+    ``baseline`` optionally overrides the comparison baseline (else the active
+    ``StudyPlan`` is used) so the UI can compare two hypotheticals without a plan.
+    """
+
+    edits: SimulateEdits = Field(default_factory=SimulateEdits)
+    baseline: Optional[SimulateEdits] = None
+
+
+class SimulateScenario(BaseModel):
+    """One side of the comparison (baseline or projected)."""
+
+    target_score: int
+    exam_date: Optional[str] = None
+    daily_minutes: int
+    weak_topic_focus: float
+    days_to_exam: Optional[int] = None
+    current_score: Optional[int] = None
+    projected_score: Optional[int] = None
+    projected_percentile: Optional[float] = None
+    base_slope_per_week: float = 0.0
+    effective_slope_per_week: float = 0.0
+    slope_multiplier: float = 1.0
+    required_slope_per_week: Optional[float] = None
+    on_track: Optional[bool] = None
+    trajectory_feasible: Optional[bool] = None
+    gap_to_target: Optional[int] = None
+    low_confidence: bool = True
+    method: str = "insufficient_data"
+
+
+class SimulateDelta(BaseModel):
+    """projected - baseline for the headline readiness signals."""
+
+    projected_score: Optional[int] = None
+    projected_percentile: Optional[float] = None
+    effective_slope_per_week: float = 0.0
+    days_to_exam: Optional[int] = None
+    on_track_changed: bool = False
+    feasible_changed: bool = False
+
+
+class SimulateResponse(BaseModel):
+    ok: bool = True
+    # Pure / non-mutating — surfaced so callers/tests can assert the contract.
+    mutated: bool = False
+    has_plan: bool = False
+    baseline: SimulateScenario
+    projected: SimulateScenario
+    delta: SimulateDelta
+    notes: list[str] = Field(default_factory=list)
+
+
+def _sim_slope_multiplier(
+    *, daily_minutes: int, base_minutes: int, weak_topic_focus: float,
+) -> tuple[float, list[str]]:
+    """Model the effect of time-budget + topic-mix edits on the improvement rate.
+
+    Returns ``(multiplier, notes)``. The multiplier scales the fitted weekly slope:
+      * Time: ``log2(minutes / base)`` scaled by ``_SIM_MAX_TIME_SLOPE_GAIN`` so a
+        doubling helps at most that fraction and a halving slows symmetrically —
+        diminishing returns, bounded.
+      * Focus: ``weak_topic_focus`` (relative to a neutral 0.5 split) scaled by
+        ``_SIM_MAX_FOCUS_SLOPE_GAIN`` — concentrating on weak types is higher-yield.
+    Heuristic and clearly labelled; it never rewrites the underlying history."""
+    import math
+
+    notes: list[str] = []
+    mult = 1.0
+    base = max(1, int(base_minutes))
+    minutes = max(1, int(daily_minutes))
+    if minutes != base:
+        # log2 ratio: +1 per doubling, -1 per halving. Bounded gain per doubling.
+        ratio_log = math.log2(minutes / base)
+        time_gain = _SIM_MAX_TIME_SLOPE_GAIN * ratio_log
+        # Clamp so an extreme budget change can't dominate (e.g. 8x -> +1.5).
+        time_gain = max(-_SIM_MAX_TIME_SLOPE_GAIN * 2, min(_SIM_MAX_TIME_SLOPE_GAIN * 2, time_gain))
+        mult *= (1.0 + time_gain)
+        notes.append(
+            f"time budget {minutes}m vs {base}m -> slope x{round(1.0 + time_gain, 3)}"
+        )
+    # Focus relative to a neutral 0.5 (an even split across types).
+    focus_delta = float(weak_topic_focus) - 0.5
+    if abs(focus_delta) > 1e-6:
+        focus_gain = _SIM_MAX_FOCUS_SLOPE_GAIN * (focus_delta / 0.5)
+        mult *= (1.0 + focus_gain)
+        notes.append(
+            f"weak-topic focus {round(float(weak_topic_focus), 2)} "
+            f"-> slope x{round(1.0 + focus_gain, 3)}"
+        )
+    return max(0.1, mult), notes
+
+
+def _simulate_scenario(
+    session: Session,
+    *,
+    target_score: int,
+    exam_date: Optional[str],
+    daily_minutes: int,
+    weak_topic_focus: float,
+    base_minutes: int,
+) -> tuple[SimulateScenario, list[str]]:
+    """Compute one scenario's readiness preview from the shared forecast math.
+
+    Pure / read-only. ``exam_date`` + ``target_score`` feed ``analytics.forecast``
+    directly; the time-budget + topic-mix multiplier then re-projects the score
+    along the fitted trend at the modelled effective slope, clamped to the same
+    realistic ceiling the forecast uses."""
+    fc = analytics.forecast(
+        session, exam_date=exam_date, target_score=target_score,
+    )
+    base_slope = float(fc.get("slope_per_week") or 0.0)
+    mult, notes = _sim_slope_multiplier(
+        daily_minutes=daily_minutes,
+        base_minutes=base_minutes,
+        weak_topic_focus=weak_topic_focus,
+    )
+    eff_slope = max(-_SIM_MAX_WEEKLY_SLOPE, min(_SIM_MAX_WEEKLY_SLOPE, base_slope * mult))
+
+    current = fc.get("current_score")
+    days = fc.get("days_to_exam")
+    base_projected = fc.get("projected_score")
+    # Re-project at the effective slope: shift the baseline projection by the
+    # extra (or reduced) weekly gain over the remaining weeks. With no horizon or
+    # no current score we can't re-project, so fall back to the forecast's number.
+    projected = base_projected
+    if current is not None and days is not None and days > 0:
+        weeks = days / 7.0
+        delta_pts = (eff_slope - base_slope) * weeks
+        if base_projected is not None:
+            projected = analytics._clamp_score(base_projected + delta_pts)
+    projected_pct = (
+        analytics.scoring.scaled_to_percentile(int(projected))
+        if projected is not None else None
+    )
+    on_track = (projected >= target_score) if projected is not None else None
+    gap = (target_score - current) if current is not None else None
+
+    scenario = SimulateScenario(
+        target_score=target_score,
+        exam_date=exam_date,
+        daily_minutes=daily_minutes,
+        weak_topic_focus=round(float(weak_topic_focus), 3),
+        days_to_exam=days,
+        current_score=current,
+        projected_score=projected,
+        projected_percentile=projected_pct,
+        base_slope_per_week=round(base_slope, 2),
+        effective_slope_per_week=round(eff_slope, 2),
+        slope_multiplier=round(mult, 3),
+        required_slope_per_week=fc.get("required_slope_per_week"),
+        on_track=on_track,
+        trajectory_feasible=fc.get("trajectory_feasible"),
+        gap_to_target=gap,
+        low_confidence=bool(fc.get("low_confidence", True)),
+        method=str(fc.get("method") or "insufficient_data"),
+    )
+    return scenario, notes
+
+
+@router.post("/simulate", response_model=SimulateResponse)
+def simulate(body: SimulateBody, session: Session = Depends(get_session)) -> SimulateResponse:
+    """PSY-2 — preview the effect of plan edits on projected readiness (NO write).
+
+    Strictly pure: reads the active ``StudyPlan`` + the shared ``analytics.forecast``
+    math, computes a BASELINE scenario (current plan, or the optional ``baseline``
+    override) and a PROJECTED scenario (baseline patched with ``edits``), and
+    returns both plus the delta — without touching the DB. ``target_score`` and
+    ``exam_date`` are real forecast inputs; ``daily_minutes`` and ``weak_topic_focus``
+    are modelled as a transparent, clamped effective-slope adjustment (the
+    multiplier + its rationale are returned in ``notes``). Two identical requests
+    return identical bodies; nothing is persisted (``mutated`` is always False)."""
+    plan = study_plan.get_active_plan(session)
+    plan_minutes = (plan.daily_minutes if plan else 60) or 60
+
+    def _resolve(edit: Optional[SimulateEdits], fallback: "SimulateEdits | None") -> dict:
+        fb_target = fallback.target_score if fallback else None
+        fb_exam = fallback.exam_date if fallback else None
+        fb_minutes = fallback.daily_minutes if fallback else None
+        fb_focus = fallback.weak_topic_focus if fallback else None
+        target = (
+            (edit.target_score if edit and edit.target_score is not None else None)
+            or fb_target
+            or (plan.target_score if plan else 165)
+        )
+        exam = (
+            edit.exam_date if edit and edit.exam_date is not None else None
+        )
+        if exam is None:
+            exam = fb_exam if fb_exam is not None else (plan.exam_date if plan else None)
+        minutes = (
+            (edit.daily_minutes if edit and edit.daily_minutes is not None else None)
+            or fb_minutes
+            or plan_minutes
+        )
+        focus = (
+            edit.weak_topic_focus if edit and edit.weak_topic_focus is not None else None
+        )
+        if focus is None:
+            focus = fb_focus if fb_focus is not None else 0.5
+        return {
+            "target_score": int(target),
+            "exam_date": exam,
+            "daily_minutes": int(minutes),
+            "weak_topic_focus": float(focus),
+        }
+
+    # Baseline: the optional override, else the active plan's params (neutral mix).
+    base_params = _resolve(body.baseline, None)
+    # Projected: baseline patched with the edits.
+    proj_params = _resolve(body.edits, body.baseline)
+
+    baseline, _ = _simulate_scenario(
+        session, base_minutes=plan_minutes, **base_params,
+    )
+    projected, notes = _simulate_scenario(
+        session, base_minutes=plan_minutes, **proj_params,
+    )
+
+    delta = SimulateDelta(
+        projected_score=(
+            (projected.projected_score - baseline.projected_score)
+            if projected.projected_score is not None and baseline.projected_score is not None
+            else None
+        ),
+        projected_percentile=(
+            round(projected.projected_percentile - baseline.projected_percentile, 2)
+            if projected.projected_percentile is not None
+            and baseline.projected_percentile is not None
+            else None
+        ),
+        effective_slope_per_week=round(
+            projected.effective_slope_per_week - baseline.effective_slope_per_week, 2
+        ),
+        days_to_exam=(
+            (projected.days_to_exam - baseline.days_to_exam)
+            if projected.days_to_exam is not None and baseline.days_to_exam is not None
+            else None
+        ),
+        on_track_changed=projected.on_track != baseline.on_track,
+        feasible_changed=projected.trajectory_feasible != baseline.trajectory_feasible,
+    )
+
+    return SimulateResponse(
+        ok=True,
+        mutated=False,
+        has_plan=plan is not None,
+        baseline=baseline,
+        projected=projected,
+        delta=delta,
+        notes=notes,
+    )
 
 
 def _activity_payload(row: ActivityEvent) -> dict:
