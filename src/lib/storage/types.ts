@@ -239,6 +239,24 @@ export interface KeyedTable<T> {
   orderedBy(field: keyof T & string, options?: KeyedTableOrderOptions): Promise<T[]>;
 }
 
+/**
+ * DATA-1 Phase 3 — the atomic-batch scope handed to a {@link StorageDriver.transaction}
+ * callback.
+ *
+ * Inside the callback, `table(name)` returns a {@link KeyedTable} whose ops run
+ * INSIDE the open transaction, so a group of writes across several tables either
+ * all land or all roll back. The surface is intentionally the SAME `KeyedTable<R>`
+ * the non-transactional `StorageDriver.table` returns — the callback uses exactly
+ * the same ops (`put` / `add` / `clear` / `bulkPut` / `get` / `whereEquals` / …),
+ * just bound to the transaction. This is what lets `progressStore`'s multi-table
+ * recorders (recordQuizAttempt, recordMockAttempt, importVaultData, …) move off
+ * the raw `db.transaction('rw', […], fn)` calls with byte-identical atomicity.
+ */
+export interface StorageTransactionScope {
+  /** A {@link KeyedTable} for `name`, bound to the enclosing transaction. */
+  table<R>(name: string): KeyedTable<R>;
+}
+
 export interface StorageDriver {
   name: 'dexie' | 'surrealdb';
   ready(): Promise<boolean>;
@@ -287,6 +305,36 @@ export interface StorageDriver {
    *   driver maps it to a SurrealDB table, sanitising record ids).
    */
   table?<T>(name: string): KeyedTable<T>;
+  /**
+   * DATA-1 Phase 3 — run `fn` as an ATOMIC read-write batch across `tables`.
+   *
+   * This is the transaction counterpart to {@link table}: instead of one keyed
+   * op at a time, `fn` receives a {@link StorageTransactionScope} whose
+   * `scope.table(name)` ops all run inside ONE transaction, so a group of writes
+   * across several tables commits all-or-nothing. It is the primitive the
+   * Phase-3 `progressStore` reroute targets: each `db.transaction('rw', […], fn)`
+   * becomes `getStorage().transaction([…], 'rw', (tx) => …)`, preserving the same
+   * tables, the same order, and the same atomic boundary.
+   *
+   * Optional on the interface (like {@link table}) so callers feature-detect it;
+   * both shipped drivers (`dexie`, `surrealdb`) provide it. ADDITIVE — existing
+   * consumers are untouched.
+   *
+   * @typeParam T - the value the batch resolves to (the callback's return).
+   * @param tables - the backend table names enrolled in the transaction. On
+   *   Dexie these are the stores Dexie locks for the duration; on SurrealDB the
+   *   list is advisory (the connection is the transaction boundary).
+   * @param mode - read-write. Only `'rw'` is modelled (every host transaction is
+   *   read-write); the param exists so the call site reads like the Dexie call
+   *   it replaces.
+   * @param fn - the batch body; every keyed op MUST go through `tx.table(name)`
+   *   to stay inside the transaction.
+   */
+  transaction?<T>(
+    tables: string[],
+    mode: 'rw',
+    fn: (tx: StorageTransactionScope) => Promise<T>,
+  ): Promise<T>;
 }
 
 export interface StorageRegistry {

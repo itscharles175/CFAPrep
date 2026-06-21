@@ -84,7 +84,13 @@ import { fetchUnifiedDue, type UnifiedReviewItem } from './lsatReviewBridge';
 // module-evaluation time, so the `db` Dexie instance is already constructed by
 // the time any rerouted op runs.
 import { getStorage } from './storage';
-import type { KeyedTable } from './storage/types';
+import type { KeyedTable, StorageTransactionScope } from './storage/types';
+// DATA-1 Phase 3 — register the two previously-deferred stores in the Dexie
+// schema so PSY-11 ability snapshots + NAV-1 study trail actually persist. We
+// import ONLY the row-shape types from those slices (this module owns the Dexie
+// schema; the slices keep writing via getStorage().table(name)).
+import type { AbilitySnapshot } from './psychometrics/abilitySnapshots';
+import type { StudyTrailEntry } from './studyTrail';
 
 /**
  * DATA-1 Phase 2 — resolve the active driver's generic keyed-table primitive for
@@ -102,10 +108,30 @@ function vaultTable<T>(name: string): KeyedTable<T> {
   return driver.table<T>(name);
 }
 
+/**
+ * DATA-1 Phase 3 — run `fn` as an atomic read-write batch across `tableNames`
+ * through the active driver's `transaction` primitive. Like {@link vaultTable},
+ * `StorageDriver.transaction` is OPTIONAL but both shipped drivers provide it;
+ * the Dexie default wraps `db.transaction('rw', tables, fn)` faithfully, so each
+ * rerouted call site is behaviour-identical (same tables, same order, same atomic
+ * boundary) to the `db.transaction('rw', […], fn)` it supersedes. The callback
+ * receives a scope whose `tx.table(name)` ops run INSIDE the transaction.
+ */
+function vaultTransaction<T>(
+  tableNames: string[],
+  fn: (tx: StorageTransactionScope) => Promise<T>,
+): Promise<T> {
+  const driver = getStorage();
+  if (!driver.transaction) {
+    throw new Error(`Active storage driver '${driver.name}' does not implement transaction().`);
+  }
+  return driver.transaction<T>(tableNames, 'rw', fn);
+}
+
 export const PROGRESS_EVENT = 'quantvault:progress';
 const PROGRESS_CHANNEL = 'quantvault:progress-channel';
-export const VAULT_SCHEMA_VERSION = 11;
-export const VAULT_SCHEMA_HASH = 'qv-v11-resilience-control-plane';
+export const VAULT_SCHEMA_VERSION = 12;
+export const VAULT_SCHEMA_HASH = 'qv-v12-ability-snapshots-study-trail';
 export const VAULT_CONTENT_VERSION = 'cfa-2026-local-pack-v1';
 
 type SettingRow = { key: string; value: unknown; updatedAt: string };
@@ -242,6 +268,16 @@ type VaultDatabase = Dexie & {
   notes: Table<VaultNote, string>;
   bookmarks: Table<VaultBookmark, string>;
   settings: Table<SettingRow, string>;
+  // DATA-1 Phase 3 — PSY-11 ability snapshots (psychometrics/abilitySnapshots.ts)
+  // + NAV-1 study trail (studyTrail.ts). Registered here so their
+  // getStorage().table(name) writes persist on Dexie; intentionally NOT in
+  // STORE_NAMES / VaultDataStores — they are derived telemetry (ability snapshots
+  // are recomputable from attempts; the trail is ephemeral navigation history),
+  // so they are excluded from the canonical vault export the way the unexported
+  // source* stores are. resetVaultData('full') still clears them via SOURCE-style
+  // handling below.
+  abilitySnapshots: Table<AbilitySnapshot, string>;
+  studyTrail: Table<StudyTrailEntry, string>;
   sourceDocuments: Table<CfaSourceDocument, string>;
   sourceChunks: Table<CfaSourceChunk, string>;
   sourceIndexes: Table<CfaSourceIndex, string>;
@@ -298,6 +334,13 @@ const AUTO_ID_STORES = new Set<(typeof STORE_NAMES)[number]>([
 ]);
 
 const SOURCE_STORE_NAMES = ['sourceDocuments', 'sourceChunks', 'sourceIndexes', 'sourceIngestionRuns', 'sourceLinks', 'sourceLinkOverrides'] as const;
+
+// DATA-1 Phase 3 — registered-but-NOT-exported derived stores. They persist via
+// getStorage().table(name) (PSY-11 ability snapshots, NAV-1 study trail) but are
+// excluded from the canonical vault export/import/validate surface (STORE_NAMES)
+// because they are recomputable / ephemeral. A 'full' resetVaultData still wipes
+// them, the same way it wipes the unexported source* stores.
+const DERIVED_STORE_NAMES = ['abilitySnapshots', 'studyTrail'] as const;
 
 export type VaultImportPreviewBase = {
   valid: boolean;
@@ -427,8 +470,8 @@ db.version(5).stores({
   settings: 'key',
 });
 
-/* D1: Current schema v11 — resilience control plane, rollback snapshots, and private source bundles */
-db.version(VAULT_SCHEMA_VERSION).stores({
+/* D1: Schema v11 — resilience control plane, rollback snapshots, and private source bundles */
+db.version(11).stores({
   lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
   quizAttempts: '++id, domain, topic, pct, createdAt, mode',
   questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
@@ -465,6 +508,21 @@ db.version(VAULT_SCHEMA_VERSION).stores({
   sourceIngestionRuns: 'id, rootPath, startedAt, status',
   sourceLinks: 'id, targetId, targetKind, documentId, chunkId, score, rank, sourcePriority, createdAt',
   sourceLinkOverrides: 'id, targetId, chunkId, action, updatedAt',
+});
+
+/* D1: Current schema v12 — DATA-1 Phase 3 registers the two previously-deferred
+ * stores so PSY-11 ability snapshots + NAV-1 study trail persist on Dexie. Dexie
+ * carries forward every store from v11, so this incremental version only declares
+ * the two NEW stores. Index strings match the queries each slice issues:
+ *   - abilitySnapshots (abilitySnapshots.ts): keyed by `id`; reads via toArray()
+ *     then JS-filters on `domain` and sorts on `at`. `modelVersion` is indexed per
+ *     the slice's wiring note. (`difficultyMapping`/`calibrationResiduals` are
+ *     nested payload — stored verbatim, not indexed.)
+ *   - studyTrail (studyTrail.ts): keyed by `id`; reads via toArray() then
+ *     JS-filters on `domain`, sorts on `recordedAt`, and bulkDeletes by `id`. */
+db.version(VAULT_SCHEMA_VERSION).stores({
+  abilitySnapshots: 'id, domain, at, modelVersion',
+  studyTrail: 'id, domain, recordedAt',
 });
 
 function nowIso() {
@@ -615,23 +673,26 @@ function normalizeQuestionResult(
   };
 }
 
-async function updateMasterySnapshot(result: QuestionResultRow, review: ReviewItem) {
+async function updateMasterySnapshot(
+  result: QuestionResultRow,
+  review: ReviewItem,
+  tx: StorageTransactionScope,
+) {
   const id = objectiveId(result.domain, result.topic, result.learningObjective);
-  // DATA-1 Phase 3: updateMasterySnapshot runs INSIDE the rw transactions opened
-  // by persistQuestionResult's callers (recordQuestionResult / recordQuizAttempt /
-  // recordMockAttempt / …). Rerouting these db.* ops through the primitive's extra
-  // async wrapper would risk detaching them from Dexie's transaction zone, losing
-  // atomicity — so the whole function stays on direct db.* until the primitive
-  // models transactions.
-  const existing = await db.masterySnapshots.get(id);
-  // DATA-1 Phase 3: `.where('learningObjective').equals(v).filter(fn).toArray()`
-  // also chains a JS `.filter()` between the indexed equality and the read, which
-  // KeyedTable.whereEquals (a bare `.equals().toArray()`) cannot express.
-  const objectiveResults = await db.questionResults
-    .where('learningObjective')
-    .equals(result.learningObjective)
-    .filter((row) => row.domain === result.domain && row.topic === result.topic)
-    .toArray();
+  // DATA-1 Phase 3: runs INSIDE the rw transaction opened by persistQuestionResult's
+  // callers via the storage `transaction` primitive — every op goes through the
+  // `tx` scope so it stays in the same atomic boundary as the direct db.* it
+  // replaced.
+  const masterySnapshotsTx = tx.table<MasterySnapshot>('masterySnapshots');
+  const existing = await masterySnapshotsTx.get(id);
+  // DATA-1 Phase 3: the original `.where('learningObjective').equals(v).filter(fn)
+  // .toArray()` chained a JS `.filter()` between the indexed equality and the read,
+  // which `KeyedTable.whereEquals` (a bare `.equals().toArray()`) cannot express.
+  // We issue the SAME indexed equality through the tx scope and apply the identical
+  // JS `.filter()` on the returned array — behaviour-identical to the direct chain.
+  const objectiveResults = (
+    await tx.table<QuestionResultRow>('questionResults').whereEquals('learningObjective', result.learningObjective)
+  ).filter((row) => row.domain === result.domain && row.topic === result.topic);
   const score = masteryScoreForResults(objectiveResults);
   const confidenceScore = Math.round(
     objectiveResults.reduce((sum, row) => sum + CONFIDENCE_SCORE[row.confidence], 0) /
@@ -646,8 +707,8 @@ async function updateMasterySnapshot(result: QuestionResultRow, review: ReviewIt
         : 'flat'
     : 'new';
 
-  // DATA-1 Phase 3: this put() is inside the caller's rw transaction (see above).
-  await db.masterySnapshots.put({
+  // DATA-1 Phase 3: this put() runs inside the caller's rw transaction (see above).
+  await masterySnapshotsTx.put({
     id,
     domain: result.domain,
     topic: result.topic,
@@ -663,19 +724,20 @@ async function updateMasterySnapshot(result: QuestionResultRow, review: ReviewIt
   });
 }
 
-async function persistQuestionResult(result: QuestionResultRow) {
-  // DATA-1 Phase 3: every caller invokes this inside an rw transaction
-  // (recordQuestionResult / recordQuizAttempt / recordFlashcardResult /
-  // recordMockAttempt / recordVignetteAttempt / recordConstructedResponseAttempt /
-  // recordFormulaDrillAttempt / recordSkillLabAttempt), so all db.* ops below
-  // must stay direct to remain inside that atomic transaction.
+async function persistQuestionResult(result: QuestionResultRow, tx: StorageTransactionScope) {
+  // DATA-1 Phase 3: every caller invokes this inside an rw transaction via the
+  // storage `transaction` primitive (recordQuestionResult / recordQuizAttempt /
+  // recordFlashcardResult / recordMockAttempt / recordVignetteAttempt /
+  // recordConstructedResponseAttempt / recordFormulaDrillAttempt /
+  // recordSkillLabAttempt). All ops below route through the `tx` scope so they
+  // stay inside that same atomic transaction (same tables, same order).
   const id = objectiveId(result.domain, result.topic, result.learningObjective);
-  const previous = await db.reviewItems.get(id);
+  const previous = await tx.table<ReviewItem>('reviewItems').get(id);
   const review = buildReviewItem(result, previous);
 
-  await db.questionResults.add(result);
-  await db.reviewItems.put(review);
-  await db.reviewEvents.add({
+  await tx.table<QuestionResultRow>('questionResults').add(result);
+  await tx.table<ReviewItem>('reviewItems').put(review);
+  await tx.table<ReviewEvent>('reviewEvents').add({
     domain: result.domain,
     topic: result.topic,
     learningObjective: result.learningObjective,
@@ -684,7 +746,7 @@ async function persistQuestionResult(result: QuestionResultRow) {
     dueAt: review.dueAt,
     createdAt: result.createdAt,
   });
-  await db.confidenceCalibration.add({
+  await tx.table<ConfidenceCalibration>('confidenceCalibration').add({
     domain: result.domain,
     topic: result.topic,
     learningObjective: result.learningObjective,
@@ -693,7 +755,7 @@ async function persistQuestionResult(result: QuestionResultRow) {
     correct: result.correct,
     createdAt: result.createdAt,
   });
-  await updateMasterySnapshot(result, review);
+  await updateMasterySnapshot(result, review, tx);
 
   return review;
 }
@@ -839,12 +901,11 @@ export async function recordQuestionResult(
   // interruption can't leave a questionResult without its review/event/
   // calibration/mastery rows. This is the lone single-result path that was
   // previously unprotected (audit M4).
-  // DATA-1 Phase 3: stays on db.transaction + direct db.* — the primitive can't
-  // model multi-table atomicity.
-  const review = await db.transaction(
-    'rw',
-    [db.questionResults, db.reviewItems, db.reviewEvents, db.confidenceCalibration, db.masterySnapshots],
-    () => persistQuestionResult(normalized),
+  // DATA-1 Phase 3: rerouted through the storage `transaction` primitive — same
+  // tables, same atomic boundary as the prior db.transaction('rw', […]) call.
+  const review = await vaultTransaction(
+    ['questionResults', 'reviewItems', 'reviewEvents', 'confidenceCalibration', 'masterySnapshots'],
+    (tx) => persistQuestionResult(normalized, tx),
   );
   emitProgressChange();
   return review;
@@ -884,21 +945,20 @@ export async function recordQuizAttempt({
     ),
   );
 
-  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
-  // db.* for atomicity (the primitive can't model transactions).
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same
+  // tables, same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.quizAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'quizAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.quizAttempts.add({
+    async (tx) => {
+      await tx.table<QuizAttemptRow>('quizAttempts').add({
         domain,
         topic,
         title,
@@ -912,10 +972,10 @@ export async function recordQuizAttempt({
       });
 
       for (const answer of normalizedAnswers) {
-        await persistQuestionResult(answer);
+        await persistQuestionResult(answer, tx);
       }
 
-      await db.studySessions.add({
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode,
@@ -2277,97 +2337,67 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
       ? await filterKeepExisting(mergeStores)
       : mergeStores;
 
-  // DATA-1 Phase 3: multi-table atomic import — the primitive does not model
-  // db.transaction, so the block (and the clear()/bulkPut() db.* ops inside it)
-  // stays direct to preserve all-or-nothing import semantics.
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — the table
+  // list (and the clear()/bulkPut() ops inside the block) preserve the SAME
+  // all-or-nothing import semantics as the prior db.transaction call. The
+  // source-vault stores are enrolled only when includeSourceVault is set, exactly
+  // as before.
+  await vaultTransaction(
     [
-      db.lessonProgress,
-      db.quizAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.mockAttempts,
-      db.vignetteAttempts,
-      db.constructedResponseAttempts,
-      db.formulaDrillAttempts,
-      db.skillLabAttempts,
-      db.studySessions,
-      db.studyPlanSettings,
-      db.contentVersions,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.flashcardAttempts,
-      db.resultArtifacts,
-      db.mockSectionState,
-      db.learningEvents,
-      db.vaultHealthSnapshots,
-      db.rollbackSnapshots,
-      db.calculatorScenarios,
-      db.releaseRunHistory,
-      db.importJobs,
-      db.sourceBundleManifests,
-      db.psychometricStats,
-      db.mockBlueprints,
-      db.notes,
-      db.bookmarks,
-      db.settings,
-      ...(importOptions.includeSourceVault
-        ? [db.sourceDocuments, db.sourceChunks, db.sourceIndexes, db.sourceIngestionRuns, db.sourceLinks, db.sourceLinkOverrides]
-        : []),
+      ...STORE_NAMES,
+      ...(importOptions.includeSourceVault ? SOURCE_STORE_NAMES : []),
     ],
-    async () => {
+    async (tx) => {
       if (importOptions.mode === 'replace') {
-        await Promise.all(STORE_NAMES.map((storeName) => db[storeName].clear()));
+        await Promise.all(STORE_NAMES.map((storeName) => tx.table(storeName).clear()));
         if (importOptions.includeSourceVault) {
-          await Promise.all(SOURCE_STORE_NAMES.map((storeName) => db[storeName].clear()));
+          await Promise.all(SOURCE_STORE_NAMES.map((storeName) => tx.table(storeName).clear()));
         }
       }
 
       await Promise.all([
-        db.lessonProgress.bulkPut(storesToWrite.lessonProgress),
-        db.quizAttempts.bulkPut(storesToWrite.quizAttempts),
-        db.questionResults.bulkPut(storesToWrite.questionResults),
-        db.reviewItems.bulkPut(storesToWrite.reviewItems),
-        db.masterySnapshots.bulkPut(storesToWrite.masterySnapshots),
-        db.mockAttempts.bulkPut(storesToWrite.mockAttempts),
-        db.vignetteAttempts.bulkPut(storesToWrite.vignetteAttempts),
-        db.constructedResponseAttempts.bulkPut(storesToWrite.constructedResponseAttempts),
-        db.formulaDrillAttempts.bulkPut(storesToWrite.formulaDrillAttempts),
-        db.skillLabAttempts.bulkPut(storesToWrite.skillLabAttempts),
-        db.studySessions.bulkPut(storesToWrite.studySessions),
-        db.studyPlanSettings.bulkPut(storesToWrite.studyPlanSettings),
-        db.contentVersions.bulkPut(storesToWrite.contentVersions),
-        db.reviewEvents.bulkPut(storesToWrite.reviewEvents),
-        db.confidenceCalibration.bulkPut(storesToWrite.confidenceCalibration),
-        db.flashcardAttempts.bulkPut(storesToWrite.flashcardAttempts),
-        db.resultArtifacts.bulkPut(storesToWrite.resultArtifacts),
-        db.mockSectionState.bulkPut(storesToWrite.mockSectionState),
-        db.learningEvents.bulkPut(storesToWrite.learningEvents),
-        db.vaultHealthSnapshots.bulkPut(storesToWrite.vaultHealthSnapshots),
-        db.rollbackSnapshots.bulkPut(storesToWrite.rollbackSnapshots),
-        db.calculatorScenarios.bulkPut(storesToWrite.calculatorScenarios),
-        db.releaseRunHistory.bulkPut(storesToWrite.releaseRunHistory),
-        db.importJobs.bulkPut(storesToWrite.importJobs),
-        db.sourceBundleManifests.bulkPut(storesToWrite.sourceBundleManifests),
-        db.psychometricStats.bulkPut(storesToWrite.psychometricStats),
-        db.mockBlueprints.bulkPut(storesToWrite.mockBlueprints),
-        db.notes.bulkPut(storesToWrite.notes),
-        db.bookmarks.bulkPut(storesToWrite.bookmarks),
-        db.settings.bulkPut(storesToWrite.settings),
+        tx.table<LessonProgress>('lessonProgress').bulkPut(storesToWrite.lessonProgress),
+        tx.table<QuizAttemptRow>('quizAttempts').bulkPut(storesToWrite.quizAttempts),
+        tx.table<QuestionResultRow>('questionResults').bulkPut(storesToWrite.questionResults),
+        tx.table<ReviewItem>('reviewItems').bulkPut(storesToWrite.reviewItems),
+        tx.table<MasterySnapshot>('masterySnapshots').bulkPut(storesToWrite.masterySnapshots),
+        tx.table<MockAttempt>('mockAttempts').bulkPut(storesToWrite.mockAttempts),
+        tx.table<VignetteAttempt>('vignetteAttempts').bulkPut(storesToWrite.vignetteAttempts),
+        tx.table<ConstructedResponseAttempt>('constructedResponseAttempts').bulkPut(storesToWrite.constructedResponseAttempts),
+        tx.table<FormulaDrillAttempt>('formulaDrillAttempts').bulkPut(storesToWrite.formulaDrillAttempts),
+        tx.table<SkillLabAttempt>('skillLabAttempts').bulkPut(storesToWrite.skillLabAttempts),
+        tx.table<StudySession>('studySessions').bulkPut(storesToWrite.studySessions),
+        tx.table<StudyPlanSettings>('studyPlanSettings').bulkPut(storesToWrite.studyPlanSettings),
+        tx.table<ContentVersion>('contentVersions').bulkPut(storesToWrite.contentVersions),
+        tx.table<ReviewEvent>('reviewEvents').bulkPut(storesToWrite.reviewEvents),
+        tx.table<ConfidenceCalibration>('confidenceCalibration').bulkPut(storesToWrite.confidenceCalibration),
+        tx.table<FlashcardAttempt>('flashcardAttempts').bulkPut(storesToWrite.flashcardAttempts),
+        tx.table<ResultArtifact>('resultArtifacts').bulkPut(storesToWrite.resultArtifacts),
+        tx.table<MockSectionState>('mockSectionState').bulkPut(storesToWrite.mockSectionState),
+        tx.table<LearningEventEnvelope>('learningEvents').bulkPut(storesToWrite.learningEvents),
+        tx.table<VaultHealthSnapshot>('vaultHealthSnapshots').bulkPut(storesToWrite.vaultHealthSnapshots),
+        tx.table<RollbackSnapshot>('rollbackSnapshots').bulkPut(storesToWrite.rollbackSnapshots),
+        tx.table<CalculatorScenario>('calculatorScenarios').bulkPut(storesToWrite.calculatorScenarios),
+        tx.table<ReleaseRunHistory>('releaseRunHistory').bulkPut(storesToWrite.releaseRunHistory),
+        tx.table<ImportJob>('importJobs').bulkPut(storesToWrite.importJobs),
+        tx.table<SourceBundleManifest>('sourceBundleManifests').bulkPut(storesToWrite.sourceBundleManifests),
+        tx.table<PsychometricStats>('psychometricStats').bulkPut(storesToWrite.psychometricStats),
+        tx.table<MockBlueprint>('mockBlueprints').bulkPut(storesToWrite.mockBlueprints),
+        tx.table<VaultNote>('notes').bulkPut(storesToWrite.notes),
+        tx.table<VaultBookmark>('bookmarks').bulkPut(storesToWrite.bookmarks),
+        tx.table<SettingRow>('settings').bulkPut(storesToWrite.settings),
         ...(importOptions.includeSourceVault && exportPayload.sourceVault
           ? [
-              db.sourceDocuments.bulkPut(exportPayload.sourceVault.sourceDocuments),
-              db.sourceChunks.bulkPut(exportPayload.sourceVault.sourceChunks),
-              db.sourceIndexes.bulkPut(exportPayload.sourceVault.sourceIndexes),
-              db.sourceIngestionRuns.bulkPut(exportPayload.sourceVault.sourceIngestionRuns),
-              db.sourceLinks.bulkPut(exportPayload.sourceVault.sourceLinks || []),
-              db.sourceLinkOverrides.bulkPut(exportPayload.sourceVault.sourceLinkOverrides || []),
+              tx.table<CfaSourceDocument>('sourceDocuments').bulkPut(exportPayload.sourceVault.sourceDocuments),
+              tx.table<CfaSourceChunk>('sourceChunks').bulkPut(exportPayload.sourceVault.sourceChunks),
+              tx.table<CfaSourceIndex>('sourceIndexes').bulkPut(exportPayload.sourceVault.sourceIndexes),
+              tx.table<CfaSourceIngestionRun>('sourceIngestionRuns').bulkPut(exportPayload.sourceVault.sourceIngestionRuns),
+              tx.table<CfaSourceLink>('sourceLinks').bulkPut(exportPayload.sourceVault.sourceLinks || []),
+              tx.table<CfaSourceLinkOverride>('sourceLinkOverrides').bulkPut(exportPayload.sourceVault.sourceLinkOverrides || []),
             ]
           : []),
       ]);
-      if (rollbackSnapshot) await db.rollbackSnapshots.put(rollbackSnapshot);
+      if (rollbackSnapshot) await tx.table<RollbackSnapshot>('rollbackSnapshots').put(rollbackSnapshot);
     },
   );
 
@@ -2426,11 +2456,12 @@ export async function recordStudyEvent(event: Omit<StudySession, 'id'>) {
 }
 
 export async function recordLearningEventEnvelope(envelope: LearningEventEnvelope) {
-  // DATA-1 Phase 3: multi-table atomic write (learningEvents + studySessions +
-  // reviewEvents); kept on db.transaction + direct db.* to preserve atomicity.
-  await db.transaction('rw', [db.learningEvents, db.studySessions, db.reviewEvents], async () => {
-    await db.learningEvents.put(envelope);
-    await db.studySessions.add({
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same
+  // tables (learningEvents + studySessions + reviewEvents), same order, same
+  // atomic boundary as the prior db.transaction call.
+  await vaultTransaction(['learningEvents', 'studySessions', 'reviewEvents'], async (tx) => {
+    await tx.table<LearningEventEnvelope>('learningEvents').put(envelope);
+    await tx.table<StudySession>('studySessions').add({
       domain: envelope.event.domain,
       topic: envelope.event.topic,
       mode: envelope.event.mode,
@@ -2440,7 +2471,7 @@ export async function recordLearningEventEnvelope(envelope: LearningEventEnvelop
       questionsAnswered: envelope.event.total || 0,
       score: envelope.event.total ? Math.round(((envelope.event.score || 0) / envelope.event.total) * 100) : envelope.event.score || 0,
     });
-    await db.reviewEvents.add({
+    await tx.table<ReviewEvent>('reviewEvents').add({
       domain: envelope.event.domain,
       topic: envelope.event.topic,
       learningObjective: envelope.sourceIds[0] || envelope.event.sourceId || `${envelope.event.sourceType}:unmapped`,
@@ -2579,21 +2610,21 @@ export async function recordFlashcardResult({
     timestamp,
   );
 
-  // DATA-1 Phase 3: multi-table atomic recorder (attempt + persistQuestionResult's
-  // 5 stores + session); kept on db.transaction + direct db.* for atomicity.
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables
+  // (attempt + persistQuestionResult's 5 stores + session), same order, same
+  // atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.flashcardAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'flashcardAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.flashcardAttempts.add({
+    async (tx) => {
+      await tx.table<FlashcardAttempt>('flashcardAttempts').add({
         domain,
         topic,
         cardId,
@@ -2602,8 +2633,8 @@ export async function recordFlashcardResult({
         elapsedSeconds,
         createdAt: timestamp,
       });
-      await persistQuestionResult(result);
-      await db.studySessions.add({
+      await persistQuestionResult(result, tx);
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode: 'flashcard-drill',
@@ -3501,21 +3532,20 @@ export async function recordMockAttempt({
     topicMap.set(answer.topic, row);
   });
 
-  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
-  // db.* for atomicity (the primitive can't model transactions).
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables,
+  // same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.mockAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'mockAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.mockAttempts.add({
+    async (tx) => {
+      await tx.table<MockAttempt>('mockAttempts').add({
         domain,
         level,
         title,
@@ -3530,9 +3560,9 @@ export async function recordMockAttempt({
         createdAt: timestamp,
       });
       for (const answer of normalizedAnswers) {
-        await persistQuestionResult(answer);
+        await persistQuestionResult(answer, tx);
       }
-      await db.studySessions.add({
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic: 'mock',
         mode,
@@ -3578,21 +3608,20 @@ export async function recordVignetteAttempt({
     ),
   );
 
-  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
-  // db.* for atomicity (the primitive can't model transactions).
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables,
+  // same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.vignetteAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'vignetteAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.vignetteAttempts.add({
+    async (tx) => {
+      await tx.table<VignetteAttempt>('vignetteAttempts').add({
         domain,
         level,
         topic,
@@ -3606,9 +3635,9 @@ export async function recordVignetteAttempt({
         createdAt: timestamp,
       });
       for (const answer of normalizedAnswers) {
-        await persistQuestionResult(answer);
+        await persistQuestionResult(answer, tx);
       }
-      await db.studySessions.add({
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode: 'vignette-review',
@@ -3666,21 +3695,20 @@ export async function recordConstructedResponseAttempt({
     ),
   );
 
-  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
-  // db.* for atomicity (the primitive can't model transactions).
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables,
+  // same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.constructedResponseAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'constructedResponseAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.constructedResponseAttempts.add({
+    async (tx) => {
+      await tx.table<ConstructedResponseAttempt>('constructedResponseAttempts').add({
         domain,
         level,
         topic,
@@ -3695,9 +3723,9 @@ export async function recordConstructedResponseAttempt({
         createdAt: timestamp,
       });
       for (const result of results) {
-        await persistQuestionResult(result);
+        await persistQuestionResult(result, tx);
       }
-      await db.studySessions.add({
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode: 'mock-review',
@@ -3744,23 +3772,22 @@ export async function recordFormulaDrillAttempt({
     timestamp,
   );
 
-  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
-  // db.* for atomicity (the primitive can't model transactions).
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables,
+  // same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.formulaDrillAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'formulaDrillAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.formulaDrillAttempts.add({ domain, level, topic, formulaName, correct, confidence, elapsedSeconds, createdAt: timestamp });
-      await persistQuestionResult(result);
-      await db.studySessions.add({
+    async (tx) => {
+      await tx.table<FormulaDrillAttempt>('formulaDrillAttempts').add({ domain, level, topic, formulaName, correct, confidence, elapsedSeconds, createdAt: timestamp });
+      await persistQuestionResult(result, tx);
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode: 'formula-drill',
@@ -3811,21 +3838,20 @@ export async function recordSkillLabAttempt({
     ),
   );
 
-  // DATA-1 Phase 3: multi-table atomic recorder; kept on db.transaction + direct
-  // db.* for atomicity (the primitive can't model transactions).
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables,
+  // same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.skillLabAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'skillLabAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.skillLabAttempts.add({
+    async (tx) => {
+      await tx.table<SkillLabAttempt>('skillLabAttempts').add({
         domain,
         level,
         topic,
@@ -3838,9 +3864,9 @@ export async function recordSkillLabAttempt({
         createdAt: timestamp,
       });
       for (const result of results) {
-        await persistQuestionResult(result);
+        await persistQuestionResult(result, tx);
       }
-      await db.studySessions.add({
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode: labType === 'calculator' ? 'calculator-drill' : labType,
@@ -4067,15 +4093,20 @@ export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean }
   const groupedResults = new Map<string, QuestionResultRow[]>();
   const latestReviewById = new Map<string, ReviewItem>();
 
-  // DATA-1 Phase 3: multi-table atomic rebuild (clear + repopulate reviewItems /
-  // masterySnapshots / reviewEvents / confidenceCalibration in one transaction);
-  // kept on db.transaction + direct db.* so a crash can't leave indexes half-built.
-  await db.transaction('rw', [db.reviewItems, db.masterySnapshots, db.reviewEvents, db.confidenceCalibration], async () => {
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — the clear +
+  // repopulate of reviewItems / masterySnapshots / reviewEvents /
+  // confidenceCalibration runs in ONE atomic batch (same tables, same order) so a
+  // crash can't leave indexes half-built, exactly as the prior db.transaction.
+  await vaultTransaction(['reviewItems', 'masterySnapshots', 'reviewEvents', 'confidenceCalibration'], async (tx) => {
+    const reviewItemsTx = tx.table<ReviewItem>('reviewItems');
+    const masterySnapshotsTx = tx.table<MasterySnapshot>('masterySnapshots');
+    const reviewEventsTx = tx.table<ReviewEvent>('reviewEvents');
+    const confidenceCalibrationTx = tx.table<ConfidenceCalibration>('confidenceCalibration');
     await Promise.all([
-      db.reviewItems.clear(),
-      db.masterySnapshots.clear(),
-      db.reviewEvents.clear(),
-      db.confidenceCalibration.clear(),
+      reviewItemsTx.clear(),
+      masterySnapshotsTx.clear(),
+      reviewEventsTx.clear(),
+      confidenceCalibrationTx.clear(),
     ]);
 
     for (const result of results) {
@@ -4086,8 +4117,8 @@ export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean }
       if (!groupedResults.has(id)) groupedResults.set(id, []);
       groupedResults.get(id)?.push(result);
 
-      await db.reviewItems.put(review);
-      await db.reviewEvents.add({
+      await reviewItemsTx.put(review);
+      await reviewEventsTx.add({
         domain: result.domain,
         topic: result.topic,
         learningObjective: result.learningObjective,
@@ -4096,7 +4127,7 @@ export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean }
         dueAt: review.dueAt,
         createdAt: result.createdAt,
       });
-      await db.confidenceCalibration.add({
+      await confidenceCalibrationTx.add({
         domain: result.domain,
         topic: result.topic,
         learningObjective: result.learningObjective,
@@ -4116,7 +4147,7 @@ export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean }
         objectiveResults.reduce((sum, row) => sum + CONFIDENCE_SCORE[row.confidence], 0) /
           Math.max(1, objectiveResults.length),
       );
-      await db.masterySnapshots.put({
+      await masterySnapshotsTx.put({
         id,
         domain: latest.domain,
         topic: latest.topic,
@@ -4266,30 +4297,31 @@ export async function resetVaultData(scope: 'attempts' | 'progress' | 'full' = '
   // vault partially wiped. The 'full' branch in particular clears rollbackSnapshots
   // and re-puts the snapshot in the SAME transaction — previously a non-atomic
   // clear+re-put across two awaits could lose the only rollback point on a crash.
-  // DATA-1 Phase 3: these Dexie Table references AND the db.transaction blocks /
-  // .clear() calls below define multi-table atomic scopes the primitive can't
-  // model, so the whole function stays on direct db.*.
-  const ATTEMPT_TABLES = [
-    db.quizAttempts, db.questionResults, db.reviewItems, db.masterySnapshots,
-    db.mockAttempts, db.vignetteAttempts, db.constructedResponseAttempts,
-    db.formulaDrillAttempts, db.skillLabAttempts, db.reviewEvents,
-    db.confidenceCalibration, db.flashcardAttempts, db.resultArtifacts,
-    db.mockSectionState, db.studySessions, db.learningEvents,
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — each branch
+  // clears the SAME store set inside ONE atomic batch, and the 'full' branch still
+  // clears rollbackSnapshots and re-puts the snapshot in the SAME transaction, so
+  // the all-or-nothing semantics are identical to the prior db.transaction blocks.
+  const ATTEMPT_TABLES: string[] = [
+    'quizAttempts', 'questionResults', 'reviewItems', 'masterySnapshots',
+    'mockAttempts', 'vignetteAttempts', 'constructedResponseAttempts',
+    'formulaDrillAttempts', 'skillLabAttempts', 'reviewEvents',
+    'confidenceCalibration', 'flashcardAttempts', 'resultArtifacts',
+    'mockSectionState', 'studySessions', 'learningEvents',
   ];
   if (scope === 'attempts') {
-    await db.transaction('rw', ATTEMPT_TABLES, async () => {
-      await Promise.all(ATTEMPT_TABLES.map((t) => t.clear()));
+    await vaultTransaction(ATTEMPT_TABLES, async (tx) => {
+      await Promise.all(ATTEMPT_TABLES.map((name) => tx.table(name).clear()));
     });
   } else if (scope === 'progress') {
-    const tables = [db.lessonProgress, ...ATTEMPT_TABLES];
-    await db.transaction('rw', tables, async () => {
-      await Promise.all(tables.map((t) => t.clear()));
+    const tables = ['lessonProgress', ...ATTEMPT_TABLES];
+    await vaultTransaction(tables, async (tx) => {
+      await Promise.all(tables.map((name) => tx.table(name).clear()));
     });
   } else {
-    const tables = [...STORE_NAMES, ...SOURCE_STORE_NAMES].map((storeName) => db[storeName]);
-    await db.transaction('rw', tables, async () => {
-      await Promise.all(tables.map((t) => t.clear()));
-      await db.rollbackSnapshots.put(rollbackSnapshot);
+    const tables = [...STORE_NAMES, ...SOURCE_STORE_NAMES, ...DERIVED_STORE_NAMES];
+    await vaultTransaction(tables, async (tx) => {
+      await Promise.all(tables.map((name) => tx.table(name).clear()));
+      await tx.table<RollbackSnapshot>('rollbackSnapshots').put(rollbackSnapshot);
     });
   }
 

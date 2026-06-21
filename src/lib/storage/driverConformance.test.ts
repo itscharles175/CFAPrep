@@ -2,6 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../progressStore';
 import type { MasterySnapshot, QuestionResult, ReviewItem } from '../learningTypes';
 import type { SourceChunkInput, StorageDriver, StorageSettingRow } from './types';
+// DATA-1 Phase 3 — exercise the now-registered Dexie stores through the REAL
+// slice persistence paths (no injected table), so the round-trip proves the
+// schema bump wired getStorage().table('abilitySnapshots'|'studyTrail') to a live
+// store instead of the prior no-op (unknown-store) degrade.
+import {
+  recordAbilitySnapshot,
+  readAbilitySnapshots,
+  readLatestAbilitySnapshot,
+} from '../psychometrics/abilitySnapshots';
+import { recordStudyContext, readStudyTrail } from '../studyTrail';
 
 // ===========================================================================
 // DATA-8 — shared storage-driver conformance harness
@@ -359,6 +369,11 @@ const dexieCase: DriverCase = {
     // DATA-1 — the generic table() suite writes to these real stores.
     await db.lessonProgress.clear();
     await db.studySessions.clear();
+    // DATA-1 Phase 3 — transaction() + deferred-store suites write here too.
+    await db.lessonProgress.clear();
+    await db.reviewEvents.clear();
+    await db.abilitySnapshots.clear();
+    await db.studyTrail.clear();
   },
   toArrayRestoresId: true,
 };
@@ -985,5 +1000,221 @@ describe.each(DRIVER_CASES)('StorageDriver conformance: $name', (driverCase) => 
       // Clearing one table never touches another.
       expect(await lessons.count()).toBe(1);
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // DATA-1 Phase 3 — transaction() atomic-batch primitive
+  //
+  // The primitive the Phase-3 progressStore recorder reroute targets. We prove
+  // the SAME contract on both drivers: a multi-table batch commits its writes
+  // and the callback's return value is surfaced, with `tx.table(name)` ops
+  // confined to their own table names. Atomic ROLLBACK on a mid-batch failure is
+  // asserted for Dexie only — Dexie gives real transactional rollback via
+  // fake-indexeddb, while the SurrealDB driver's transaction() is a
+  // runtime-verify-gated sequential best-effort (no client-side cross-table
+  // rollback), so a rollback assertion there would assert a guarantee the
+  // offline driver does not make. Reuses the real `lessonProgress` (keyed) +
+  // `studySessions` (auto-id) stores so the Dexie side is a faithful 1:1 of the
+  // direct `db.transaction('rw', [...], fn)` it replaces.
+  // -------------------------------------------------------------------------
+  describe('transaction() atomic-batch primitive', () => {
+    interface KeyedRow {
+      id: string;
+      domain: string;
+      moduleId: string;
+      lastVisitedAt: string;
+      score: number;
+    }
+    const makeRow = (overrides: Partial<KeyedRow> = {}): KeyedRow => ({
+      id: 'cfa::fixed-income::los-1',
+      domain: 'cfa',
+      moduleId: 'fixed-income',
+      lastVisitedAt: '2026-06-01T00:00:00.000Z',
+      score: 50,
+      ...overrides,
+    });
+
+    it('exposes transaction() on both drivers', () => {
+      expect(typeof driver.transaction).toBe('function');
+    });
+
+    it('commits writes across several tables in one batch', async () => {
+      await driver.transaction!(['lessonProgress', 'studySessions'], 'rw', async (tx) => {
+        await tx.table<KeyedRow>('lessonProgress').put(makeRow({ id: 'tx-keyed', score: 7 }));
+        await tx.table<{ domain: string; topic: string; score: number }>('studySessions').add({
+          domain: 'cfa',
+          topic: 't',
+          score: 9,
+        });
+      });
+
+      const lessons = driver.table!<KeyedRow>('lessonProgress');
+      const sessions = driver.table!<{ domain: string; topic: string; score: number }>('studySessions');
+      expect((await lessons.get('tx-keyed'))!.score).toBe(7);
+      expect(await sessions.count()).toBe(1);
+    });
+
+    it('surfaces the callback return value', async () => {
+      const result = await driver.transaction!(['lessonProgress'], 'rw', async (tx) => {
+        await tx.table<KeyedRow>('lessonProgress').put(makeRow({ id: 'ret', score: 3 }));
+        const row = await tx.table<KeyedRow>('lessonProgress').get('ret');
+        return row?.score ?? -1;
+      });
+      expect(result).toBe(3);
+    });
+
+    it('reads inside the batch see writes made earlier in the same batch', async () => {
+      const seen = await driver.transaction!(['lessonProgress'], 'rw', async (tx) => {
+        const t = tx.table<KeyedRow>('lessonProgress');
+        await t.put(makeRow({ id: 'inner', score: 42 }));
+        const back = await t.get('inner');
+        return back?.score;
+      });
+      expect(seen).toBe(42);
+    });
+
+    it('keeps tx writes isolated per table name', async () => {
+      await driver.transaction!(['lessonProgress', 'studySessions'], 'rw', async (tx) => {
+        await tx.table<KeyedRow>('lessonProgress').put(makeRow({ id: 'iso-lesson' }));
+        await tx.table<{ domain: string; topic: string; score: number }>('studySessions').add({
+          domain: 'cfa',
+          topic: 't',
+          score: 1,
+        });
+      });
+      expect(await driver.table!<KeyedRow>('lessonProgress').count()).toBe(1);
+      expect(await driver.table!<{ domain: string; topic: string; score: number }>('studySessions').count()).toBe(1);
+    });
+
+    it.skipIf(driverCase.name === 'surrealdb')(
+      'rolls back every write when the batch throws (Dexie only — Surreal tx is sequential best-effort)',
+      async () => {
+        const lessons = driver.table!<KeyedRow>('lessonProgress');
+        await lessons.put(makeRow({ id: 'pre-existing', score: 1 }));
+
+        await expect(
+          driver.transaction!(['lessonProgress'], 'rw', async (tx) => {
+            await tx.table<KeyedRow>('lessonProgress').put(makeRow({ id: 'doomed', score: 99 }));
+            throw new Error('boom');
+          }),
+        ).rejects.toThrow('boom');
+
+        // The doomed write rolled back; the pre-existing row is untouched.
+        expect(await lessons.get('doomed')).toBeUndefined();
+        expect((await lessons.get('pre-existing'))!.score).toBe(1);
+      },
+    );
+  });
+});
+
+// ===========================================================================
+// DATA-1 Phase 3 — the two previously-deferred stores now PERSIST + READ back
+//
+// Before the schema bump, abilitySnapshots.ts (PSY-11) and studyTrail.ts (NAV-1)
+// wrote via getStorage().table('abilitySnapshots'|'studyTrail'), but those stores
+// were not in the Dexie schema, so on the active Dexie backend every write hit the
+// unknown-store path and silently no-op'd (recordAbilitySnapshot → false, the
+// trail → trailed:false). Registering them in db.version(12) wires the SAME slice
+// code to a live store. These tests call the REAL slice functions WITHOUT an
+// injected table, so they exercise the production getStorage() path against the
+// default Dexie driver + fake-indexeddb.
+// ===========================================================================
+describe('DATA-1 Phase 3 — deferred stores persist on the registered Dexie schema', () => {
+  beforeEach(async () => {
+    await db.abilitySnapshots.clear();
+    await db.studyTrail.clear();
+  });
+  afterEach(async () => {
+    await db.abilitySnapshots.clear();
+    await db.studyTrail.clear();
+  });
+
+  it('abilitySnapshots: recordAbilitySnapshot now persists and reads back', async () => {
+    const ok = await recordAbilitySnapshot({
+      domain: 'cfa',
+      theta: 0.42,
+      uncertainty: 0.31,
+      difficultyMapping: [{ id: 'item-1', b: 0.1, empiricalDifficulty: 0.6 }],
+      at: '2026-06-10T00:00:00.000Z',
+    });
+    // The write now LANDS (was `false` on the unknown-store no-op path pre-bump).
+    expect(ok).toBe(true);
+
+    // Read back through the real slice path.
+    const rows = await readAbilitySnapshots('cfa');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].theta).toBe(0.42);
+    expect(rows[0].uncertainty).toBe(0.31);
+    expect(rows[0].difficultyMapping.items[0].id).toBe('item-1');
+
+    // It is also visible on the raw registered Dexie store.
+    expect(await db.abilitySnapshots.count()).toBe(1);
+
+    const latest = await readLatestAbilitySnapshot('cfa');
+    expect(latest?.at).toBe('2026-06-10T00:00:00.000Z');
+  });
+
+  it('abilitySnapshots: keyed by id (same id overwrites, distinct ids accumulate)', async () => {
+    await recordAbilitySnapshot({
+      domain: 'cfa',
+      theta: 0.1,
+      uncertainty: 0.5,
+      difficultyMapping: [],
+      at: '2026-06-10T00:00:00.000Z',
+    });
+    // Same domain + at → same id → idempotent overwrite.
+    await recordAbilitySnapshot({
+      domain: 'cfa',
+      theta: 0.9,
+      uncertainty: 0.2,
+      difficultyMapping: [],
+      at: '2026-06-10T00:00:00.000Z',
+    });
+    // Different timestamp → distinct id → accumulates.
+    await recordAbilitySnapshot({
+      domain: 'cfa',
+      theta: 0.7,
+      uncertainty: 0.3,
+      difficultyMapping: [],
+      at: '2026-06-11T00:00:00.000Z',
+    });
+
+    const rows = await readAbilitySnapshots('cfa');
+    expect(rows).toHaveLength(2);
+    // Oldest → newest by `at`; the overwrite kept the second theta.
+    expect(rows[0].theta).toBe(0.9);
+    expect(rows[1].theta).toBe(0.7);
+  });
+
+  it('studyTrail: recordStudyContext now persists and reads back', async () => {
+    const { trailed } = await recordStudyContext({
+      domain: 'cfa',
+      route: '/cfa/lesson/abc',
+      label: 'Ethics — Lesson 3',
+      recordedAt: '2026-06-10T00:00:00.000Z',
+    });
+    // The durable trail write now LANDS (was `trailed:false` pre-bump).
+    expect(trailed).toBe(true);
+
+    const trail = await readStudyTrail({ domain: 'cfa' });
+    expect(trail).toHaveLength(1);
+    expect(trail[0].route).toBe('/cfa/lesson/abc');
+    expect(trail[0].label).toBe('Ethics — Lesson 3');
+
+    expect(await db.studyTrail.count()).toBe(1);
+  });
+
+  it('studyTrail: newest-first ordering across multiple recorded contexts', async () => {
+    await recordStudyContext({ domain: 'cfa', route: '/a', label: 'A', recordedAt: '2026-06-10T00:00:00.000Z' });
+    await recordStudyContext({ domain: 'cfa', route: '/b', label: 'B', recordedAt: '2026-06-11T00:00:00.000Z' });
+    await recordStudyContext({ domain: 'lsat', route: '/c', label: 'C', recordedAt: '2026-06-12T00:00:00.000Z' });
+
+    const all = await readStudyTrail();
+    // Newest → oldest by recordedAt.
+    expect(all.map((e) => e.route)).toEqual(['/c', '/b', '/a']);
+
+    // Domain filter isolates the plane.
+    const cfaOnly = await readStudyTrail({ domain: 'cfa' });
+    expect(cfaOnly.map((e) => e.route)).toEqual(['/b', '/a']);
   });
 });

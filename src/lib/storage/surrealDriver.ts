@@ -12,6 +12,7 @@ import type {
   SourceChunkInput,
   StorageDriver,
   StorageSettingRow,
+  StorageTransactionScope,
 } from './types';
 
 /** Loose record shape accepted by the SurrealDB client generics. */
@@ -616,11 +617,52 @@ function createSurrealTable<T>(name: string): KeyedTable<T> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// transaction() — atomic read-write batch (DATA-1 Phase 3), best-effort
+// ---------------------------------------------------------------------------
+// runtime-verify-gated: this driver is NOT exercised today (Dexie is the active
+// backend), so the transaction path here is wire-ready but UNVERIFIED against a
+// live :8000 sidecar.
+//
+// SurrealDB's wire protocol DOES expose BEGIN/COMMIT/CANCEL TRANSACTION, but the
+// JS client's keyed-CRUD methods (`upsert`/`create`/`delete`/`select`) issue
+// individual RPCs that do NOT cleanly compose into one SurrealQL transaction
+// block from the client side — wrapping arbitrary callback ops in a single
+// BEGIN…COMMIT would require re-expressing every op as raw SurrealQL bound into
+// one `query()` string, which the generic `KeyedTable` surface does not model.
+//
+// So this is SEQUENTIAL best-effort: the scope's `table(name)` is the SAME
+// non-transactional `createSurrealTable(name)`, and `fn` runs its ops in order.
+// It preserves ORDER and result identity (so the callback's return value and the
+// rows it writes match the Dexie path) but NOT cross-table rollback on a
+// mid-batch failure. The `tables` list is advisory here (the connection is the
+// boundary). A future hardening pass can replace this with a server-side
+// BEGIN…COMMIT once the op surface is expressible as composed SurrealQL.
+const surrealTxScope: StorageTransactionScope = {
+  table<R>(name: string): KeyedTable<R> {
+    return createSurrealTable<R>(name);
+  },
+};
+
 export const surrealDriver: StorageDriver = {
   name: 'surrealdb',
 
   table<T>(name: string): KeyedTable<T> {
     return createSurrealTable<T>(name);
+  },
+
+  async transaction<T>(
+    _tables: string[],
+    _mode: 'rw',
+    fn: (tx: StorageTransactionScope) => Promise<T>,
+  ): Promise<T> {
+    // runtime-verify-gated best-effort (see block comment above): sequential,
+    // order-preserving, no cross-table rollback. Open the connection up front so
+    // a connect failure surfaces before any partial write (mirrors the named
+    // methods, which `getClient()` + `ensureSchema()` on each op).
+    const client = await getClient();
+    await ensureSchema(client);
+    return fn(surrealTxScope);
   },
 
   async ready(): Promise<boolean> {

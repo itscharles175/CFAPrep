@@ -14,6 +14,7 @@ import type {
   SourceChunkInput,
   StorageDriver,
   StorageSettingRow,
+  StorageTransactionScope,
 } from './types';
 
 /**
@@ -381,11 +382,46 @@ function createDexieTable<T>(name: string): KeyedTable<T> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// transaction() — atomic read-write batch (DATA-1 Phase 3)
+// ---------------------------------------------------------------------------
+// Faithfully wraps `db.transaction('rw', tables, fn)`: Dexie tracks the open
+// transaction in its async zone, so a `db.table(name)` access INSIDE the callback
+// automatically enrols in the active transaction. The scope's `table(name)` is
+// therefore just `createDexieTable(name)` — the SAME 1:1 KeyedTable wrapper the
+// non-transactional `table()` returns — so a rerouted `progressStore` recorder
+// is byte-identical in atomicity to the direct `db.transaction(...)` it replaces.
+const dexieTxScope: StorageTransactionScope = {
+  table<R>(name: string): KeyedTable<R> {
+    return createDexieTable<R>(name);
+  },
+};
+
 export const dexieDriver: StorageDriver = {
   name: 'dexie',
 
   table<T>(name: string): KeyedTable<T> {
     return createDexieTable<T>(name);
+  },
+
+  async transaction<T>(
+    tables: string[],
+    _mode: 'rw',
+    fn: (tx: StorageTransactionScope) => Promise<T>,
+  ): Promise<T> {
+    // Resolve each store name to its Dexie Table so Dexie locks exactly the
+    // stores the direct `db.transaction('rw', [db.x, db.y], …)` call locked.
+    const dexieTables = tables.map((name) => db.table(name));
+    // IMPORTANT: the transaction body MUST be an `async` function. The scope's
+    // `table()` ops are 1:1 Dexie calls (which keep the transaction's PSD zone
+    // alive), but `fn` reaches them through several nested `async`/`await` layers
+    // (recorder → persistQuestionResult → updateMasterySnapshot). With a plain
+    // `() => fn(...)` callback Dexie sees the zone drain between those hops and
+    // raises PrematureCommitError ("Transaction committed too early"); wrapping
+    // the body in `async () => fn(...)` keeps Dexie's zone bound across every
+    // awaited op, so atomicity is preserved exactly like the prior direct
+    // `db.transaction('rw', [...], async () => …)` calls.
+    return db.transaction('rw', dexieTables, async () => fn(dexieTxScope));
   },
 
   async ready(): Promise<boolean> {

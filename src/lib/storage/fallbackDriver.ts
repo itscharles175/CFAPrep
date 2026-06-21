@@ -9,6 +9,7 @@ import type {
   SourceChunkInput,
   StorageDriver,
   StorageSettingRow,
+  StorageTransactionScope,
 } from './types';
 import type { MasterySnapshot, QuestionResult, ReviewItem } from '../learningTypes';
 
@@ -359,6 +360,24 @@ export function createReadThroughDriver(
     };
   }
 
+  // -------------------------------------------------------------------------
+  // transaction() — the DATA-1 Phase-3 atomic-batch primitive. A transaction is
+  // a WRITE boundary, so per BA4 (read availability, not write availability) it
+  // routes to the PRIMARY ONLY — never to the Dexie cache. Diverting an atomic
+  // batch to the cache during an outage would diverge the two stores exactly
+  // like the single-op writes above. The primary's error surfaces to the caller.
+  // Only present when the primary implements transaction() (it does as of P3).
+  // -------------------------------------------------------------------------
+  let transactionFn: StorageDriver['transaction'];
+  if (primary.transaction) {
+    const primaryTransaction = primary.transaction.bind(primary);
+    transactionFn = <T,>(
+      tables: string[],
+      mode: 'rw',
+      fn: (tx: StorageTransactionScope) => Promise<T>,
+    ): Promise<T> => primaryTransaction(tables, mode, fn);
+  }
+
   const wrapper: ReadThroughDriver = {
     name: primary.name,
     isReadThrough: true,
@@ -390,6 +409,7 @@ export function createReadThroughDriver(
     questionResults,
     masterySnapshots,
     table: tableFn,
+    transaction: transactionFn,
   };
 
   return wrapper;
