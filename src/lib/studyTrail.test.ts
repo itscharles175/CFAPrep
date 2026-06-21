@@ -280,12 +280,25 @@ describe('graceful degradation (no store / unreachable backend)', () => {
     await expect(readStudyTrail({}, makeThrowingTable())).resolves.toEqual([]);
   });
 
-  it('default (un-injected) path degrades to a boolean/array on the real Dexie driver', async () => {
-    // The 'studyTrail' store is NOT in the host Dexie schema, so the real
-    // getStorage().table('studyTrail') write rejects internally. The module must
-    // swallow that and return trailed:false rather than throw.
-    const res = await recordStudyContext({ domain: 'cfa', route: '/cfa/y', label: 'y' });
+  it('default (un-injected) path now PERSISTS on the real Dexie driver (studyTrail registered at v12)', async () => {
+    // DATA-1 Phase 3 registered the 'studyTrail' store in the host Dexie schema
+    // at version 12 (progressStore.ts: `studyTrail: 'id, domain, recordedAt'`), so
+    // the real getStorage().table('studyTrail') write now LANDS under fake-indexeddb
+    // rather than rejecting "unknown table". This used to assert only the degrade
+    // contract (trailed could be false); it now asserts the durable write succeeds
+    // and reads back — while keeping the never-throws / boolean+array shape contract.
+    const route = `/cfa/y-${Date.now()}`;
+    const res = await recordStudyContext({ domain: 'cfa', route, label: 'y' });
+    // Shape contract still holds: trailed is a boolean, resumed is a boolean.
     expect(typeof res.trailed).toBe('boolean');
-    await expect(readStudyTrail()).resolves.toBeInstanceOf(Array);
+    expect(typeof res.resumed).toBe('boolean');
+    // And because the store is now registered, the durable write actually persists.
+    expect(res.trailed).toBe(true);
+
+    const trail = await readStudyTrail();
+    // readStudyTrail never throws and returns an array (degrade contract preserved).
+    expect(trail).toBeInstanceOf(Array);
+    // The just-recorded context is readable back from the real driver.
+    expect(trail.some((e) => e.route === route)).toBe(true);
   });
 });

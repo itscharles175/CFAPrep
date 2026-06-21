@@ -7,6 +7,7 @@ import type {
   StorageSettingRow,
   StorageTransactionScope,
 } from './types';
+import type { MasterySnapshot } from '../learningTypes';
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory driver — settings + generic table() + transaction(), with a
@@ -257,6 +258,101 @@ describe('createDualWriteDriver (DATA-5b)', () => {
     const report = await dual.verify();
     expect(report.ok).toBe(false);
     expect(report.mismatches.some((m) => m.namespace === 'settings')).toBe(true);
+  });
+
+  it('survives a shadow FAILURE inside a mirrored transaction: primary still commits', async () => {
+    const p = makeMemDriver('surrealdb');
+    const s = makeMemDriver('dexie');
+    // The shadow's re-run of `fn` will throw on its first table.put.
+    s.setFailWrites(true);
+    const errors: unknown[] = [];
+    const dual = createDualWriteDriver(p.driver, s.driver, {
+      onShadowError: (e) => errors.push(e),
+    });
+
+    const result = await dual.transaction!(['progress'], 'rw', async (tx) => {
+      await tx.table<Row>('progress').put({ id: 'txfail', v: 7 });
+      return 'committed';
+    });
+
+    // The primary transaction's result still flows back to the caller.
+    expect(result).toBe('committed');
+    // Primary holds the row; the shadow re-run threw before writing it.
+    expect(p.tables.get('progress')?.get('txfail')).toEqual({ id: 'txfail', v: 7 });
+    expect(s.tables.get('progress')?.has('txfail')).toBe(false);
+    // The shadow failure is recorded and the soak is no longer commit-safe.
+    expect(dual.shadowHealthy).toBe(false);
+    expect(dual.shadowErrorCount).toBe(1);
+    expect(errors).toHaveLength(1);
+  });
+
+  it('survives a shadow FAILURE on table().add: primary still gets the row', async () => {
+    const p = makeMemDriver('surrealdb');
+    const s = makeMemDriver('dexie');
+    s.setFailWrites(true);
+    const dual = createDualWriteDriver(p.driver, s.driver);
+
+    // add() returns the PRIMARY's auto-id even though the shadow add throws.
+    const id = await dual.table!('log').add({ event: 'boom' });
+    expect(id).toBe(1);
+    expect(p.tables.get('log')?.size).toBe(1);
+    expect(p.tables.get('log')?.get(1)).toEqual({ id: 1, event: 'boom' });
+    // The shadow never received the row.
+    expect(s.tables.get('log')?.size ?? 0).toBe(0);
+    expect(dual.shadowHealthy).toBe(false);
+    expect(dual.shadowErrorCount).toBe(1);
+  });
+
+  it('verify() flags drift when a transaction re-run derives DIFFERENT rows on each backend', async () => {
+    const p = makeMemDriver('surrealdb');
+    const s = makeMemDriver('dexie');
+
+    // verify() reads masterySnapshots via driver.masterySnapshots.toArray(), NOT
+    // via table(). Back each driver's masterySnapshots STORE with its own
+    // table('masterySnapshots') so the transaction's tx.table(...).put writes land
+    // where verify() can see them. (Tests attach driver capabilities the same way
+    // the crossDomainBridge test below does.)
+    const wireMastery = (mem: ReturnType<typeof makeMemDriver>): void => {
+      const t = mem.driver.table!<MasterySnapshot>('masterySnapshots');
+      (mem.driver as StorageDriver).masterySnapshots = {
+        get: (id) => t.get(id),
+        put: (snap) => t.put(snap),
+        toArray: () => t.toArray(),
+      };
+    };
+    wireMastery(p);
+    wireMastery(s);
+
+    // Seed DIFFERENT pre-state into the table the transaction reads: the primary
+    // has 2 pre-existing snapshots, the shadow has 0.
+    await p.driver.table!<MasterySnapshot>('masterySnapshots').put({
+      id: 'seed-a',
+    } as unknown as MasterySnapshot);
+    await p.driver.table!<MasterySnapshot>('masterySnapshots').put({
+      id: 'seed-b',
+    } as unknown as MasterySnapshot);
+
+    const dual = createDualWriteDriver(p.driver, s.driver);
+
+    // The transaction READS the current count and writes a derived snapshot keyed
+    // off it. Because the wrapper mirrors a transaction by RE-RUNNING `fn` against
+    // the shadow, and the two backends started with different counts, each produces
+    // a DIFFERENT derived row (primary: id "derived-2", shadow: id "derived-0").
+    await dual.transaction!(['masterySnapshots'], 'rw', async (tx) => {
+      const table = tx.table<MasterySnapshot>('masterySnapshots');
+      const before = await table.count();
+      await table.put({ id: `derived-${before}` } as unknown as MasterySnapshot);
+      return before;
+    });
+
+    // Primary now has the 2 seeds + derived-2; shadow has only derived-0.
+    expect(p.tables.get('masterySnapshots')?.has('derived-2')).toBe(true);
+    expect(s.tables.get('masterySnapshots')?.has('derived-0')).toBe(true);
+
+    // verify() sees the divergence in the masterySnapshots namespace.
+    const report = await dual.verify();
+    expect(report.ok).toBe(false);
+    expect(report.mismatches.some((m) => m.namespace === 'masterySnapshots')).toBe(true);
   });
 
   it('exposes crossDomainBridge, falling back to the shadow when the primary lacks it', () => {

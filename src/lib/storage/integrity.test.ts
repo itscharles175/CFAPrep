@@ -474,4 +474,75 @@ describe('cutoverTo integrity rollback', () => {
     // Clean up: roll the active driver back for the afterEach reset.
     setStoredStoragePreference('dexie');
   });
+
+  it('force overwrites a NON-EMPTY target: append-only log ends at the source count (not doubled)', async () => {
+    // Seed the Dexie source with settings + a 3-row append-only attempt log.
+    await db.settings.put({ key: 'a', value: 1, updatedAt: 't' });
+    await db.questionResults.bulkAdd(
+      [qResult('q1'), qResult('q2'), qResult('q3')] as Parameters<typeof db.questionResults.bulkAdd>[0],
+    );
+
+    // Seed the FAKE surrealdb target so it ALREADY holds rows — this makes the
+    // dry-run manifest UNSAFE (a normal cutover would refuse). The target's
+    // pre-existing questionResults differ from the source so a duplicating
+    // (non-clearing) copy would leave 3 + 3 = 6 rows.
+    const target = assemble(
+      {
+        ...buildParts(false),
+        questionResults: makeQuestionResults([qResult('old1'), qResult('old2'), qResult('old3')]),
+      },
+      'surrealdb',
+    );
+    storageRegistry.drivers['surrealdb'] = target;
+
+    const result = await cutoverTo('surrealdb', { force: true });
+
+    expect(result.ok).toBe(true);
+    expect(result.verification?.ok).toBe(true);
+
+    // overwrite cleared the target log FIRST, so the count equals the source (3),
+    // proving it was NOT appended on top of the pre-existing 3 rows.
+    const targetCount = (await target.questionResults!.toArray()).length;
+    const sourceCount = (await db.questionResults.toArray()).length;
+    expect(targetCount).toBe(sourceCount);
+    expect(targetCount).toBe(3);
+
+    expect(getActiveDriverName()).toBe('surrealdb');
+    expect(getStoredStoragePreference()).toBe('surrealdb');
+
+    // Clean up: roll the active driver back for the afterEach reset.
+    setStoredStoragePreference('dexie');
+  });
+
+  it('WITHOUT force, refuses a non-empty target and surfaces the unsafe manifest blocker', async () => {
+    await db.settings.put({ key: 'a', value: 1, updatedAt: 't' });
+    await db.questionResults.bulkAdd(
+      [qResult('q1'), qResult('q2'), qResult('q3')] as Parameters<typeof db.questionResults.bulkAdd>[0],
+    );
+
+    // Same pre-seeded (non-empty) target as the force case, but no force flag.
+    const target = assemble(
+      {
+        ...buildParts(false),
+        questionResults: makeQuestionResults([qResult('old1'), qResult('old2'), qResult('old3')]),
+      },
+      'surrealdb',
+    );
+    storageRegistry.drivers['surrealdb'] = target;
+
+    const result = await cutoverTo('surrealdb');
+
+    expect(result.ok).toBe(false);
+    expect(result.manifest).toBeDefined();
+    expect(result.manifest!.safe).toBe(false);
+    expect(result.manifest!.blockers.length).toBeGreaterThan(0);
+    expect(result.manifest!.blockers.some((b) => b.includes('questionResults'))).toBe(true);
+    expect(result.error).toMatch(/Refusing cutover/i);
+
+    // The target log was NOT touched (no migration ran) and the active driver
+    // rolled back to Dexie; the preference is never persisted on a refusal.
+    expect((await target.questionResults!.toArray()).length).toBe(3);
+    expect(getActiveDriverName()).toBe('dexie');
+    expect(getStoredStoragePreference()).toBe('dexie');
+  });
 });

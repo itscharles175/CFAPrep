@@ -46,8 +46,9 @@ const StyleGallery = lazy(() => import('./pages/StyleGallery'));
 // additively below (its own /leeches route); not part of the typed routeManifest.
 const LeechesAndGaps = lazy(() => import('./pages/LeechesAndGaps'));
 // Wave 6 — host preferences page (appearance / density / reading aids via
-// <ReadingSettings/>). Registered additively below (its own /settings route),
-// same as /leeches; kept out of the typed routeManifest to stay least-invasive.
+// <ReadingSettings/>). Registered additively below at the /preferences route
+// (NOT /settings, which the LSAT subtree owns), same as /leeches; kept out of
+// the typed routeManifest to stay least-invasive.
 const Settings = lazy(() => import('./pages/Settings'));
 const PwaInstallPrompt = lazy(() => import('./components/PwaInstallPrompt'));
 

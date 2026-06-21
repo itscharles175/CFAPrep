@@ -311,6 +311,17 @@ export function createDualWriteDriver(
   // functions of storage state; a primary+shadow that start identical (a clean
   // soak) stay identical, and verify() catches any drift. Only present when both
   // drivers implement transaction().
+  //
+  // COMMIT-GATE SCOPE: verify() = verifyMigration over the CORE namespaces only
+  // (settings/reviewItems/questionResults/masterySnapshots). The recorders also
+  // write append-only rows to quizAttempts/studySessions/reviewEvents/
+  // confidenceCalibration and derived rows to abilitySnapshots/studyTrail; those
+  // are NOT in the gate (recomputable / append-only telemetry, matching
+  // migrateData's copy scope). A primary partial-failure that lands ONLY in those
+  // stores would not be flagged by verify() — but the SurrealDB primary is itself
+  // best-effort non-atomic (runtime-gated), so this is an accepted limitation of
+  // the soak gate, not a regression to the active Dexie path. Widen
+  // VERIFIED_NAMESPACES if those stores ever become commit-critical.
   // -------------------------------------------------------------------------
   let transactionFn: StorageDriver['transaction'];
   if (primary.transaction && shadow.transaction) {

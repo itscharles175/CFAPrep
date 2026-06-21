@@ -320,6 +320,33 @@ describe('guardChunkEmbeddings (DATA-7)', () => {
     guardChunkEmbeddings(input, 3); // would drop the embedding
     expect(input[0].embedding).toEqual([1, 2]); // original untouched
   });
+
+  it('breaks a modal tie toward the LARGER embedding length', () => {
+    // counts {2:1, 3:1} — a perfect tie. The tie-break rule
+    // `count === bestCount && len > bestLen` selects the larger length (3),
+    // so the 3-dim chunk keeps its embedding and the 2-dim one is dropped.
+    const result = guardChunkEmbeddings([chunk('a', [1, 2]), chunk('b', [3, 4, 5])]);
+    expect(result.dimension).toBe(3);
+    expect(result.embedded).toBe(1);
+    expect(result.dropped).toBe(1);
+    const a = result.chunks.find((c) => c.id === 'a');
+    const b = result.chunks.find((c) => c.id === 'b');
+    expect(a?.embedding).toBeUndefined(); // 2-dim loses the tie, embedding stripped
+    expect(b?.embedding).toEqual([3, 4, 5]); // 3-dim wins the tie, embedding kept
+  });
+
+  it('resolves the modal tie identically regardless of input order', () => {
+    // Reversed inputs vs. the prior case — same {2:1, 3:1} tie. The tie-break is
+    // order-independent: the larger length (3) wins either way.
+    const result = guardChunkEmbeddings([chunk('b', [3, 4, 5]), chunk('a', [1, 2])]);
+    expect(result.dimension).toBe(3);
+    expect(result.embedded).toBe(1);
+    expect(result.dropped).toBe(1);
+    const a = result.chunks.find((c) => c.id === 'a');
+    const b = result.chunks.find((c) => c.id === 'b');
+    expect(a?.embedding).toBeUndefined();
+    expect(b?.embedding).toEqual([3, 4, 5]);
+  });
 });
 
 describe('migrateData chunks (DATA-7)', () => {

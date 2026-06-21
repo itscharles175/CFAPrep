@@ -175,18 +175,42 @@ describe('graceful degradation (no store / unreachable backend)', () => {
     expect(latest).toBeNull();
   });
 
-  it('default (un-injected) path degrades silently on the real Dexie driver', async () => {
-    // The 'abilitySnapshots' store is NOT in the host Dexie schema, so the real
-    // getStorage().table('abilitySnapshots') write rejects internally. The module
-    // must swallow that and return false rather than throw.
+  it('default (un-injected) path persists on the real Dexie driver (store now registered at v12)', async () => {
+    // DATA-1 Phase 3 registered the 'abilitySnapshots' store in the host Dexie
+    // schema at db.version(12) ('id, domain, at, modelVersion' — see
+    // progressStore.ts), so the real getStorage().table('abilitySnapshots') write
+    // now SUCCEEDS instead of rejecting. With fake-indexeddb wired up in
+    // setupTests.js, the un-injected path persists for real and reads back.
+    const at = `2026-06-19T13:00:00.000Z::${Math.random()}`; // unique id; shared default DB
     const ok = await recordAbilitySnapshot({
       domain: 'cfa',
       theta: 0.4,
       uncertainty: 0.5,
       difficultyMapping: [],
+      at,
     });
     expect(typeof ok).toBe('boolean');
-    // And the read path must never throw either.
-    await expect(readAbilitySnapshots('cfa')).resolves.toBeInstanceOf(Array);
+    expect(ok).toBe(true);
+
+    // The read path must never throw, and the just-written snapshot is readable.
+    const rows = await readAbilitySnapshots('cfa');
+    expect(rows).toBeInstanceOf(Array);
+    expect(rows.some((r) => r.id === abilitySnapshotId('cfa', at))).toBe(true);
+  });
+
+  it('degrade contract holds when the table op throws: reads→[]/null, writes→false, never throws', async () => {
+    // With the store now registered at v12 the un-injected path persists, so the
+    // degrade contract is exercised via an explicitly throwing/rejecting injected
+    // table (the same shape an unreachable sidecar or a future unregistered store
+    // would present). recordAbilitySnapshot must resolve false, reads must resolve
+    // to [] / null, and nothing may throw.
+    await expect(
+      recordAbilitySnapshot(
+        { domain: 'cfa', theta: 0.4, uncertainty: 0.5, difficultyMapping: [] },
+        makeThrowingTable(),
+      ),
+    ).resolves.toBe(false);
+    await expect(readAbilitySnapshots('cfa', makeThrowingTable())).resolves.toEqual([]);
+    await expect(readLatestAbilitySnapshot('cfa', makeThrowingTable())).resolves.toBeNull();
   });
 });

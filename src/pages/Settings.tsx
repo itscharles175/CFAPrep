@@ -4,8 +4,9 @@
  * A minimal, host-styled page whose only job today is to give the Wave 6
  * <ReadingSettings/> panel a reachable home: appearance (base + reading theme),
  * layout density, and the inclusive-reading aids all live there. Registered
- * additively in App.jsx (its own `/settings` route — same pattern as
- * `/leeches`), so it stays out of the typed routeManifest.
+ * additively in App.jsx at the `/preferences` route (NOT `/settings`, which the
+ * LSAT Setup subtree owns — see Sidebar.tsx) — same additive pattern as
+ * `/leeches`, so it stays out of the typed routeManifest.
  *
  * Pure presentation: the panel persists every choice through its own
  * localStorage-backed reading engine; this page adds no state of its own.

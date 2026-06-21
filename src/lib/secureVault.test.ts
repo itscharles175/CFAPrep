@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   createMemoryKeyStore,
   decryptWithDek,
   encryptWithDek,
   generateDekBase64,
   getSecureVaultStatus,
+  isWindowsPlatform,
   SecureVault,
   unlockSecureVaultOnLaunch,
   type SecureKeyStore,
@@ -196,5 +197,127 @@ describe('unlockSecureVaultOnLaunch / getSecureVaultStatus', () => {
     expect(await getSecureVaultStatus(vault)).toEqual({ enabled: false, unlocked: false, available: true });
     await vault.enable();
     expect(await getSecureVaultStatus(vault)).toEqual({ enabled: true, unlocked: true, available: true });
+  });
+});
+
+describe('SecureVault hardening (audit follow-ups)', () => {
+  /** A valid-base64 key of an arbitrary byte length (to probe length enforcement). */
+  function keyOfBytes(n: number): string {
+    return btoa(String.fromCharCode(...new Uint8Array(n).fill(7)));
+  }
+
+  it('unlock rejects a valid-base64 but wrong-length (AES-128) key — pins 256-bit', async () => {
+    const shortKey = keyOfBytes(16); // valid base64, importable as AES-128 without the guard
+    const store: SecureKeyStore = {
+      async isAvailable() {
+        return true;
+      },
+      async get() {
+        return shortKey;
+      },
+      async set() {
+        /* no-op */
+      },
+      async clear() {
+        /* no-op */
+      },
+    };
+    const result = await new SecureVault(store, memFlag(true)).unlock();
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/not a valid encryption key/i);
+  });
+
+  it('enable returns ok:false and stays disabled+locked when the keychain write fails', async () => {
+    const failSet: SecureKeyStore = {
+      async isAvailable() {
+        return true;
+      },
+      async get() {
+        return null;
+      },
+      async set() {
+        throw new Error('keychain write denied');
+      },
+      async clear() {
+        /* no-op */
+      },
+    };
+    const vault = new SecureVault(failSet, memFlag());
+    const result = await vault.enable();
+    expect(result.ok).toBe(false);
+    // No half-enabled state: the flag is NOT set and no DEK is held.
+    expect(vault.isEnabled()).toBe(false);
+    expect(vault.isUnlocked()).toBe(false);
+  });
+
+  it('disable returns ok:false when the keychain clear fails', async () => {
+    let stored: string | null = null;
+    const failClear: SecureKeyStore = {
+      async isAvailable() {
+        return true;
+      },
+      async get() {
+        return stored;
+      },
+      async set(v) {
+        stored = v;
+      },
+      async clear() {
+        throw new Error('keychain delete denied');
+      },
+    };
+    const vault = new SecureVault(failClear, memFlag());
+    await vault.enable();
+    const result = await vault.disable();
+    expect(result.ok).toBe(false);
+  });
+
+  it('decrypt throws when the vault is locked', async () => {
+    const vault = new SecureVault(createMemoryKeyStore(), memFlag());
+    await vault.enable();
+    vault.lock();
+    await expect(vault.decrypt({ v: 1, iv: 'AAAAAAAAAAAAAAAA', ct: 'AAAA' })).rejects.toThrow(/locked/);
+  });
+
+  it('unlockSecureVaultOnLaunch times out a wedged keychain read instead of hanging', async () => {
+    const hangStore: SecureKeyStore = {
+      async isAvailable() {
+        return true;
+      },
+      get() {
+        return new Promise<string | null>(() => {
+          /* never settles — models a contended/wedged Credential Manager */
+        });
+      },
+      async set() {
+        /* no-op */
+      },
+      async clear() {
+        /* no-op */
+      },
+    };
+    const vault = new SecureVault(hangStore, memFlag(true));
+    const result = await unlockSecureVaultOnLaunch(vault, 20);
+    expect(result.enabled).toBe(true);
+    expect(result.unlocked).toBe(false);
+    expect(result.error).toMatch(/timed out/i);
+  });
+});
+
+describe('isWindowsPlatform', () => {
+  const orig = Object.getOwnPropertyDescriptor(navigator, 'userAgentData');
+  afterEach(() => {
+    if (orig) Object.defineProperty(navigator, 'userAgentData', orig);
+    else Reflect.deleteProperty(navigator as unknown as Record<string, unknown>, 'userAgentData');
+  });
+
+  it('detects Windows via userAgentData.platform', () => {
+    Object.defineProperty(navigator, 'userAgentData', { value: { platform: 'Windows' }, configurable: true });
+    expect(isWindowsPlatform()).toBe(true);
+  });
+
+  it('returns false for a non-Windows platform', () => {
+    Object.defineProperty(navigator, 'userAgentData', { value: { platform: 'macOS' }, configurable: true });
+    expect(isWindowsPlatform()).toBe(false);
   });
 });

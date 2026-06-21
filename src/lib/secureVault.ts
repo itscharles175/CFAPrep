@@ -78,10 +78,17 @@ export function generateDekBase64(): string {
 
 async function importDek(dekBase64: string): Promise<CryptoKey> {
   const subtle = requireCryptoSubtle();
-  return subtle.importKey('raw', new Uint8Array(base64ToBytes(dekBase64)), { name: 'AES-GCM' }, false, [
-    'encrypt',
-    'decrypt',
-  ]);
+  const raw = base64ToBytes(dekBase64);
+  // Enforce the FULL 256-bit key length. WebCrypto's raw AES-GCM import also
+  // accepts 16- and 24-byte keys (AES-128/192), so a truncated / corrupt keychain
+  // blob that happens to be valid base64 of a shorter length would otherwise
+  // import cleanly and silently DOWNGRADE the vault below the promised 256-bit
+  // strength. Reject anything that isn't exactly DEK_BYTES so unlock()'s
+  // validation (and every encrypt/decrypt) pins AES-256.
+  if (raw.length !== DEK_BYTES) {
+    throw new Error('secure vault: key must be ' + DEK_BYTES * 8 + '-bit (' + DEK_BYTES + ' bytes)');
+  }
+  return subtle.importKey('raw', new Uint8Array(raw), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
 /** Encrypt a UTF-8 string with the raw DEK (fresh IV per call). */
@@ -136,6 +143,23 @@ export function isTauri(): boolean {
 }
 
 /**
+ * Whether the current platform is Windows. The keychain backend
+ * (`src-tauri/src/keychain.rs`) only implements credential storage under
+ * `#[cfg(windows)]`; on macOS/Linux it returns an "unsupported" error. So the
+ * secure vault is a Windows-desktop feature today, and availability must gate on
+ * the OS — not mere Tauri presence — otherwise a non-Windows desktop build shows
+ * an "Enable" button that fails with a confusing keychain error instead of the
+ * clean "unavailable here" state. Prefers the modern userAgentData.platform,
+ * falling back to navigator.platform / userAgent.
+ */
+export function isWindowsPlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const uaData = (navigator as unknown as { userAgentData?: { platform?: string } }).userAgentData;
+  if (uaData && typeof uaData.platform === 'string') return /win/i.test(uaData.platform);
+  return /win/i.test(navigator.platform || navigator.userAgent || '');
+}
+
+/**
  * The production key store: the OS keychain, reached via the Rust `keychain_*`
  * Tauri commands (Windows Credential Manager). Only available in the desktop
  * shell; in browser dev / tests `isAvailable()` is false and the secure vault
@@ -143,7 +167,8 @@ export function isTauri(): boolean {
  */
 export const tauriKeychainKeyStore: SecureKeyStore = {
   async isAvailable(): Promise<boolean> {
-    return isTauri();
+    // Tauri presence AND Windows — the credential backend is Windows-only today.
+    return isTauri() && isWindowsPlatform();
   },
   async get(): Promise<string | null> {
     if (!isTauri()) return null;
@@ -155,6 +180,9 @@ export const tauriKeychainKeyStore: SecureKeyStore = {
     return value ?? null;
   },
   async set(dekBase64: string): Promise<void> {
+    // Short-circuit outside the desktop shell, mirroring get()/clear(), so a
+    // stray call surfaces a clear error rather than an opaque invoke failure.
+    if (!isTauri()) throw new Error('The OS keychain is only available in the desktop app.');
     const { invoke } = await import('@tauri-apps/api/core');
     await invoke('keychain_set', {
       service: KEYCHAIN_SERVICE,
@@ -363,17 +391,32 @@ export async function getSecureVaultStatus(vault: SecureVault = secureVault): Pr
   };
 }
 
+/** Default ceiling for an unlock-on-launch keychain read (ms). */
+export const UNLOCK_LAUNCH_TIMEOUT_MS = 4000;
+
 /**
  * Unlock-on-launch: if the secure vault is enabled, load its DEK from the OS
  * keychain so subsequent reads/writes can decrypt/encrypt. Never throws — a
  * failed unlock is surfaced so the boot path can warn rather than crash. A no-op
  * (returns `enabled: false`) when the vault is disabled, so the default boot path
  * is unchanged.
+ *
+ * BOUNDED: the keychain read is a synchronous blocking Windows FFI call dispatched
+ * over Tauri IPC, which has no built-in timeout — a contended/wedged Credential
+ * Manager (or an AV shim intercepting the cred APIs) could otherwise make unlock
+ * neither resolve nor reject, hanging the boot chain that awaits this. We race the
+ * unlock against `timeoutMs` so the caller always settles and the data bootstraps
+ * always run; a timeout reports `unlocked: false` (the vault stays locked, which
+ * is safe — no rows are encrypted today).
  */
 export async function unlockSecureVaultOnLaunch(
   vault: SecureVault = secureVault,
+  timeoutMs: number = UNLOCK_LAUNCH_TIMEOUT_MS,
 ): Promise<{ enabled: boolean; unlocked: boolean; error?: string }> {
   if (!vault.isEnabled()) return { enabled: false, unlocked: false };
-  const result = await vault.unlock();
-  return { enabled: true, unlocked: result.ok, error: result.error };
+  const timeout = new Promise<SecureVaultResult>((resolve) => {
+    setTimeout(() => resolve({ ok: false, error: 'keychain unlock timed out' }), timeoutMs);
+  });
+  const result = await Promise.race([vault.unlock(), timeout]);
+  return { enabled: true, unlocked: result.ok === true, error: result.error };
 }

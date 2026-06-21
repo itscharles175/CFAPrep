@@ -143,6 +143,19 @@ export function guardChunkEmbeddings(
  * callers either migrate into a fresh target (guaranteed by
  * {@link buildCutoverManifest}'s safe-check) or pass `overwrite`.
  *
+ * SCOPE (deliberate): this copies the CORE vault namespaces — settings,
+ * reviewItems, questionResults, masterySnapshots — plus chunks (DATA-7). It does
+ * NOT copy the host's DERIVED telemetry stores (`abilitySnapshots`, `studyTrail`
+ * — recomputable from the attempt log, like chunks are re-derivable from
+ * sourceDocuments) nor the append-only recorder stores (`quizAttempts`,
+ * `studySessions`, `reviewEvents`, `confidenceCalibration`, …). Those are either
+ * reconstructible or outside the core-vault contract, so {@link verifyMigration}
+ * (the rollback gate) deliberately excludes them too (see integrity.ts
+ * VERIFIED_NAMESPACES). A backend cutover therefore restores the precious,
+ * single-copy data; derived/recorder data re-accrues from use. (Full transparent
+ * copy of every generic store is a possible future enhancement, but it is NOT a
+ * silent gap — it is this documented boundary.)
+ *
  * Throws if a namespace the target claims to support fails mid-write — the
  * caller is expected to roll the active driver back.
  */
