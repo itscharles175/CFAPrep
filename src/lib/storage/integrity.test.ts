@@ -291,6 +291,41 @@ describe('computeStoreDigest / computeVaultDigest', () => {
       'masterySnapshots',
     ]);
   });
+
+  it('questionResults digest ignores the backend-assigned auto-id (same content, different ids → match)', async () => {
+    const withId = (qid: string, id: number) => ({ ...qResult(qid), id }) as unknown as QuestionResult;
+    const a = assemble(
+      { ...buildParts(false), questionResults: makeQuestionResults([withId('q1', 1), withId('q2', 2)]) },
+      'dexie',
+    );
+    const b = assemble(
+      { ...buildParts(false), questionResults: makeQuestionResults([withId('q1', 901), withId('q2', 902)]) },
+      'surrealdb',
+    );
+    // Dexie ++id vs SurrealDB record id differ, but the rows are the same log.
+    expect(await computeStoreDigest(a, 'questionResults')).toEqual(
+      await computeStoreDigest(b, 'questionResults'),
+    );
+  });
+
+  it('questionResults digest still catches a CONTENT difference (not just id)', async () => {
+    const a = assemble(
+      { ...buildParts(false), questionResults: makeQuestionResults([{ ...qResult('q1'), id: 1 } as unknown as QuestionResult]) },
+      'dexie',
+    );
+    const b = assemble(
+      {
+        ...buildParts(false),
+        questionResults: makeQuestionResults([
+          { ...qResult('q1', { correct: false }), id: 1 } as unknown as QuestionResult,
+        ]),
+      },
+      'surrealdb',
+    );
+    const da = await computeStoreDigest(a, 'questionResults');
+    const db2 = await computeStoreDigest(b, 'questionResults');
+    expect(da.hash).not.toBe(db2.hash);
+  });
 });
 
 // ===========================================================================

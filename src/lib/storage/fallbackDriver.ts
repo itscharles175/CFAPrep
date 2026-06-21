@@ -227,6 +227,17 @@ export function createReadThroughDriver(
       deleteByDocument(documentId: string): Promise<void> {
         return p.deleteByDocument(documentId);
       },
+      // exportAll is a read (DATA-7) — fall back to the Dexie cache on a primary
+      // outage, like the other reads. Only present when BOTH drivers expose it.
+      ...(p.exportAll && f.exportAll
+        ? {
+            exportAll: (): Promise<SourceChunkInput[]> =>
+              readThrough(
+                () => p.exportAll!(),
+                () => f.exportAll!(),
+              ),
+          }
+        : {}),
     };
   }
 
@@ -408,6 +419,12 @@ export function createReadThroughDriver(
     reviewItems,
     questionResults,
     masterySnapshots,
+    // crossDomainBridge is a READ projection used by the host→LSAT sync hook.
+    // Surface it so sync isn't silently skipped while SurrealDB is active: prefer
+    // the primary's bridge, falling back to the Dexie cache's (the SurrealDB
+    // driver doesn't implement the bridge today, so this routes through Dexie —
+    // which holds the cutover-copied data — keeping sync functional).
+    crossDomainBridge: primary.crossDomainBridge ?? fallback.crossDomainBridge,
     table: tableFn,
     transaction: transactionFn,
   };

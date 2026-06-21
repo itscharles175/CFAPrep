@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { migrateData, type MigrationReport } from './migrate';
+import {
+  buildCutoverManifest,
+  guardChunkEmbeddings,
+  migrateData,
+  type MigrationReport,
+} from './migrate';
 import type {
+  ChunkStore,
   MasterySnapshotStore,
   QuestionResultStore,
   ReviewItemStore,
+  SourceChunkInput,
   StorageDriver,
   StorageSettingRow,
 } from './types';
@@ -226,5 +233,228 @@ describe('migrateData', () => {
     expect(await target.settings.toArray()).toHaveLength(2);
     expect(await target.reviewItems!.toArray()).toHaveLength(2);
     expect(await target.masterySnapshots!.toArray()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DATA-7 chunk migration + dimension guard, DATA-2 manifest + overwrite.
+// ---------------------------------------------------------------------------
+
+function makeChunks(seed: SourceChunkInput[] = []) {
+  const map = new Map<string, SourceChunkInput>(seed.map((c) => [c.id, c]));
+  const store: ChunkStore = {
+    async upsert(c) {
+      map.set(c.id, c);
+    },
+    async bulkUpsert(cs) {
+      cs.forEach((c) => map.set(c.id, { ...c }));
+    },
+    async deleteByDocument(docId) {
+      for (const [k, v] of map) if (v.documentId === docId) map.delete(k);
+    },
+    async search() {
+      return [];
+    },
+    async exportAll() {
+      return [...map.values()].map((c) => ({ ...c }));
+    },
+  };
+  return { map, store };
+}
+
+function chunk(id: string, embedding?: number[]): SourceChunkInput {
+  return {
+    id,
+    documentId: 'doc1',
+    domain: 'cfa',
+    text: `text-${id}`,
+    locator: id,
+    ...(embedding ? { embedding } : {}),
+  };
+}
+
+describe('guardChunkEmbeddings (DATA-7)', () => {
+  it('returns dimension null and copies text when no chunk carries an embedding', () => {
+    const result = guardChunkEmbeddings([chunk('a'), chunk('b')]);
+    expect(result.dimension).toBeNull();
+    expect(result.embedded).toBe(0);
+    expect(result.dropped).toBe(0);
+    expect(result.chunks).toHaveLength(2);
+    expect(result.chunks[0].embedding).toBeUndefined();
+  });
+
+  it('keeps every embedding when the corpus is uniform', () => {
+    const result = guardChunkEmbeddings([chunk('a', [1, 2, 3]), chunk('b', [4, 5, 6])]);
+    expect(result.dimension).toBe(3);
+    expect(result.embedded).toBe(2);
+    expect(result.dropped).toBe(0);
+    expect(result.chunks.every((c) => Array.isArray(c.embedding))).toBe(true);
+  });
+
+  it('drops mismatched embeddings (keeps text) using the modal dimension', () => {
+    const result = guardChunkEmbeddings([
+      chunk('a', [1, 2, 3]),
+      chunk('b', [4, 5, 6]),
+      chunk('c', [7, 8]), // odd one out — 2-dim
+    ]);
+    expect(result.dimension).toBe(3); // modal length
+    expect(result.embedded).toBe(2);
+    expect(result.dropped).toBe(1);
+    const dropped = result.chunks.find((c) => c.id === 'c');
+    expect(dropped?.embedding).toBeUndefined();
+    expect(dropped?.text).toBe('text-c'); // text preserved
+  });
+
+  it('honours an explicit expectedDimension over the modal length', () => {
+    const result = guardChunkEmbeddings(
+      [chunk('a', [1, 2, 3]), chunk('b', [1, 2]), chunk('c', [3, 4])],
+      3, // force 3 even though 2-dim is modal
+    );
+    expect(result.dimension).toBe(3);
+    expect(result.embedded).toBe(1);
+    expect(result.dropped).toBe(2);
+  });
+
+  it('does not mutate the input rows', () => {
+    const input = [chunk('a', [1, 2])];
+    guardChunkEmbeddings(input, 3); // would drop the embedding
+    expect(input[0].embedding).toEqual([1, 2]); // original untouched
+  });
+});
+
+describe('migrateData chunks (DATA-7)', () => {
+  function driverWithChunks(name: 'dexie' | 'surrealdb', chunks?: ChunkStore): StorageDriver {
+    return {
+      name,
+      async ready() {
+        return true;
+      },
+      settings: makeSettings().store,
+      chunks,
+    };
+  }
+
+  it('copies the chunk corpus when both drivers can enumerate it', async () => {
+    const source = driverWithChunks('dexie', makeChunks([chunk('a', [1, 2, 3]), chunk('b', [4, 5, 6])]).store);
+    const targetChunks = makeChunks();
+    const target = driverWithChunks('surrealdb', targetChunks.store);
+
+    const report = await migrateData(source, target);
+    expect(report.chunks).toBe(2);
+    expect(report.chunksEmbeddingsDropped).toBe(0);
+    expect(targetChunks.map.size).toBe(2);
+  });
+
+  it('drops mismatched embeddings during migration and reports the count', async () => {
+    const source = driverWithChunks(
+      'dexie',
+      makeChunks([chunk('a', [1, 2, 3]), chunk('b', [4, 5, 6]), chunk('c', [7, 8])]).store,
+    );
+    const targetChunks = makeChunks();
+    const target = driverWithChunks('surrealdb', targetChunks.store);
+
+    const report = await migrateData(source, target);
+    expect(report.chunks).toBe(3); // all 3 copied (text)
+    expect(report.chunksEmbeddingsDropped).toBe(1);
+    expect(targetChunks.map.get('c')?.embedding).toBeUndefined();
+  });
+
+  it('skips chunks when migrateChunks is false', async () => {
+    const source = driverWithChunks('dexie', makeChunks([chunk('a', [1, 2, 3])]).store);
+    const targetChunks = makeChunks();
+    const target = driverWithChunks('surrealdb', targetChunks.store);
+
+    const report = await migrateData(source, target, { migrateChunks: false });
+    expect(report.chunks).toBe(0);
+    expect(targetChunks.map.size).toBe(0);
+    expect(report.skipped.some((s) => s.startsWith('chunks'))).toBe(true);
+  });
+});
+
+describe('migrateData overwrite (DATA-2)', () => {
+  it('clears the target attempt log first so a forced re-run does not duplicate', async () => {
+    const source: StorageDriver = {
+      name: 'dexie',
+      async ready() {
+        return true;
+      },
+      settings: makeSettings().store,
+      questionResults: makeQuestionResults([qResult('q1'), qResult('q2')]).store,
+    };
+    const targetQ = makeQuestionResults();
+    const target: StorageDriver = {
+      name: 'surrealdb',
+      async ready() {
+        return true;
+      },
+      settings: makeSettings().store,
+      questionResults: targetQ.store,
+    };
+
+    await migrateData(source, target, { overwrite: true });
+    await migrateData(source, target, { overwrite: true });
+    // Without overwrite this would be 4; the clear keeps it at 2.
+    expect(await target.questionResults!.toArray()).toHaveLength(2);
+  });
+});
+
+describe('buildCutoverManifest (DATA-2)', () => {
+  function fullDriver(name: 'dexie' | 'surrealdb', seed: boolean, chunks?: ChunkStore): StorageDriver {
+    return {
+      name,
+      async ready() {
+        return true;
+      },
+      settings: makeSettings(seed ? [{ key: 'a', value: 1, updatedAt: 't' }] : []).store,
+      reviewItems: makeReviewItems(seed ? [review('r1')] : []).store,
+      questionResults: makeQuestionResults(seed ? [qResult('q1')] : []).store,
+      masterySnapshots: makeMastery(seed ? [mastery('m1')] : []).store,
+      chunks,
+    };
+  }
+
+  it('is safe when every target table is empty', async () => {
+    const from = fullDriver('dexie', true, makeChunks([chunk('a', [1, 2, 3])]).store);
+    const to = fullDriver('surrealdb', false, makeChunks().store);
+
+    const manifest = await buildCutoverManifest(from, to);
+    expect(manifest.safe).toBe(true);
+    expect(manifest.blockers).toEqual([]);
+    expect(manifest.from).toBe('dexie');
+    expect(manifest.to).toBe('surrealdb');
+    expect(manifest.chunks.sourceCount).toBe(1);
+    expect(manifest.chunks.embedded).toBe(1);
+    expect(manifest.chunks.dimension).toBe(3);
+    expect(manifest.chunks.migratable).toBe(true);
+  });
+
+  it('refuses (blockers) when the target already holds rows', async () => {
+    const from = fullDriver('dexie', true);
+    const to = fullDriver('surrealdb', true); // non-empty target
+
+    const manifest = await buildCutoverManifest(from, to);
+    expect(manifest.safe).toBe(false);
+    expect(manifest.blockers.length).toBeGreaterThan(0);
+    expect(manifest.blockers.some((b) => b.includes('settings'))).toBe(true);
+    expect(manifest.blockers.some((b) => b.includes('questionResults'))).toBe(true);
+  });
+
+  it('flags a non-empty target chunk corpus as a blocker', async () => {
+    const from = fullDriver('dexie', false, makeChunks([chunk('a')]).store);
+    const to = fullDriver('surrealdb', false, makeChunks([chunk('z')]).store);
+
+    const manifest = await buildCutoverManifest(from, to);
+    expect(manifest.safe).toBe(false);
+    expect(manifest.blockers.some((b) => b.includes('chunks'))).toBe(true);
+    expect(manifest.chunks.targetCount).toBe(1);
+  });
+
+  it('marks chunks non-migratable when the source cannot enumerate them', async () => {
+    const from = fullDriver('dexie', false); // no chunks store
+    const to = fullDriver('surrealdb', false);
+
+    const manifest = await buildCutoverManifest(from, to);
+    expect(manifest.chunks.migratable).toBe(false);
+    expect(manifest.chunks.sourceCount).toBe(0);
   });
 });

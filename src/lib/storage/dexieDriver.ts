@@ -139,6 +139,31 @@ const chunks: ChunkStore = {
     await db.sourceChunks.where('documentId').equals(documentId).delete();
   },
 
+  async exportAll(): Promise<SourceChunkInput[]> {
+    // DATA-7 — full corpus read for a cross-driver migration. Read every
+    // `sourceChunks` row and project it back to the `SourceChunkInput` shape,
+    // carrying the embedding so the target rebuilds its vector index without
+    // re-embedding. Mirrors the field projection `search()` uses; optional
+    // fields are only emitted when present so a re-`bulkUpsert` round-trips
+    // byte-for-byte through `canonicalJson` (no `undefined`-vs-absent drift).
+    const all = await db.sourceChunks.toArray();
+    return all.map((raw) => {
+      const r = raw as unknown as SourceChunkInput;
+      const out: SourceChunkInput = {
+        id: r.id,
+        documentId: r.documentId,
+        domain: r.domain ?? '',
+        text: r.text ?? '',
+        locator: r.locator ?? '',
+      };
+      if (r.level != null) out.level = r.level;
+      if (r.topic != null) out.topic = r.topic;
+      if (r.page != null) out.page = r.page;
+      if (Array.isArray(r.embedding) && r.embedding.length > 0) out.embedding = r.embedding;
+      return out;
+    });
+  },
+
   async search(options: ChunkSearchOptions): Promise<ChunkSearchResult[]> {
     const limit = options.limit ?? 12;
     const queryTerms = tokenise(options.query ?? '');

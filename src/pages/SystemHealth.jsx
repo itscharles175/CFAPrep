@@ -17,7 +17,7 @@ import {
 import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop, pickCfaFolder } from '../lib/desktopIngestion';
 import { useToast } from '../context/ToastContext';
 import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
-import { getStorage, getActiveDriverName, cutoverTo, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
+import { getStorage, getActiveDriverName, cutoverTo, previewCutover, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
 import { checkLsatBackendHealth, getLsatCloudBudget, syncProviderToLsat, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
 import EditModelRoutingModal from '../components/SystemHealth/EditModelRoutingModal';
 import { TrustReleasePanel } from '../components/ui/TrustReleasePanel';
@@ -203,6 +203,9 @@ export default function SystemHealth() {
   const [cutoverBusy, setCutoverBusy] = useState(false);
   const [cutoverError, setCutoverError] = useState('');
   const [cutoverReport, setCutoverReport] = useState(null);
+  // DATA-2 — dry-run preview of a SurrealDB cutover (counts + loss-safety) shown
+  // before the user commits the switch.
+  const [cutoverManifest, setCutoverManifest] = useState(null);
   // Auto-generated targeted material queue
   const [targetedQueue, setTargetedQueue] = useState([]);
   const [targetedBusy, setTargetedBusy] = useState(false);
@@ -454,12 +457,36 @@ export default function SystemHealth() {
     toast.info('Psychometrics cleared', 'Cache emptied — recompute any time.');
   }
 
+  async function handlePreviewCutover() {
+    // DATA-2 — dry-run: show what a cutover would copy and whether it's loss-safe,
+    // WITHOUT switching drivers or mutating anything.
+    setCutoverBusy(true);
+    setCutoverError('');
+    setCutoverReport(null);
+    setCutoverManifest(null);
+    try {
+      const result = await previewCutover('surrealdb');
+      if (!result.ok) {
+        setCutoverError(result.error || 'Could not reach the SurrealDB sidecar at localhost:8000.');
+        return;
+      }
+      setCutoverManifest(result.manifest);
+    } catch (error) {
+      setCutoverError(error?.message || String(error));
+    } finally {
+      setCutoverBusy(false);
+    }
+  }
+
   async function handleCutoverToSurreal() {
     setCutoverBusy(true);
     setCutoverError('');
     setCutoverReport(null);
     try {
       const result = await cutoverTo('surrealdb');
+      // DATA-2 — surface the manifest (counts / blockers) whether or not the
+      // cutover proceeded, so a refusal explains exactly what blocked it.
+      if (result.manifest) setCutoverManifest(result.manifest);
       if (!result.ok) {
         setCutoverError(result.error || 'Could not reach the SurrealDB sidecar at localhost:8000.');
         toast.warning('SurrealDB unavailable', 'Staying on the local Dexie store.');
@@ -470,7 +497,10 @@ export default function SystemHealth() {
       if (result.report) {
         setCutoverReport(result.report);
         const copied = result.report.settings + result.report.reviewItems + result.report.questionResults + result.report.masterySnapshots;
-        toast.success('Switched to SurrealDB', `Migrated ${copied} rows. Re-ingest curriculum to rebuild the vector index.`);
+        const chunkNote = result.report.chunks
+          ? ` and ${result.report.chunks} chunk${result.report.chunks === 1 ? '' : 's'}`
+          : '';
+        toast.success('Switched to SurrealDB', `Migrated ${copied} rows${chunkNote}.`);
       } else if (result.alreadyActive) {
         toast.info('Already on SurrealDB', 'No migration needed.');
       }
@@ -485,6 +515,7 @@ export default function SystemHealth() {
     setCutoverBusy(true);
     setCutoverError('');
     setCutoverReport(null);
+    setCutoverManifest(null);
     try {
       const result = await switchToDexie();
       if (!result.ok) {
@@ -1230,16 +1261,48 @@ export default function SystemHealth() {
                 Migrated: <span className="qv-mono">{cutoverReport.settings}</span> settings ·{' '}
                 <span className="qv-mono">{cutoverReport.reviewItems}</span> review items ·{' '}
                 <span className="qv-mono">{cutoverReport.questionResults}</span> attempts ·{' '}
-                <span className="qv-mono">{cutoverReport.masterySnapshots}</span> mastery snapshots.
+                <span className="qv-mono">{cutoverReport.masterySnapshots}</span> mastery snapshots ·{' '}
+                <span className="qv-mono">{cutoverReport.chunks ?? 0}</span> chunks
+                {cutoverReport.chunksEmbeddingsDropped
+                  ? ` (${cutoverReport.chunksEmbeddingsDropped} embedding${cutoverReport.chunksEmbeddingsDropped === 1 ? '' : 's'} dropped — dimension mismatch)`
+                  : ''}
+                .
+              </div>
+            )}
+            {cutoverManifest && (
+              <div className="qv-mt-2 qv-fs-sm qv-text-secondary">
+                <strong>Migration preview</strong> ({cutoverManifest.from} → {cutoverManifest.to}):{' '}
+                {cutoverManifest.namespaces.map((ns) => (
+                  <span key={ns.namespace}>
+                    <span className="qv-mono">{ns.sourceCount}</span> {ns.namespace} ·{' '}
+                  </span>
+                ))}
+                <span className="qv-mono">{cutoverManifest.chunks.sourceCount}</span> chunks
+                {cutoverManifest.chunks.dimension != null
+                  ? ` (${cutoverManifest.chunks.embedded} embedded @ dim ${cutoverManifest.chunks.dimension})`
+                  : ''}
+                .{' '}
+                {cutoverManifest.safe ? (
+                  <span className="qv-text-success">Safe to migrate.</span>
+                ) : (
+                  <span className="qv-text-warning">
+                    Blocked: {cutoverManifest.blockers.join('; ')}.
+                  </span>
+                )}
               </div>
             )}
             {cutoverError && <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{cutoverError}</p>}
           </div>
           <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
             {activeDriver !== 'surrealdb' ? (
-              <button className="btn btn-primary btn-sm" onClick={handleCutoverToSurreal} disabled={cutoverBusy}>
-                {cutoverBusy ? 'Switching…' : 'Switch to SurrealDB'}
-              </button>
+              <>
+                <button className="btn btn-secondary btn-sm" onClick={handlePreviewCutover} disabled={cutoverBusy}>
+                  {cutoverBusy ? 'Working…' : 'Preview migration'}
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={handleCutoverToSurreal} disabled={cutoverBusy}>
+                  {cutoverBusy ? 'Switching…' : 'Switch to SurrealDB'}
+                </button>
+              </>
             ) : (
               <button className="btn btn-secondary btn-sm" onClick={handleRollbackToDexie} disabled={cutoverBusy}>
                 {cutoverBusy ? 'Switching…' : 'Roll back to Dexie'}

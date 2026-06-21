@@ -70,6 +70,20 @@ export interface ChunkStore {
   deleteByDocument(documentId: string): Promise<void>;
   /** Hybrid (vector + BM25) or BM25-only search. */
   search(options: ChunkSearchOptions): Promise<ChunkSearchResult[]>;
+  /**
+   * DATA-7 — read EVERY stored chunk (text + embedding) for a cross-driver
+   * migration. This is the read-all the migration path needs to copy the vector
+   * index instead of forcing hours of re-embedding after a cutover; streaming
+   * the result through {@link bulkUpsert} on the target rebuilds the MTREE from
+   * the existing vectors.
+   *
+   * Optional on the interface: a future remote-only driver that can't enumerate
+   * its corpus omits it, and `migrateData` falls back to skipping chunks (the
+   * historical behaviour — re-ingest to rebuild). Both shipped drivers implement
+   * it (dexie reads the `sourceChunks` table; surrealdb SELECTs the `chunks`
+   * table).
+   */
+  exportAll?(): Promise<SourceChunkInput[]>;
 }
 
 /**

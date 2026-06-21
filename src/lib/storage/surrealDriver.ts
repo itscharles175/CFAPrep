@@ -272,6 +272,37 @@ const chunks: ChunkStore = {
     await client.query('DELETE chunks WHERE documentId = $doc;', { doc: documentId });
   },
 
+  async exportAll(): Promise<SourceChunkInput[]> {
+    // DATA-7 — full corpus read for a cross-driver migration. runtime-verify-
+    // gated: this driver isn't exercised today (Dexie is active), so this path is
+    // wire-ready but unverified against a live :8000 sidecar.
+    const client = await getClient();
+    await ensureSchema(client);
+    const rows = await client.select<SurrealRecord>('chunks');
+    const arr = Array.isArray(rows) ? rows : [];
+    return arr.map((r) => {
+      // Recover the original host id: the record id is `chunks:<sanitiseId(id)>`,
+      // so decode the slug after the table prefix. (A bare string with no ':' is
+      // already the raw id.)
+      const rawId = r['id'];
+      const idStr = typeof rawId === 'string' ? rawId : String(rawId ?? '');
+      const id = idStr.includes(':') ? decodeId(idStr.slice(idStr.indexOf(':') + 1)) : idStr;
+      const out: SourceChunkInput = {
+        id,
+        documentId: String(r['documentId'] ?? ''),
+        domain: String(r['domain'] ?? ''),
+        text: String(r['text'] ?? ''),
+        locator: String(r['locator'] ?? ''),
+      };
+      if (r['level'] != null) out.level = String(r['level']);
+      if (r['topic'] != null) out.topic = String(r['topic']);
+      if (typeof r['page'] === 'number') out.page = r['page'] as number;
+      const emb = r['embedding'];
+      if (Array.isArray(emb) && emb.length > 0) out.embedding = emb as number[];
+      return out;
+    });
+  },
+
   async search(options: ChunkSearchOptions): Promise<ChunkSearchResult[]> {
     const client = await getClient();
     await ensureSchema(client);

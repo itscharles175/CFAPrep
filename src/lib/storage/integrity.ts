@@ -23,12 +23,18 @@ import { sha256Hex } from '../llm/determinism.js';
 import type { StorageDriver } from './types';
 
 /**
- * The namespaces a migration copies and this verifier checks. Mirrors the set
- * `migrateData` walks (settings + reviewItems + questionResults +
- * masterySnapshots). `chunks` is intentionally excluded: it has no generic
- * "read all" on the driver interface and is re-derived from `sourceDocuments`
- * on re-ingestion, so `migrateData` never copies it and there is nothing to
- * verify.
+ * The namespaces this verifier gates a cutover on (the rollback-critical set).
+ *
+ * `chunks` is intentionally EXCLUDED even though DATA-7 now copies them
+ * (`migrate.ts`): chunks are RECONSTRUCTIBLE (re-derived from `sourceDocuments`
+ * on re-ingestion), so a chunk-copy hiccup is recoverable and must NOT roll back
+ * an otherwise-good migration of the irreplaceable user data. The dimension
+ * guard also intentionally TRANSFORMS chunks in transit (it strips
+ * wrong-dimension embeddings), so a naive source==target chunk digest would
+ * false-fail by construction. The manifest still surfaces a non-empty target
+ * chunk table as a blocker before a cutover runs (`buildCutoverManifest`), and
+ * chunk counts are reported — chunk integrity is observable, just not a rollback
+ * gate. The four namespaces here ARE the precious, single-copy data.
  */
 export const VERIFIED_NAMESPACES = [
   'settings',
@@ -160,13 +166,34 @@ async function readNamespace(driver: StorageDriver, namespace: VerifiedNamespace
   }
 }
 
+/**
+ * Strip the backend-assigned auto-id from an append-only `questionResults` row
+ * before hashing. The attempt log has NO semantic key — Dexie assigns a numeric
+ * `++id` and SurrealDB a random record id — so two FAITHFUL copies across
+ * heterogeneous backends carry different `id` values for the same logical rows.
+ * Including the id in the digest would make a clean SurrealDB↔Dexie cutover /
+ * dual-write commit false-fail. Dropping it (the count still catches
+ * duplication / loss) compares the rows by CONTENT, which is what "faithful
+ * copy" means for an append-only log.
+ */
+function stripAutoId(row: unknown): unknown {
+  if (row && typeof row === 'object') {
+    const { id: _id, ...rest } = row as Record<string, unknown>;
+    return rest;
+  }
+  return row;
+}
+
 /** Digest a single namespace of one driver (count + canonical SHA-256). */
 export async function computeStoreDigest(
   driver: StorageDriver,
   namespace: VerifiedNamespace,
 ): Promise<StoreDigest> {
   const rows = await readNamespace(driver, namespace);
-  return { count: rows.length, hash: await hashRows(rows) };
+  // The count is always over the raw rows; only the append-only log's HASH drops
+  // the non-semantic auto-id so heterogeneous backends compare by content.
+  const rowsForHash = namespace === 'questionResults' ? rows.map(stripAutoId) : rows;
+  return { count: rows.length, hash: await hashRows(rowsForHash) };
 }
 
 /** Digest every verified namespace of one driver. */
