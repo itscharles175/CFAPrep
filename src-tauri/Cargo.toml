@@ -45,6 +45,10 @@ windows = { version = "0.61", features = [
     # CreateJobObjectW's signature references SECURITY_ATTRIBUTES (gated behind
     # Win32_Security), so the JobObjects creation call needs this enabled.
     "Win32_Security",
+    # GAP-SEC-1 — Windows Credential Manager (CredRead/Write/DeleteW + CREDENTIALW)
+    # for OS-keychain custody of the opt-in secure-vault key. Same pinned
+    # windows 0.61.3 already in Cargo.lock, so this feature add is no-network.
+    "Win32_Security_Credentials",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }

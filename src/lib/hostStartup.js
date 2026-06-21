@@ -9,6 +9,7 @@ import { bootstrapAiContent } from './bootstrapAiContent';
 import { bootstrapFsrsParameters } from './bootstrapFsrsParameters';
 import { bootstrapStorage } from './bootstrapStorage';
 import { requestPersistentStorage } from './storage/quota';
+import { unlockSecureVaultOnLaunch } from './secureVault';
 
 // App-lifetime startup side-effects. Guarded so they run once even though the
 // host tree may unmount/remount as the user soft-switches domains (legacy path)
@@ -31,9 +32,27 @@ export function runHostStartupOnce() {
   }
   // Re-activate the user's chosen storage backend BEFORE the data bootstraps
   // run, so they read/write through the correct driver. Falls back to Dexie.
-  bootstrapStorage().finally(() => {
-    bootstrapSourceVault();
-    bootstrapAiContent();
-    bootstrapFsrsParameters();
-  });
+  bootstrapStorage()
+    // GAP-SEC-1 — if the opt-in secure vault is enabled, unlock it (load the DEK
+    // from the OS keychain) before the data bootstraps so encrypted rows can be
+    // read. A no-op + fast resolve when the vault is disabled (the default), so
+    // this path is unchanged for everyone who hasn't opted in. Never throws — but
+    // a failed unlock of an ENABLED vault is logged (not silently swallowed) so it
+    // is visible; once per-record encryption is wired this must become a gate
+    // before the data bootstraps (reading encrypted stores while locked would
+    // corrupt). Today no rows are encrypted, so proceeding is safe.
+    .then(() =>
+      unlockSecureVaultOnLaunch()
+        .then((status) => {
+          if (status.enabled && !status.unlocked) {
+            console.warn('[secureVault] enabled but failed to unlock on launch:', status.error);
+          }
+        })
+        .catch(() => undefined),
+    )
+    .finally(() => {
+      bootstrapSourceVault();
+      bootstrapAiContent();
+      bootstrapFsrsParameters();
+    });
 }

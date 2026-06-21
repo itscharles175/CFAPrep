@@ -12,6 +12,7 @@
  */
 import { PageHeader } from '../components/ui/Primitives';
 import ReadingSettings from '../components/ReadingSettings';
+import SecureVaultPanel from '../components/SecureVaultPanel';
 
 export default function Settings() {
   return (
@@ -22,6 +23,7 @@ export default function Settings() {
         subtitle="Appearance, layout density, and reading aids. Every choice is stored on this device."
       />
       <ReadingSettings />
+      <SecureVaultPanel />
     </div>
   );
 }

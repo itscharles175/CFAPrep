@@ -46,6 +46,11 @@ mod identity;
 // Rust panic / abnormal exit.
 mod crash_report;
 
+// GAP-SEC-1: OS-keychain custody for the opt-in secure-vault key. Exposes
+// keychain_get/set/delete so the host can store the vault data-encryption-key in
+// the Windows Credential Manager (OS-protected) instead of plaintext app storage.
+mod keychain;
+
 /// One supervised sidecar: its declarative spec (retained so a crashed process
 /// can be respawned from the same recipe) paired with the live `Child` handle.
 struct SupervisedSidecar {
@@ -2910,7 +2915,11 @@ pub fn run() {
             cfa_read_pdf_bytes,
             get_sidecar_status,
             get_sidecar_logs,
-            get_system_health_aggregated
+            get_system_health_aggregated,
+            // GAP-SEC-1: OS-keychain custody for the opt-in secure-vault key.
+            keychain::keychain_set,
+            keychain::keychain_get,
+            keychain::keychain_delete
         ])
         .manage(Sidecars::default())
         .manage(SkippedSidecars::default())
