@@ -39,6 +39,7 @@ __all__ = [
     "offline_provider_name",
     "critic_model_name",
     "cloud_enabled",
+    "assert_cloud_allowed",
     "cloud_budget_status",
     "cloud_budget_dry_run",
     "embed_sync",
@@ -80,8 +81,37 @@ def local_provider() -> Union[OllamaProvider, LMStudioProvider]:
 
 
 def cloud_enabled() -> bool:
-    """Cloud offline generation is configured AND has a key."""
+    """Cloud offline generation is configured AND has a key.
+
+    This is a pure config read (no side effects) so status/health endpoints can
+    report routing accurately. The actual egress is gated separately by the
+    strict-offline fence (:func:`assert_cloud_allowed`), enforced at the point
+    the cloud provider is selected/instantiated in :func:`offline_generate`.
+    """
     return config.GEN_PROVIDER == "cloud" and bool(config.CLOUD_API_KEY)
+
+
+def assert_cloud_allowed() -> None:
+    """AI-10 strict offline fence: refuse to select/instantiate the cloud provider.
+
+    StudyVault's no-cloud invariant ("works on a plane") is enforced here, not by
+    convention: when ``config.ENFORCE_OFFLINE`` is on (the default in the packaged
+    build) and the cloud provider is configured (``GEN_PROVIDER=cloud`` + a key),
+    raise a clear :class:`RuntimeError` naming the offending env var so the egress
+    path to api.anthropic.com is unreachable. The cloud code itself stays in the
+    tree for opt-out/standalone use — set ``LSATLAB_ENFORCE_OFFLINE=0`` to allow
+    it. No-op when the fence is off or cloud isn't configured.
+    """
+    if not config.ENFORCE_OFFLINE:
+        return
+    if config.GEN_PROVIDER != "cloud":
+        return
+    raise RuntimeError(
+        "Strict offline fence is ON: the cloud LLM provider is blocked "
+        "(LSATLAB_GEN_PROVIDER='cloud'). StudyVault is local-only by default — "
+        "no cloud, no telemetry. Set LSATLAB_GEN_PROVIDER=ollama (or lmstudio) to "
+        "use a local model, or LSATLAB_ENFORCE_OFFLINE=0 to opt out of the fence."
+    )
 
 
 def cloud_budget_status() -> dict:
@@ -221,6 +251,11 @@ def offline_generate(prompt: str, system: Optional[str] = None,
     if format is not None:
         opts["format"] = format
     if cloud_enabled():
+        # AI-10 — strict offline fence: before doing ANYTHING cloud-bound, refuse
+        # (with a clear, env-var-naming RuntimeError) when enforcement is on. This
+        # is the selection point that makes the api.anthropic.com egress path
+        # unreachable in the normal StudyVault build.
+        assert_cloud_allowed()
         # 7.3 — ENFORCE the monthly budget: refuse the (paid) cloud call when its
         # WORST-CASE cost would push month-to-date spend past the cap, so a single
         # large call can't overshoot the budget. We fall back to the local model so

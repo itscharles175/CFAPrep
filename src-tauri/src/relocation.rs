@@ -30,6 +30,9 @@ const DB_FILENAME: &str = "lsatlab.db";
 /// on macOS, `$XDG_DATA_HOME`/`~/.local/share` on Linux). Mirrors the backend's
 /// resolver so the OLD-dir detection matches how a packaged build resolved its
 /// store. Returns `None` only when no base can be determined.
+// Per-platform returns are cfg-gated; each arm's `return` is that platform's tail
+// expression, but the cfg siblings make clippy read them as "needless" — allow it.
+#[allow(clippy::needless_return)]
 fn os_app_data_base() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
@@ -63,7 +66,10 @@ fn home_dir() -> Option<PathBuf> {
     let key = "USERPROFILE";
     #[cfg(not(target_os = "windows"))]
     let key = "HOME";
-    std::env::var(key).ok().filter(|s| !s.is_empty()).map(PathBuf::from)
+    std::env::var(key)
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
 }
 
 /// The LEGACY app-data dir an orphaned store would live under (independent of any
@@ -115,9 +121,7 @@ pub fn detect_orphaned_store(new_dir: &Path) -> RelocationVerdict {
         .unwrap_or(false);
 
     let orphaned = match old_store.as_ref() {
-        Some(o) => {
-            !same_path && is_nonempty_store(o) && !is_nonempty_store(&new_store)
-        }
+        Some(o) => !same_path && is_nonempty_store(o) && !is_nonempty_store(&new_store),
         None => false,
     };
 
@@ -155,10 +159,7 @@ pub fn resolve_lsat_data_dir(new_dir: Option<PathBuf>) -> Option<PathBuf> {
     // detecting against that default would require duplicating the backend's
     // frozen-vs-dev branch here. Keep it conservative: only act when the
     // supervisor already knows the new dir.
-    let new = match new_dir {
-        Some(d) => d,
-        None => return None,
-    };
+    let new = new_dir?;
 
     let verdict = detect_orphaned_store(&new);
     if verdict.orphaned {
@@ -230,7 +231,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         let new_dir = tmp.path().join("active");
         write_store(&new_dir, b"active-bank"); // new store present + non-empty
-        // Even if an old store exists, a populated new store wins → use new_dir.
+                                               // Even if an old store exists, a populated new store wins → use new_dir.
         let resolved = resolve_lsat_data_dir(Some(new_dir.clone()));
         assert_eq!(resolved, Some(new_dir));
     }

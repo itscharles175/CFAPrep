@@ -213,7 +213,21 @@ async def _log_resolved_models(log) -> None:
 async def lifespan(app: FastAPI):
     observability.setup_logging()
     log = observability.get_logger("lsatlab")
-    # B20: warn if cloud generation is enabled with an unrecognised model slug.
+    # AI-10 — strict offline fence: if the cloud provider is configured while the
+    # fence is ON (the default StudyVault build), fail FAST at startup. The egress
+    # path is unreachable at the selection point regardless (see
+    # llm.assert_cloud_allowed), but surfacing it here turns a silently-degraded
+    # config into a loud, actionable boot error rather than a surprise at the first
+    # generation. LSATLAB_ENFORCE_OFFLINE=0 opts out (cloud stays for standalone).
+    if config.ENFORCE_OFFLINE and config.GEN_PROVIDER == "cloud":
+        raise RuntimeError(
+            "Strict offline fence is ON but LSATLAB_GEN_PROVIDER='cloud' is "
+            "configured. StudyVault is local-only by default — no cloud, no "
+            "telemetry. Set LSATLAB_GEN_PROVIDER=ollama (or lmstudio), or "
+            "LSATLAB_ENFORCE_OFFLINE=0 to opt out of the fence."
+        )
+    # B20: warn if cloud generation is enabled with an unrecognised model slug
+    # (only reachable when the offline fence is opted out).
     if config.GEN_PROVIDER == "cloud" and config.CLOUD_API_KEY:
         if not _ANTHROPIC_MODEL_RE.match(config.CLOUD_GEN_MODEL):
             log.warning(

@@ -275,7 +275,7 @@ describe('surrealDriver unified-schema namespaces (mocked client)', () => {
     await surrealDriver.reviewItems!.put(makeReviewItem({ id: 'weird id*x' }));
 
     expect(surrealState.upsertCalls).toHaveLength(1);
-    expect(surrealState.upsertCalls[0].id).toBe('review_items:weird_id_x');
+    expect(surrealState.upsertCalls[0].id).toBe('review_items:weird%20id%2Ax');
     expect(surrealState.upsertCalls[0].payload).toMatchObject({ domain: 'cfa', topic: 'fixed-income' });
   });
 
@@ -335,7 +335,7 @@ describe('surrealDriver unified-schema namespaces (mocked client)', () => {
     const { surrealDriver } = await import('./surrealDriver');
     await surrealDriver.masterySnapshots!.put(makeSnapshot({ id: 'cfa::fi::los-1' }));
     expect(surrealState.upsertCalls).toHaveLength(1);
-    expect(surrealState.upsertCalls[0].id).toBe('mastery_snapshots:cfa__fi__los-1');
+    expect(surrealState.upsertCalls[0].id).toBe('mastery_snapshots:cfa%3A%3Afi%3A%3Alos-1');
     expect(surrealState.upsertCalls[0].payload).toMatchObject({ score: 72 });
   });
 

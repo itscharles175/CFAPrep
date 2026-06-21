@@ -126,6 +126,8 @@ def test_ollama_generate_omits_options_when_not_requested(monkeypatch):
 
 
 def test_cloud_generate_forces_json_tool_use(monkeypatch):
+    # AI-10: opt out of the strict-offline fence so the provider can construct.
+    monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
     captured = {}
 
     class _Resp:

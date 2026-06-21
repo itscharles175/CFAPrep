@@ -39,6 +39,8 @@ spike/
 .pyinstaller-lsat-dist/
 /lsatlab.spec
 services/lsat-backend/**/*.db
+services/lsat-backend/**/*.db-shm
+services/lsat-backend/**/*.db-wal
 services/lsat-backend/**/*.sqlite*
 services/lsat-backend/.venv*/
 services/lsat-backend/datasets/

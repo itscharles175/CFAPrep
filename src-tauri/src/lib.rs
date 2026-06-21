@@ -8,6 +8,7 @@
 // packaging (Pillar 0, still open) needs to bundle the Python backend via
 // PyInstaller into Tauri's `resourceDir()` and update this path resolution.
 // Set the `QV_SERVICES_DIR` env var to override the search at runtime.
+use serde::Serialize;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
@@ -16,7 +17,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use serde::Serialize;
 use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_dialog::DialogExt;
 
@@ -40,7 +40,12 @@ struct SupervisedSidecar {
 
 impl SupervisedSidecar {
     fn new(spec: SidecarSpec, child: Child) -> Self {
-        Self { spec, child, consecutive_failures: 0, backoff_until: None }
+        Self {
+            spec,
+            child,
+            consecutive_failures: 0,
+            backoff_until: None,
+        }
     }
 }
 
@@ -360,11 +365,7 @@ fn services_dir() -> PathBuf {
 /// subdirectory (StudyVault's frozen LSAT sidecar). Any one is enough to pin
 /// the layout — in dev several are present; in a packaged install only the
 /// bundled ones exist.
-fn services_dir_search(
-    env_override: Option<&Path>,
-    cwd: &Path,
-    exe_dir: &Path,
-) -> Option<PathBuf> {
+fn services_dir_search(env_override: Option<&Path>, cwd: &Path, exe_dir: &Path) -> Option<PathBuf> {
     if let Some(p) = env_override {
         if p.exists() {
             return Some(p.to_path_buf());
@@ -457,9 +458,7 @@ fn wait_for_port_ready(
             );
             return false;
         }
-        log::info!(
-            "sidecar: readiness for {label}: waiting for port {port} (probe {attempts})"
-        );
+        log::info!("sidecar: readiness for {label}: waiting for port {port} (probe {attempts})");
         std::thread::sleep(READINESS_POLL_GAP);
     }
 }
@@ -1204,6 +1203,9 @@ fn get_system_health_aggregated(
     aggregate_sidecar_health(&rows)
 }
 
+// `run()` (the Tauri entry point) is defined after this module by file convention;
+// clippy's items-after-test-module would otherwise trip the `-D warnings` gate.
+#[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1267,8 +1269,7 @@ mod tests {
         fs::write(root.join("README.md"), b"nope").unwrap();
 
         let entries = cfa_list_pdfs(root.to_string_lossy().to_string()).expect("walk");
-        let names: std::collections::HashSet<_> =
-            entries.into_iter().map(|e| e.name).collect();
+        let names: std::collections::HashSet<_> = entries.into_iter().map(|e| e.name).collect();
         assert!(names.contains("real.pdf"));
         assert!(names.contains("UPPER.PDF"));
         assert!(!names.contains("decoy.pdf.txt"));
@@ -1322,7 +1323,10 @@ mod tests {
         let dir_with_pdf_ext = tmp.path().join("folder.pdf");
         fs::create_dir(&dir_with_pdf_ext).unwrap();
         let err = cfa_read_pdf_bytes_impl(dir_with_pdf_ext.to_str().unwrap()).unwrap_err();
-        assert!(err.contains("Not a regular file"), "unexpected error: {err}");
+        assert!(
+            err.contains("Not a regular file"),
+            "unexpected error: {err}"
+        );
     }
 
     // ---- pick_folder_recv ----
@@ -1675,7 +1679,10 @@ mod tests {
             ]
         );
         assert_eq!(outcome.launched.len(), 4);
-        assert!(outcome.skipped.is_empty(), "nothing skipped when RAG present");
+        assert!(
+            outcome.skipped.is_empty(),
+            "nothing skipped when RAG present"
+        );
         // Each slot retains the spec that produced it (so a crash can be
         // respawned), paired with the live child.
         assert_eq!(outcome.launched[0].spec.name, "SurrealDB");
@@ -1720,12 +1727,19 @@ mod tests {
         let mut outcome = spawn_sidecars_with(&launcher, &dir, &logs, Duration::ZERO);
 
         // Only the required sidecars were launched, in order.
-        let launched_names: Vec<_> =
-            outcome.launched.iter().map(|s| s.spec.name.clone()).collect();
+        let launched_names: Vec<_> = outcome
+            .launched
+            .iter()
+            .map(|s| s.spec.name.clone())
+            .collect();
         assert_eq!(launched_names, vec!["SurrealDB", "LSAT backend"]);
         // The launcher was never even asked to start the optional pair.
-        let attempted: Vec<_> =
-            launcher.calls.borrow().iter().map(|s| s.name.clone()).collect();
+        let attempted: Vec<_> = launcher
+            .calls
+            .borrow()
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
         assert_eq!(attempted, vec!["SurrealDB", "LSAT backend"]);
         // The optional open-notebook API + worker were recorded as skipped.
         let skipped_names: Vec<_> = outcome.skipped.iter().map(|s| s.name.clone()).collect();
@@ -2098,8 +2112,8 @@ mod tests {
         let index_of = |name: &str| specs.iter().position(|s| s.name == name);
         for (i, spec) in specs.iter().enumerate() {
             for dep in &spec.depends_on {
-                let dep_idx = index_of(dep)
-                    .unwrap_or_else(|| panic!("dependency {dep} not in spec set"));
+                let dep_idx =
+                    index_of(dep).unwrap_or_else(|| panic!("dependency {dep} not in spec set"));
                 assert!(
                     dep_idx < i,
                     "{} (idx {i}) depends on {dep} (idx {dep_idx}) which must come first",
@@ -2208,7 +2222,11 @@ mod tests {
         }
         assert_eq!(
             snap,
-            vec!["first".to_string(), "second".to_string(), "third".to_string()]
+            vec![
+                "first".to_string(),
+                "second".to_string(),
+                "third".to_string()
+            ]
         );
     }
 

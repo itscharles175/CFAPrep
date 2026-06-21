@@ -74,6 +74,8 @@ def test_offline_generate_routes_to_cloud_when_configured(monkeypatch):
     import app.llm as llm
     from app.llm import cloud
 
+    # AI-10: opt out of the strict-offline fence so this exercises the cloud path.
+    monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
     monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
     monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
     monkeypatch.setattr(cloud.AnthropicProvider, "generate",
@@ -86,6 +88,8 @@ def test_offline_generate_routes_to_cloud_when_configured(monkeypatch):
 def test_cloud_provider_builds_cached_messages_request(monkeypatch):
     from app.llm import cloud
 
+    # AI-10: opt out of the strict-offline fence so the provider can construct.
+    monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
     captured = {}
 
     class _Resp:

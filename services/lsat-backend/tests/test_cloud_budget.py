@@ -59,6 +59,8 @@ def test_worst_case_estimate_blocks_overshoot_even_when_spend_under_budget(
     import app.llm as llm
     from app.llm import cloud
 
+    # AI-10: opt out of the strict-offline fence so the cloud path is exercised.
+    monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
     monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
     monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
     monkeypatch.setattr(config, "CLOUD_INPUT_COST_PER_MTOK", 15.0)
@@ -98,6 +100,8 @@ def test_comfortably_under_budget_call_is_admitted(db_session, monkeypatch):
     import app.llm as llm
     from app.llm import cloud
 
+    # AI-10: opt out of the strict-offline fence so the cloud path is exercised.
+    monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
     monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
     monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
     monkeypatch.setattr(config, "CLOUD_INPUT_COST_PER_MTOK", 15.0)

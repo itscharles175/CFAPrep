@@ -143,9 +143,56 @@ async function ensureSchema(client: Surreal): Promise<void> {
 // SurrealQL helpers
 // ---------------------------------------------------------------------------
 
-/** Sanitise an arbitrary chunk id into a SurrealDB record-id-safe slug. */
-function sanitiseId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, '_');
+/**
+ * Encode an arbitrary host id into a SurrealDB record-id-safe slug.
+ *
+ * This is a strict, reversible percent-escaping over the UTF-8 bytes of the
+ * input: every character outside the SurrealDB-id-safe set `[A-Za-z0-9_-]`
+ * (including `%` itself, so the encoding stays unambiguous) is replaced by one
+ * `%XX` group per UTF-8 byte, using UPPERCASE hex.
+ *
+ * Unlike the previous `replace(/[^a-zA-Z0-9_-]/g, '_')` scheme — which mapped
+ * many distinct ids onto the same slug — this encoding is INJECTIVE: distinct
+ * inputs always produce distinct outputs (e.g. `a::b` -> `a%3A%3Ab` while
+ * `a:b` -> `a%3Ab`). That prevents silent cross-domain overwrites of FSRS-queue
+ * and mastery-snapshot rows whose ids are colon-delimited (`domain::topic::lo`).
+ *
+ * The output uses only `[A-Za-z0-9_%-]`, all of which are valid inside a
+ * SurrealDB string record id. Pair with {@link decodeId} for the inverse.
+ */
+export function sanitiseId(id: string): string {
+  const bytes = new TextEncoder().encode(id);
+  let out = '';
+  for (const byte of bytes) {
+    // Safe set: 0-9 (0x30-0x39), A-Z (0x41-0x5A), a-z (0x61-0x7A), '-' (0x2D), '_' (0x5F).
+    if (
+      (byte >= 0x30 && byte <= 0x39) ||
+      (byte >= 0x41 && byte <= 0x5a) ||
+      (byte >= 0x61 && byte <= 0x7a) ||
+      byte === 0x2d ||
+      byte === 0x5f
+    ) {
+      out += String.fromCharCode(byte);
+    } else {
+      out += `%${byte.toString(16).padStart(2, '0').toUpperCase()}`;
+    }
+  }
+  return out;
+}
+
+/** Inverse of {@link sanitiseId}: recover the original host id from its slug. */
+export function decodeId(slug: string): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < slug.length; i += 1) {
+    const ch = slug[i];
+    if (ch === '%') {
+      bytes.push(parseInt(slug.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else {
+      bytes.push(ch.charCodeAt(0));
+    }
+  }
+  return new TextDecoder().decode(Uint8Array.from(bytes));
 }
 
 function encodeSettingKey(key: string): string {

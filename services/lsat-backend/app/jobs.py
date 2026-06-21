@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -721,6 +722,35 @@ def reconcile_orphans(eng=None) -> int:
         return len(orphans)
 
 
+# Default cadence for the recurring-maintenance tick (seconds). Hourly is well
+# below every seeded schedule's own cadence (6h-7d), so the per-row next_run_at
+# gate — not this tick — decides when a task actually fires.
+DEFAULT_SCHEDULER_TICK_SECONDS = 3600.0
+
+
+def _scheduler_tick_interval_from_env() -> float:
+    """How often the worker checks for due ScheduledTask rows, in seconds.
+
+    Read inline from ``LSATLAB_SCHEDULER_TICK_SECONDS`` (config.py is owned by
+    another slice) with an hourly default. A non-positive value disables the
+    tick; any positive value is clamped to a 60s floor so a typo can't make the
+    worker poll the scheduler on every tight loop iteration."""
+    raw = os.environ.get("LSATLAB_SCHEDULER_TICK_SECONDS")
+    if raw is None or raw.strip() == "":
+        return DEFAULT_SCHEDULER_TICK_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        log.warning(
+            "invalid LSATLAB_SCHEDULER_TICK_SECONDS=%r; using default %ss",
+            raw, DEFAULT_SCHEDULER_TICK_SECONDS,
+        )
+        return DEFAULT_SCHEDULER_TICK_SECONDS
+    if value <= 0:
+        return 0.0  # disabled
+    return max(60.0, value)
+
+
 # --- worker -----------------------------------------------------------------
 class JobWorker:
     """Single-threaded drain of queued GenJobs. Sequential by design."""
@@ -728,7 +758,8 @@ class JobWorker:
     def __init__(self, eng=None, *, runner: Optional[Callable[[int], None]] = None,
                  poll_interval: Optional[float] = None,
                  idle_hook: Optional[Callable[[], None]] = None,
-                 idle_hook_interval: Optional[float] = None) -> None:
+                 idle_hook_interval: Optional[float] = None,
+                 scheduler_tick_interval: Optional[float] = None) -> None:
         self.engine = eng or engine
         self.runner = runner or generation.run_job
         self.poll_interval = poll_interval or config.JOBS_POLL_INTERVAL_S
@@ -739,6 +770,16 @@ class JobWorker:
             else config.DIAGNOSIS_INTERVAL_S
         )
         self._last_hook = 0.0
+        # Recurring maintenance scheduler: on idle ticks, at most this often, the
+        # worker fires due ScheduledTask rows (backups/calibration/revalidation).
+        # Read inline from the env (config.py is owned elsewhere) with a safe
+        # hourly default; clamped to a 60s floor so a misconfigured tiny value
+        # can't busy-run the scheduler on every poll. <= 0 disables the tick.
+        self.scheduler_tick_interval = (
+            scheduler_tick_interval if scheduler_tick_interval is not None
+            else _scheduler_tick_interval_from_env()
+        )
+        self._last_scheduler_tick = 0.0
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -795,12 +836,37 @@ class JobWorker:
         except Exception:
             log.exception("job worker: idle hook failed")
 
+    def _run_scheduler_tick(self) -> None:
+        """Fire due recurring-maintenance tasks, throttled to the tick interval.
+
+        Without this, the seeded ScheduledTask rows (backups/calibration/
+        revalidation/…) never run on cadence: their next_run_at is set but
+        nothing polls them. We only check at most once per ``scheduler_tick_
+        interval``; the per-row next_run_at gate inside ``run_due_scheduled_tasks``
+        still decides which (if any) actually run. Wrapped in try/except so a
+        single failing scheduled task can never kill the worker loop."""
+        if self.scheduler_tick_interval <= 0:
+            return  # disabled
+        now = time.monotonic()
+        if (self._last_scheduler_tick
+                and now - self._last_scheduler_tick < self.scheduler_tick_interval):
+            return
+        self._last_scheduler_tick = now
+        try:
+            with Session(self.engine) as s:
+                result = run_due_scheduled_tasks(s)
+            if result.get("ran"):
+                log.info("scheduler tick ran %s due task(s)", result["ran"])
+        except Exception:
+            log.exception("job worker: scheduler tick failed")
+
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
                 if self.drain_once():
                     continue
                 self._run_idle_hook()
+                self._run_scheduler_tick()
                 self._stop.wait(self.poll_interval)
             except Exception:
                 log.exception("job worker loop error")

@@ -370,8 +370,9 @@ describe('surrealDriver.chunks (mocked client)', () => {
       locator: 'loc',
     });
     expect(surrealState.upsertCalls).toHaveLength(1);
-    // Sanitised id keeps only [a-zA-Z0-9_-].
-    expect(surrealState.upsertCalls[0].id).toBe('chunks:weird_id_with_chars');
+    // sanitiseId now reversibly percent-escapes every non-[A-Za-z0-9_-] byte
+    // (DATA-4: injective, collision-free) — space -> %20, '*' -> %2A.
+    expect(surrealState.upsertCalls[0].id).toBe('chunks:weird%20id%2Awith%2Achars');
   });
 
   it('deleteByDocument issues a DELETE query with the document bind', async () => {

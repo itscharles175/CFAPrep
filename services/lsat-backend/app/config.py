@@ -16,8 +16,8 @@ def _env(name: str, default: str) -> str:
 
 
 # Single source of truth for the backend version; kept in sync with the frontend
-# package.json / tauri.conf (0.1.0). FastAPI's version is read from here.
-APP_VERSION = _env("LSATLAB_APP_VERSION", "0.1.0")
+# package.json / tauri.conf (0.9.0). FastAPI's version is read from here.
+APP_VERSION = _env("LSATLAB_APP_VERSION", "0.9.0")
 
 
 # --- App data directory (S2) ------------------------------------------------
@@ -300,6 +300,37 @@ LOCAL_PROVIDER = _env("LSATLAB_LOCAL_PROVIDER", "ollama").lower()  # "ollama" | 
 LMSTUDIO_URL = _env("LSATLAB_LMSTUDIO_URL", "http://localhost:1234/v1").rstrip("/")
 
 GEN_PROVIDER = _env("LSATLAB_GEN_PROVIDER", "ollama").lower()    # "ollama" | "cloud"
+
+
+def _default_enforce_offline() -> bool:
+    """Default state of the strict-offline fence (AI-10).
+
+    StudyVault's defining invariant is "works on a plane": no cloud, no
+    telemetry. The optional cloud provider (``GEN_PROVIDER=cloud``) stays in the
+    tree for opt-out/standalone use, but in the normal app build the fence is ON
+    so selecting it raises loudly instead of quietly reaching api.anthropic.com.
+
+    The test suite exercises the cloud code paths directly (faked HTTP), so the
+    fence defaults OFF under pytest — detected the same way the rest of the suite
+    sets its hermetic env: a pytest run sets ``PYTEST_CURRENT_TEST`` / imports the
+    ``pytest`` module. An explicit ``LSATLAB_ENFORCE_OFFLINE`` always wins, so a
+    test (or a CI egress check) can still force either state.
+    """
+    explicit = os.environ.get("LSATLAB_ENFORCE_OFFLINE")
+    if explicit is not None:
+        return explicit not in ("0", "false", "False")
+    under_pytest = (
+        "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+    )
+    return not under_pytest
+
+
+# AI-10 — strict offline provider fence. When ON (the default in the packaged
+# StudyVault build) any attempt to SELECT/INSTANTIATE the cloud provider raises a
+# clear RuntimeError naming the offending env var, making the cloud egress path
+# unreachable. Off (opt-out) only when LSATLAB_ENFORCE_OFFLINE=0 — or implicitly
+# under pytest so the suite can still cover the cloud code with faked HTTP.
+ENFORCE_OFFLINE = _default_enforce_offline()
 CLOUD_API_KEY = _env("LSATLAB_CLOUD_API_KEY", "") or _env("ANTHROPIC_API_KEY", "")
 # B20: Updated default from "claude-opus-4-7" (invalid slug) to a known-good
 # Anthropic model ID. Override via LSATLAB_CLOUD_GEN_MODEL.

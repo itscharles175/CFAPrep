@@ -46,6 +46,24 @@ jobs:
       - name: Content validation
         run: npm run content:validate
 
+      # GAP-EGRESS-1 — build-time "no-cloud" gate. StudyVault's central invariant
+      # is offline-only ("works on a plane"); today that's convention, not a build
+      # check, so a stray non-loopback fetch in shipped source (src/ + the LSAT
+      # backend app/) would ship green. This static scan FAILS on any non-loopback
+      # network egress outside the documented allowlist (the opt-in Anthropic cloud
+      # path in cloud.py/config.py + the user-initiated HF research importer). It's
+      # node-only — no extra setup — so it runs inline in this job. (Plan GAP-EGRESS-1.)
+      - name: No-egress gate
+        run: node scripts/check-no-egress.mjs
+
+      # DX-1 — docs-drift gate. Verifies docs/ARCHITECTURE.md's load-bearing claims
+      # still match the tree: referenced source paths exist, and it doesn't describe
+      # the RETIRED split-shell boot path (host-entry.jsx / direct LsatRoot mount)
+      # now that src/main.jsx boots the unified <UnifiedRoot>. Minimal + explicit
+      # assertions only (no prose linting). node-only, runs inline. (Plan DX-1.)
+      - name: Docs-drift gate
+        run: node scripts/check-docs-drift.mjs
+
       - name: Audit dependencies
         run: npm audit --omit=dev --audit-level=high
 
@@ -382,3 +400,88 @@ jobs:
             !**/*.pdf
             !**/*.epub
           retention-days: 14
+
+  # TEST-1: the FULL LSAT backend pytest suite. Before this, only the OpenAPI
+  # contract test ran in the `lsat-sidecar-smoke` job — ~90 mature test files
+  # (schema/seed, SRS, generation gates, import, migrations, analytics, the
+  # provenance-safe MCP tools, …) sat dark, so a backend regression shipped green.
+  # This job provisions the same isolated `.venv-lsat` the sidecar jobs use,
+  # installs the backend FROM ITS pyproject (so `mcp`, `fsrs`, `sqlite-vec`, … —
+  # the authoritative runtime set — are present) plus the dev test tools, and runs
+  # pytest over the whole `tests/` tree. The live-provider tests (test_live_ollama,
+  # the realtime LMStudio leg) self-skip via `@pytest.mark.skipif(not _ollama_up())`
+  # when no model server is reachable — which is always true in CI — so no broad
+  # skip is needed and the `mcp` tools (mcp is a hard dependency, hence installed)
+  # run for real. Runs in parallel with `quality` — no host slowdown. (Plan TEST-1.)
+  lsat-backend-tests:
+    name: LSAT backend — full pytest suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Same venv layout (`.venv-lsat` at the repo root) the sidecar-smoke +
+      # OpenAPI-drift jobs provision, so the backend resolves `app` identically.
+      # The backend declares its runtime deps in pyproject (no requirements*.txt),
+      # so install the package itself for those; add the dev test tools
+      # (pytest/hypothesis/pytest-cov from the pyproject `dev` dependency-group)
+      # explicitly, since plain pip doesn't read PEP-735 groups on older versions.
+      - name: Provision LSAT backend venv
+        run: |
+          python -m venv .venv-lsat
+          .venv-lsat/bin/python -m pip install --upgrade pip wheel
+          .venv-lsat/bin/python -m pip install "services/lsat-backend"
+          .venv-lsat/bin/python -m pip install \
+            "pytest>=9.0.3" "pytest-cov>=7.1.0" "hypothesis>=6.152.9"
+
+      # Run the entire suite from the backend dir so `app` + the tests/conftest
+      # fixtures resolve. conftest already points the DB/backups at per-PID temp
+      # files and aims the model probes at a closed port, so this is fully
+      # hermetic + offline (no Ollama/LM Studio on the runner). No `-k`/`--ignore`
+      # exclusion: every collected file passes with the deps above installed; the
+      # only network-dependent tests self-skip via their own `skipif` guards.
+      - name: Backend pytest (full suite)
+        working-directory: services/lsat-backend
+        run: ../../.venv-lsat/bin/python -m pytest -q
+
+  # TEST-2: the Tauri Rust core (src-tauri/) — compile, test, lint, format. The
+  # Rust supervisor (sidecar lifecycle, Job-Object cleanup, data relocation) had
+  # NO CI: `cargo test` only ran inside the tagged release bundle, so a broken
+  # supervisor surfaced at release, not on the PR. This job is WINDOWS-primary —
+  # the desktop app's main target, where the Job-Object + path logic is
+  # platform-specific — and runs the standard Rust gate: fmt --check, clippy
+  # (warnings = errors), and the unit tests in lib.rs + relocation.rs. WebView2
+  # is preinstalled on the windows runner, so the `tauri` crate links. Runs in
+  # parallel with `quality` — no host slowdown. (Plan TEST-2.)
+  tauri-rust:
+    name: Tauri Rust core — fmt + clippy + test (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Rust format check
+        working-directory: src-tauri
+        run: cargo fmt --all --check
+
+      - name: Clippy (warnings as errors)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test --all-features

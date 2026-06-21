@@ -33,6 +33,17 @@ class AnthropicProvider:
 
     def __init__(self, api_key: str, *, model: Optional[str] = None,
                  url: Optional[str] = None, max_tokens: Optional[int] = None) -> None:
+        # AI-10 — strict offline fence, defense-in-depth. The facade
+        # (app.llm.assert_cloud_allowed) already blocks the cloud SELECTION path,
+        # but guarding the constructor makes the egress path unreachable even if a
+        # future caller instantiates the provider directly. No-op when the fence is
+        # off (the default under pytest, so the cloud HTTP-shape tests still run).
+        if config.ENFORCE_OFFLINE:
+            raise RuntimeError(
+                "Strict offline fence is ON: refusing to instantiate the cloud "
+                "AnthropicProvider. StudyVault is local-only by default — no cloud, "
+                "no telemetry. Set LSATLAB_ENFORCE_OFFLINE=0 to opt out of the fence."
+            )
         if not api_key:
             raise ValueError("AnthropicProvider requires an API key")
         self.api_key = api_key

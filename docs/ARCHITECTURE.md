@@ -34,25 +34,32 @@ There is **one Vite build**. The LSAT subtree is aliased (`@lsat/*` →
 `/src/domains/lsat`) and bundled into its own lazy chunks, so a host-only user
 never downloads the LSAT code (and vice-versa).
 
-## 2. Top-level routing (and why domain switches reload today)
+## 2. Top-level routing (one unified root, soft cross-domain nav)
 
-`src/main.jsx` branches at the very top on the URL:
+`src/main.jsx` renders a single application root — `src/components/UnifiedRoot.tsx`
+— directly. There is **one** host `<BrowserRouter>` that routes *both* planes; a
+top-level `<Routes>` selects:
 
-- `/lsat…` → mounts `src/domains/lsat/LsatRoot.tsx` (its own provider tree +
-  `BrowserRouter basename="/lsat"`).
-- everything else → mounts the host via `src/host-entry.jsx` (`mountHost`).
+- `/lsat` + `/lsat/*` → `<LsatUnifiedMount>` — the LSAT providers + startup, with the
+  vendored LSAT `App` re-based onto the `/lsat` prefix via
+  `src/components/RebasedLsatRouter.tsx`, all inside the shared host shell.
+- everything else → the host `<App/>` (the host shell + routes).
 
-Only **one** `BrowserRouter` is ever live, so the two routers never conflict.
-Crossing `/cfa ↔ /lsat` is a **hard navigation** (`window.location`) — a full
-page load. This is deliberate: the two design systems' global CSS (host body/token
-rules vs. LSAT's Tailwind layer) *conflict in a single document* (LSAT's `body`
-rules flip the host's dark palette light), so isolating them per page load keeps
-each domain visually correct.
+Both planes share the one history, so crossing `/cfa ↔ /lsat` is a **soft
+navigation** — no page reload, no router swap — routed through
+`src/lib/domainNav.ts`. The LSAT mount is therefore **persistent**, and its
+provider/effect teardown lives in `<LsatUnifiedMount>` for that reason. One-time
+host startup (the host CSS world + host bootstrap) is reproduced in `UnifiedRoot`
+via the shared `runHostStartupOnce`.
 
-> A **single-root soft-navigation** version (no reload; a `MutationObserver`
-> keeps only the active domain's stylesheets live) is implemented on the branch
-> `codex/s6-router-merge-wip` — pending runtime verification before merge. See
-> [STUDYVAULT-POLISH-PLAN.md](STUDYVAULT-POLISH-PLAN.md) §S6.
+> History: until the **Keystone K4** UI-unification cutover (K4-12/K4-13) the two
+> domains booted as a *split shell* — the entry swapped the host sub-app against a
+> separate LSAT root, each owning its own `<BrowserRouter>`, with a
+> `MutationObserver` keeping only the active domain's stylesheets live so the two
+> design systems' global CSS could not conflict. That split shell, its
+> CSS-isolation observer, and the per-domain hard reload were all retired; both
+> design systems now coexist in one document (reconciled by the K4 reskin). See
+> [LSAT-INTEGRATION-UPGRADE-ROADMAP.md](LSAT-INTEGRATION-UPGRADE-ROADMAP.md) §7.
 
 ## 3. Shared surfaces (what makes it feel like one product)
 
@@ -104,12 +111,12 @@ projects) · `npm run typecheck:lsat` · `cargo test` (in `src-tauri/`).
 
 ```
 src/
-  main.jsx                  top-level domain branch (host vs /lsat)
-  host-entry.jsx            host bootstrap (mountHost)
-  App.jsx                   host shell + routes
+  main.jsx                  boots the single unified root
+  components/UnifiedRoot.tsx one BrowserRouter routing host + /lsat (soft nav)
+  App.jsx                   host shell + routes (LSAT mounts at /lsat/* via LsatUnifiedMount)
   index.css, styles/        host design tokens (+ unified-palette.css)
   components/, pages/, lib/  host UI, routes, logic
-  domains/lsat/             vendored LSAT app (@lsat/*), own router + Tailwind
+  domains/lsat/             vendored LSAT app (@lsat/*), re-based under /lsat + Tailwind
   lib/lsatBackend.ts        host → LSAT sidecar health/model client
   lib/lsatReviewBridge.ts   host Review Inbox ← LSAT due cards
 src-tauri/                  Tauri Rust core + sidecar supervisor

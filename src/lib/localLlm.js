@@ -1,6 +1,7 @@
 import { getStorage } from './storage';
 import { packExcerpts, pickBudget, renderExcerpts } from './contextBudget';
 import { streamSse, isStreamTimeout } from './streamingClient';
+import { stripThink } from './stripThink';
 
 // Local-LLM integration. Targets an OpenAI-compatible chat endpoint exposed by a
 // local model server (Ollama at :11434/v1, LM Studio at :1234/v1). No cloud, no
@@ -321,7 +322,9 @@ export async function generateQuestionsFromCurriculum({ settings, topicTitle, ch
     }
     if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
     const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content || '';
+    // AI-8 — strip reasoning traces BEFORE extraction so a leading <think> block
+    // can't break JSON parsing nor leak chain-of-thought into question fields.
+    const content = stripThink(data?.choices?.[0]?.message?.content || '');
     const parsed = extractJsonArray(content);
     if (!parsed) throw new Error('The model did not return parseable questions. Try a more capable local model.');
 
@@ -391,7 +394,8 @@ export async function explainWrongAnswer({ settings, question, options, correctI
     if (typeof content !== 'string' || !content.trim()) {
       throw new Error('The model returned an empty explanation. Try a more capable local model.');
     }
-    return content.trim();
+    // AI-8 — drop any <think> reasoning trace before showing the explanation.
+    return stripThink(content);
   });
 }
 
@@ -461,7 +465,8 @@ export async function critiqueConstructedResponse({ settings, prompt, response, 
     if (typeof content !== 'string' || !content.trim()) {
       throw new Error('The model returned an empty critique. Try a more capable local model.');
     }
-    return content.trim();
+    // AI-8 — drop any <think> reasoning trace before showing the critique.
+    return stripThink(content);
   });
 }
 
@@ -550,7 +555,9 @@ export async function gradeConstructedResponseStructured({ settings, prompt, res
   }
   if (!fetchResponse.ok) throw new Error(`Local model server responded ${fetchResponse.status}.`);
   const data = await fetchResponse.json();
-  const content = data?.choices?.[0]?.message?.content || '';
+  // AI-8 — strip reasoning traces BEFORE the JSON match so braces inside a
+  // <think> block can't corrupt the grade, nor leak into evidence/summary text.
+  const content = stripThink(data?.choices?.[0]?.message?.content || '');
 
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
@@ -692,7 +699,8 @@ export async function narrateStudyPlan({ settings, plan, signal }) {
     if (typeof content !== 'string' || !content.trim()) {
       throw new Error('The model returned an empty narrative. Try a more capable local model.');
     }
-    return content.trim();
+    // AI-8 — drop any <think> reasoning trace before showing the narrative.
+    return stripThink(content);
   });
 }
 
@@ -753,7 +761,8 @@ export async function summarizeTopicFromCurriculum({ settings, topicTitle, chunk
     if (typeof content !== 'string' || !content.trim()) {
       throw new Error('The model returned an empty summary. Try a more capable local model.');
     }
-    return content.trim();
+    // AI-8 — drop any <think> reasoning trace before showing the summary.
+    return stripThink(content);
   });
 }
 
@@ -862,7 +871,9 @@ export async function generateFlashcardsFromCurriculum({ settings, topicTitle, c
     }
     if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
     const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content || '';
+    // AI-8 — strip reasoning traces BEFORE extraction so a leading <think> block
+    // can't break JSON parsing nor leak chain-of-thought into card front/back.
+    const content = stripThink(data?.choices?.[0]?.message?.content || '');
     const parsed = extractJsonArray(content);
     if (!parsed) throw new Error('The model did not return parseable flashcards. Try a more capable local model.');
 
@@ -943,7 +954,8 @@ export async function generateText({
     if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content || '';
-    return { text: String(content) };
+    // AI-8 — drop any <think> reasoning trace before returning the raw text.
+    return { text: stripThink(String(content)) };
   });
 }
 
@@ -1031,12 +1043,18 @@ export async function streamText({
       },
       {
         onDelta: (token) => {
+          // AI-8 — mid-stream deltas pass through RAW so live tokens aren't
+          // corrupted; the reasoning trace is removed once at finalization
+          // (onDone / stream end) below, never on a partial delta.
           text += token;
           onToken?.(token);
         },
         onDone: () => {
-          onDone?.(text);
-          resolve({ text });
+          // AI-8 — filter the fully-assembled text so no <think> reasoning
+          // reaches onDone consumers or the resolved value (incl. the coach/TTS).
+          const clean = stripThink(text);
+          onDone?.(clean);
+          resolve({ text: clean });
         },
         onTimeout: (error) => {
           onTimeout?.(error);
@@ -1065,8 +1083,9 @@ export async function streamText({
       () => {
         // streamSse resolves after the terminal handler ran. If the stream ended
         // with neither done nor error (e.g. a caller abort), settle so awaiting
-        // callers are never left hanging.
-        resolve({ text });
+        // callers are never left hanging. (AI-8: filter here too — the resolved
+        // value must never carry a partial reasoning trace.)
+        resolve({ text: stripThink(text) });
       },
       // streamSse never rejects, but guard defensively.
       (err) => reject(err instanceof Error ? err : new Error(String(err))),

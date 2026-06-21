@@ -267,6 +267,8 @@ def test_cloud_still_wins_over_lmstudio_for_offline(monkeypatch):
 
     # LMStudio is the local provider, but GEN_PROVIDER=cloud + a key must still
     # route OFFLINE generation to Anthropic (cloud is orthogonal to LOCAL).
+    # AI-10: opt out of the strict-offline fence so the cloud path is reachable.
+    monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
     monkeypatch.setattr(config, "LOCAL_PROVIDER", "lmstudio")
     monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
     monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
