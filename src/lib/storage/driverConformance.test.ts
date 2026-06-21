@@ -124,12 +124,75 @@ vi.mock('surrealdb', () => {
       }
 
       // byTopic: `SELECT * FROM question_results WHERE domain = $d AND topic = $t`
-      if (sql.startsWith('SELECT * FROM question_results')) {
+      // (matched specifically by its $d/$t binds so the generic table() SELECT
+      // handlers below can serve question_results too).
+      if (sql.startsWith('SELECT * FROM question_results WHERE domain = $d AND topic = $t')) {
         const t = surrealStore.table('question_results');
         const d = binds?.d;
         const tp = binds?.t;
         const hits = [...t.values()].filter((r) => r.domain === d && r.topic === tp);
         return [hits];
+      }
+
+      // --- DATA-1 generic table() primitive shapes -------------------------
+      // These coexist with the namespace-specific handlers above; chunks is
+      // still routed to its own (empty-ranking) handler further down.
+
+      // count(): `SELECT count() AS count FROM <table> GROUP ALL`
+      {
+        const m = sql.match(/^SELECT count\(\) AS count FROM (\w+) GROUP ALL/);
+        if (m) {
+          const t = surrealStore.table(m[1]);
+          return [[{ count: t.size }]];
+        }
+      }
+
+      // whereEquals(): `SELECT * FROM <table> WHERE <field> = $value`
+      {
+        const m = sql.match(/^SELECT \* FROM (\w+) WHERE (\w+) = \$value/);
+        if (m && m[1] !== 'chunks') {
+          const t = surrealStore.table(m[1]);
+          const field = m[2];
+          const value = binds?.value;
+          const hits = [...t.values()].filter((r) => r[field] === value);
+          return [hits];
+        }
+      }
+
+      // whereAnyOf(): `SELECT * FROM <table> WHERE <field> IN $values`
+      {
+        const m = sql.match(/^SELECT \* FROM (\w+) WHERE (\w+) IN \$values/);
+        if (m && m[1] !== 'chunks') {
+          const t = surrealStore.table(m[1]);
+          const field = m[2];
+          const values = (binds?.values as unknown[]) ?? [];
+          const set = new Set(values);
+          const hits = [...t.values()].filter((r) => set.has(r[field]));
+          return [hits];
+        }
+      }
+
+      // orderedBy(): `SELECT * FROM <table> ORDER BY <field> ASC|DESC [LIMIT n] [START n]`
+      {
+        const m = sql.match(/^SELECT \* FROM (\w+) ORDER BY (\w+) (ASC|DESC)(?: LIMIT (\d+))?(?: START (\d+))?/);
+        if (m && m[1] !== 'chunks') {
+          const t = surrealStore.table(m[1]);
+          const field = m[2];
+          const desc = m[3] === 'DESC';
+          const limit = m[4] != null ? Number(m[4]) : undefined;
+          const start = m[5] != null ? Number(m[5]) : undefined;
+          let rows = [...t.values()].sort((a, b) => {
+            const av = a[field] as string | number;
+            const bv = b[field] as string | number;
+            if (av < bv) return desc ? 1 : -1;
+            if (av > bv) return desc ? -1 : 1;
+            return 0;
+          });
+          // SurrealDB applies START (offset) before LIMIT; mirror that order.
+          if (start != null) rows = rows.slice(start);
+          if (limit != null) rows = rows.slice(0, limit);
+          return [rows];
+        }
       }
 
       // chunks.search: `SELECT ... FROM chunks ...` — offline BM25/vector scoring
@@ -293,6 +356,9 @@ const dexieCase: DriverCase = {
     await db.reviewItems.clear();
     await db.questionResults.clear();
     await db.masterySnapshots.clear();
+    // DATA-1 — the generic table() suite writes to these real stores.
+    await db.lessonProgress.clear();
+    await db.studySessions.clear();
   },
   toArrayRestoresId: true,
 };
@@ -722,6 +788,202 @@ describe.each(DRIVER_CASES)('StorageDriver conformance: $name', (driverCase) => 
       await driver.reviewItems!.delete('cfa::iso::lo');
       expect(await driver.reviewItems!.toArray()).toHaveLength(0);
       expect(await driver.masterySnapshots!.get('cfa::iso::lo')).toBeDefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // DATA-1 — generic table() keyed-table primitive
+  //
+  // Proves the SAME contract on both drivers for the primitive that the
+  // Phase-2 progressStore reroute will target. We exercise it against REAL
+  // Dexie store names so the Dexie side is genuinely behaviourally identical to
+  // direct `db.<table>` access: `lessonProgress` (string-keyed) for keyed CRUD,
+  // and `studySessions` (`++id` auto-id) for the append-only `add` path.
+  //
+  // Key-restore caveat mirrors the namespace methods (see DriverCase docs):
+  // single-row `get` re-stamps the host id; whole-table reads return rows
+  // as-stored. So array assertions match on stable payload fields, and only
+  // match on `id` when `driverCase.toArrayRestoresId`.
+  // -------------------------------------------------------------------------
+  describe('table() generic primitive', () => {
+    // Row shape over the REAL `lessonProgress` store. Its indexed fields are
+    // `id, domain, moduleId, completed, updatedAt, lastVisitedAt` — the
+    // query-surface tests below filter / order on those (Dexie `where`/`orderBy`
+    // REQUIRE an index, so using indexed fields is what keeps the Dexie side a
+    // faithful 1:1 of direct `db.lessonProgress.<op>` access). `score` is an
+    // extra (un-indexed) payload field that must round-trip verbatim.
+    interface KeyedRow {
+      id: string;
+      domain: string;
+      moduleId: string;
+      lastVisitedAt: string;
+      score: number;
+      tag?: string;
+    }
+    const makeRow = (overrides: Partial<KeyedRow> = {}): KeyedRow => ({
+      id: 'cfa::fixed-income::los-1',
+      domain: 'cfa',
+      moduleId: 'fixed-income',
+      lastVisitedAt: '2026-06-01T00:00:00.000Z',
+      score: 50,
+      ...overrides,
+    });
+
+    it('exposes table() on both drivers', () => {
+      expect(typeof driver.table).toBe('function');
+    });
+
+    it('put → get round-trips a keyed row (id restored on single-row get)', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      const row = makeRow({ score: 88, tag: 'x' });
+      await t.put(row);
+      const fetched = await t.get(row.id);
+      expect(fetched).toBeDefined();
+      expect(fetched!.id).toBe(row.id);
+      // Un-indexed payload fields survive the round-trip verbatim.
+      expect(fetched!.score).toBe(88);
+      expect(fetched!.tag).toBe('x');
+    });
+
+    it('put is an idempotent upsert (same key overwrites, no duplication)', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      await t.put(makeRow({ score: 10 }));
+      await t.put(makeRow({ score: 20 }));
+      expect(await t.count()).toBe(1);
+      expect((await t.get('cfa::fixed-income::los-1'))!.score).toBe(20);
+    });
+
+    it('get returns undefined for a missing key', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      expect(await t.get('nope')).toBeUndefined();
+    });
+
+    it('delete removes a single row, leaving others intact', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      await t.put(makeRow({ id: 'keep' }));
+      await t.put(makeRow({ id: 'drop' }));
+      await t.delete('drop');
+      expect(await t.get('drop')).toBeUndefined();
+      expect(await t.get('keep')).toBeDefined();
+    });
+
+    it('bulkPut / count / toArray carry every row', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      await t.bulkPut([
+        makeRow({ id: 'a', moduleId: 'a' }),
+        makeRow({ id: 'b', moduleId: 'b' }),
+        makeRow({ id: 'c', moduleId: 'c' }),
+      ]);
+      expect(await t.count()).toBe(3);
+      const all = await t.toArray();
+      expect(all).toHaveLength(3);
+      expect(all.map((r) => r.moduleId).sort()).toEqual(['a', 'b', 'c']);
+    });
+
+    it('bulkGet returns one slot per key (undefined where absent)', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      await t.bulkPut([makeRow({ id: 'a' }), makeRow({ id: 'c' })]);
+      const got = await t.bulkGet(['a', 'b', 'c']);
+      expect(got).toHaveLength(3);
+      expect(got[0]).toBeDefined();
+      expect(got[1]).toBeUndefined();
+      expect(got[2]).toBeDefined();
+    });
+
+    it('bulkDelete removes every requested key', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      await t.bulkPut([makeRow({ id: 'a' }), makeRow({ id: 'b' }), makeRow({ id: 'c' })]);
+      await t.bulkDelete(['a', 'c']);
+      expect(await t.count()).toBe(1);
+      expect(await t.get('b')).toBeDefined();
+    });
+
+    it('clear empties the table', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      await t.bulkPut([makeRow({ id: 'a' }), makeRow({ id: 'b' })]);
+      await t.clear();
+      expect(await t.count()).toBe(0);
+      expect(await t.toArray()).toHaveLength(0);
+    });
+
+    it('colon-delimited keys do NOT collide and round-trip distinctly', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      await t.put(makeRow({ id: 'domain::topic::lo', score: 11 }));
+      await t.put(makeRow({ id: 'domain:topic:lo', score: 22 }));
+      expect((await t.get('domain::topic::lo'))!.score).toBe(11);
+      expect((await t.get('domain:topic:lo'))!.score).toBe(22);
+      expect(await t.count()).toBe(2);
+    });
+
+    it('whereEquals filters to matching rows on an indexed field', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      await t.bulkPut([
+        makeRow({ id: 'a', moduleId: 'fixed-income' }),
+        makeRow({ id: 'b', moduleId: 'equity' }),
+        makeRow({ id: 'c', moduleId: 'fixed-income' }),
+      ]);
+      const hits = await t.whereEquals('moduleId', 'fixed-income');
+      expect(hits).toHaveLength(2);
+      for (const h of hits) expect(h.moduleId).toBe('fixed-income');
+    });
+
+    it('whereAnyOf filters to rows whose indexed field is in the set', async () => {
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      await t.bulkPut([
+        makeRow({ id: 'a', moduleId: 'alpha' }),
+        makeRow({ id: 'b', moduleId: 'beta' }),
+        makeRow({ id: 'c', moduleId: 'gamma' }),
+      ]);
+      const hits = await t.whereAnyOf('moduleId', ['alpha', 'gamma']);
+      expect(hits.map((h) => h.moduleId).sort()).toEqual(['alpha', 'gamma']);
+    });
+
+    it('orderedBy returns rows sorted, with desc / limit / offset honoured', async () => {
+      // Order on the indexed `lastVisitedAt`; ISO strings sort lexically.
+      const t = driver.table!<KeyedRow>('lessonProgress');
+      await t.bulkPut([
+        makeRow({ id: 'a', lastVisitedAt: '2026-06-03T00:00:00.000Z' }),
+        makeRow({ id: 'b', lastVisitedAt: '2026-06-01T00:00:00.000Z' }),
+        makeRow({ id: 'c', lastVisitedAt: '2026-06-02T00:00:00.000Z' }),
+      ]);
+
+      const asc = await t.orderedBy('lastVisitedAt');
+      expect(asc.map((r) => r.lastVisitedAt.slice(8, 10))).toEqual(['01', '02', '03']);
+
+      const desc = await t.orderedBy('lastVisitedAt', { desc: true });
+      expect(desc.map((r) => r.lastVisitedAt.slice(8, 10))).toEqual(['03', '02', '01']);
+
+      const topTwo = await t.orderedBy('lastVisitedAt', { desc: true, limit: 2 });
+      expect(topTwo.map((r) => r.lastVisitedAt.slice(8, 10))).toEqual(['03', '02']);
+
+      const skipOne = await t.orderedBy('lastVisitedAt', { offset: 1 });
+      expect(skipOne.map((r) => r.lastVisitedAt.slice(8, 10))).toEqual(['02', '03']);
+    });
+
+    it('add appends to an auto-id table (no caller-supplied key)', async () => {
+      // `studySessions` is a Dexie `++id` store; SurrealDB CREATE assigns a
+      // random record id. Two adds of an unkeyed row accumulate, never collide.
+      const t = driver.table!<{ domain: string; topic: string; score: number }>('studySessions');
+      await t.add({ domain: 'cfa', topic: 't', score: 1 });
+      await t.add({ domain: 'cfa', topic: 't', score: 2 });
+      const all = await t.toArray();
+      expect(all).toHaveLength(2);
+      expect(all.map((r) => r.score).sort()).toEqual([1, 2]);
+    });
+
+    it('keeps writes isolated per table name', async () => {
+      const lessons = driver.table!<KeyedRow>('lessonProgress');
+      const sessions = driver.table!<{ domain: string; topic: string; score: number }>('studySessions');
+      await lessons.put(makeRow({ id: 'only-lesson' }));
+      await sessions.add({ domain: 'cfa', topic: 't', score: 9 });
+
+      expect(await lessons.count()).toBe(1);
+      expect(await sessions.count()).toBe(1);
+
+      await sessions.clear();
+      expect(await sessions.count()).toBe(0);
+      // Clearing one table never touches another.
+      expect(await lessons.count()).toBe(1);
     });
   });
 });

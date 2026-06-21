@@ -4,6 +4,8 @@ import type {
   ChunkSearchOptions,
   ChunkSearchResult,
   ChunkStore,
+  KeyedTable,
+  KeyedTableOrderOptions,
   MasterySnapshotStore,
   QuestionResultStore,
   ReviewItemStore,
@@ -460,8 +462,166 @@ const masterySnapshots: MasterySnapshotStore = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// table() — generic keyed-table primitive (DATA-1)
+// ---------------------------------------------------------------------------
+// Maps a host table name to a SurrealDB table, mirroring the namespace methods
+// above: keyed CRUD goes through `StringRecordId(`<table>:<sanitiseId(key)>`)`
+// (so colon-delimited host ids never collide — see `sanitiseId`), bulk writes
+// use the same `FOR … UPSERT type::thing(...)` loop as `reviewItems.bulkPut`,
+// and the query surface translates to SurrealQL. Offline-safe to CONSTRUCT (no
+// connection is opened until a method runs).
+//
+// Key handling parallels the existing methods exactly:
+//   - `get` re-stamps the host `id` from the lookup key (Surreal stores a
+//     record reference, not the host string id).
+//   - whole-table reads (`toArray` / `orderedBy` / `whereEquals` / `whereAnyOf`)
+//     return rows AS-STORED, WITHOUT re-stamping the host id — matching
+//     `reviewItems.toArray()` / `masterySnapshots.toArray()` today.
+//   - `put` keys off `row.id` (the Dexie primary key for keyed stores).
+//   - `add` uses `create()` so SurrealDB assigns a random record id, mirroring
+//     Dexie auto-increment for append-only stores.
+
+/** Read the host key off a row (Dexie keyed stores use the `id` primary key). */
+function rowKeyOf(row: unknown): string {
+  const id = (row as { id?: unknown })?.id;
+  return String(id);
+}
+
+/** Build a {@link KeyedTable} backed by a SurrealDB table. */
+function createSurrealTable<T>(name: string): KeyedTable<T> {
+  const rid = (key: string | number) => new StringRecordId(`${name}:${sanitiseId(String(key))}`);
+
+  return {
+    async get(key) {
+      const client = await getClient();
+      await ensureSchema(client);
+      const result = await client.select<SurrealRecord>(rid(key));
+      const row = Array.isArray(result) ? result[0] : (result as SurrealRecord | undefined);
+      if (!row) return undefined;
+      // Re-stamp the host key (Surreal stored a record reference, not it).
+      return { ...(row as unknown as T), id: key } as T;
+    },
+
+    async bulkGet(keys) {
+      const client = await getClient();
+      await ensureSchema(client);
+      // One select per key keeps slot alignment (undefined where absent), which
+      // is the contract `db.<table>.bulkGet(keys)` provides to the import path.
+      return Promise.all(
+        keys.map(async (key) => {
+          const result = await client.select<SurrealRecord>(rid(key));
+          const row = Array.isArray(result) ? result[0] : (result as SurrealRecord | undefined);
+          if (!row) return undefined;
+          return { ...(row as unknown as T), id: key } as T;
+        }),
+      );
+    },
+
+    async put(row) {
+      const client = await getClient();
+      await ensureSchema(client);
+      await client.upsert(rid(rowKeyOf(row)), { ...(row as unknown as SurrealRecord) });
+    },
+
+    async bulkPut(rows) {
+      if (rows.length === 0) return;
+      const client = await getClient();
+      await ensureSchema(client);
+      for (let i = 0; i < rows.length; i += BULK_CHUNK_SIZE) {
+        const batch = rows
+          .slice(i, i + BULK_CHUNK_SIZE)
+          .map((row) => ({ ...(row as unknown as SurrealRecord), _id: sanitiseId(rowKeyOf(row)) }));
+        await client.query(`FOR $r IN $rows { UPSERT type::thing('${name}', $r._id) MERGE $r; };`, {
+          rows: batch,
+        });
+      }
+    },
+
+    async add(row) {
+      const client = await getClient();
+      await ensureSchema(client);
+      // CREATE assigns a random record id, matching Dexie auto-increment.
+      await client.create(name, { ...(row as unknown as SurrealRecord) });
+    },
+
+    async delete(key) {
+      const client = await getClient();
+      await ensureSchema(client);
+      await client.delete(rid(key));
+    },
+
+    async bulkDelete(keys) {
+      const client = await getClient();
+      await ensureSchema(client);
+      await Promise.all(keys.map((key) => client.delete(rid(key))));
+    },
+
+    async toArray() {
+      const client = await getClient();
+      await ensureSchema(client);
+      const rows = await client.select<SurrealRecord>(name);
+      return (Array.isArray(rows) ? rows : []) as unknown as T[];
+    },
+
+    async count() {
+      const client = await getClient();
+      await ensureSchema(client);
+      const result = await client.query<[Array<{ count: number }>]>(
+        `SELECT count() AS count FROM ${name} GROUP ALL;`,
+      );
+      const rows = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : [];
+      return rows.length > 0 ? Number(rows[0]?.count ?? 0) : 0;
+    },
+
+    async clear() {
+      const client = await getClient();
+      await ensureSchema(client);
+      await client.delete(name);
+    },
+
+    async whereEquals(field, value) {
+      const client = await getClient();
+      await ensureSchema(client);
+      const result = await client.query<[SurrealRecord[]]>(
+        `SELECT * FROM ${name} WHERE ${field} = $value;`,
+        { value },
+      );
+      const rows = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : [];
+      return rows as unknown as T[];
+    },
+
+    async whereAnyOf(field, values) {
+      const client = await getClient();
+      await ensureSchema(client);
+      const result = await client.query<[SurrealRecord[]]>(
+        `SELECT * FROM ${name} WHERE ${field} IN $values;`,
+        { values },
+      );
+      const rows = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : [];
+      return rows as unknown as T[];
+    },
+
+    async orderedBy(field, options: KeyedTableOrderOptions = {}) {
+      const client = await getClient();
+      await ensureSchema(client);
+      const parts = [`SELECT * FROM ${name}`, `ORDER BY ${field} ${options.desc ? 'DESC' : 'ASC'}`];
+      if (options.limit != null) parts.push(`LIMIT ${Number(options.limit)}`);
+      // SurrealQL START offsets AFTER LIMIT in clause order.
+      if (options.offset != null) parts.push(`START ${Number(options.offset)}`);
+      const result = await client.query<[SurrealRecord[]]>(`${parts.join(' ')};`);
+      const rows = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : [];
+      return rows as unknown as T[];
+    },
+  };
+}
+
 export const surrealDriver: StorageDriver = {
   name: 'surrealdb',
+
+  table<T>(name: string): KeyedTable<T> {
+    return createSurrealTable<T>(name);
+  },
 
   async ready(): Promise<boolean> {
     try {

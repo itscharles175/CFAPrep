@@ -134,6 +134,111 @@ export interface CrossDomainBridge {
   mastery(): Promise<CrossDomainMastery[]>;
 }
 
+/**
+ * Options for the ordered read of {@link KeyedTable.orderedBy}.
+ *
+ * Mirrors the Dexie `orderBy(field).reverse?().offset?(n).limit?(n).toArray()`
+ * chain that `progressStore` uses pervasively (e.g. the
+ * `db.<table>.orderBy('createdAt').reverse().toArray()` /
+ * `.reverse().limit(10)` / `.reverse().offset(10)` reads in
+ * `getProgressSummary`, `getResultArtifacts`, `listRollbackSnapshots`,
+ * `getVaultHealthReport`). Collapsing those three modifiers into one options
+ * bag keeps the primitive small while covering every ordered shape the host
+ * actually issues.
+ */
+export interface KeyedTableOrderOptions {
+  /** Descending order (Dexie `.reverse()`). Default ascending. */
+  desc?: boolean;
+  /** Skip the first N rows (Dexie `.offset(n)`). */
+  offset?: number;
+  /** Cap the result to N rows (Dexie `.limit(n)`); `1` mirrors `.first()`. */
+  limit?: number;
+}
+
+/**
+ * DATA-1 — a generic, typed, keyed-table primitive.
+ *
+ * This is the driver-agnostic shape that the Phase-2 reroute of `progressStore`
+ * (~308 direct `db.<table>` accesses across ~36 Dexie tables) will target. The
+ * surface is derived from a SURVEY of how `progressStore` actually queries
+ * Dexie today — it is deliberately the *smallest faithful* cover of the real
+ * call sites, NOT the full Dexie API:
+ *
+ *   - `get` / `put` / `delete` / `clear` / `toArray` / `count`  — keyed CRUD +
+ *     scans (`db.X.get`, `.put`, `.delete`, `.clear`, `.toArray`, `.count`).
+ *   - `add`            — append-only insert into an auto-id store (Dexie `++id`
+ *                        tables: `questionResults`, `quizAttempts`,
+ *                        `mockAttempts`, `studySessions`, …). The backend
+ *                        assigns the key; callers never supply one.
+ *   - `bulkPut`        — bulk upsert used by the import / migration path
+ *                        (`db.X.bulkPut(rows)` across every store).
+ *   - `bulkGet`        — bulk keyed read used by import-dedupe / conflict
+ *                        detection (`db.X.bulkGet(keys)` in
+ *                        `filterKeepExisting` / `detectImportConflicts`).
+ *   - `bulkDelete`     — bulk keyed delete (Dexie `db.X.bulkDelete`; mirrors the
+ *                        existing `settings.bulkDelete` namespace method).
+ *   - `whereEquals`    — single indexed-equality read
+ *                        (`db.questionResults.where('learningObjective')
+ *                        .equals(v)…toArray()` in `updateMasterySnapshot`, and
+ *                        `db.sourceChunks.where('documentId').equals(v)` in the
+ *                        chunk store). The post-`.equals` JS `.filter(...)` the
+ *                        host adds stays in the caller — it runs on the returned
+ *                        array, so the driver only needs the indexed equality.
+ *   - `whereAnyOf`     — single indexed set-membership read (Dexie
+ *                        `where(field).anyOf(values)`). Not on a hot
+ *                        `progressStore` path today, but it is the natural bulk
+ *                        companion to `whereEquals`, is trivially expressible on
+ *                        both backends, and the migration / cross-domain reads
+ *                        want it — so it is included rather than faked later.
+ *   - `orderedBy`      — ordered (optionally reversed / offset / limited) scan
+ *                        (see {@link KeyedTableOrderOptions}).
+ *
+ * @typeParam T - the row shape. Rows are stored verbatim; the backend does not
+ *   reshape them. `string | number` keys cover both Dexie keyed (`id: string`)
+ *   and auto-id (`id?: number`) tables.
+ *
+ * NB on key restoration: like the existing namespace methods, single-row reads
+ * (`get`) restore the original host key, but whole-table reads (`toArray`,
+ * `orderedBy`, `whereEquals`, `whereAnyOf`) return rows AS-STORED. On Dexie the
+ * key is the primary key so it always round-trips; on SurrealDB a record
+ * reference is stored and the host key is only re-stamped on `get`. Callers that
+ * need the key on a scanned row must read a field, not rely on a re-stamp — this
+ * matches today's `reviewItems.toArray()` / `masterySnapshots.toArray()`
+ * behaviour exactly, so a Phase-2 reroute is behaviour-preserving.
+ */
+export interface KeyedTable<T> {
+  /** Keyed read; `undefined` when absent. Restores the host key on the row. */
+  get(key: string | number): Promise<T | undefined>;
+  /** Bulk keyed read; one slot per requested key, `undefined` where absent. */
+  bulkGet(keys: Array<string | number>): Promise<Array<T | undefined>>;
+  /** Keyed upsert (Dexie `put`). */
+  put(row: T): Promise<void>;
+  /** Bulk keyed upsert (Dexie `bulkPut`); chunked internally for large writes. */
+  bulkPut(rows: T[]): Promise<void>;
+  /**
+   * Append-only insert into an auto-id table (Dexie `add`). The backend assigns
+   * the primary key, so callers pass a row WITHOUT one. Use `put` for keyed
+   * tables. Resolves to the assigned key when the backend exposes it.
+   */
+  add(row: T): Promise<string | number | void>;
+  /** Keyed delete; a no-op when the key is absent. */
+  delete(key: string | number): Promise<void>;
+  /** Bulk keyed delete (Dexie `bulkDelete`). */
+  bulkDelete(keys: Array<string | number>): Promise<void>;
+  /** Full-table scan, rows as-stored. */
+  toArray(): Promise<T[]>;
+  /** Row count. */
+  count(): Promise<number>;
+  /** Empty the table. */
+  clear(): Promise<void>;
+  /** Rows where `field` strictly equals `value` (Dexie `where(field).equals`). */
+  whereEquals(field: keyof T & string, value: unknown): Promise<T[]>;
+  /** Rows where `field` is one of `values` (Dexie `where(field).anyOf`). */
+  whereAnyOf(field: keyof T & string, values: unknown[]): Promise<T[]>;
+  /** Ordered (optionally reversed / offset / limited) scan. */
+  orderedBy(field: keyof T & string, options?: KeyedTableOrderOptions): Promise<T[]>;
+}
+
 export interface StorageDriver {
   name: 'dexie' | 'surrealdb';
   ready(): Promise<boolean>;
@@ -168,6 +273,20 @@ export interface StorageDriver {
    * `StorageDriver` consumers are unaffected.
    */
   crossDomainBridge?: CrossDomainBridge;
+  /**
+   * DATA-1 — generic typed access to ANY backend table by name (see
+   * {@link KeyedTable}). This is the foundation the Phase-2 `progressStore`
+   * reroute targets: instead of `db.<table>.<op>` it will call
+   * `getStorage().table<RowType>('<table>').<op>`. Optional on the interface
+   * (like `chunks` / `reviewItems`) so callers feature-detect it; both shipped
+   * drivers (`dexie`, `surrealdb`) provide it. ADDITIVE — existing namespace
+   * methods and their consumers are untouched.
+   *
+   * @typeParam T - the row shape for the named table.
+   * @param name - the backend table name (the Dexie store name; the SurrealDB
+   *   driver maps it to a SurrealDB table, sanitising record ids).
+   */
+  table?<T>(name: string): KeyedTable<T>;
 }
 
 export interface StorageRegistry {

@@ -1,3 +1,4 @@
+import type { Table } from 'dexie';
 import { db } from '../progressStore';
 import { createCrossDomainBridge } from '../dataDictionary';
 import type { MasterySnapshot, QuestionResult, ReviewItem } from '../learningTypes';
@@ -5,6 +6,8 @@ import type {
   ChunkSearchOptions,
   ChunkSearchResult,
   ChunkStore,
+  KeyedTable,
+  KeyedTableOrderOptions,
   MasterySnapshotStore,
   QuestionResultStore,
   ReviewItemStore,
@@ -298,8 +301,92 @@ const masterySnapshots: MasterySnapshotStore = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// table() — generic keyed-table primitive (DATA-1)
+// ---------------------------------------------------------------------------
+// Thin pass-through over `db.table(name)`. Every method is a 1:1 wrapper of the
+// equivalent Dexie call so a Phase-2 reroute of `progressStore` from
+// `db.<table>.<op>` to `getStorage().table('<table>').<op>` is BEHAVIOURALLY
+// IDENTICAL while `getStorage()` returns this driver. We intentionally re-issue
+// the SAME Dexie query the host writes today (e.g. `where(field).equals(value)`,
+// `orderBy(field).reverse().offset().limit().toArray()`) rather than reading the
+// whole table and filtering in JS, so index usage and ordering semantics match.
+
+/** Build a {@link KeyedTable} backed by a Dexie `Table`, mirroring direct access. */
+function createDexieTable<T>(name: string): KeyedTable<T> {
+  // `db.table()` resolves lazily by name, exactly like `db.<table>`. The row /
+  // key generics are erased to `any` here because the caller pins them via
+  // `KeyedTable<T>`; behaviour is unchanged from the direct `db.<table>` call.
+  const tbl = () => db.table(name) as unknown as Table<T, string | number>;
+
+  return {
+    async get(key) {
+      return tbl().get(key);
+    },
+
+    async bulkGet(keys) {
+      return tbl().bulkGet(keys);
+    },
+
+    async put(row) {
+      await tbl().put(row);
+    },
+
+    async bulkPut(rows) {
+      if (rows.length === 0) return;
+      await tbl().bulkPut(rows);
+    },
+
+    async add(row) {
+      // Dexie `add` assigns and returns the new primary key (the `++id` value
+      // for auto-id stores). We surface it for parity with the SurrealDB driver.
+      return tbl().add(row);
+    },
+
+    async delete(key) {
+      await tbl().delete(key);
+    },
+
+    async bulkDelete(keys) {
+      await tbl().bulkDelete(keys);
+    },
+
+    async toArray() {
+      return tbl().toArray();
+    },
+
+    async count() {
+      return tbl().count();
+    },
+
+    async clear() {
+      await tbl().clear();
+    },
+
+    async whereEquals(field, value) {
+      return tbl().where(field).equals(value as string | number).toArray();
+    },
+
+    async whereAnyOf(field, values) {
+      return tbl().where(field).anyOf(values as Array<string | number>).toArray();
+    },
+
+    async orderedBy(field, options: KeyedTableOrderOptions = {}) {
+      let collection = tbl().orderBy(field);
+      if (options.desc) collection = collection.reverse();
+      if (options.offset != null) collection = collection.offset(options.offset);
+      if (options.limit != null) collection = collection.limit(options.limit);
+      return collection.toArray();
+    },
+  };
+}
+
 export const dexieDriver: StorageDriver = {
   name: 'dexie',
+
+  table<T>(name: string): KeyedTable<T> {
+    return createDexieTable<T>(name);
+  },
 
   async ready(): Promise<boolean> {
     try {
