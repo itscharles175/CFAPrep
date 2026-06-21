@@ -21,6 +21,7 @@ import math
 
 from .. import config, observability
 from ..observability import time_llm_call
+from . import cache
 from .base import CloudBudgetExceeded, LLMError, LLMOOMError
 from .lmstudio import LMStudioProvider
 from .ollama import OllamaProvider
@@ -44,6 +45,8 @@ __all__ = [
     "cloud_budget_dry_run",
     "embed_sync",
     "provider_info",
+    "cache",
+    "cache_stats",
 ]
 
 _log = logging.getLogger("lsatlab.llm")
@@ -268,8 +271,10 @@ def offline_generate(prompt: str, system: Optional[str] = None,
             from .cloud import AnthropicProvider
             prov = AnthropicProvider(config.CLOUD_API_KEY)
             target = model or config.CLOUD_GEN_MODEL
-            with time_llm_call(task, provider="anthropic", model=target):
-                return prov.generate(target, prompt, system, timeout, **opts)
+            return _cached_generate(
+                prov, "anthropic", target, prompt, system, timeout,
+                temperature=temperature, seed=seed, opts=opts, task=task,
+            )
         _log.warning(
             "cloud monthly budget would be exceeded (spend=%.4f + worst_case=%.4f "
             "> budget=%.2f); falling back to local model for task=%s",
@@ -278,8 +283,51 @@ def offline_generate(prompt: str, system: Optional[str] = None,
         )
     prov = local_provider()
     target = model or config.GEN_MODEL
-    with time_llm_call(task, provider=prov.name, model=target):
-        return prov.generate(target, prompt, system, timeout, **opts)
+    return _cached_generate(
+        prov, prov.name, target, prompt, system, timeout,
+        temperature=temperature, seed=seed, opts=opts, task=task,
+    )
+
+
+def _cached_generate(prov, provider_name: str, target: str, prompt: str,
+                     system: Optional[str], timeout: Optional[float], *,
+                     temperature: Optional[float], seed: Optional[int],
+                     opts: dict, task: str) -> str:
+    """BACK-1 — wrap a provider ``generate`` call with the deterministic cache.
+
+    For a DETERMINISTIC call (temp 0 / seeded) and ``config.LLM_CACHE_ENABLED``:
+    look up the content-addressed cache first (provider+model+temperature+seed+
+    prompt, host-parity key); on a hit return the stored text WITHOUT a model call
+    (still recorded as a hit for the rate counter). On a miss, call the model
+    under the usual ``time_llm_call`` timing seam and STORE the result before
+    returning. Warm/creative calls bypass the cache entirely and behave exactly as
+    before. The cache layer is best-effort — any cache error degrades to a plain
+    model call, never a crash.
+
+    NOTE: the cache key intentionally OMITS ``system``/``format``/``timeout``. The
+    generation gate's deterministic calls (the only cacheable ones in practice)
+    fold everything score-affecting into ``prompt``; the host contract keys on the
+    same five fields, so this preserves host<->backend key parity. A caller that
+    varies ``system`` for the SAME prompt at temp 0 is not a pattern in this
+    codebase; if that ever changes, fold system into the prompt at the call site.
+    """
+    cache_on = getattr(config, "LLM_CACHE_ENABLED", True)
+    if cache_on:
+        cached = cache.get(
+            provider=provider_name, model=target,
+            temperature=temperature, seed=seed, prompt=prompt,
+        )
+        if cached is not None:
+            return cached
+    with time_llm_call(task, provider=provider_name, model=target):
+        result = prov.generate(target, prompt, system, timeout, **opts)
+    if cache_on:
+        cache.put(
+            provider=provider_name, model=target,
+            temperature=temperature, seed=seed, prompt=prompt,
+            response=result,
+        )
+    return result
 
 
 def critic_model_name() -> str:
@@ -311,6 +359,16 @@ def embed_sync(text: str, model: Optional[str] = None) -> list[float]:
     target = model or config.EMBED_MODEL
     with time_llm_call("embed", provider=prov.name, model=target):
         return prov.embed_sync(text, target)
+
+
+def cache_stats() -> dict:
+    """BACK-1 — content-addressed LLM cache counters for the observability surface.
+
+    A thin pass-through to :func:`cache.stats` (hit/miss/store counts + hit_rate +
+    LRU size) plus whether the cache is enabled, so /observability can show the
+    deterministic-call cache hit rate alongside the latency/contention gauges.
+    """
+    return {"enabled": getattr(config, "LLM_CACHE_ENABLED", True), **cache.stats()}
 
 
 def provider_info() -> dict:

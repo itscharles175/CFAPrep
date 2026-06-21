@@ -17,13 +17,34 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Manager, RunEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use tauri_plugin_dialog::DialogExt;
 
 // DATA-7: app-data relocation guard. Detects an LSAT SQLite store orphaned at the
 // OLD OS app-data dir after a bundle-id / app-data-dir change and decides whether
 // the LSAT sidecar should read from the recovered store (set via LSATLAB_DATA_DIR).
 mod relocation;
+
+// NATIVE-1: crash-safe sidecar lifecycle. Cross-platform process-group seam that
+// makes the OS reap every spawned sidecar when the app dies — even on an
+// uncatchable SIGKILL where `RunEvent::Exit` never runs (Windows Job Object with
+// KILL_ON_JOB_CLOSE; Unix PDEATHSIG). The audit (M14) found this absent.
+mod process_group;
+
+// NATIVE-1: boot-time stale-port sweep. Before spawning, detect + kill any
+// leftover process squatting an owned sidecar port (e.g. an orphan from a prior
+// hard-kill on a platform without the Job Object net).
+mod port_sweep;
+
+// NATIVE-8: owned-port registry + sidecar identity handshake. Tracks
+// {service -> owned port/pid} and rejects a FOREIGN process squatting an owned
+// port so it isn't mistaken for a healthy sidecar.
+mod identity;
+
+// NATIVE-4: local-only crash reporting + last-resort reaping. Panic hook that
+// writes a timestamped crash log under the app log dir and reaps sidecars on a
+// Rust panic / abnormal exit.
+mod crash_report;
 
 /// One supervised sidecar: its declarative spec (retained so a crashed process
 /// can be respawned from the same recipe) paired with the live `Child` handle.
@@ -64,6 +85,19 @@ struct Sidecars(Mutex<Vec<SupervisedSidecar>>);
 /// shared-access reason as `Sidecars`.
 #[derive(Default)]
 struct SkippedSidecars(Mutex<Vec<SidecarSpec>>);
+
+/// NATIVE-1: the app-lifetime crash-reap process group (Windows Job Object /
+/// Unix PDEATHSIG / no-op). Managed as Tauri state so BOTH the initial spawn and
+/// the health-supervisor respawn path assign children to the SAME group — and so
+/// the Windows Job handle lives as long as the app (its `Drop` on teardown is the
+/// kill-on-close trigger). `Arc` so the background poll task can hold a clone.
+struct ProcessGroupState(Arc<dyn process_group::ProcessGroup>);
+
+impl Default for ProcessGroupState {
+    fn default() -> Self {
+        Self(Arc::from(process_group::create_process_group()))
+    }
+}
 
 /// Max log lines retained per sidecar in the in-memory ring buffer. Once a
 /// sidecar's buffer reaches this length, each new line evicts the oldest, so
@@ -132,6 +166,31 @@ fn attach_log_capture(name: &str, child: &mut Child, logs: &SidecarLogs) {
     }
 }
 
+/// NATIVE-1: bind a freshly-spawned `child` to the app's crash-reap process group
+/// (Windows Job Object / Unix PDEATHSIG) so a hard-kill of the app reaps it
+/// instead of leaving an orphan squatting its port. Best-effort by contract: a
+/// failure is logged and the sidecar keeps running — orphan protection is a
+/// safety net, never a launch gate. A no-op group (`is_active() == false`) skips
+/// the assign entirely. Called from both the initial spawn and the respawn path,
+/// since a respawned child is a brand-new pid that must re-join the group.
+fn assign_to_process_group(name: &str, child: &Child, group: &dyn process_group::ProcessGroup) {
+    if !group.is_active() {
+        return;
+    }
+    let pid = child.id();
+    match group.assign(pid) {
+        Ok(()) => log::info!(
+            "sidecar: {name} (pid {pid}) joined the {} crash-reap group",
+            group.kind()
+        ),
+        Err(e) => log::warn!(
+            "sidecar: {name} (pid {pid}) could not join the {} crash-reap group: {e} \
+             (it will still be reaped on graceful exit)",
+            group.kind()
+        ),
+    }
+}
+
 /// Spawn a detached thread that reads `stream` line-by-line and appends each to
 /// `logs` under `name`. Generic over the reader so a unit test can drive it
 /// with an in-memory cursor instead of a real pipe. Lines that fail to decode
@@ -161,7 +220,7 @@ const HEALTH_PROBE_TIMEOUT_MS: u64 = 750;
 
 /// Status snapshot for one supervised sidecar, returned by the
 /// `get_sidecar_status` command so the UI can render a health panel.
-#[derive(Serialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 struct SidecarStatus {
     name: String,
     /// Readiness port probed by the supervisor, or `None` for sidecars that
@@ -549,6 +608,24 @@ impl SidecarLauncher for ProcessLauncher {
         // always paired with a reader on the spawn path.
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+
+        // NATIVE-1 (Unix path): arm PR_SET_PDEATHSIG = SIGKILL in the child
+        // between fork and exec, so the sidecar is killed if the app (its parent)
+        // dies — the Unix analogue of the Windows Job Object kill-on-close. The
+        // Windows reap is handled by the Job Object assignment in the spawn
+        // orchestration; on Unix this pre_exec hook is the equivalent net.
+        #[cfg(all(unix, not(windows)))]
+        {
+            use std::os::unix::process::CommandExt;
+            // SAFETY: the closure runs in the post-fork/pre-exec child and only
+            // calls prctl, which is async-signal-safe. A failure to arm is
+            // returned as an io::Error so the spawn surfaces it (best-effort:
+            // the caller still treats the sidecar as launched).
+            unsafe {
+                cmd.pre_exec(|| process_group::arm_pdeathsig_for_current_process());
+            }
+        }
+
         cmd.spawn().map_err(|e| e.to_string())
     }
 }
@@ -753,8 +830,13 @@ fn spawn_sidecars_with<L: SidecarLauncher>(
     // applies the DATA-7 relocation guard to them, and calls
     // `spawn_sidecars_with_specs` directly — so the only behavioural difference is
     // the LSAT spec's `LSATLAB_DATA_DIR` env. Tests still drive this entrypoint.
+    //
+    // NATIVE-1: tests of this entrypoint pass the inert `NoopGroup` (their mock
+    // launcher spawns throwaway children that exit immediately); the production
+    // path passes the real crash-reap group.
     let specs = build_sidecar_specs(dir);
-    spawn_sidecars_with_specs(launcher, specs, logs, readiness_budget)
+    let group = process_group::NoopGroup;
+    spawn_sidecars_with_specs(launcher, specs, logs, readiness_budget, &group)
 }
 
 /// Ordered-startup core (BA2/OPS-5/BA8), parameterized by PRE-BUILT specs so the
@@ -767,6 +849,7 @@ fn spawn_sidecars_with_specs<L: SidecarLauncher>(
     specs: Vec<SidecarSpec>,
     logs: &SidecarLogs,
     readiness_budget: Duration,
+    group: &dyn process_group::ProcessGroup,
 ) -> SpawnOutcome {
     // Index every spec's readiness port by name so a dependent can look up the
     // port it must wait on. Specs without a readiness port (the worker) map to
@@ -835,6 +918,9 @@ fn spawn_sidecars_with_specs<L: SidecarLauncher>(
             Ok(mut child) => {
                 log::info!("sidecar: {} started (pid {})", spec.name, child.id());
                 attach_log_capture(&spec.name, &mut child, logs);
+                // NATIVE-1: join the crash-reap group so a hard-kill of the app
+                // reaps this sidecar (no orphan holding its port).
+                assign_to_process_group(&spec.name, &child, group);
                 kids.push(SupervisedSidecar::new(spec, child));
             }
             Err(e) => log::error!("sidecar: {} failed to start: {e}", spec.name),
@@ -886,7 +972,67 @@ fn apply_lsat_relocation_env(specs: &mut [SidecarSpec], new_dir: Option<PathBuf>
     }
 }
 
-fn spawn_sidecars(logs: &SidecarLogs) -> SpawnOutcome {
+/// The distinct readiness ports a set of specs OWNS (NATIVE-1/8). Used by the
+/// boot-time stale-port sweep to know which ports to clear of orphans before
+/// spawning, and to seed the owned-port registry. Pure — sorted + deduped.
+fn owned_ready_ports(specs: &[SidecarSpec]) -> Vec<u16> {
+    let mut ports: Vec<u16> = specs.iter().filter_map(|s| s.ready_port).collect();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
+}
+
+/// NATIVE-8: build the owned-port registry from the sidecars we actually
+/// launched — {service → port, pid, expected identity}. Each launched slot with a
+/// readiness port becomes a claim carrying the identity that port must echo to
+/// count as ours. Pure (reads only the slots) so it's unit-testable; consumed by
+/// the supervisor to log the owned-port map and back the identity handshake.
+fn build_owned_port_registry(launched: &[SupervisedSidecar]) -> identity::OwnedPortRegistry {
+    let mut reg = identity::OwnedPortRegistry::new();
+    for slot in launched {
+        let Some(port) = slot.spec.ready_port else {
+            continue;
+        };
+        let Some(expected) = expected_identity_for(&slot.spec) else {
+            continue;
+        };
+        reg.claim(identity::OwnedPort {
+            service: slot.spec.name.clone(),
+            port,
+            pid: slot.child.id(),
+            expected,
+        });
+    }
+    reg
+}
+
+/// NATIVE-1: boot-time stale-port sweep. Before spawning, kill any leftover
+/// process squatting an owned sidecar port — the recovery path for an orphan that
+/// survived a prior hard-kill (e.g. on a platform without the Job Object net, or
+/// from before this protection existed). Best-effort + logged; never fatal. Skips
+/// our own pid so the app can't reap itself. Logs the per-port outcome so the
+/// sidecar log viewer shows what was cleared.
+fn sweep_stale_ports(ports: &[u16]) {
+    let self_pid = std::process::id();
+    let actions = port_sweep::sweep_ports(&port_sweep::SystemSweeper, ports, self_pid);
+    for action in actions {
+        match action {
+            port_sweep::SweepAction::Free => {}
+            port_sweep::SweepAction::Killed { port, pids } => log::warn!(
+                "sidecar: stale-port sweep killed orphan(s) {pids:?} squatting owned port {port}"
+            ),
+            port_sweep::SweepAction::KillFailed { port, pids } => log::error!(
+                "sidecar: stale-port sweep could NOT kill orphan(s) {pids:?} on owned port {port}; \
+                 the sidecar launch for that port may fail to bind"
+            ),
+            port_sweep::SweepAction::SkippedSelf { port, pid } => log::info!(
+                "sidecar: stale-port sweep skipped owned port {port} — held by our own pid {pid}"
+            ),
+        }
+    }
+}
+
+fn spawn_sidecars(logs: &SidecarLogs, group: &dyn process_group::ProcessGroup) -> SpawnOutcome {
     let dir = services_dir();
     // DATA-7: only the host knows where app-data was relocated to; it pins the
     // LSAT data dir via the LSATLAB_DATA_DIR env. Detect an orphaned legacy store
@@ -898,7 +1044,9 @@ fn spawn_sidecars(logs: &SidecarLogs) -> SpawnOutcome {
         .map(PathBuf::from);
     let mut specs = build_sidecar_specs(&dir);
     apply_lsat_relocation_env(&mut specs, new_dir);
-    spawn_sidecars_with_specs(&ProcessLauncher, specs, logs, READINESS_WAIT_BUDGET)
+    // NATIVE-1: clear any orphan squatting an owned port BEFORE we try to bind it.
+    sweep_stale_ports(&owned_ready_ports(&specs));
+    spawn_sidecars_with_specs(&ProcessLauncher, specs, logs, READINESS_WAIT_BUDGET, group)
 }
 
 /// Probe one sidecar's readiness port. Sidecars with no `ready_port` (the
@@ -910,6 +1058,122 @@ fn probe_sidecar_healthy(spec: &SidecarSpec) -> bool {
         Some(port) => is_port_listening("127.0.0.1", port, HEALTH_PROBE_TIMEOUT_MS),
         None => true,
     }
+}
+
+/// NATIVE-8: the identity the supervisor EXPECTS a spec's owned port to echo from
+/// its health endpoint. The service id is the stable token a sidecar self-reports
+/// (e.g. the LSAT backend echoes `"service":"lsat-backend"`). Version is left
+/// unpinned (`any_version`) for now — the handshake's first job is rejecting a
+/// FOREIGN service id; version-gating can tighten later without changing the seam.
+/// `None` for a spec with no readiness port (the worker — nothing to handshake).
+fn expected_identity_for(spec: &SidecarSpec) -> Option<identity::ExpectedIdentity> {
+    spec.ready_port?;
+    // Map the human spec name to the service token the sidecar echoes. The LSAT
+    // backend is the one that already serves /api/health with a service id; the
+    // others fall back to `Unverified` (no echo) until they adopt the handshake.
+    let service = match spec.name.as_str() {
+        "LSAT backend" => "lsat-backend",
+        "open-notebook API" => "open-notebook",
+        "SurrealDB" => "surrealdb",
+        other => other,
+    };
+    Some(identity::ExpectedIdentity::any_version(service))
+}
+
+/// Production [`identity::IdentityProbe`]: a tiny, dependency-free loopback
+/// HTTP/1.0 GET of `IDENTITY_PATH` on `127.0.0.1:<port>`, parsing the echoed
+/// `service`/`version` from the JSON body. Std-only (no HTTP crate) + strictly
+/// loopback — never leaves the machine, matching the offline invariant. Any
+/// connect/read/parse failure yields `None`, which the classifier treats as
+/// `Unverified` (liveness fallback) rather than a false match.
+struct HttpIdentityProbe;
+
+impl identity::IdentityProbe for HttpIdentityProbe {
+    fn fetch_identity(&self, port: u16) -> Option<identity::EchoedIdentity> {
+        let body = http_get_loopback(port, identity::IDENTITY_PATH, HEALTH_PROBE_TIMEOUT_MS)?;
+        let echoed = identity::parse_identity_body(&body);
+        // Only return Some if we actually parsed at least a service id; a body
+        // with neither field is indistinguishable from "no handshake" → None →
+        // Unverified (don't reject a non-handshake sidecar as foreign).
+        if echoed.service.is_some() || echoed.version.is_some() {
+            Some(echoed)
+        } else {
+            None
+        }
+    }
+}
+
+/// Minimal blocking HTTP/1.0 GET over loopback, returning the response BODY as a
+/// string (headers stripped at the blank line). Bounded by `timeout_ms` on both
+/// connect and read so a wedged listener can't stall the supervisor. Strictly
+/// `127.0.0.1` — this is an internal identity handshake, never a general client.
+fn http_get_loopback(port: u16, path: &str, timeout_ms: u64) -> Option<String> {
+    use std::io::{Read, Write};
+    let timeout = Duration::from_millis(timeout_ms);
+    let addr: SocketAddr = ("127.0.0.1", port).to_socket_addrs().ok()?.next()?;
+    let mut stream = TcpStream::connect_timeout(&addr, timeout).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    // HTTP/1.0 + Connection: close so the server closes the socket at end of
+    // body and our read-to-EOF terminates without needing chunked parsing.
+    let req = format!(
+        "GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\nAccept: application/json\r\n\r\n"
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut raw = Vec::new();
+    // Cap the read so a chatty endpoint can't balloon memory; the health body is
+    // tiny.
+    let mut buf = [0u8; 4096];
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                raw.extend_from_slice(&buf[..n]);
+                if raw.len() > 64 * 1024 {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    let text = String::from_utf8_lossy(&raw);
+    // Split headers from body at the first blank line.
+    let body = text
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b)
+        .or_else(|| text.split_once("\n\n").map(|(_, b)| b))?;
+    Some(body.to_string())
+}
+
+/// NATIVE-8: classify a spec's port health combining liveness + the identity
+/// handshake. For a port-less spec (the worker) there's nothing to probe →
+/// `Unverified` (liveness handled by the caller's `try_wait`). For a socketed
+/// spec, probe liveness, then — if listening — fetch + match the echoed identity.
+/// A foreign squatter (wrong/absent-when-expected id) classifies as `Foreign`
+/// (down, with a precise reason); a sidecar that doesn't echo identity yet stays
+/// `Unverified` (up). Generic over the probe so it's unit-testable with a mock.
+fn classify_sidecar_health<P: identity::IdentityProbe>(
+    spec: &SidecarSpec,
+    probe: &P,
+) -> identity::PortHealth {
+    let Some(port) = spec.ready_port else {
+        return identity::PortHealth::Unverified;
+    };
+    let listening = is_port_listening("127.0.0.1", port, HEALTH_PROBE_TIMEOUT_MS);
+    let Some(expected) = expected_identity_for(spec) else {
+        // No expectation we can match against → fall back to liveness.
+        return if listening {
+            identity::PortHealth::Unverified
+        } else {
+            identity::PortHealth::NotListening
+        };
+    };
+    let echoed = if listening {
+        probe.fetch_identity(port)
+    } else {
+        None
+    };
+    identity::classify_port_health(listening, &expected, echoed.as_ref())
 }
 
 /// One supervision sweep over the managed sidecars: probe each one's readiness
@@ -943,6 +1207,7 @@ fn supervise_once<L: SidecarLauncher>(
     launcher: &L,
     sidecars: &Mutex<Vec<SupervisedSidecar>>,
     logs: &SidecarLogs,
+    group: &dyn process_group::ProcessGroup,
 ) -> Vec<String> {
     let mut respawned = Vec::new();
     let mut guard = match sidecars.lock() {
@@ -950,15 +1215,24 @@ fn supervise_once<L: SidecarLauncher>(
         Err(poisoned) => poisoned.into_inner(),
     };
     let now = std::time::Instant::now();
+    let identity_probe = HttpIdentityProbe;
     for slot in guard.iter_mut() {
         // A sidecar that exposes a readiness port is "down" when that port is
-        // not accepting connections. Port-less sidecars (the worker) are only
-        // probed for process liveness via `try_wait`.
-        let port_down = slot
-            .spec
-            .ready_port
-            .map(|port| !is_port_listening("127.0.0.1", port, HEALTH_PROBE_TIMEOUT_MS))
-            .unwrap_or(false);
+        // not accepting connections OR (NATIVE-8) a FOREIGN process is squatting
+        // it (wrong identity echoed) — a squatter must not keep us from
+        // respawning our own sidecar. Port-less sidecars (the worker) classify
+        // as Unverified here and are judged purely by process liveness below.
+        let health = classify_sidecar_health(&slot.spec, &identity_probe);
+        if let identity::PortHealth::Foreign(verdict) = &health {
+            log::warn!(
+                "sidecar: {} — a FOREIGN process is squatting owned port {:?} \
+                 (identity {:?}); treating as down so we can reclaim it",
+                slot.spec.name,
+                slot.spec.ready_port,
+                verdict
+            );
+        }
+        let port_down = !health.is_up();
         let process_exited = matches!(slot.child.try_wait(), Ok(Some(_)));
 
         if !(port_down || process_exited) {
@@ -997,6 +1271,9 @@ fn supervise_once<L: SidecarLauncher>(
                     // Re-attach capture: the new child has fresh stdout/stderr
                     // pipes, so its output keeps flowing into the ring buffer.
                     attach_log_capture(&name, &mut child, logs);
+                    // NATIVE-1: a respawn is a brand-new pid — re-join it to the
+                    // crash-reap group so the orphan protection covers it too.
+                    assign_to_process_group(&name, &child, group);
                     slot.child = child;
                     respawned.push(name);
                 }
@@ -1030,7 +1307,14 @@ fn spawn_health_supervisor(app: AppHandle) {
                         .try_state::<SidecarLogs>()
                         .map(|s| s.inner().clone())
                         .unwrap_or_default();
-                    supervise_once(&ProcessLauncher, &state.0, &logs);
+                    // NATIVE-1: reach the app-lifetime crash-reap group so a
+                    // respawned child re-joins it. Fall back to a no-op group if
+                    // somehow absent rather than skip the sweep.
+                    let group: Arc<dyn process_group::ProcessGroup> = app
+                        .try_state::<ProcessGroupState>()
+                        .map(|s| s.0.clone())
+                        .unwrap_or_else(|| Arc::new(process_group::NoopGroup));
+                    supervise_once(&ProcessLauncher, &state.0, &logs, group.as_ref());
                 }
             });
             // If the blocking task itself fails to join (runtime shutting down),
@@ -1174,6 +1458,93 @@ fn aggregate_sidecar_health(rows: &[SidecarStatus]) -> SystemHealthAggregate {
         optional_down,
         total,
         required_down_names,
+    }
+}
+
+/// NATIVE-6: the Tauri event name the supervisor emits ONCE when ordered startup
+/// finishes, carrying a ready/degraded boot verdict the host can react to (e.g.
+/// dismiss a boot splash, surface a "RAG unavailable" banner). Additive to the
+/// poll-based status commands — this is the single boot signal.
+const BOOT_STATUS_EVENT: &str = "studyvault://boot-status";
+
+/// NATIVE-2: the event emitted into the RUNNING instance when a second launch is
+/// intercepted by the single-instance guard, carrying the new launch's argv +
+/// cwd so the host can act on a forwarded file/deeplink arg.
+const SECOND_INSTANCE_EVENT: &str = "studyvault://second-instance";
+
+/// NATIVE-2 payload: the forwarded second-launch argv + cwd. Pure builder so the
+/// shape is unit-testable without launching twice.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+struct SecondInstancePayload {
+    argv: Vec<String>,
+    cwd: String,
+}
+
+/// Build the second-instance event payload from the forwarded argv + cwd. Pure —
+/// the single-instance callback is runtime-only, but its payload construction is
+/// asserted here.
+fn second_instance_payload(argv: &[String], cwd: &str) -> SecondInstancePayload {
+    SecondInstancePayload {
+        argv: argv.to_vec(),
+        cwd: cwd.to_string(),
+    }
+}
+
+/// NATIVE-6: the boot-status payload emitted on `BOOT_STATUS_EVENT`. `status` is
+/// the OPS-3 roll-up verdict ("ok"/"degraded"/"error"); `launched`/`skipped`
+/// count what ordered startup did; `degraded_reason` is a short human note when
+/// not "ok" (e.g. which optional sidecars were skipped / which required are down).
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+struct BootStatus {
+    status: String,
+    launched: usize,
+    skipped: usize,
+    /// Names of optional sidecars skipped for an absent resource (OPS-5).
+    skipped_names: Vec<String>,
+    /// Names of REQUIRED sidecars that aren't ready right after boot.
+    required_down_names: Vec<String>,
+    /// Short human note when degraded/error; empty when "ok".
+    degraded_reason: String,
+}
+
+/// Build the NATIVE-6 boot-status payload from the just-finished spawn outcome.
+/// Pure — classifies the launched rows (via `aggregate_sidecar_health`) plus the
+/// OPS-5 skipped optionals — so the boot verdict is unit-testable without a live
+/// app. A skipped optional sidecar yields "degraded" (feature unavailable, app
+/// works); a not-ready REQUIRED sidecar yields "error".
+fn build_boot_status(launched_rows: &[SidecarStatus], skipped: &[SidecarSpec]) -> BootStatus {
+    // Fold the skipped optionals into the same row shape so the aggregate sees
+    // them as not-ready optionals → degraded (never error).
+    let mut rows: Vec<SidecarStatus> = launched_rows.to_vec();
+    rows.extend(skipped.iter().map(skipped_sidecar_status));
+    let agg = aggregate_sidecar_health(&rows);
+
+    let skipped_names: Vec<String> = skipped.iter().map(|s| s.name.clone()).collect();
+    let degraded_reason = if agg.status == "error" {
+        format!(
+            "required sidecar(s) not ready: {}",
+            agg.required_down_names.join(", ")
+        )
+    } else if agg.status == "degraded" {
+        if skipped_names.is_empty() {
+            "an optional sidecar is not ready".to_string()
+        } else {
+            format!(
+                "optional feature(s) unavailable: {}",
+                skipped_names.join(", ")
+            )
+        }
+    } else {
+        String::new()
+    };
+
+    BootStatus {
+        status: agg.status,
+        launched: launched_rows.len(),
+        skipped: skipped.len(),
+        skipped_names,
+        required_down_names: agg.required_down_names,
+        degraded_reason,
     }
 }
 
@@ -1830,7 +2201,8 @@ mod tests {
             Mutex::new(vec![SupervisedSidecar::new(spec, child)]);
 
         let logs = SidecarLogs::default();
-        let respawned = supervise_once(&launcher, &state, &logs);
+        let group = process_group::NoopGroup;
+        let respawned = supervise_once(&launcher, &state, &logs, &group);
         assert_eq!(respawned, vec!["ephemeral".to_string()]);
         // The launcher was called once more for the respawn (initial launch
         // above used the same mock, so total calls == 2).
@@ -1864,7 +2236,8 @@ mod tests {
             Mutex::new(vec![SupervisedSidecar::new(spec, child)]);
 
         let logs = SidecarLogs::default();
-        let respawned = supervise_once(&launcher, &state, &logs);
+        let group = process_group::NoopGroup;
+        let respawned = supervise_once(&launcher, &state, &logs, &group);
         assert!(
             respawned.is_empty(),
             "a running port-less sidecar should not be respawned"
@@ -2239,11 +2612,296 @@ mod tests {
         assert_eq!(logs.snapshot("SurrealDB"), vec!["hello".to_string()]);
         assert!(logs.snapshot("absent").is_empty());
     }
+
+    // ---- NATIVE-1: owned ports + stale-port sweep wiring ----
+
+    #[test]
+    fn owned_ready_ports_are_sorted_deduped_and_skip_portless() {
+        let specs = build_sidecar_specs(Path::new("C:/qv/services"));
+        // SurrealDB 8000, API 5055, worker None, LSAT 8100 → {5055, 8000, 8100}.
+        assert_eq!(owned_ready_ports(&specs), vec![5055, 8000, 8100]);
+    }
+
+    // ---- NATIVE-8: expected identity + registry + classification ----
+
+    #[test]
+    fn expected_identity_maps_known_services_and_skips_portless() {
+        let specs = build_sidecar_specs(Path::new("C:/qv/services"));
+        let lsat = specs.iter().find(|s| s.name == "LSAT backend").unwrap();
+        assert_eq!(expected_identity_for(lsat).unwrap().service, "lsat-backend");
+        let surreal = specs.iter().find(|s| s.name == "SurrealDB").unwrap();
+        assert_eq!(expected_identity_for(surreal).unwrap().service, "surrealdb");
+        // The port-less worker has no expectation to handshake against.
+        let worker = specs
+            .iter()
+            .find(|s| s.name == "open-notebook worker")
+            .unwrap();
+        assert!(expected_identity_for(worker).is_none());
+    }
+
+    /// Mock identity probe for classify_sidecar_health tests.
+    struct StubProbe {
+        echo: Option<identity::EchoedIdentity>,
+    }
+    impl identity::IdentityProbe for StubProbe {
+        fn fetch_identity(&self, _port: u16) -> Option<identity::EchoedIdentity> {
+            self.echo.clone()
+        }
+    }
+
+    #[test]
+    fn classify_sidecar_health_rejects_foreign_squatter_on_listening_port() {
+        // A spec whose port IS listening but whose echoed identity is a foreign
+        // service must classify Foreign (down), not healthy.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let spec = SidecarSpec {
+            name: "LSAT backend".into(),
+            program: PathBuf::from("x"),
+            args: vec![],
+            env: vec![],
+            ready_port: Some(port),
+            depends_on: vec![],
+            optional: false,
+            resource_path: None,
+        };
+        let probe = StubProbe {
+            echo: Some(identity::EchoedIdentity::new(
+                Some("some-foreign-app".into()),
+                None,
+            )),
+        };
+        let health = classify_sidecar_health(&spec, &probe);
+        assert!(
+            matches!(health, identity::PortHealth::Foreign(_)),
+            "foreign squatter must be rejected, got {health:?}"
+        );
+        assert!(!health.is_up());
+        drop(listener);
+    }
+
+    #[test]
+    fn classify_sidecar_health_is_unverified_when_no_identity_echoed() {
+        // Listening + no handshake echo → Unverified (still up: legacy liveness).
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let spec = SidecarSpec {
+            name: "SurrealDB".into(),
+            program: PathBuf::from("x"),
+            args: vec![],
+            env: vec![],
+            ready_port: Some(port),
+            depends_on: vec![],
+            optional: false,
+            resource_path: None,
+        };
+        let probe = StubProbe { echo: None };
+        let health = classify_sidecar_health(&spec, &probe);
+        assert_eq!(health, identity::PortHealth::Unverified);
+        assert!(health.is_up());
+        drop(listener);
+    }
+
+    #[test]
+    fn classify_sidecar_health_portless_is_unverified() {
+        // The worker (no readiness port) classifies Unverified — liveness is
+        // judged elsewhere (try_wait), never as down purely from a port probe.
+        let worker = SidecarSpec {
+            name: "open-notebook worker".into(),
+            program: PathBuf::from("uv"),
+            args: vec![],
+            env: vec![],
+            ready_port: None,
+            depends_on: vec![],
+            optional: true,
+            resource_path: None,
+        };
+        let probe = StubProbe { echo: None };
+        assert_eq!(
+            classify_sidecar_health(&worker, &probe),
+            identity::PortHealth::Unverified
+        );
+    }
+
+    // ---- NATIVE-6: boot status verdict ----
+
+    #[test]
+    fn build_boot_status_is_ok_when_all_required_up_and_none_skipped() {
+        // Two required, both ready, nothing skipped → "ok", no reason.
+        let rows = vec![
+            status_row("SurrealDB", true, false),
+            status_row("LSAT backend", true, false),
+        ];
+        let boot = build_boot_status(&rows, &[]);
+        assert_eq!(boot.status, "ok");
+        assert_eq!(boot.launched, 2);
+        assert_eq!(boot.skipped, 0);
+        assert!(boot.degraded_reason.is_empty());
+        assert!(boot.required_down_names.is_empty());
+    }
+
+    #[test]
+    fn build_boot_status_is_degraded_when_optional_skipped() {
+        // Required up, an optional open-notebook skipped (RAG-less build) →
+        // "degraded" with a feature-unavailable reason, never "error".
+        let rows = vec![status_row("LSAT backend", true, false)];
+        let skipped = vec![SidecarSpec {
+            name: "open-notebook API".into(),
+            program: PathBuf::from("uv"),
+            args: vec![],
+            env: vec![],
+            ready_port: Some(5055),
+            depends_on: vec![],
+            optional: true,
+            resource_path: Some(PathBuf::from("C:/qv/services/open-notebook")),
+        }];
+        let boot = build_boot_status(&rows, &skipped);
+        assert_eq!(boot.status, "degraded");
+        assert_eq!(boot.skipped, 1);
+        assert_eq!(boot.skipped_names, vec!["open-notebook API".to_string()]);
+        assert!(boot.degraded_reason.contains("open-notebook API"));
+    }
+
+    #[test]
+    fn build_boot_status_is_error_when_required_down() {
+        // A required sidecar not ready right after boot → "error" with its name.
+        let rows = vec![
+            status_row("SurrealDB", true, false),
+            status_row("LSAT backend", false, false),
+        ];
+        let boot = build_boot_status(&rows, &[]);
+        assert_eq!(boot.status, "error");
+        assert_eq!(boot.required_down_names, vec!["LSAT backend".to_string()]);
+        assert!(boot.degraded_reason.contains("LSAT backend"));
+    }
+
+    // ---- NATIVE-2: second-instance forward payload ----
+
+    #[test]
+    fn second_instance_payload_carries_argv_and_cwd() {
+        let payload = second_instance_payload(
+            &[
+                "studyvault".to_string(),
+                "open".to_string(),
+                "x.pdf".to_string(),
+            ],
+            "C:/Users/me",
+        );
+        assert_eq!(payload.cwd, "C:/Users/me");
+        assert_eq!(payload.argv.len(), 3);
+        assert_eq!(payload.argv[2], "x.pdf");
+        // Serializes to the documented snake_case shape for the host event.
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["cwd"], "C:/Users/me");
+        assert_eq!(json["argv"][1], "open");
+    }
+
+    #[test]
+    fn build_owned_port_registry_claims_launched_socketed_sidecars() {
+        // Launch two trivial children, wrap them as supervised slots with specs,
+        // and assert the registry captures {service → port, pid, identity} for
+        // the socketed ones and skips the port-less worker.
+        let launcher = MockLauncher::new(vec![]);
+        let make = |name: &str, port: Option<u16>| {
+            let spec = SidecarSpec {
+                name: name.into(),
+                program: PathBuf::from("x"),
+                args: vec![],
+                env: vec![],
+                ready_port: port,
+                depends_on: vec![],
+                optional: false,
+                resource_path: None,
+            };
+            let child = launcher.launch(&spec).expect("launch");
+            SupervisedSidecar::new(spec, child)
+        };
+        let mut slots = vec![
+            make("LSAT backend", Some(8100)),
+            make("open-notebook worker", None),
+        ];
+
+        let reg = build_owned_port_registry(&slots);
+        assert_eq!(reg.len(), 1, "only the socketed sidecar is claimed");
+        let claim = reg.get("LSAT backend").expect("claim");
+        assert_eq!(claim.port, 8100);
+        assert_eq!(claim.expected.service, "lsat-backend");
+        assert!(claim.pid > 0);
+        assert!(reg.owns_port(8100));
+        assert!(!reg.owns_port(9999));
+
+        for s in slots.iter_mut() {
+            let _ = s.child.kill();
+            let _ = s.child.wait();
+        }
+    }
+}
+
+/// NATIVE-4 glue: resolve the app log dir, build the last-resort reaper (kills
+/// every tracked sidecar tree), and install the local crash-report panic hook.
+///
+/// The reaper holds a CLONE of the `AppHandle` so it can reach the managed
+/// `Sidecars` state from inside the panic hook; it drains + tree-kills each child
+/// (the same `kill_child_tree` the graceful-exit path uses) and returns the count
+/// for the crash-log entry. The timestamp is a coarse since-UNIX-epoch seconds
+/// stamp — std-only, no chrono dep, good enough to order crash entries.
+fn install_crash_report_hook(handle: AppHandle) {
+    use tauri::Manager;
+    // Resolve the app log dir; fall back to a temp dir so the breadcrumb still
+    // lands somewhere even if the platform log dir can't resolve.
+    let log_dir = handle
+        .path()
+        .app_log_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("StudyVault").join("logs"));
+
+    let reaper_handle = handle.clone();
+    let reaper: crash_report::Reaper = Box::new(move || {
+        let mut reaped = 0usize;
+        if let Some(state) = reaper_handle.try_state::<Sidecars>() {
+            if let Ok(mut guard) = state.0.lock() {
+                for mut supervised in guard.drain(..) {
+                    kill_child_tree(&mut supervised.child);
+                    let _ = supervised.child.wait();
+                    reaped += 1;
+                }
+            }
+        }
+        reaped
+    });
+
+    crash_report::install_crash_hook(log_dir, reaper, crash_timestamp);
+}
+
+/// Coarse UTC-ish timestamp for crash entries: seconds since the UNIX epoch,
+/// rendered as `unix:<secs>`. std-only (no chrono) — enough to order entries.
+fn crash_timestamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!("unix:{secs}")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // NATIVE-2: single-instance guard MUST be the first plugin. A second
+        // launch of StudyVault runs this callback IN THE ALREADY-RUNNING instance
+        // (with the new process's argv + cwd) and then exits — so it never spawns
+        // a duplicate set of sidecars fighting over the owned ports. We focus the
+        // existing window and forward the new argv as an event the host can act on
+        // (e.g. open a file passed on the 2nd launch).
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            log::info!("single-instance: second launch forwarded (argv={argv:?}, cwd={cwd})");
+            // Re-focus the primary window so the user sees the existing instance.
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_focus();
+                let _ = win.unminimize();
+            }
+            // Forward the second launch's argv to the running instance; the host
+            // listens for this to handle a file/deeplink arg without a new process.
+            let _ = app.emit(SECOND_INSTANCE_EVENT, second_instance_payload(&argv, &cwd));
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
@@ -2257,6 +2915,11 @@ pub fn run() {
         .manage(Sidecars::default())
         .manage(SkippedSidecars::default())
         .manage(SidecarLogs::default())
+        // NATIVE-1: create the app-lifetime crash-reap process group (Windows Job
+        // Object with KILL_ON_JOB_CLOSE / Unix PDEATHSIG / no-op) once, here, so
+        // both the initial spawn and the health-supervisor respawn assign children
+        // to the SAME group and the Windows Job handle lives as long as the app.
+        .manage(ProcessGroupState::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -2265,6 +2928,29 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // NATIVE-4: install the local-only crash-report panic hook + last-resort
+            // reaper. On any Rust panic it writes a timestamped entry to a local
+            // crash.log under the app log dir (nothing leaves the machine) and
+            // kills the tracked sidecars — covering the window where the process
+            // panics before the OS Job Object / PDEATHSIG net fires.
+            install_crash_report_hook(app.handle().clone());
+
+            // NATIVE-1: which crash-reap net actually engaged (for the log).
+            if let Some(g) = app.try_state::<ProcessGroupState>() {
+                if g.0.is_active() {
+                    log::info!(
+                        "sidecar: orphan protection active via {} (crash/SIGKILL reaping armed)",
+                        g.0.kind()
+                    );
+                } else {
+                    log::warn!(
+                        "sidecar: orphan protection UNAVAILABLE on this platform; \
+                         sidecars are reaped on graceful exit + the boot stale-port sweep"
+                    );
+                }
+            }
+
             // BA8: capture sidecar stdout/stderr into the managed log ring
             // buffer from launch. The store is shared with the health
             // supervisor so respawned children re-attach capture.
@@ -2272,6 +2958,12 @@ pub fn run() {
                 .try_state::<SidecarLogs>()
                 .map(|s| s.inner().clone())
                 .unwrap_or_default();
+            // NATIVE-1: the app-lifetime crash-reap group, cloned for the startup
+            // task so spawned sidecars join it. Falls back to no-op if absent.
+            let group: Arc<dyn process_group::ProcessGroup> = app
+                .try_state::<ProcessGroupState>()
+                .map(|s| s.0.clone())
+                .unwrap_or_else(|| Arc::new(process_group::NoopGroup));
             // BA2: ordered startup gates each sidecar behind its dependencies'
             // readiness ports with a bounded (~30s/dep) wait, so this can block
             // for a noticeable stretch when a dependency is slow to bind. Run it
@@ -2282,7 +2974,7 @@ pub fn run() {
             // the state is still empty, so there's no race in starting it first.
             let startup_handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || {
-                let outcome = spawn_sidecars(&logs);
+                let outcome = spawn_sidecars(&logs, group.as_ref());
                 // OPS-5: record any optional sidecars that were skipped for an
                 // absent resource so `get_sidecar_status` can report "feature
                 // unavailable" (e.g. RAG-less build) to the UI.
@@ -2296,13 +2988,50 @@ pub fn run() {
                         names.join(", ")
                     );
                 }
+                // NATIVE-6: build the boot ready/degraded verdict from what
+                // ordered startup launched + skipped, BEFORE moving the launched
+                // set into managed state. The launched rows are mapped through the
+                // same status helper the health commands use, so a not-yet-ready
+                // required sidecar reads as "error" and a skipped optional as
+                // "degraded".
+                let launched_rows: Vec<SidecarStatus> = outcome
+                    .launched
+                    .iter()
+                    .map(launched_sidecar_status)
+                    .collect();
+                let boot = build_boot_status(&launched_rows, &outcome.skipped);
+
                 if let Some(skipped_state) = startup_handle.try_state::<SkippedSidecars>() {
                     *skipped_state.0.lock().unwrap() = outcome.skipped;
                 }
                 if let Some(state) = startup_handle.try_state::<Sidecars>() {
+                    // NATIVE-8: record the owned-port map {service → port, pid}
+                    // from the launched set so the supervisor knows exactly which
+                    // ports + pids it owns (and which identity each must echo).
+                    let registry = build_owned_port_registry(&outcome.launched);
+                    log::info!(
+                        "sidecar: owned-port registry seeded — {} service(s), ports {:?}",
+                        registry.len(),
+                        registry.owned_ports()
+                    );
                     *state.0.lock().unwrap() = outcome.launched;
                     log::info!("sidecar: ordered startup complete");
                 }
+
+                // NATIVE-6: emit the single boot-status event so the host can
+                // dismiss a splash / surface a degraded banner. Best-effort.
+                log::info!(
+                    "sidecar: boot status = {} (launched {}, skipped {}){}",
+                    boot.status,
+                    boot.launched,
+                    boot.skipped,
+                    if boot.degraded_reason.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — {}", boot.degraded_reason)
+                    }
+                );
+                let _ = startup_handle.emit(BOOT_STATUS_EVENT, boot);
             });
             // BA1: start the background health supervisor that polls each
             // sidecar's readiness port and respawns any that fall over.

@@ -1001,6 +1001,42 @@ def _m028_export_history(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 28")
 
 
+def _m029_backend_perf(conn) -> None:
+    """Wave 4 Backend-Perf — BACK-1 LLM cache UNIQUE key + BACK-3 batch checkpoint.
+
+    Two additive, idempotent changes ``create_all`` can't express on a PRE-EXISTING
+    DB:
+
+    - ``ux_llmcacheentry_key`` — a UNIQUE index on ``llmcacheentry.cache_key`` so
+      the deterministic LLM-response cache (BACK-1) UPSERTs by content key (one row
+      per (provider, model, temperature, seed, prompt) pre-image) instead of
+      duplicating. The ``llmcacheentry`` table itself is created by ``create_all``
+      (``models.LLMCacheEntry``). Wrapped so a pre-existing DB that somehow holds
+      duplicate keys logs and keeps the app-level upsert guard rather than breaking
+      boot.
+    - ``genjob.next_index`` — the BACK-3 resumable-batch checkpoint (INTEGER
+      DEFAULT 0). ``create_all`` adds it on a fresh DB; on an existing DB
+      ``_add_column_if_missing`` ALTERs it in (a clean no-op when already present, a
+      skip on a partial DB lacking the ``genjob`` table). Legacy jobs leave it 0.
+
+    PRAGMA-guarded exactly like migrations 20-28: every statement is idempotent /
+    tolerant, so a fresh DB and a re-run are clean no-ops. Bumps ``PRAGMA
+    user_version`` to 29 so the DB-level version tracks the latest recorded
+    migration."""
+    try:
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_llmcacheentry_key "
+            "ON llmcacheentry (cache_key)"
+        )
+    except Exception as exc:  # pre-existing duplicates — keep app-level upsert
+        log.warning("migration 29: skipped ux_llmcacheentry_key (%s)", exc)
+    _add_column_if_missing(
+        conn, "genjob", "next_index", "next_index INTEGER DEFAULT 0",
+        mig="migration 29",
+    )
+    conn.exec_driver_sql("PRAGMA user_version = 29")
+
+
 def _annotation_search_text(data_json, user_explanation) -> str:
     """Flatten an annotation's searchable note text out of its opaque ``data_json``
     plus the user-authored explanation, into one whitespace-joined string for FTS.
@@ -1099,6 +1135,7 @@ MIGRATIONS: list[Migration] = [
     (26, "genjob_passage_first", _m026_genjob_passage_first),
     (27, "cross_domain_sync_log", _m027_cross_domain_sync_log),
     (28, "export_history", _m028_export_history),
+    (29, "backend_perf", _m029_backend_perf),
 ]
 
 

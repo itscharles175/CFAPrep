@@ -81,6 +81,15 @@ DEFAULT_SCHEDULES: tuple[dict[str, object], ...] = (
         "task_type": "eval",
         "cadence_s": 7 * 24 * 60 * 60,
     },
+    {
+        # BACK-5 — periodic SQLite hygiene: WAL TRUNCATE checkpoint + conditional
+        # VACUUM/ANALYZE. Cadence comes from config (12h default) so a packaged
+        # install keeps the DB file + WAL sidecar tidy without a manual call.
+        "key": "db_maintenance",
+        "label": "SQLite WAL checkpoint + conditional vacuum",
+        "task_type": "db_maintenance",
+        "cadence_s": config.DB_MAINTENANCE_INTERVAL_S,
+    },
 )
 
 DEFAULT_SCHEDULE_KEYS = tuple(str(item["key"]) for item in DEFAULT_SCHEDULES)
@@ -92,6 +101,8 @@ SUPPORTED_SCHEDULED_TASK_TYPES = frozenset(
         "content_audit",
         "content_revalidation",
         "eval",
+        # BACK-5 — SQLite WAL checkpoint + conditional VACUUM/ANALYZE.
+        "db_maintenance",
     }
 )
 
@@ -700,6 +711,13 @@ def _execute_task(session: Session, row: ScheduledTask) -> dict:
                 session, notes=f"scheduled:{row.key}"
             )
         }
+    if row.task_type == "db_maintenance":
+        # BACK-5 — WAL checkpoint + conditional VACUUM/ANALYZE. Runs against the
+        # shared engine (its own autocommit connection, since VACUUM forbids an
+        # open transaction); ``session`` is not used. Reclaimed bytes + per-step
+        # verdict land in the SchedulerRun result for the trust cockpit.
+        from .db import run_db_maintenance
+        return {"db_maintenance": run_db_maintenance()}
     allowed = ", ".join(sorted(SUPPORTED_SCHEDULED_TASK_TYPES))
     raise ValueError(f"unsupported scheduled task type: {row.task_type!r}; expected one of {allowed}")
 

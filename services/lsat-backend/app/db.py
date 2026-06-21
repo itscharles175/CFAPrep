@@ -154,6 +154,140 @@ def get_session() -> Iterator[Session]:
         yield session
 
 
+# --- BACK-5: periodic SQLite maintenance ------------------------------------
+def _db_file_size_bytes() -> int:
+    """On-disk size of the SQLite main DB file (0 when unknown / in-memory)."""
+    import os
+
+    try:
+        path = config.DB_PATH
+        return os.path.getsize(path) if os.path.exists(path) else 0
+    except Exception:  # pragma: no cover - diagnostics must never raise
+        return 0
+
+
+def run_db_maintenance(
+    *,
+    eng=None,
+    vacuum_freelist_ratio: float | None = None,
+    vacuum_min_freelist_pages: int | None = None,
+) -> dict:
+    """BACK-5 — WAL TRUNCATE checkpoint + CONDITIONAL VACUUM + ANALYZE.
+
+    Why this exists
+    ---------------
+    Two writers share the SQLite file (FastAPI threads + the job worker) with
+    WAL on, so the ``-wal`` sidecar grows during bursts and the main file
+    accumulates free pages as content is quarantined / soft-deleted / re-imported.
+    Nothing reclaims that space on a desktop install. This is the registered
+    maintenance task (hooked into the existing scheduler via the ``db_maintenance``
+    task type) that keeps the file tidy:
+
+      1. ``PRAGMA wal_checkpoint(TRUNCATE)`` — flush the WAL back into the main DB
+         and shrink the ``-wal`` file to zero. Safe + cheap; runs every time.
+      2. ``VACUUM`` — only CONDITIONALLY: a full-file rewrite is expensive, so we
+         skip it unless the free-list is a meaningful fraction of the file
+         (``freelist_count / page_count >= vacuum_freelist_ratio`` AND
+         ``freelist_count >= vacuum_min_freelist_pages``). ``ratio <= 0`` disables
+         VACUUM entirely.
+      3. ``ANALYZE`` — refresh the query planner's stats after the checkpoint /
+         vacuum so index selection stays good as the bank grows. Cheap.
+
+    Records ``reclaimed_bytes`` (main-file size BEFORE minus AFTER; clamped at 0 so
+    a concurrent write that grows the file doesn't report a negative reclaim) so
+    the trust cockpit can show how much disk the maintenance freed. VACUUM and the
+    checkpoint each run OUTSIDE a transaction (a raw autocommit connection) because
+    SQLite forbids VACUUM inside one. Best-effort + isolated: any single step that
+    raises is captured in the result and does not abort the others.
+    """
+    eng = eng or engine
+    ratio = (
+        config.DB_VACUUM_FREELIST_RATIO if vacuum_freelist_ratio is None
+        else vacuum_freelist_ratio
+    )
+    min_pages = (
+        config.DB_VACUUM_MIN_FREELIST_PAGES if vacuum_min_freelist_pages is None
+        else vacuum_min_freelist_pages
+    )
+
+    size_before = _db_file_size_bytes()
+    result: dict[str, Any] = {
+        "size_before_bytes": size_before,
+        "wal_checkpoint": None,
+        "vacuum": {"ran": False},
+        "analyze": False,
+        "errors": [],
+    }
+
+    raw = eng.raw_connection()
+    try:
+        # The shared engine binds connections with check_same_thread=False and the
+        # WAL/busy_timeout PRAGMAs; use the DBAPI connection in autocommit so
+        # VACUUM (which forbids an open transaction) can run.
+        try:
+            raw.isolation_level = None  # autocommit (no implicit BEGIN)
+        except Exception:  # pragma: no cover - some drivers ignore this
+            pass
+        cur = raw.cursor()
+        try:
+            # (1) WAL TRUNCATE checkpoint.
+            try:
+                row = cur.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                # (busy, log_frames, checkpointed_frames)
+                result["wal_checkpoint"] = {
+                    "busy": row[0] if row else None,
+                    "log_frames": row[1] if row else None,
+                    "checkpointed_frames": row[2] if row else None,
+                }
+            except Exception as exc:  # noqa: BLE001
+                result["errors"].append(f"wal_checkpoint:{exc}")
+
+            # (2) conditional VACUUM based on the free-list ratio.
+            try:
+                page_count = cur.execute("PRAGMA page_count").fetchone()[0] or 0
+                freelist = cur.execute("PRAGMA freelist_count").fetchone()[0] or 0
+                page_count = int(page_count)
+                freelist = int(freelist)
+                free_ratio = (freelist / page_count) if page_count else 0.0
+                should_vacuum = (
+                    ratio > 0
+                    and freelist >= int(min_pages)
+                    and free_ratio >= ratio
+                )
+                result["vacuum"] = {
+                    "ran": False,
+                    "page_count": page_count,
+                    "freelist_count": freelist,
+                    "freelist_ratio": round(free_ratio, 4),
+                    "threshold_ratio": ratio,
+                    "min_freelist_pages": int(min_pages),
+                }
+                if should_vacuum:
+                    cur.execute("VACUUM")
+                    result["vacuum"]["ran"] = True
+            except Exception as exc:  # noqa: BLE001
+                result["errors"].append(f"vacuum:{exc}")
+
+            # (3) ANALYZE — refresh planner stats (cheap, always).
+            try:
+                cur.execute("ANALYZE")
+                result["analyze"] = True
+            except Exception as exc:  # noqa: BLE001
+                result["errors"].append(f"analyze:{exc}")
+        finally:
+            cur.close()
+    finally:
+        raw.close()
+
+    size_after = _db_file_size_bytes()
+    result["size_after_bytes"] = size_after
+    # Clamp at 0: a concurrent write that grew the file mid-maintenance must not
+    # report a negative reclaim.
+    result["reclaimed_bytes"] = max(0, size_before - size_after)
+    result["ok"] = not result["errors"]
+    return result
+
+
 @contextmanager
 def atomic_batch(session: Session) -> Iterator[Session]:
     """BA5 — all-or-nothing batch write on an existing ``session``.

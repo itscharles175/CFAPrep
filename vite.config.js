@@ -56,6 +56,25 @@ export default defineConfig({
             return 'd3-core-vendor';
           }
           if (id.includes('katex')) return 'katex';
+          // @tanstack/react-query (PERF-1): now used app-wide (host data layer +
+          // LSAT), so give it its OWN chunk instead of letting it ride along in
+          // whichever route chunk imports it first. MUST come before the generic
+          // `react` catch-all below, which would otherwise swallow it.
+          if (/node_modules\/@tanstack\/(react-query|query-core)\//.test(normalized)) {
+            return 'react-query-vendor';
+          }
+          // LSAT UI vendor libs (PERF-1): @radix-ui primitives, motion (which
+          // resolves through framer-motion), sonner, cmdk, and vaul. These are
+          // shared by the LSAT sub-app and the host's shadcn-style src/components/ui;
+          // fold them into ONE chunk so they aren't scattered/duplicated across
+          // route chunks. Path-bounded so `motion` matches the package dir, not any
+          // path that merely contains the substring.
+          if (
+            normalized.includes('node_modules/@radix-ui/') ||
+            /node_modules\/(motion|framer-motion|sonner|cmdk|vaul)\//.test(normalized)
+          ) {
+            return 'lsat-ui-vendor';
+          }
           if (id.includes('react-router') || id.includes('react-dom') || id.includes('react')) return 'react-vendor';
           return undefined;
         },

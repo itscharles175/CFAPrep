@@ -123,7 +123,8 @@ def _generate(prompt: str, system: str | None = None, timeout: float | None = No
 
 
 def _candidate_generator(prompt: str, system: str | None = None,
-                         timeout: float | None = None) -> str:
+                         timeout: float | None = None, *,
+                         seed: int | None = None) -> str:
     """Live CANDIDATE generator (R7 2.1 + bank-expansion Wave 1.3): asks the
     provider for guaranteed JSON. When ``GEN_STRUCTURED_SCHEMA`` is on (the
     default), Ollama's structured-output mode constrains the response to
@@ -131,6 +132,12 @@ def _candidate_generator(prompt: str, system: str | None = None,
     candidate cannot make it past the decoder. With only ``GEN_STRUCTURED_OUTPUT``
     on we fall back to free-shape JSON (older Ollama / non-Ollama providers).
     ``_extract_json`` stays as a last-resort fallback either way.
+
+    BACK-3 — when ``seed`` is passed (the resumable-batch path supplies a
+    deterministic per-index seed), it is forwarded to the provider so candidate
+    index ``i`` is REPRODUCIBLE: an interrupted batch that resumes regenerates the
+    same candidate at each index rather than re-rolling a fresh (duplicate-risking)
+    one. Normal generation leaves ``seed=None`` and keeps its warm, diverse output.
     """
     fmt: Optional[Union[str, dict]] = None
     if config.GEN_STRUCTURED_SCHEMA:
@@ -140,6 +147,7 @@ def _candidate_generator(prompt: str, system: str | None = None,
     return strip_think(llm.offline_generate(
         prompt, system=system, timeout=timeout,
         temperature=config.GEN_CANDIDATE_TEMPERATURE,
+        seed=seed,
         format=fmt,
     ))
 
@@ -946,7 +954,8 @@ def validate_candidate(cand: dict, runs: int, solver=_generate, critic=_generate
                        distractor_quality_enabled: Optional[bool] = None,
                        multi_model_solver=None,
                        session: Session | None = None,
-                       embedder=None) -> dict:
+                       embedder=None,
+                       cost_aware: Optional[bool] = None) -> dict:
     """Run the decorrelated, adversarial generation gate (R7 Wave 3a).
 
     The gate measures ITEM SOUNDNESS, not sampling luck. Ordered checks (cheap
@@ -1045,6 +1054,36 @@ def validate_candidate(cand: dict, runs: int, solver=_generate, critic=_generate
     leak_verdict = lexical_leak_ok(cand, q_type=q_type)
     report["checks"]["lexical_leak_ok"] = leak_verdict
     leak_ok = leak_verdict.get("ok", True)
+
+    # BACK-2 — cost-aware early-exit. The cheap, no-model checks above
+    # (structural + trap_metadata already short-circuit; length-tell + lexical
+    # leak are computed here without a model call) are sufficient to REJECT a
+    # candidate. When ``cost_aware`` is on, a candidate that already failed one of
+    # them is doomed — every remaining check feeds an AND into ``base_passed`` and
+    # can only stay False — so we skip the expensive LLM solve/critique/CoVe/
+    # distractor/multi-model passes entirely and return the same verdict the full
+    # pipeline would, with the SAME ``reason`` (the fall-through below prioritises
+    # length_tell then lexical_leak ahead of the model-driven reasons). The skipped
+    # gates are recorded as ``{"ok": True, "skipped": "cost_aware_short_circuit"}``
+    # so the per-gate observability replay treats them as not-judged (None), never
+    # as passes. Flag-gated OFF for a full-evidence run that wants every verdict.
+    cost_aware_on = (
+        config.GEN_COST_AWARE_GATE if cost_aware is None else bool(cost_aware)
+    )
+    if cost_aware_on and (length_tell or not leak_ok):
+        for skipped_key in (
+            "deterministic_solve", "self_consistency", "permutation_invariant",
+            "informativity", "single_defensible", "distractor_quality",
+            "cove_verify", "multi_model_agreement", "structural_type",
+            "rc_authenticity", "novelty",
+        ):
+            report["checks"].setdefault(
+                skipped_key, {"ok": True, "skipped": "cost_aware_short_circuit"}
+            )
+        report["cost_aware_short_circuit"] = True
+        report["passed"] = False
+        report["reason"] = "length_tell" if length_tell else "lexical_leak"
+        return report
 
     # (3) deterministic solve — the AUTHORITATIVE correctness signal. The critic
     # (temp 0, decorrelated model) solves the item once; the solved letter must
@@ -1426,6 +1465,11 @@ def build_validation_report(
             distractor_quality_enabled=distractor_quality_enabled,
             multi_model_solver=multi_model_solver,
             session=None,
+            # INT-1 is the FULL-EVIDENCE shared endpoint: it reports every gate's
+            # verdict for the trust panel, so the BACK-2 cheap-first short-circuit
+            # is force-disabled here regardless of the global flag. (run_job, which
+            # only needs the pass/fail decision, honours the config default.)
+            cost_aware=False,
         )
         error: str | None = None
     except Exception as exc:  # noqa: BLE001 — never 500 on a model outage
@@ -2097,9 +2141,29 @@ def run_job(job_id: int, generate=None, *, critic=None, embedder=None) -> None:
         quarantined = 0
         produced = 0
 
+        # BACK-3 — resumable, idempotent batch. When ``GEN_RESUMABLE_BATCH`` is on
+        # AND this is the default (non-injected) generator path, the loop resumes
+        # from the persisted ``job.next_index`` checkpoint instead of regenerating
+        # candidates 0..k, and each candidate is generated under a deterministic
+        # per-index seed so a resumed attempt reproduces the same candidate (no
+        # dupes). Tests that inject a ``generate`` fake keep the legacy full-range,
+        # no-seed behaviour so their deterministic stubs are unaffected. OFF by
+        # default; ``produced``/``accepted``/``quarantined`` counters count only the
+        # candidates this RUN processed, while ``next_index`` is the durable
+        # cross-run cursor.
+        resumable = config.GEN_RESUMABLE_BATCH and generate is None
+        start_index = max(0, int(getattr(job, "next_index", 0) or 0)) if resumable else 0
+        if resumable and start_index > 0:
+            # Resuming: seed the in-run tallies from the job's persisted counters so
+            # the totals ACCUMULATE across runs (produced/accepted/quarantined are
+            # cross-run on a resumable job, like ``next_index``).
+            produced = max(0, int(job.produced or 0))
+            accepted = max(0, int(job.accepted or 0))
+            quarantined = max(0, int(job.quarantined or 0))
+
         coaching = _coaching_note(session, job.q_type)
         try:
-            for i in range(max(0, job.count)):
+            for i in range(start_index, max(0, job.count)):
                 session.refresh(job)
                 if (job.validation_report or {}).get("cancel_requested"):
                     candidates_report.append({
@@ -2137,7 +2201,12 @@ def run_job(job_id: int, generate=None, *, critic=None, embedder=None) -> None:
                         gen_prompt
                         + f"\nFollow this outline from the planner:\n{plan_raw[:2000]}\n"
                     )
-                raw = gen_fn(gen_prompt)
+                # BACK-3 — in resumable mode (default generator only), pin the
+                # per-index seed so candidate ``i`` is reproducible across a resume.
+                if resumable:
+                    raw = gen_fn(gen_prompt, seed=config.GEN_BATCH_BASE_SEED + i)
+                else:
+                    raw = gen_fn(gen_prompt)
                 cand = _extract_json(raw)
                 produced += 1
                 if not cand:
@@ -2147,6 +2216,17 @@ def run_job(job_id: int, generate=None, *, critic=None, embedder=None) -> None:
                         "section_type": section_type,
                     })
                     quarantined += 1
+                    # BACK-3 — checkpoint past an unparseable candidate so a
+                    # resume doesn't re-roll it. (Deterministic seeds make the
+                    # re-roll identical anyway, so this is correctness-neutral —
+                    # just avoids redundant work on resume.)
+                    if resumable:
+                        job.next_index = i + 1
+                        job.produced = produced
+                        job.quarantined = quarantined
+                        job.updated_at = datetime.now(timezone.utc)
+                        session.add(job)
+                        session.commit()
                     continue
                 # BA5: validate + persist ONE candidate inside a SAVEPOINT so a
                 # single bad candidate (a validator/persist exception, an
@@ -2185,6 +2265,8 @@ def run_job(job_id: int, generate=None, *, critic=None, embedder=None) -> None:
                     quarantined += 1
                     job.produced = produced
                     job.quarantined = quarantined
+                    if resumable:
+                        job.next_index = i + 1  # BACK-3 checkpoint
                     job.progress_pct = round(100 * produced / max(1, job.count), 1)
                     job.updated_at = datetime.now(timezone.utc)
                     session.add(job)
@@ -2213,6 +2295,8 @@ def run_job(job_id: int, generate=None, *, critic=None, embedder=None) -> None:
                 job.produced = produced
                 job.accepted = accepted
                 job.quarantined = quarantined
+                if resumable:
+                    job.next_index = i + 1  # BACK-3 durable resume cursor
                 job.progress_pct = round(100 * produced / max(1, job.count), 1)
                 job.updated_at = datetime.now(timezone.utc)
                 session.add(job)

@@ -61,6 +61,10 @@ def status(session: Session = Depends(get_session)) -> dict[str, Any]:
         "explain_p50_ms": observability.latency_p50("explain_stream"),
         "embed_coverage_pct": embed_coverage_pct,
         "models": llm.provider_info(),
+        # BACK-1 — deterministic LLM response cache hit-rate counter (hits/misses/
+        # stores + hit_rate + LRU size). RAM-only gauge, resets on restart like the
+        # latency/contention gauges.
+        "llm_cache": llm.cache_stats(),
         "cloud_tokens": tokens,
         "cloud_monthly_budget_usd": budget if budget > 0 else None,
         # --- 7.3 additive keys (existing keys above are preserved verbatim) ---

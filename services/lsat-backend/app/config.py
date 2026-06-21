@@ -164,6 +164,56 @@ GEN_SALVAGE_REWRITE = _env("LSATLAB_GEN_SALVAGE_REWRITE", "0") not in (
     "0", "false", "False",
 )
 
+# --- Wave 4 Backend-Perf -----------------------------------------------------
+# BACK-1 — content-addressed cache for DETERMINISTIC LLM responses (temp 0 /
+# seeded). When on (default), offline_generate consults a SQLite + in-memory LRU
+# cache keyed by the host-parity sha256 pre-image (app/llm/cache.py) so repeated
+# deterministic gate calls skip the GPU. No-op for warm/creative calls. Purely a
+# speed knob: a cache miss just calls the model as before, so disabling it only
+# loses the speedup. The local model is otherwise deterministic at temp 0, so a
+# stale entry can't change results unless the model binary itself changes.
+LLM_CACHE_ENABLED = _env("LSATLAB_LLM_CACHE", "1") not in ("0", "false", "False")
+# BACK-2 — cost-aware gate scheduling. When on (default), the generation gate
+# runs its CHEAP deterministic checks first (structural, trap metadata, length
+# tell, lexical leak) and SHORT-CIRCUITS before invoking the expensive LLM
+# solve/critique passes if one fails. Set to 0 for a FULL-EVIDENCE run that
+# records every gate's verdict regardless of an early cheap failure.
+GEN_COST_AWARE_GATE = _env("LSATLAB_GEN_COST_AWARE_GATE", "1") not in (
+    "0", "false", "False",
+)
+# BACK-3 — resumable, idempotent batch generation. When on, an interrupted batch
+# resumes from GenJob.next_index instead of regenerating candidates 0..k, and
+# each candidate is generated under a deterministic per-index seed so a resumed
+# attempt reproduces the same candidate (no dupes). OFF by default — generation
+# candidates are intentionally diverse (warm temperature), so this is opt-in for
+# runs that want reproducible, resumable batches.
+GEN_RESUMABLE_BATCH = _env("LSATLAB_GEN_RESUMABLE_BATCH", "0") not in (
+    "0", "false", "False",
+)
+# BACK-3 — base seed for the per-index deterministic candidate seed. The seed for
+# candidate i is (GEN_BATCH_BASE_SEED + i), so a resumed batch reproduces the
+# exact candidate at each index. Only consulted when GEN_RESUMABLE_BATCH is on.
+GEN_BATCH_BASE_SEED = int(_env("LSATLAB_GEN_BATCH_BASE_SEED", "1311") or "1311")
+
+# BACK-5 — recurring SQLite maintenance (WAL checkpoint + conditional
+# VACUUM/ANALYZE), registered as a scheduled task. Cadence in seconds (default
+# 12h). The task TRUNCATE-checkpoints the WAL every run and runs VACUUM only when
+# the free-list ratio exceeds GEN-independent thresholds below, recording the
+# bytes reclaimed for the trust cockpit.
+DB_MAINTENANCE_INTERVAL_S = int(
+    _env("LSATLAB_DB_MAINTENANCE_INTERVAL", str(12 * 60 * 60))
+    or str(12 * 60 * 60)
+)
+# Run VACUUM only when freelist_count / page_count exceeds this fraction (a near-
+# empty freelist isn't worth a full-file rewrite). 0 disables conditional VACUUM.
+DB_VACUUM_FREELIST_RATIO = float(
+    _env("LSATLAB_DB_VACUUM_FREELIST_RATIO", "0.15") or "0.15"
+)
+# Always skip VACUUM below this many free pages regardless of ratio (tiny DBs).
+DB_VACUUM_MIN_FREELIST_PAGES = int(
+    _env("LSATLAB_DB_VACUUM_MIN_FREELIST_PAGES", "64") or "64"
+)
+
 
 def gen_dedup_threshold_for(
     q_type: str | None, *, section_type: str = "LR",

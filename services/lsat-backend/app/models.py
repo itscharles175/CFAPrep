@@ -298,6 +298,12 @@ class GenJob(SQLModel, table=True):
     # iteration). Additive/optional (migration 26); existing LR/RC single-candidate
     # jobs leave it False and are unchanged.
     passage_first: bool = Field(default=False)
+    # BACK-3 — resumable batch checkpoint. The next candidate index a resumed run
+    # should START at, so an interrupted batch picks up where it left off instead
+    # of re-generating (and re-persisting) candidates 0..k again. Additive/optional
+    # (migration 29); legacy jobs leave it 0 and run the whole count from the top
+    # exactly as before. Only consulted when ``config.GEN_RESUMABLE_BATCH`` is on.
+    next_index: int = Field(default=0)
     validation_report: dict = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: Optional[datetime] = None
@@ -726,6 +732,29 @@ class ValidatorRun(SQLModel, table=True):
     failure_reasons_json: list = Field(default_factory=list, sa_column=Column(JSON))
     meta_json: dict = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class LLMCacheEntry(SQLModel, table=True):
+    """BACK-1 — durable content-addressed cache for DETERMINISTIC LLM responses.
+
+    One row per ``cache_key`` (a host-parity SHA-256 hex of the frozen pre-image
+    in ``app/llm/cache.py`` / ``src/lib/llm/determinism.js``). Only deterministic
+    calls (temperature 0 or a pinned seed) are cached, so the stored ``response``
+    is the reproducible output for that exact (provider, model, temperature, seed,
+    prompt). Survives a restart — the in-memory LRU in ``llm.cache`` is just the
+    hot tier in front of this table. ``hits`` counts re-reads for observability;
+    ``key_version`` records the pre-image schema so a future format change can
+    invalidate stale rows. Best-effort: a cache failure never breaks generation.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    cache_key: str = Field(index=True)
+    key_version: int = Field(default=1, index=True)
+    provider: str = ""
+    model: str = ""
+    response: str = ""
+    hits: int = 0
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    last_hit_at: Optional[datetime] = None
 
 
 class SchedulerRun(SQLModel, table=True):
