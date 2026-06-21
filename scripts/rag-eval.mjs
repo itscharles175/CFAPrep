@@ -36,18 +36,23 @@ const FIXTURE_DIR = join(REPO_ROOT, 'tests', 'rag-fixtures');
 
 // ---------------------------------------------------------------------------
 // FLOOR — seeded from the harness's own current numbers (k=5) with a small
-// safety margin so it never flaps on float noise. These are the values
-// `evaluateFixture(..., 5)` produces today over the committed fixtures:
-//   recall=1.0  precision≈0.22778  mrr≈0.95833  ndcg≈0.96924
+// safety margin so it never flaps on float noise. Re-seeded in Wave 5 after the
+// RAG-5 (structure-aware) + RAG-8 (notebook-body) fixtures were added — the
+// corpus grew from 13→16 chunks and the queries from 12→14, so mean precision@5
+// drifts DOWN purely because the (mostly single-relevant) queries can only put
+// 1 relevant doc in 5 slots (≈0.2 each); this is a fixture-size artifact, not a
+// ranking regression. nDCG + MRR both IMPROVED with the new structure-aware
+// chunks, so those floors were RAISED. Current `evaluateFixture(..., 5)`:
+//   recall=1.0  precision≈0.22381  mrr≈0.96429  ndcg≈0.97364
 // To RAISE the bar after a retrieval improvement, bump these (and document why).
 // To CHANGE the fixtures, re-run `node ... scripts/rag-eval.mjs` and re-seed.
 // ---------------------------------------------------------------------------
 export const FLOOR_K = 5;
 export const FLOOR = {
   recall: 1.0,
-  precision: 0.227,
-  mrr: 0.95,
-  ndcg: 0.96,
+  precision: 0.223,
+  mrr: 0.96,
+  ndcg: 0.97,
 };
 
 function loadFixture() {

@@ -9,15 +9,25 @@ import {
   searchChunks,
   evaluateFixture,
   checkFloor,
+  defaultRetrieval,
+  fusionRetrieval,
+  rerankRetrieval,
+  tokenOverlapJudge,
+  metricDelta,
+  shouldEnableByDefault,
   type RagFixture,
   type EvalChunk,
+  type RelevanceJudgment,
 } from './ragEval';
 
 // The CLI gate (scripts/rag-eval.mjs) and this test share ONE floor: the
 // numbers below are the same seeded baseline. Keep them in sync — if you change
 // the fixtures or improve retrieval, re-seed BOTH.
 const FLOOR_K = 5;
-const FLOOR = { recall: 1.0, precision: 0.227, mrr: 0.95, ndcg: 0.96 };
+// Re-seeded in Wave 5 (RAG-5 + RAG-8 fixtures) — see scripts/rag-eval.mjs for the
+// rationale: precision drifts down with corpus size (fixture artifact); nDCG/MRR
+// rose with the structure-aware chunks, so those floors were raised.
+const FLOOR = { recall: 1.0, precision: 0.223, mrr: 0.96, ndcg: 0.97 };
 
 // Vite/vitest resolves JSON imports natively, so the test consumes the exact
 // same golden fixtures the CLI harness reads off disk.
@@ -201,5 +211,61 @@ describe('metric invariants (property-based)', () => {
         },
       ),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wave-5 measurement harnesses — fusion / rerank / decision primitive
+// ---------------------------------------------------------------------------
+describe('Wave-5 retrieval-variant harnesses', () => {
+  const chunks: EvalChunk[] = [
+    { id: 'a', domain: 'cfa', text: 'modified duration of a bond', embedding: [1, 0, 0] },
+    { id: 'b', domain: 'cfa', text: 'convexity curvature price yield', embedding: [0, 1, 0] },
+    { id: 'c', domain: 'cfa', text: 'unrelated excel pivot table', embedding: [0, 0, 1] },
+  ];
+
+  it('fusionRetrieval falls back to BM25-only when no query embedding is present', () => {
+    const j: RelevanceJudgment = { id: 'q', query: 'modified duration', relevant: ['a'] };
+    const fused = fusionRetrieval()(chunks, j, 5);
+    const bm25 = defaultRetrieval(chunks, j, 5);
+    expect(fused[0]).toBe('a');
+    expect(fused).toEqual(bm25);
+  });
+
+  it('fusionRetrieval fuses BM25 + vector channels when a query embedding is present', () => {
+    const j: RelevanceJudgment = { id: 'q', query: 'duration', relevant: ['a'], embedding: [1, 0, 0] };
+    const fused = fusionRetrieval()(chunks, j, 5);
+    // 'a' is top of both the lexical (duration) and vector ([1,0,0]) channels.
+    expect(fused[0]).toBe('a');
+  });
+
+  it('rerankRetrieval re-sorts by the synthetic judge', () => {
+    const j: RelevanceJudgment = { id: 'q', query: 'convexity curvature', relevant: ['b'] };
+    const ranked = rerankRetrieval(tokenOverlapJudge, 24)(chunks, j, 5);
+    expect(ranked[0]).toBe('b');
+  });
+
+  it('metricDelta computes signed per-metric differences', () => {
+    const base = { k: 5, queryCount: 1, recall: 1, precision: 0.2, mrr: 0.5, ndcg: 0.6 };
+    const variant = { k: 5, queryCount: 1, recall: 1, precision: 0.2, mrr: 0.8, ndcg: 0.75 };
+    const d = metricDelta(base, variant);
+    expect(d.ndcg).toBeCloseTo(0.15, 9);
+    expect(d.mrr).toBeCloseTo(0.3, 9);
+    expect(d.recall).toBe(0);
+  });
+
+  it('shouldEnableByDefault requires an nDCG gain AND no recall regression', () => {
+    expect(shouldEnableByDefault({ recall: 0, precision: 0, mrr: 0, ndcg: 0.01 })).toBe(true);
+    expect(shouldEnableByDefault({ recall: 0, precision: 0, mrr: 0, ndcg: 0 })).toBe(false);
+    expect(shouldEnableByDefault({ recall: -0.1, precision: 0, mrr: 0, ndcg: 0.5 })).toBe(false);
+  });
+
+  it('on the golden set, fusion + rerank do NOT beat BM25 (data-driven default-OFF)', () => {
+    const fixture: RagFixture = { chunks: corpus.chunks as EvalChunk[], queries: queries.queries };
+    const base = evaluateFixture(fixture, 5, defaultRetrieval).aggregate;
+    const reranked = evaluateFixture(fixture, 5, rerankRetrieval(tokenOverlapJudge, 24)).aggregate;
+    const d = metricDelta(base, reranked);
+    // Documents the measured result: no nDCG lift → ship the heavier stage OFF.
+    expect(shouldEnableByDefault(d)).toBe(false);
   });
 });

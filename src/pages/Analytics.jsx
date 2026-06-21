@@ -17,6 +17,12 @@ import { predictRetention } from '../lib/scheduler';
 import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { projectExamReadiness } from '../lib/examReadiness';
+// PSY-3 / PSY-5 (Wave 5) — explainable forecast attribution + ranked study
+// recommendations. Pure, deterministic, offline functions over the SAME
+// snapshots/results the Exam-Readiness Cockpit already loads; surfaced additively
+// below the cockpit so the projection explains WHY and WHAT to do next.
+import { attributeForecast } from '../lib/psychometrics/forecastAttribution';
+import { recommendFromAttribution } from '../lib/psychometrics/recommendations';
 import { getStorage } from '../lib/storage';
 import { getLsatActivity, getLsatCalibration } from '../lib/lsatAnalyticsBridge';
 import { getLsatCrossDomain } from '../lib/lsatCrossDomainBridge';
@@ -390,6 +396,10 @@ export default function Analytics() {
   const [masteryTrend, setMasteryTrend] = useState([]);
   const [retentionDecay, setRetentionDecay] = useState([]);
   const [readiness, setReadiness] = useState(null);
+  // PSY-3 / PSY-5 — { drivers, recommendations } explaining the readiness gap.
+  // null = loading / not yet computed; populated from the same snapshots+results
+  // the cockpit projection uses.
+  const [forecastExplain, setForecastExplain] = useState(null);
   // ANL-6 — cross-domain toggle + data. `domain` drives both the heatmap and
   // the calibration scatter. CFA counts come from local Dexie telemetry; the
   // LSAT activity/calibration come from the sidecar (best-effort, degrading).
@@ -490,6 +500,18 @@ export default function Analytics() {
         const examDate = typeof examRow?.value === 'string' ? examRow.value : null;
         const projection = projectExamReadiness({ snapshots, results, examDate });
         setReadiness(projection);
+        // PSY-3 / PSY-5 — decompose the gap into ranked drivers and emit
+        // explainable, impact-ranked recommendations from the SAME inputs. Pure
+        // + offline; wrapped defensively so a malformed row never blanks the page.
+        try {
+          const attribution = attributeForecast({ snapshots, results, examDate });
+          setForecastExplain({
+            drivers: attribution.drivers,
+            recommendations: recommendFromAttribution(attribution, { limit: 4 }),
+          });
+        } catch {
+          setForecastExplain({ drivers: [], recommendations: [] });
+        }
       })
       .catch(() => undefined);
 
@@ -659,6 +681,60 @@ export default function Analytics() {
           </>
         )}
       </Panel>
+
+      {/* PSY-3 / PSY-5 — why the forecast lands where it does + what to do next.
+          Renders only when there is a measurable gap with at least one driver, so
+          a fully-ready (or empty) profile doesn't show a noisy empty panel. */}
+      {forecastExplain && forecastExplain.drivers.length > 0 && (
+        <Panel
+          tone="analytics"
+          title="Why This Forecast — Drivers & Next Steps"
+          subtitle="The projected-readiness gap, decomposed into ranked drivers (PSY-3), with explainable, impact-ranked study recommendations (PSY-5). All computed locally from your mastery snapshots and attempt history."
+        >
+          <div className="analytics-table" style={{ marginBottom: 16 }}>
+            <div className="analytics-row analytics-head">
+              <span>Driver</span>
+              <span>Impact (pts)</span>
+              <span>Share</span>
+            </div>
+            {forecastExplain.drivers.slice(0, 5).map((d) => (
+              <div className="analytics-row" key={`${d.kind}:${d.label}`}>
+                <span>{d.label}</span>
+                <strong style={{ color: d.contribution >= 0 ? 'var(--warning, #f59e0b)' : 'var(--success, #34d399)' }}>
+                  {d.contribution >= 0 ? '+' : ''}{d.contribution}
+                </strong>
+                <span>{Math.round(d.share * 100)}%</span>
+              </div>
+            ))}
+          </div>
+
+          {forecastExplain.recommendations.length > 0 && (
+            <div>
+              <p className="qv-fs-sm qv-text-secondary" style={{ marginBottom: 8 }}>
+                Recommended next steps (highest expected impact first)
+              </p>
+              <div className="qv-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                {forecastExplain.recommendations.map((rec) => (
+                  <div
+                    key={`${rec.action}:${rec.title}`}
+                    style={{
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      padding: 'var(--space-3, 12px)',
+                    }}
+                  >
+                    <div className="qv-row-2" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                      <strong>{rec.title}</strong>
+                      <span className="qv-chip qv-text-success">+{rec.expectedImpact} pts</span>
+                    </div>
+                    <p className="qv-fs-sm qv-text-muted" style={{ margin: '6px 0 0' }}>{rec.whyThis}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Panel>
+      )}
 
       <Panel
         tone="analytics"

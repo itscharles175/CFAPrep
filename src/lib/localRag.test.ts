@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { localGroundedAnswer, retrieveChunks } from './localRag';
+import { localGroundedAnswer, retrieveChunks, verifyAnswerCitations } from './localRag';
 import { db } from './progressStore';
 import { getStorage } from './storage';
-import type { SourceChunkInput } from './storage/types';
+import type { SourceChunkInput, ChunkSearchResult } from './storage/types';
 
 function chunk(id: string, text: string, extra: Partial<SourceChunkInput> = {}): SourceChunkInput {
   return {
@@ -169,5 +169,124 @@ describe('localGroundedAnswer', () => {
     });
     // Only the quant chunk should be a candidate.
     expect(result.citations.every((c) => c.locator === 'p. 1')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wave 5 — RAG-2 (hybrid), RAG-3 (rerank), RAG-4 (citation verifier)
+// ---------------------------------------------------------------------------
+describe('Wave 5 retrieval flags + grounding (RAG-2/3/4)', () => {
+  beforeEach(async () => {
+    await db.sourceChunks.clear();
+    await getStorage().chunks!.bulkUpsert([
+      chunk('c1', 'Modified duration measures bond price sensitivity to small parallel yield changes.'),
+      chunk('c2', 'Convexity captures the curvature of the price-yield relationship.'),
+      chunk('c3', 'Effective duration is used for bonds with embedded options.'),
+    ]);
+  });
+
+  it('RAG-2 hybrid: degrades to BM25 when the embedder is offline (never throws)', async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+    const hits = await retrieveChunks({
+      question: 'modified duration',
+      domain: 'cfa',
+      includeNotebookSources: false,
+      hybrid: true,
+      embedOptions: { fetchImpl, settings: { baseUrl: 'http://localhost:1234/v1' } },
+    });
+    expect(hits[0].id).toBe('c1');
+  });
+
+  it('RAG-3 rerank: re-orders the pool via the local judge', async () => {
+    const rerankGenerate = vi.fn(async ({ prompt }: { prompt: string }) =>
+      ({ text: prompt.includes('Convexity') ? '99' : '1' }),
+    );
+    const hits = await retrieveChunks({
+      question: 'duration',
+      domain: 'cfa',
+      includeNotebookSources: false,
+      rerank: true,
+      rerankGenerate,
+      limit: 3,
+    });
+    expect(hits[0].id).toBe('c2');
+  });
+
+  it('RAG-4: grounded:true when the cited claim is entailed (lexical, offline)', async () => {
+    const generate = vi.fn(async () => ({
+      text: 'Modified duration measures bond price sensitivity to yield changes [1].',
+    }));
+    const res = await localGroundedAnswer({
+      question: 'What does modified duration measure?',
+      domain: 'cfa',
+      includeNotebookSources: false,
+      generate,
+      entailUseLlm: false,
+    });
+    expect(res.verification).toBeDefined();
+    expect(res.grounded).toBe(true);
+  });
+
+  it('RAG-4: grounded:false (structured refusal) when a cited claim is unsupported', async () => {
+    const generate = vi.fn(async () => ({
+      text: 'XLOOKUP returns a matching value from a result array in Excel spreadsheets [1].',
+    }));
+    const res = await localGroundedAnswer({
+      question: 'Tell me about duration',
+      domain: 'cfa',
+      includeNotebookSources: false,
+      generate,
+      entailUseLlm: false,
+    });
+    expect(res.grounded).toBe(false);
+    expect(res.verification!.some((v) => !v.entailed)).toBe(true);
+  });
+
+  it('RAG-4: verifyCitations:false skips verification', async () => {
+    const generate = vi.fn(async () => ({ text: 'Answer [1].' }));
+    const res = await localGroundedAnswer({
+      question: 'q',
+      domain: 'cfa',
+      includeNotebookSources: false,
+      generate,
+      verifyCitations: false,
+    });
+    expect(res.verification).toBeUndefined();
+    expect(res.grounded).toBeUndefined();
+  });
+});
+
+describe('verifyAnswerCitations (RAG-4 unit)', () => {
+  const numbered: Array<{ chunk: ChunkSearchResult; number: number }> = [
+    {
+      number: 1,
+      chunk: {
+        id: 'c1',
+        documentId: 'd',
+        domain: 'cfa',
+        text: 'Convexity captures the curvature of the price-yield relationship.',
+        locator: 'r1',
+        score: 1,
+      },
+    },
+  ];
+
+  it('only verifies CITED claims', async () => {
+    const results = await verifyAnswerCitations(
+      'Convexity captures curvature [1]. This sentence has no citation.',
+      numbered,
+      { useLlm: false },
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].entailed).toBe(true);
+  });
+
+  it('marks an unsupported cited claim as not entailed', async () => {
+    const results = await verifyAnswerCitations(
+      'XLOOKUP returns a matching value from a result array [1].',
+      numbered,
+      { useLlm: false },
+    );
+    expect(results[0].entailed).toBe(false);
   });
 });

@@ -95,6 +95,29 @@
       "domain": "excel",
       "topic": "analysis",
       "text": "A PivotTable summarises and aggregates large ranges of data by dragging fields into rows, columns, values, and filters without writing any formulas."
+    },
+    {
+      "id": "los-9a-intact",
+      "domain": "cfa",
+      "level": "level2",
+      "topic": "derivatives",
+      "text": "LOS 9.a Describe how a forward rate agreement settles. A forward rate agreement settles in cash at expiration based on the difference between the contracted forward rate and the realized reference rate, discounted back over the FRA period.",
+      "embedding": [0.9, 0.1, 0.0, 0.05]
+    },
+    {
+      "id": "los-9a-split-noise",
+      "domain": "cfa",
+      "level": "level2",
+      "topic": "derivatives",
+      "text": "the realized reference rate, discounted back. Separately, margin requirements for futures are posted daily through mark-to-market, which is a distinct mechanism from FRA cash settlement.",
+      "embedding": [0.2, 0.8, 0.1, 0.0]
+    },
+    {
+      "id": "nb-body-1",
+      "domain": "open-notebook",
+      "topic": "notes",
+      "text": "My personal note on swap valuation: the value of a plain-vanilla interest-rate swap at initiation is zero, and thereafter equals the difference between the present values of the fixed and floating legs.",
+      "embedding": [0.05, 0.1, 0.95, 0.0]
     }
   ]
 }

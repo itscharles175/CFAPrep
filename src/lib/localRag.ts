@@ -39,6 +39,10 @@ import {
   type NotebookSourceHit,
 } from './openNotebook';
 import type { ChunkSearchResult } from './storage/types';
+import { reciprocalRankFusion } from './rag/fusion';
+import { rerankCandidates, type RerankGenerate } from './rag/reranker';
+import { embedText, type EmbedOptions } from './rag/embedder';
+import { entail, type EntailmentGenerate } from './rag/entailment';
 
 export interface LocalRagCitation {
   /** 1-based index matching the [n] marker in the answer. */
@@ -56,6 +60,17 @@ export interface LocalRagAnswer {
   retrieved: number;
   /** How many survived the context budget and were sent to the model. */
   used: number;
+  /**
+   * RAG-4 — per-claim citation-faithfulness results (present when
+   * `verifyCitations` ran). One row per cited claim.
+   */
+  verification?: CitationVerification[];
+  /**
+   * RAG-4 — true when verification found at least one cited claim NOT entailed by
+   * its source, i.e. the answer is a structured grounding-REFUSAL. The UI must
+   * surface this rather than presenting an unsupported answer as grounded.
+   */
+  grounded?: boolean;
 }
 
 export interface LocalRagOptions {
@@ -87,6 +102,48 @@ export interface LocalRagOptions {
    * attempted regardless of `notebookSourcesAvailable`, so tests need no sidecar.
    */
   searchNotebook?: (input: { baseUrl: string; query: string; signal?: AbortSignal }) => Promise<NotebookSourceHit[]>;
+  /**
+   * RAG-2 — activate host HYBRID retrieval. When `true` (and no explicit
+   * `embedding` was passed) the question is embedded via the local `/v1/embeddings`
+   * endpoint and the vector is fed into `chunks.search` so the driver's dormant
+   * vector+BM25 blend lights up. OFFLINE-GRACEFUL: a failed embed call silently
+   * falls back to BM25-only. DEFAULT OFF — the vector blend ships ON only where
+   * rag-eval shows an nDCG lift on the golden set (see slice report); elsewhere
+   * callers opt in. No-op when an `embedding` is already supplied.
+   */
+  hybrid?: boolean;
+  /** Embedder overrides/seam for {@link hybrid} (tests inject `fetchImpl`). */
+  embedOptions?: EmbedOptions;
+  /**
+   * RAG-3 — local-LLM reranker as a 2nd stage. When `true`, retrieval
+   * over-retrieves `rerankTopN` (default 24) candidates, the local model
+   * pointwise-judges each, and the list is re-sorted before budget packing.
+   * DEFAULT OFF — only enable where rag-eval shows an nDCG lift; OFFLINE-GRACEFUL
+   * (a candidate the judge can't score keeps its stage-1 rank).
+   */
+  rerank?: boolean;
+  /** Over-retrieve depth for the reranker stage. Default 24. */
+  rerankTopN?: number;
+  /** Override the reranker's generator (tests). */
+  rerankGenerate?: RerankGenerate;
+  /**
+   * RAG-4 — citation-faithfulness verification. When `true` (the default for
+   * {@link localGroundedAnswer}), each cited claim is checked for entailment
+   * against its cited chunk(s); unsupported claims trigger a structured
+   * grounding-REFUSAL rather than a silent "cite everything" fallback.
+   * OFFLINE-GRACEFUL: entailment degrades to the deterministic lexical check.
+   */
+  verifyCitations?: boolean;
+  /** Entailment threshold for {@link verifyCitations}. Default 0.5. */
+  entailmentThreshold?: number;
+  /** Override the entailment generator (tests). */
+  entailGenerate?: EntailmentGenerate;
+  /**
+   * Use the local-LLM entailment judge (vs the offline lexical fallback) for
+   * citation verification. Default `true`; tests/eval set `false` for
+   * determinism. Independent of {@link verifyCitations}.
+   */
+  entailUseLlm?: boolean;
 }
 
 const SYSTEM_PROMPT = [
@@ -164,27 +221,126 @@ export async function retrieveChunks(opts: LocalRagOptions): Promise<ChunkSearch
     throw new Error('The active storage driver does not support chunk search.');
   }
   const limit = opts.limit ?? 12;
+
+  // RAG-2 — host HYBRID: when asked AND no explicit embedding was passed, embed
+  // the question via the local /v1/embeddings endpoint so the driver's vector +
+  // BM25 blend lights up. OFFLINE-GRACEFUL: a null embedding ⇒ BM25-only.
+  let queryEmbedding = opts.embedding;
+  if (opts.hybrid && (!queryEmbedding || queryEmbedding.length === 0)) {
+    const embedded = await embedText(opts.question, { ...opts.embedOptions, signal: opts.signal });
+    if (embedded) queryEmbedding = embedded;
+  }
+
+  // RAG-3 — when reranking, over-retrieve a wider candidate pool first.
+  const candidateLimit = opts.rerank ? Math.max(opts.rerankTopN ?? 24, limit) : limit;
+
   const [hostChunks, notebookHits] = await Promise.all([
     storage.chunks.search({
       query: opts.question,
-      embedding: opts.embedding,
+      embedding: queryEmbedding,
       domain: opts.domain,
       level: opts.level,
       topic: opts.topic,
-      limit,
+      limit: candidateLimit,
     }),
     retrieveNotebookHits(opts),
   ]);
 
-  if (notebookHits.length === 0) return hostChunks;
+  // RAG-6 — combine host + notebook signals with reciprocal-rank fusion (rank,
+  // not raw score, so the two incomparable score scales can't skew the union) +
+  // calibrated text-dedup. When there are no notebook hits this is a single-list
+  // fusion that preserves the host order exactly, so the historical
+  // host-only path is byte-for-byte unchanged.
+  let merged: ChunkSearchResult[];
+  if (notebookHits.length === 0) {
+    merged = hostChunks;
+  } else {
+    const byId = new Map<string, ChunkSearchResult>();
+    for (const hit of notebookHits) byId.set(hit.id, hit);
+    for (const chunk of hostChunks) byId.set(chunk.id, chunk);
+    const fused = reciprocalRankFusion(
+      [
+        { items: hostChunks },
+        { items: notebookHits },
+      ],
+      { dedupeByText: true },
+    );
+    merged = fused.map((row) => byId.get(row.item.id)!).filter(Boolean);
+  }
 
-  // Union + dedupe by id (host chunks win on collision), then re-rank by score.
-  const byId = new Map<string, ChunkSearchResult>();
-  for (const hit of notebookHits) byId.set(hit.id, hit);
-  for (const chunk of hostChunks) byId.set(chunk.id, chunk);
-  return Array.from(byId.values())
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+  // RAG-3 — pointwise local-LLM rerank of the candidate pool, then truncate.
+  if (opts.rerank && merged.length > 0) {
+    const reranked = await rerankCandidates(
+      opts.question,
+      merged.map((c) => ({ id: c.id, text: c.text || '', score: c.score })),
+      { generate: opts.rerankGenerate, limit, settings: opts.settings, signal: opts.signal },
+    );
+    const byId = new Map(merged.map((c) => [c.id, c]));
+    return reranked.map((r) => byId.get(r.id)!).filter(Boolean);
+  }
+
+  return merged.slice(0, limit);
+}
+
+/** One verified claim from the citation-faithfulness pass (RAG-4). */
+export interface CitationVerification {
+  /** The citation [n] number the claim referenced. */
+  number: number;
+  /** The sentence/claim text checked. */
+  claim: string;
+  /** Whether the cited chunk(s) entail the claim. */
+  entailed: boolean;
+  /** Entailment support score in [0,1]. */
+  score: number;
+}
+
+/** Split an answer into claim-sized sentences carrying their [n] markers. */
+function splitClaims(answer: string): Array<{ text: string; citations: number[] }> {
+  const sentences = (answer || '')
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return sentences.map((text) => {
+    const citations: number[] = [];
+    for (const m of text.matchAll(/\[(\d+)\]/g)) {
+      const n = Number(m[1]);
+      if (n >= 1) citations.push(n);
+    }
+    return { text, citations };
+  });
+}
+
+/**
+ * RAG-4 — verify that each CITED claim in `answer` is actually entailed by the
+ * chunk(s) it cites, using the SHARED GAP-ENTAIL-1 entailment primitive. Returns
+ * one row per claim that carried a citation. OFFLINE-GRACEFUL via `entail`.
+ *
+ * Only claims that carry a `[n]` marker are checked — an uncited sentence makes
+ * no grounding promise, so verifying it would be checking nothing in particular.
+ */
+export async function verifyAnswerCitations(
+  answer: string,
+  numbered: Array<{ chunk: ChunkSearchResult; number: number }>,
+  opts: { threshold?: number; useLlm?: boolean; generate?: EntailmentGenerate; settings?: LocalRagOptions['settings']; signal?: AbortSignal } = {},
+): Promise<CitationVerification[]> {
+  const byNumber = new Map(numbered.map((e) => [e.number, e.chunk]));
+  const claims = splitClaims(answer).filter((c) => c.citations.length > 0);
+  const results: CitationVerification[] = [];
+  for (const claim of claims) {
+    const evidence = claim.citations
+      .map((n) => byNumber.get(n)?.text || '')
+      .filter(Boolean)
+      .join('\n\n');
+    const { entailed, score } = await entail(claim.text, evidence, {
+      threshold: opts.threshold,
+      useLlm: opts.useLlm,
+      generate: opts.generate,
+      settings: opts.settings,
+      signal: opts.signal,
+    });
+    results.push({ number: claim.citations[0], claim: claim.text, entailed, score });
+  }
+  return results;
 }
 
 /**
@@ -248,10 +404,43 @@ export async function localGroundedAnswer(opts: LocalRagOptions): Promise<LocalR
     score: entry.chunk.score,
   }));
 
+  // RAG-4 — citation-faithfulness verification (ON by default here). Each cited
+  // claim must be entailed by the chunk(s) it cites; if any cited claim is NOT
+  // supported we flag the answer as a grounding-REFUSAL (`grounded:false`) so the
+  // UI can refuse to present it as grounded — no silent "cite everything"
+  // fallback. OFFLINE-GRACEFUL: `entail` degrades to the lexical check, and the
+  // whole pass is best-effort (a verifier failure never breaks the answer).
+  let verification: CitationVerification[] | undefined;
+  let grounded: boolean | undefined;
+  if (opts.verifyCitations !== false) {
+    try {
+      verification = await verifyAnswerCitations(answer, numbered, {
+        threshold: opts.entailmentThreshold,
+        useLlm: opts.entailUseLlm,
+        // Default the entailment generator to the SAME generator the answer used,
+        // so an injected (test/real) generator is reused for verification and we
+        // never silently reach for the global `generateText` (network) behind the
+        // caller's back. An explicit `entailGenerate` still wins.
+        generate: opts.entailGenerate ?? (opts.generate as EntailmentGenerate | undefined),
+        settings: opts.settings,
+        signal: opts.signal,
+      });
+      // Only assert (un)groundedness when there was something cited to check.
+      grounded = verification.length === 0 ? true : verification.every((v) => v.entailed);
+    } catch {
+      // Verification is additive — a failure leaves the answer unverified rather
+      // than blocking it. `grounded` stays undefined ("not checked").
+      verification = undefined;
+      grounded = undefined;
+    }
+  }
+
   return {
     answer,
     citations,
     retrieved: retrievedChunks.length,
     used: packed.kept.length,
+    ...(verification !== undefined ? { verification } : {}),
+    ...(grounded !== undefined ? { grounded } : {}),
   };
 }

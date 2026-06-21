@@ -135,6 +135,26 @@ describe('runContentGate', () => {
   it('throws on an unknown kind (caller misuse)', () => {
     expect(() => runContentGate({ kind: 'bogus', value: {} })).toThrow(/unknown kind/i);
   });
+
+  it('default groundedness is wired to the shared entailment (GAP-ENTAIL-1)', async () => {
+    // The gate's DEFAULT groundednessFn is `lexicalGroundednessFn` from the shared
+    // entailment service; assert it agrees with the legacy heuristic numerically
+    // AND that a grounded MCQ passes the default path.
+    const { lexicalGroundednessFn } = await import('../rag/entailment');
+    expect(lexicalGroundednessFn('modified duration bond', CONTEXT)).toBe(
+      tokenOverlapGroundedness('modified duration bond', CONTEXT),
+    );
+    const grounded = runContentGate({
+      kind: 'mcq',
+      value: {
+        question: 'What does modified duration measure for a bond?',
+        options: ['Price sensitivity to yield', 'Coupon amount'],
+        correct: 0,
+      },
+      context: CONTEXT,
+    });
+    expect(grounded.ok).toBe(true);
+  });
 });
 
 describe('gateBatch', () => {

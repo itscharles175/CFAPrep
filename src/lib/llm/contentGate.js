@@ -19,17 +19,23 @@
 //      hallucinated question with zero anchoring to the curriculum is flagged.
 //
 //      ── SEAM (RAG-4 / GAP-ENTAIL-1) ───────────────────────────────────────
-//      The groundedness check is intentionally a pluggable function. In Wave 5
-//      a shared ENTAILMENT SERVICE replaces `tokenOverlapGroundedness` with a
-//      real NLI/entailment call (host-side or sidecar). Pass `groundednessFn`
-//      to `runContentGate` to swap it; the default heuristic keeps the gate
-//      useful and fully offline until then. Do NOT inline the heuristic at call
-//      sites — always go through this seam so the upgrade is one edit.
+//      The groundedness check is intentionally a pluggable function. Wave 5
+//      WIRED this seam to the shared entailment service: the gate's DEFAULT
+//      `groundednessFn` is now `lexicalGroundednessFn` from
+//      `src/lib/rag/entailment.ts` — the SAME token model the RAG-4 citation
+//      verifier uses — so the gate and the verifier can never drift. The gate
+//      stays SYNCHRONOUS + fully OFFLINE (it uses the deterministic lexical leg
+//      of the entailment service, not the async LLM judge). Callers that want
+//      the heavier LLM-backed entailment pass `groundednessFn` explicitly (or use
+//      the async `entail()` directly, as the RAG-4 verifier does). Do NOT inline
+//      a heuristic at call sites — always go through this seam.
 //
 // The gate NEVER throws on bad content: it returns a structured verdict
 // { ok, value?, violations, quarantined? } so callers can drop/route the item
 // without a try/catch around every generation. It DOES throw only on caller
 // misuse (e.g. a missing kind).
+
+import { lexicalGroundednessFn } from '../rag/entailment';
 
 /**
  * @typedef {Object} GateViolation
@@ -75,10 +81,15 @@ function salientTokens(text) {
 }
 
 /**
- * Default groundedness heuristic: fraction of the content's salient tokens that
+ * Legacy groundedness heuristic: fraction of the content's salient tokens that
  * also appear in the grounding context. Returns a score in [0,1]. When there is
  * NO context to check against, returns 1 (grounding is not asserted, so don't
  * penalize) — callers that require grounding must pass a non-empty `context`.
+ *
+ * NOTE (Wave 5): this is now numerically equivalent to the shared
+ * `lexicalGroundednessFn` (same stopword set + same token-overlap math), which
+ * is the gate's wired DEFAULT. It is kept exported for the existing tests +
+ * back-compat. New code should not reach for it directly — go through the seam.
  *
  * @param {string} content   - the generated text (question + options + …)
  * @param {string} context   - the grounding source text (curriculum excerpts)
@@ -174,7 +185,9 @@ export function runContentGate({
   value,
   context = '',
   groundednessThreshold = DEFAULT_GROUNDEDNESS_THRESHOLD,
-  groundednessFn = tokenOverlapGroundedness,
+  // SEAM (GAP-ENTAIL-1): default to the SHARED lexical entailment so the gate and
+  // the RAG-4 citation verifier score grounding through one token model.
+  groundednessFn = lexicalGroundednessFn,
 }) {
   const violations = [];
   // Assigned in every non-throwing branch below (mcq / flashcard); the `else`

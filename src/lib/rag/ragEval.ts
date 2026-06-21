@@ -314,22 +314,29 @@ export interface MetricFloor {
 }
 
 /**
- * Run retrieval + metrics for every query in a fixture at a fixed k.
- * Retrieval pulls `Math.max(k, limit)` candidates (so precision@k is meaningful
- * even when k < limit) and the metrics slice to k internally.
+ * A pluggable retrieval function: given a fixture's corpus + one query judgment,
+ * return an ORDERED list of chunk ids (best first). This is the seam the Wave-5
+ * eval harnesses use to MEASURE a retrieval variant (BM25-only, RRF-fused,
+ * reranked, hybrid) against the SAME metric machinery as the baseline.
  */
-export function evaluateFixture(fixture: RagFixture, k = 5): EvalReport {
+export type RetrievalFn = (chunks: EvalChunk[], judgment: RelevanceJudgment, k: number) => string[];
+
+/** The default (host-mirrored BM25/hybrid) retrieval used by {@link evaluateFixture}. */
+export const defaultRetrieval: RetrievalFn = (chunks, judgment, k) =>
+  searchChunks(chunks, {
+    query: judgment.query,
+    embedding: judgment.embedding,
+    domain: judgment.domain,
+    level: judgment.level,
+    topic: judgment.topic,
+    limit: Math.max(k, 12),
+  }).map((h) => h.id);
+
+/** Compute per-query + aggregate metrics from an ordered id list per query. */
+function metricsFromRetrieval(fixture: RagFixture, k: number, retrieve: RetrievalFn): EvalReport {
   const perQuery: PerQueryMetrics[] = fixture.queries.map((judgment) => {
     const relevant = new Set(judgment.relevant);
-    const hits = searchChunks(fixture.chunks, {
-      query: judgment.query,
-      embedding: judgment.embedding,
-      domain: judgment.domain,
-      level: judgment.level,
-      topic: judgment.topic,
-      limit: Math.max(k, 12),
-    });
-    const retrievedIds = hits.map((h) => h.id);
+    const retrievedIds = retrieve(fixture.chunks, judgment, k);
     return {
       queryId: judgment.id,
       query: judgment.query,
@@ -359,6 +366,18 @@ export function evaluateFixture(fixture: RagFixture, k = 5): EvalReport {
   };
 }
 
+/**
+ * Run retrieval + metrics for every query in a fixture at a fixed k.
+ * Retrieval pulls `Math.max(k, limit)` candidates (so precision@k is meaningful
+ * even when k < limit) and the metrics slice to k internally.
+ *
+ * Accepts an optional `retrieve` override so a Wave-5 retrieval variant can be
+ * scored against the SAME metrics; defaults to the host-mirrored BM25/hybrid.
+ */
+export function evaluateFixture(fixture: RagFixture, k = 5, retrieve: RetrievalFn = defaultRetrieval): EvalReport {
+  return metricsFromRetrieval(fixture, k, retrieve);
+}
+
 /** A failed-floor entry. */
 export interface FloorViolation {
   metric: keyof MetricFloor;
@@ -381,4 +400,137 @@ export function checkFloor(agg: AggregateMetrics, floor: MetricFloor, epsilon = 
     }
   });
   return violations;
+}
+
+// ---------------------------------------------------------------------------
+// Wave-5 measurement harnesses — make each retrieval upgrade PROVABLE
+// ---------------------------------------------------------------------------
+// These let a CI test / the CLI gate score a retrieval VARIANT against the same
+// metrics as the baseline, so "turn it on only if nDCG improves" is a number,
+// not a guess. All pure + offline (no LLM, no network): the reranker harness
+// takes a SYNTHETIC judge so it's deterministic.
+
+/** A single BM25 vs vector channel as an ordered id list, for fusion. */
+function channelIds(chunks: EvalChunk[], judgment: RelevanceJudgment, k: number, channel: 'bm25' | 'vector'): string[] {
+  const limit = Math.max(k, 12);
+  if (channel === 'bm25') {
+    return searchChunks(chunks, {
+      query: judgment.query,
+      domain: judgment.domain,
+      level: judgment.level,
+      topic: judgment.topic,
+      limit,
+    }).map((h) => h.id);
+  }
+  // vector channel: rank purely by query↔chunk cosine (needs a query embedding).
+  if (!Array.isArray(judgment.embedding) || judgment.embedding.length === 0) return [];
+  const scored = chunks
+    .filter((c) => {
+      if (judgment.domain && c.domain !== judgment.domain) return false;
+      if (judgment.level && c.level !== judgment.level) return false;
+      if (judgment.topic && c.topic !== judgment.topic) return false;
+      return Array.isArray(c.embedding) && c.embedding.length > 0;
+    })
+    .map((c) => ({ id: c.id, cos: cosineSimilarity(judgment.embedding!, c.embedding!) }))
+    .sort((a, b) => b.cos - a.cos || (a.id < b.id ? -1 : 1));
+  return scored.slice(0, limit).map((r) => r.id);
+}
+
+/**
+ * RAG-6 measurement — reciprocal-rank-fuse the BM25 + vector channels and score.
+ * Mirrors `src/lib/rag/fusion.ts`'s RRF math (k=60) on id lists so the harness
+ * proves the SAME fusion the host runs. Falls back to BM25-only when no query
+ * embedding is present (so a lexical-only fixture still scores sanely).
+ */
+export const fusionRetrieval =
+  (rrfK = 60): RetrievalFn =>
+  (chunks, judgment, k) => {
+    const bm25 = channelIds(chunks, judgment, k, 'bm25');
+    const vector = channelIds(chunks, judgment, k, 'vector');
+    const lists = [bm25, vector].filter((l) => l.length > 0);
+    if (lists.length === 0) return [];
+    if (lists.length === 1) return lists[0];
+    const acc = new Map<string, number>();
+    for (const list of lists) {
+      list.forEach((id, index) => {
+        acc.set(id, (acc.get(id) ?? 0) + 1 / (rrfK + index + 1));
+      });
+    }
+    return Array.from(acc.entries())
+      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+      .map(([id]) => id);
+  };
+
+/** A synthetic pointwise judge for the reranker harness: 0..1 per (query, chunk). */
+export type SyntheticJudge = (query: string, chunk: EvalChunk) => number;
+
+/**
+ * RAG-3 measurement — over-retrieve top-N (BM25/hybrid), then re-sort by a
+ * SYNTHETIC pointwise judge (the real reranker uses the local LLM; here the judge
+ * is injected so the harness is deterministic + offline). Use a judge that knows
+ * the gold set to model the UPPER BOUND of reranking, or a token-overlap judge to
+ * model a realistic local model.
+ */
+export const rerankRetrieval =
+  (judge: SyntheticJudge, overRetrieve = 24): RetrievalFn =>
+  (chunks, judgment, k) => {
+    const candidates = searchChunks(chunks, {
+      query: judgment.query,
+      embedding: judgment.embedding,
+      domain: judgment.domain,
+      level: judgment.level,
+      topic: judgment.topic,
+      limit: Math.max(overRetrieve, k),
+    });
+    const byId = new Map(chunks.map((c) => [c.id, c]));
+    return candidates
+      .map((hit, index) => {
+        const chunk = byId.get(hit.id);
+        return {
+          id: hit.id,
+          // Judge score primary; original rank as a stable tiebreaker.
+          judge: chunk ? judge(judgment.query, chunk) : 0,
+          stage1: candidates.length - index,
+        };
+      })
+      .sort((a, b) => b.judge - a.judge || b.stage1 - a.stage1 || (a.id < b.id ? -1 : 1))
+      .map((r) => r.id);
+  };
+
+/** A token-overlap synthetic judge — models a weak/realistic local reranker. */
+export const tokenOverlapJudge: SyntheticJudge = (query, chunk) => {
+  const q = new Set(tokenise(query));
+  if (q.size === 0) return 0;
+  const c = new Set(tokenise(chunk.text));
+  let hit = 0;
+  for (const t of q) if (c.has(t)) hit += 1;
+  return hit / q.size;
+};
+
+/** The signed delta of each aggregate metric between a VARIANT and the BASELINE. */
+export interface MetricDelta {
+  recall: number;
+  precision: number;
+  mrr: number;
+  ndcg: number;
+}
+
+/** baseline → variant aggregate metric deltas (variant − baseline). */
+export function metricDelta(baseline: AggregateMetrics, variant: AggregateMetrics): MetricDelta {
+  return {
+    recall: variant.recall - baseline.recall,
+    precision: variant.precision - baseline.precision,
+    mrr: variant.mrr - baseline.mrr,
+    ndcg: variant.ndcg - baseline.ndcg,
+  };
+}
+
+/**
+ * The decision primitive: should a heavier retrieval STAGE ship ON by default?
+ * Only when it improves nDCG on the golden set by at least `minNdcgGain` AND does
+ * not regress recall. This encodes the Wave-5 rule ("enable by default only if it
+ * improves the metric") as a function the gate + tests can assert on.
+ */
+export function shouldEnableByDefault(delta: MetricDelta, minNdcgGain = 1e-4): boolean {
+  return delta.ndcg >= minNdcgGain && delta.recall >= -1e-9;
 }

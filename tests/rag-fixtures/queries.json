@@ -61,6 +61,16 @@
       "id": "q-duration-family",
       "query": "Explain duration measures for bonds including embedded options.",
       "relevant": ["fi-dur-1", "fi-dur-2"]
+    },
+    {
+      "id": "q-fra-settlement",
+      "query": "How does a forward rate agreement settle at expiration?",
+      "relevant": ["los-9a-intact"]
+    },
+    {
+      "id": "q-notebook-swap",
+      "query": "What is the value of a plain-vanilla interest-rate swap at initiation?",
+      "relevant": ["nb-body-1"]
     }
   ]
 }
