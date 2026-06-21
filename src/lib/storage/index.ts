@@ -1,6 +1,7 @@
 import { dexieDriver } from './dexieDriver';
 import { createReadThroughDriver, type ReadThroughDriver } from './fallbackDriver';
 import { migrateData, type MigrationReport } from './migrate';
+import { summarizeMismatches, verifyMigration, type VerificationReport } from './integrity';
 import type { StorageDriver, StorageRegistry } from './types';
 
 export type StorageDriverName = 'dexie' | 'surrealdb';
@@ -157,6 +158,12 @@ export interface CutoverResult {
   error?: string;
   /** Present when a data migration ran as part of the cutover. */
   report?: MigrationReport;
+  /**
+   * Present when a data migration ran AND was integrity-verified (DATA-3). On a
+   * failed verification this carries the per-namespace count/hash comparison
+   * that triggered the auto-rollback, so the UI can show exactly what diverged.
+   */
+  verification?: VerificationReport;
   /** True when the target was already active (no-op). */
   alreadyActive?: boolean;
 }
@@ -171,10 +178,19 @@ export interface CutoverResult {
  *      untouched).
  *   3. Copy data source → target via {@link migrateData}.  If the copy throws,
  *      roll the active driver back to the source and surface the error.
+ *   3b. DATA-3 — verify the copy preserved the data via {@link verifyMigration}
+ *      (per-namespace row count + canonical-JSON SHA-256).  If ANY namespace
+ *      diverged, the copy silently lost / corrupted / duplicated rows: roll the
+ *      active driver back to the source, do NOT persist the preference, and
+ *      return `{ ok: false, error: '…integrity check failed; rolled back…',
+ *      report, verification }`.  Because StudyVault is local-first and
+ *      single-copy, a corrupted cutover is unrecoverable — so a mismatch must
+ *      never be persisted.
  *   4. Persist the preference so the choice survives a reload.
  *
  * `migrate: false` skips the data copy (used for rollback to Dexie, whose data
  * was never cleared, and to avoid duplicating the append-only attempt log).
+ * Skipping the copy also skips verification — there is nothing to verify.
  */
 export async function cutoverTo(
   name: StorageDriverName,
@@ -200,6 +216,41 @@ export async function cutoverTo(
       const msg = err instanceof Error ? err.message : String(err);
       return { ok: false, error: `Migration failed (rolled back to '${from.name}'): ${msg}` };
     }
+
+    // DATA-3 — prove the copy preserved every namespace before committing to it.
+    // A migrateData() that returned without throwing can still have silently
+    // lost / corrupted / duplicated rows; verifyMigration() catches that via a
+    // per-namespace row-count + canonical-JSON SHA-256 comparison. On any
+    // mismatch we auto-roll-back and DO NOT persist the preference.
+    let verification: VerificationReport;
+    try {
+      verification = await verifyMigration(from, to);
+    } catch (err) {
+      // The verifier itself failing (e.g. a read threw) is treated as a failed
+      // verification: roll back rather than commit to an unproven backend.
+      storageRegistry.active = from;
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        error: `Migration integrity check could not run (rolled back to '${from.name}'): ${msg}`,
+        report,
+      };
+    }
+
+    if (!verification.ok) {
+      storageRegistry.active = from;
+      return {
+        ok: false,
+        error: `Migration integrity check failed; rolled back to '${from.name}' (mismatched: ${summarizeMismatches(
+          verification,
+        )}).`,
+        report,
+        verification,
+      };
+    }
+
+    setStoredStoragePreference(name);
+    return { ok: true, report, verification };
   }
 
   setStoredStoragePreference(name);
