@@ -519,7 +519,7 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       PYTHONUNBUFFERED: '1'
-      LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-backend-tests
+      LSATLAB_DATA_DIR: /tmp/lsat-backend-tests
       LSATLAB_OLLAMA_URL: http://127.0.0.1:1
       LSATLAB_LMSTUDIO_URL: http://127.0.0.1:1/v1
       LSATLAB_LLM_RETRIES: '0'
