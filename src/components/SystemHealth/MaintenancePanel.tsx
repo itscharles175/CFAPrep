@@ -44,29 +44,19 @@ import {
   type GuardrailBanner,
 } from '../../lib/maintenancePanel';
 import { getRuntimeMetrics } from '../../lib/runtimeMetricsStore';
+import { fetchLsatSidecarJson } from '../../lib/lsatSidecarClient';
 import { getSidecarLogs, getSidecarStatus, type AggregatedSystemHealth } from '../../lib/systemHealth';
 import type { TrustManifest } from '../../hooks/useTrustManifest';
-
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 
 /** Degrading fetch of the backend runtime-evidence summary (log dir / recent
  *  errors). Never throws — returns null on any failure so the export still
  *  bundles. This is a read-only existing endpoint (/observability/runtime-evidence). */
 async function fetchBackendRuntimeEvidence(timeoutMs = 3000): Promise<unknown> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}/api/observability/runtime-evidence`, {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchLsatSidecarJson('/api/observability/runtime-evidence', {
+    timeoutMs,
+    headers: { accept: 'application/json' },
+  });
+  return res.ok ? res.data : null;
 }
 
 export interface MaintenancePanelProps {

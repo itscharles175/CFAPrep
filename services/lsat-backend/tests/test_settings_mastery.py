@@ -10,11 +10,13 @@ def test_settings_get_and_live_update(client):
     before = client.get("/api/settings").json()
     assert "settings" in before and "provider" in before
     assert before["settings"]["explain_model"] == config.EXPLAIN_MODEL
+    assert before["provider"]["capabilities"]["matrix"]["anthropic"]["sampling"]["seed"] is False
 
     try:
         r = client.put("/api/settings", json={"gen_model": "qwen3:32b"})
         body = r.json()
         assert body["settings"]["gen_model"] == "qwen3:32b"
+        assert body["provider"]["capabilities"]["offline"]["known"] is True
         # applied live to the config module (call sites read it at call time)
         assert config.GEN_MODEL == "qwen3:32b"
 

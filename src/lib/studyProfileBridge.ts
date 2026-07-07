@@ -32,8 +32,8 @@ import {
   studyPlanSettingsToProfile,
   studyProfileToPlanSettingsPatch,
 } from './progressStore';
+import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 // Not yet bound to `keyof paths` — the contract is regenerated a batch later.
 const STUDY_PROFILE_PATH = '/api/study/profile';
 
@@ -53,30 +53,17 @@ async function fetchProfileJson(
   timeoutMs: number,
   init: { method?: string; body?: string } = {},
 ): Promise<{ ok: boolean; status: number; data: unknown } | { ok: false; status: 0; error: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${STUDY_PROFILE_PATH}`, {
-      signal: controller.signal,
-      method: init.method || 'GET',
-      headers: {
-        accept: 'application/json',
-        ...(init.body ? { 'content-type': 'application/json' } : {}),
-      },
-      body: init.body,
-    });
-    let data: unknown = null;
-    try {
-      data = await res.json();
-    } catch {
-      /* non-JSON body */
-    }
-    return { ok: res.ok, status: res.status, data };
-  } catch (err) {
-    return { ok: false, status: 0, error: err instanceof Error ? err.message : String(err) };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchLsatSidecarJson(STUDY_PROFILE_PATH, {
+    timeoutMs,
+    method: init.method || 'GET',
+    headers: {
+      accept: 'application/json',
+      ...(init.body ? { 'content-type': 'application/json' } : {}),
+    },
+    body: init.body,
+  });
+  if (res.reachable) return { ok: res.ok, status: res.status, data: res.data };
+  return { ok: false, status: 0, error: res.error ?? 'LSAT backend unreachable' };
 }
 
 /** Build the local-Dexie fallback profile from the host's `StudyPlanSettings`. */

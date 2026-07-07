@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "LSAT Lab Backend",
-    "version": "0.1.0"
+    "version": "0.9.0"
   },
   "paths": {
     "/api/health": {
@@ -15,11 +15,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "type": "object",
-                  "title": "Response Health Api Health Get"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             }
@@ -6551,6 +6547,225 @@
         }
       }
     },
+    "/api/content-factory/plan": {
+      "post": {
+        "summary": "Content Factory Plan",
+        "description": "Preview (or, with ``activate=true`` + the flag ON, enqueue) the gated plan.\n\nWithout ``activate`` this is a PURE dry run: it ranks coverage deficits by\nthinness x weak-topic analytics, attaches per-target citations, and writes\nnothing — safe offline. With ``activate=true`` AND\n``config.CONTENT_FACTORY_ENABLED`` it enqueues one gated ``GenJob`` per target\n(the worker runs ``validate_candidate`` on every candidate; no gate is\nskipped) and records a rollback-able provenance batch.",
+        "operationId": "content_factory_plan_api_content_factory_plan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FactoryPlanBody"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactoryPlanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/content-factory/{batch_id}/rollback": {
+      "post": {
+        "summary": "Content Factory Rollback",
+        "description": "Reverse a factory batch: cancel pending jobs + soft-delete produced items.\n\nIdempotent: a second call is a clean no-op (already-terminal jobs and\nalready-tombstoned questions are counted but left alone).",
+        "operationId": "content_factory_rollback_api_content_factory__batch_id__rollback_post",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactoryRollbackResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/content-factory/batches": {
+      "get": {
+        "summary": "Content Factory Batches",
+        "description": "Recent factory batches (newest first) for the trust cockpit / UI.",
+        "operationId": "content_factory_batches_api_content_factory_batches_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactoryBatchList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/import/parse": {
       "post": {
         "summary": "Parse",
@@ -9244,7 +9459,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/StudyTodayResponse"
                 }
               }
             }
@@ -9371,6 +9586,75 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SharedStudyProfileOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Uniform backend error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/study/simulate": {
+      "post": {
+        "summary": "Simulate",
+        "description": "PSY-2 — preview the effect of plan edits on projected readiness (NO write).\n\nStrictly pure: reads the active ``StudyPlan`` + the shared ``analytics.forecast``\nmath, computes a BASELINE scenario (current plan, or the optional ``baseline``\noverride) and a PROJECTED scenario (baseline patched with ``edits``), and\nreturns both plus the delta — without touching the DB. ``target_score`` and\n``exam_date`` are real forecast inputs; ``daily_minutes`` and ``weak_topic_focus``\nare modelled as a transparent, clamped effective-slope adjustment (the\nmultiplier + its rationale are returned in ``notes``). Two identical requests\nreturn identical bodies; nothing is persisted (``mutated`` is always False).",
+        "operationId": "simulate_api_study_simulate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulateResponse"
                 }
               }
             }
@@ -13105,7 +13389,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/AdaptiveNextResponse"
                 }
               }
             }
@@ -18395,7 +18679,7 @@
     "/api/generation/passages": {
       "post": {
         "summary": "Create Passage Job",
-        "description": "Queue a passage-first RC job. The durable worker drains it; returns at once.\n\nEnqueues a normal gen job and flips its ``passage_first`` flag so\n``generation.run_job`` dispatches to the passage-first orchestrator (generate\nONE passage, then attach a varied question set). The flag is set on the row\nafter enqueue so the existing ``jobs.enqueue`` signature is untouched.",
+        "description": "Queue a passage-first RC job. The durable worker drains it; returns at once.\n\nEnqueues a gen job WITH ``passage_first=True`` set atomically at insert so\n``generation.run_job`` dispatches to the passage-first orchestrator (generate\nONE passage, then attach a varied question set). audit M8: the flag is no\nlonger flipped in a second commit — that left a window where the worker could\ngrab the queued job before the flag was set and run the wrong pipeline.",
         "operationId": "create_passage_job_api_generation_passages_post",
         "requestBody": {
           "content": {
@@ -19779,6 +20063,254 @@
         "title": "ActivityDay",
         "description": "One day of ``GET /api/analytics/activity`` (mirrors ``analytics.activity``)."
       },
+      "AdaptiveNextRecommendation": {
+        "properties": {
+          "question_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question Id"
+          },
+          "content_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Id"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "q_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Type"
+          },
+          "difficulty": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Difficulty"
+          },
+          "difficulty_estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Difficulty Estimate"
+          },
+          "mastery_fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mastery Fraction"
+          },
+          "expected_success": {
+            "type": "number",
+            "title": "Expected Success"
+          },
+          "information_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Score"
+          },
+          "raw_information": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Information"
+          },
+          "utility_score": {
+            "type": "number",
+            "title": "Utility Score"
+          },
+          "zpd_fit": {
+            "type": "number",
+            "title": "Zpd Fit"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "selector_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selector Strategy"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "leech": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leech"
+          },
+          "attempts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempts"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "expected_success",
+          "utility_score",
+          "zpd_fit",
+          "reason"
+        ],
+        "title": "AdaptiveNextRecommendation",
+        "description": "One item from ``POST /api/adaptivity/next``.\n\nThe route returns either LSAT-native recommendations (``question_id`` +\nembedded ``question``) or host-plane recommendations (``content_id``/``key``).\nOptional fields keep both shapes under one additive schema without changing\neither payload."
+      },
+      "AdaptiveNextResponse": {
+        "properties": {
+          "ability": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ability"
+          },
+          "selector": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Selector"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "recommendations": {
+            "items": {
+              "$ref": "#/components/schemas/AdaptiveNextRecommendation"
+            },
+            "type": "array",
+            "title": "Recommendations"
+          },
+          "guardrails": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Guardrails"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ability",
+          "selector",
+          "count",
+          "recommendations",
+          "guardrails"
+        ],
+        "title": "AdaptiveNextResponse",
+        "description": "``POST /api/adaptivity/next`` response envelope."
+      },
       "AnnotationBody": {
         "properties": {
           "highlights": {
@@ -19990,8 +20522,8 @@
               "$ref": "#/components/schemas/AttemptCreate"
             },
             "type": "array",
-            "title": "Attempts",
-            "default": []
+            "maxItems": 1000,
+            "title": "Attempts"
           }
         },
         "type": "object",
@@ -20044,8 +20576,8 @@
               "$ref": "#/components/schemas/ChoiceEvent"
             },
             "type": "array",
-            "title": "Choice Events",
-            "default": []
+            "maxItems": 500,
+            "title": "Choice Events"
           },
           "client_attempt_id": {
             "anyOf": [
@@ -20489,6 +21021,7 @@
               "type": "integer"
             },
             "type": "array",
+            "maxItems": 5000,
             "title": "Question Ids"
           }
         },
@@ -21828,6 +22361,471 @@
         "type": "object",
         "title": "ExportBody"
       },
+      "FactoryBatch": {
+        "properties": {
+          "batch_id": {
+            "type": "integer",
+            "title": "Batch Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "provenance": {
+            "type": "string",
+            "title": "Provenance"
+          },
+          "gate_bypassed": {
+            "type": "boolean",
+            "title": "Gate Bypassed",
+            "default": false
+          },
+          "rolled_back": {
+            "type": "boolean",
+            "title": "Rolled Back",
+            "default": false
+          },
+          "job_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Job Ids"
+          },
+          "targets": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Targets"
+          },
+          "rollback": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "batch_id",
+          "status",
+          "title",
+          "provenance",
+          "created_at"
+        ],
+        "title": "FactoryBatch"
+      },
+      "FactoryBatchList": {
+        "properties": {
+          "batches": {
+            "items": {
+              "$ref": "#/components/schemas/FactoryBatch"
+            },
+            "type": "array",
+            "title": "Batches"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "FactoryBatchList"
+      },
+      "FactoryEnqueuedJob": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "q_type": {
+            "type": "string",
+            "title": "Q Type"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "priority": {
+            "type": "number",
+            "title": "Priority"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "q_type",
+          "count",
+          "priority"
+        ],
+        "title": "FactoryEnqueuedJob"
+      },
+      "FactoryPlanBody": {
+        "properties": {
+          "activate": {
+            "type": "boolean",
+            "title": "Activate",
+            "default": false
+          },
+          "coverage_floor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000,
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Floor"
+          },
+          "max_per_type": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50,
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Per Type"
+          },
+          "max_types": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50,
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Types"
+          },
+          "q_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Types"
+          }
+        },
+        "type": "object",
+        "title": "FactoryPlanBody",
+        "description": "A request to plan (and optionally enqueue) coverage-driven generation."
+      },
+      "FactoryPlanResponse": {
+        "properties": {
+          "provenance": {
+            "type": "string",
+            "title": "Provenance"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain",
+            "default": "lsat"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "coverage_floor": {
+            "type": "integer",
+            "title": "Coverage Floor"
+          },
+          "max_per_type": {
+            "type": "integer",
+            "title": "Max Per Type"
+          },
+          "max_types": {
+            "type": "integer",
+            "title": "Max Types"
+          },
+          "gate": {
+            "type": "string",
+            "title": "Gate"
+          },
+          "gate_bypassed": {
+            "type": "boolean",
+            "title": "Gate Bypassed",
+            "default": false
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/FactoryTarget"
+            },
+            "type": "array",
+            "title": "Targets"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/FactorySkip"
+            },
+            "type": "array",
+            "title": "Skipped"
+          },
+          "target_count": {
+            "type": "integer",
+            "title": "Target Count",
+            "default": 0
+          },
+          "total_candidates": {
+            "type": "integer",
+            "title": "Total Candidates",
+            "default": 0
+          },
+          "enqueued": {
+            "type": "boolean",
+            "title": "Enqueued",
+            "default": false
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/FactoryEnqueuedJob"
+            },
+            "type": "array",
+            "title": "Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provenance",
+          "enabled",
+          "coverage_floor",
+          "max_per_type",
+          "max_types",
+          "gate"
+        ],
+        "title": "FactoryPlanResponse",
+        "description": "The plan + (when activated) the enqueued, gated batch."
+      },
+      "FactoryRollbackResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "jobs_cancelled": {
+            "type": "integer",
+            "title": "Jobs Cancelled",
+            "default": 0
+          },
+          "jobs_already_terminal": {
+            "type": "integer",
+            "title": "Jobs Already Terminal",
+            "default": 0
+          },
+          "questions_soft_deleted": {
+            "type": "integer",
+            "title": "Questions Soft Deleted",
+            "default": 0
+          },
+          "questions_already_deleted": {
+            "type": "integer",
+            "title": "Questions Already Deleted",
+            "default": 0
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "FactoryRollbackResponse"
+      },
+      "FactorySkip": {
+        "properties": {
+          "q_type": {
+            "type": "string",
+            "title": "Q Type"
+          },
+          "servable": {
+            "type": "integer",
+            "title": "Servable",
+            "default": 0
+          },
+          "anchors": {
+            "type": "integer",
+            "title": "Anchors",
+            "default": 0
+          },
+          "deficit": {
+            "type": "integer",
+            "title": "Deficit",
+            "default": 0
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "q_type",
+          "reason"
+        ],
+        "title": "FactorySkip"
+      },
+      "FactoryTarget": {
+        "properties": {
+          "q_type": {
+            "type": "string",
+            "title": "Q Type"
+          },
+          "servable": {
+            "type": "integer",
+            "title": "Servable"
+          },
+          "anchors": {
+            "type": "integer",
+            "title": "Anchors"
+          },
+          "quarantined": {
+            "type": "integer",
+            "title": "Quarantined",
+            "default": 0
+          },
+          "coverage_floor": {
+            "type": "integer",
+            "title": "Coverage Floor"
+          },
+          "deficit": {
+            "type": "integer",
+            "title": "Deficit"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "mastery": {
+            "type": "number",
+            "title": "Mastery"
+          },
+          "mastery_lower_bound": {
+            "type": "number",
+            "title": "Mastery Lower Bound"
+          },
+          "weakness": {
+            "type": "number",
+            "title": "Weakness"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts",
+            "default": 0
+          },
+          "priority": {
+            "type": "number",
+            "title": "Priority"
+          },
+          "citations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Citations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "q_type",
+          "servable",
+          "anchors",
+          "coverage_floor",
+          "deficit",
+          "count",
+          "mastery",
+          "mastery_lower_bound",
+          "weakness",
+          "priority"
+        ],
+        "title": "FactoryTarget"
+      },
       "ForTypeBody": {
         "properties": {
           "q_type": {
@@ -22569,6 +23567,29 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "service",
+          "version"
+        ],
+        "title": "HealthResponse"
       },
       "HintBody": {
         "properties": {
@@ -24425,6 +25446,329 @@
         "title": "SharedStudyProfileOut",
         "description": "The reconciled shared study profile (inline ``response_model``).\n\nMirrors the host's ``SharedStudyProfile`` TS type\n(``src/lib/types/StudyProfile.ts``): the reconciled scalars plus the\nhost-owned fields, the winning side, and the timestamp the arbiter ordered\nby. ``has_plan`` stays true when an active LSAT ``StudyPlan`` exists (parity\nwith ``GET /api/study/plan``)."
       },
+      "SimulateBody": {
+        "properties": {
+          "edits": {
+            "$ref": "#/components/schemas/SimulateEdits"
+          },
+          "baseline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SimulateEdits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "SimulateBody",
+        "description": "A what-if request: the baseline is the active plan; ``edits`` is the patch.\n\n``baseline`` optionally overrides the comparison baseline (else the active\n``StudyPlan`` is used) so the UI can compare two hypotheticals without a plan."
+      },
+      "SimulateDelta": {
+        "properties": {
+          "projected_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projected Score"
+          },
+          "projected_percentile": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projected Percentile"
+          },
+          "effective_slope_per_week": {
+            "type": "number",
+            "title": "Effective Slope Per Week",
+            "default": 0
+          },
+          "days_to_exam": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days To Exam"
+          },
+          "on_track_changed": {
+            "type": "boolean",
+            "title": "On Track Changed",
+            "default": false
+          },
+          "feasible_changed": {
+            "type": "boolean",
+            "title": "Feasible Changed",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "SimulateDelta",
+        "description": "projected - baseline for the headline readiness signals."
+      },
+      "SimulateEdits": {
+        "properties": {
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 180,
+                "minimum": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Score"
+          },
+          "exam_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exam Date"
+          },
+          "daily_minutes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 600,
+                "minimum": 5
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Minutes"
+          },
+          "weak_topic_focus": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1,
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weak Topic Focus"
+          }
+        },
+        "type": "object",
+        "title": "SimulateEdits",
+        "description": "Proposed plan edits to preview. Every field optional — unset = unchanged."
+      },
+      "SimulateResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "mutated": {
+            "type": "boolean",
+            "title": "Mutated",
+            "default": false
+          },
+          "has_plan": {
+            "type": "boolean",
+            "title": "Has Plan",
+            "default": false
+          },
+          "baseline": {
+            "$ref": "#/components/schemas/SimulateScenario"
+          },
+          "projected": {
+            "$ref": "#/components/schemas/SimulateScenario"
+          },
+          "delta": {
+            "$ref": "#/components/schemas/SimulateDelta"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "baseline",
+          "projected",
+          "delta"
+        ],
+        "title": "SimulateResponse"
+      },
+      "SimulateScenario": {
+        "properties": {
+          "target_score": {
+            "type": "integer",
+            "title": "Target Score"
+          },
+          "exam_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exam Date"
+          },
+          "daily_minutes": {
+            "type": "integer",
+            "title": "Daily Minutes"
+          },
+          "weak_topic_focus": {
+            "type": "number",
+            "title": "Weak Topic Focus"
+          },
+          "days_to_exam": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days To Exam"
+          },
+          "current_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Score"
+          },
+          "projected_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projected Score"
+          },
+          "projected_percentile": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projected Percentile"
+          },
+          "base_slope_per_week": {
+            "type": "number",
+            "title": "Base Slope Per Week",
+            "default": 0
+          },
+          "effective_slope_per_week": {
+            "type": "number",
+            "title": "Effective Slope Per Week",
+            "default": 0
+          },
+          "slope_multiplier": {
+            "type": "number",
+            "title": "Slope Multiplier",
+            "default": 1
+          },
+          "required_slope_per_week": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Slope Per Week"
+          },
+          "on_track": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Track"
+          },
+          "trajectory_feasible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trajectory Feasible"
+          },
+          "gap_to_target": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gap To Target"
+          },
+          "low_confidence": {
+            "type": "boolean",
+            "title": "Low Confidence",
+            "default": true
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "default": "insufficient_data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_score",
+          "daily_minutes",
+          "weak_topic_focus"
+        ],
+        "title": "SimulateScenario",
+        "description": "One side of the comparison (baseline or projected)."
+      },
       "SrsParamsOut": {
         "properties": {
           "weights": {
@@ -25127,6 +26471,342 @@
         "type": "object",
         "title": "StudyProfileBody",
         "description": "A write to the shared study profile (``PUT /api/study/profile``).\n\nEvery field is optional so either side can write only what it owns: the LSAT\nUI sends the scalars (``target_score`` / ``exam_date`` / ``daily_minutes``);\nthe host bridge can additionally send the host-owned ``target_level`` /\n``rest_days`` / ``mock_cadence_days`` / ``topic_weights``. Unsent fields keep\ntheir current reconciled value rather than being zeroed."
+      },
+      "StudyTodayResponse": {
+        "properties": {
+          "has_plan": {
+            "type": "boolean",
+            "title": "Has Plan"
+          },
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Score"
+          },
+          "exam_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exam Date"
+          },
+          "daily_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Minutes"
+          },
+          "days_to_exam": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days To Exam"
+          },
+          "predicted_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Predicted Score"
+          },
+          "forecast": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Forecast"
+          },
+          "due_count": {
+            "type": "integer",
+            "title": "Due Count"
+          },
+          "weakest_types": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Weakest Types"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/StudyTodayTask"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "notebook_context": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Notebook Context"
+          },
+          "intensity": {
+            "type": "string",
+            "title": "Intensity"
+          },
+          "minutes_budget": {
+            "type": "integer",
+            "title": "Minutes Budget"
+          },
+          "estimated_minutes": {
+            "type": "number",
+            "title": "Estimated Minutes"
+          },
+          "leech_count": {
+            "type": "integer",
+            "title": "Leech Count"
+          },
+          "concept_gap_count": {
+            "type": "integer",
+            "title": "Concept Gap Count"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          },
+          "ability_selector": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ability Selector"
+          },
+          "utility_model": {
+            "type": "string",
+            "title": "Utility Model"
+          },
+          "utility": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utility"
+          },
+          "selector_summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Selector Summary"
+          },
+          "include_host": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Host"
+          },
+          "planes_merged": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planes Merged"
+          },
+          "host_task_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Task Count"
+          },
+          "budget_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Source"
+          },
+          "cross_domain": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cross Domain"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "has_plan",
+          "target_score",
+          "exam_date",
+          "daily_minutes",
+          "days_to_exam",
+          "predicted_score",
+          "forecast",
+          "due_count",
+          "weakest_types",
+          "tasks",
+          "notebook_context",
+          "intensity",
+          "minutes_budget",
+          "estimated_minutes",
+          "leech_count",
+          "concept_gap_count",
+          "rationale",
+          "ability_selector",
+          "utility_model",
+          "utility",
+          "selector_summary"
+        ],
+        "title": "StudyTodayResponse",
+        "description": "``GET /api/study/today`` daily plan envelope."
+      },
+      "StudyTodayTask": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "est_minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Minutes"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "q_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Type"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "utility_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utility Model"
+          },
+          "utility_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utility Score"
+          },
+          "selector_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selector Strategy"
+          },
+          "target_difficulty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Difficulty"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "type",
+          "label"
+        ],
+        "title": "StudyTodayTask",
+        "description": "One task from ``GET /api/study/today``.\n\nThe task list is intentionally additive: LSAT tasks, host drills, pacing\ndrills, and future planner rows all share the headline fields below while\npreserving their specialized keys."
       },
       "TagBody": {
         "properties": {

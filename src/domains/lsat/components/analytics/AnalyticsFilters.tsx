@@ -11,9 +11,9 @@ import {
   SelectValue,
 } from "@lsat/components/ui/select";
 import { Sheet, SheetContent, SheetTrigger } from "@lsat/components/ui/sheet";
-import type { Source } from "./tabs";
+import type { AnalyticsRange, Source } from "./types";
 
-export type AnalyticsRange = "7" | "30" | "all";
+export type { AnalyticsRange, Source } from "./types";
 
 export function AnalyticsFilters({
   source,

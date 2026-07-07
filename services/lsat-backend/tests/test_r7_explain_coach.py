@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from sqlmodel import Session, delete, select
 
 from app import ai, coach, embeddings, eval as evalmod, pregenerate
@@ -868,6 +869,42 @@ def test_run_eval_aggregates_and_golden(db_session):
     assert all("golden" in it for it in report["items"])
     # A formatted report renders without error.
     assert "mean overall" in evalmod.format_report(report)
+
+
+def test_release_floor_is_deterministic_and_offline(db_session):
+    result = evalmod.run_release_floor(db_session)
+    report = result["report"]
+
+    assert result["ok"] is True
+    assert result["issues"] == []
+    assert report["n"] >= 1
+    assert report["golden_total"] >= 1
+    assert report["golden_passed"] == report["golden_total"]
+    assert report["golden_pass_rate"] == 1.0
+    assert report["mean_overall"] == 1.0
+
+
+def test_release_floor_blocks_when_thresholds_are_not_met(db_session):
+    result = evalmod.run_release_floor(db_session, min_mean_overall=1.01)
+
+    assert result["ok"] is False
+    assert "mean_overall_below_floor" in result["issues"]
+
+
+def test_release_floor_cli_check_is_deterministic(db_session, capsys):
+    evalmod._main(["--release-floor", "--check"])
+
+    out = capsys.readouterr().out
+    assert "LSATLab Tier-A explanation eval" in out
+    assert "explanation_golden_floor ok=True" in out
+    assert "golden_pass_rate=1.0" in out
+
+
+def test_release_floor_cli_check_exits_nonzero_below_floor(db_session):
+    with pytest.raises(SystemExit) as exc:
+        evalmod._main(["--release-floor", "--check", "--min-mean-overall", "1.01"])
+
+    assert exc.value.code == 1
 
 
 def test_run_eval_passes_rc_passage_to_explainer_and_judge(db_session):

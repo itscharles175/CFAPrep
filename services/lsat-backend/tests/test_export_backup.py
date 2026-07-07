@@ -14,6 +14,7 @@ Covers:
 """
 from __future__ import annotations
 
+import pytest
 from sqlmodel import Session, select
 
 
@@ -115,6 +116,23 @@ def test_validate_envelope_rejects_newer_schema(db_session):
     assert any("newer" in e for e in result["errors"])
 
 
+def test_backend_encrypted_backup_payload_round_trips(db_session):
+    from app import export_backup
+
+    env = export_backup.build_unified_export(db_session)
+    blob = export_backup.encrypt_backup_payload(env, "correct horse battery staple")
+    assert export_backup.is_encrypted_backup_blob(blob) is True
+    assert "data" not in blob
+    assert "hostData" not in blob
+
+    recovered = export_backup.decrypt_backup_payload(
+        blob, "correct horse battery staple"
+    )
+    assert recovered == env
+    with pytest.raises(ValueError, match="invalid passphrase|corrupted"):
+        export_backup.decrypt_backup_payload(blob, "wrong passphrase")
+
+
 def test_round_trip_import_is_idempotent(db_session):
     """A KEYED question (stable external_id + content_hash) survives the unified
     round-trip without duplicating — import_bank dedups by those keys (seed rows
@@ -200,8 +218,6 @@ def test_validate_rejects_official_content(db_session):
 
 
 def test_import_official_content_raises(db_session):
-    import pytest
-
     from app import export_backup
 
     env = _official_envelope(export_backup)
@@ -274,7 +290,10 @@ def test_restore_count_increments_on_import(db_session):
 # --- HTTP routes + OpenAPI --------------------------------------------------
 def test_export_routes_round_trip_via_http(client):
     # Build
-    r = client.post("/api/export/backup", json={"include_history": True})
+    r = client.post(
+        "/api/export/backup",
+        json={"include_history": True, "allow_plaintext": True},
+    )
     assert r.status_code == 200, r.text
     env = r.json()
     export_id = env["exportId"]
@@ -301,6 +320,43 @@ def test_export_routes_round_trip_via_http(client):
     body = rl.json()
     assert body["total"] >= 1
     assert any(it["export_id"] == export_id for it in body["items"])
+
+
+def test_export_route_requires_passphrase_or_explicit_plaintext(client):
+    r = client.post("/api/export/backup", json={"include_history": True})
+    assert r.status_code == 400
+    assert r.json()["detail"]["error"] == "backup_passphrase_required"
+
+
+def test_export_route_can_encrypt_validate_and_import(client):
+    passphrase = "correct horse battery staple"
+    r = client.post("/api/export/backup", json={"passphrase": passphrase})
+    assert r.status_code == 200, r.text
+    blob = r.json()
+    assert blob["algorithm"] == "AES-GCM-256"
+    assert blob["kdf"] == "PBKDF2-SHA256-200000"
+    assert "data" not in blob
+    assert "hostData" not in blob
+
+    rv_missing = client.post("/api/export/validate", json={"envelope": blob})
+    assert rv_missing.status_code == 400
+    assert rv_missing.json()["detail"]["error"] == "encrypted_backup_passphrase_required"
+
+    rv = client.post(
+        "/api/export/validate",
+        json={"envelope": blob, "passphrase": passphrase},
+    )
+    assert rv.status_code == 200
+    assert rv.json()["ok"] is True
+    assert rv.json()["encrypted"] is True
+
+    ri = client.post(
+        "/api/export/import",
+        json={"envelope": blob, "passphrase": passphrase},
+    )
+    assert ri.status_code == 200, ri.text
+    assert ri.json()["ok"] is True
+    assert ri.json()["encrypted"] is True
 
 
 def test_import_official_via_http_is_400(client):

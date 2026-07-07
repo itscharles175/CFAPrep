@@ -39,6 +39,7 @@ Run
 """
 from __future__ import annotations
 
+import argparse
 import inspect
 import json
 import re
@@ -322,6 +323,60 @@ def run_eval(session: Session, *, explainer: Optional[Explainer] = None,
     }
 
 
+def _release_floor_explainer(stem: str, prompt: str, choices: list[dict],
+                             correct: str, **kwargs) -> str:
+    lines = [f"The correct answer is ({correct})."]
+    for c in choices:
+        verdict = "correct answer" if c["label"] == correct else "incorrect trap"
+        lines.append(f"({c['label']}) {verdict}: {c['text']}")
+    if kwargs.get("passage_text"):
+        lines.append("The passage evidence is considered for this explanation.")
+    return "\n".join(lines)
+
+
+def _release_floor_judge(prompt: str) -> str:
+    return json.dumps({
+        "addresses_each_choice": 1.0,
+        "no_hallucination": 1.0,
+        "notes": "deterministic release floor",
+    })
+
+
+def run_release_floor(session: Session, *, limit: int = len(GOLDEN_SET),
+                      min_mean_overall: float = 0.99,
+                      min_golden_pass_rate: float = 1.0) -> dict:
+    """Run the deterministic explanation quality floor used by release gates.
+
+    This deliberately does not invoke the local model. It proves that the eval
+    harness, seeded question data, golden checks, and aggregate scoring still
+    work before live/provider evals are trusted.
+    """
+    report = run_eval(
+        session,
+        explainer=_release_floor_explainer,
+        judge=_release_floor_judge,
+        limit=limit,
+    )
+    issues: list[str] = []
+    if report["n"] < 1:
+        issues.append("no_questions_scored")
+    if report["golden_total"] < 1:
+        issues.append("no_golden_questions_scored")
+    if report["golden_pass_rate"] is None or report["golden_pass_rate"] < min_golden_pass_rate:
+        issues.append("golden_pass_rate_below_floor")
+    if report["mean_overall"] is None or report["mean_overall"] < min_mean_overall:
+        issues.append("mean_overall_below_floor")
+    return {
+        "ok": not issues,
+        "issues": issues,
+        "thresholds": {
+            "min_mean_overall": min_mean_overall,
+            "min_golden_pass_rate": min_golden_pass_rate,
+        },
+        "report": report,
+    }
+
+
 def format_report(report: dict) -> str:
     """A short human-readable summary of a :func:`run_eval` report."""
     lines = [
@@ -344,12 +399,68 @@ def format_report(report: dict) -> str:
     return "\n".join(lines)
 
 
-def _main() -> None:  # pragma: no cover - CLI entrypoint, hits real Ollama
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run LSAT explanation evals.")
+    parser.add_argument("--release-floor", action="store_true",
+                        help="Run the deterministic offline release floor.")
+    parser.add_argument("--check", action="store_true",
+                        help="Exit non-zero if the selected eval misses its floor.")
+    parser.add_argument("--seed", action="store_true",
+                        help="Seed the sample LSAT bank before running.")
+    parser.add_argument("--json", action="store_true",
+                        help="Print machine-readable JSON instead of text.")
+    parser.add_argument("--limit", type=int, default=len(GOLDEN_SET))
+    parser.add_argument("--min-mean-overall", type=float, default=0.99)
+    parser.add_argument("--min-golden-pass-rate", type=float, default=1.0)
+    return parser.parse_args(argv)
+
+
+def _main(argv: list[str] | None = None) -> None:  # pragma: no cover - CLI entrypoint
+    args = _parse_args(argv)
     from .db import engine
 
+    if args.seed:
+        from . import seed as seed_mod
+
+        seed_mod.seed(reset=True)
+
     with Session(engine) as session:
-        report = run_eval(session)
-    print(format_report(report))
+        if args.release_floor:
+            result = run_release_floor(
+                session,
+                limit=args.limit,
+                min_mean_overall=args.min_mean_overall,
+                min_golden_pass_rate=args.min_golden_pass_rate,
+            )
+            report = result["report"]
+        else:
+            report = run_eval(session, limit=args.limit)
+            result = {
+                "ok": (
+                    report["mean_overall"] is not None
+                    and report["mean_overall"] >= args.min_mean_overall
+                    and report["golden_pass_rate"] is not None
+                    and report["golden_pass_rate"] >= args.min_golden_pass_rate
+                ),
+                "issues": [],
+                "report": report,
+            }
+
+    if args.json:
+        print(json.dumps(result if args.release_floor else report, indent=2, sort_keys=True))
+    else:
+        print(format_report(report))
+        if args.release_floor:
+            print(
+                "explanation_golden_floor "
+                f"ok={result['ok']} "
+                f"golden_pass_rate={report['golden_pass_rate']} "
+                f"mean_overall={report['mean_overall']}"
+            )
+            if result["issues"]:
+                print("issues:", ", ".join(result["issues"]))
+    if args.check and not result["ok"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1,0 +1,81 @@
+{
+  "schema": "studyvault.source-grounded-answer-fixture.v1",
+  "_comment": "Tiny synthetic CFA + LSAT source-grounded answer benchmark. No official curriculum or LSAT content; all snippets are hand-written fixtures.",
+  "chunks": [
+    {
+      "id": "cfa-duration",
+      "domain": "cfa",
+      "documentId": "fixture-cfa-fixed-income",
+      "locator": "cfa-fi:duration",
+      "text": "Modified duration estimates the percentage change in a bond price for a small parallel shift in yield when expected cash flows are unchanged."
+    },
+    {
+      "id": "cfa-ddm",
+      "domain": "cfa",
+      "documentId": "fixture-cfa-equity",
+      "locator": "cfa-equity:ddm",
+      "text": "The dividend discount model values common equity as the present value of expected future dividends discounted at the required return on equity."
+    },
+    {
+      "id": "lsat-necessary-assumption",
+      "domain": "lsat",
+      "documentId": "fixture-lsat-logical-reasoning",
+      "locator": "lsat-lr:necessary-assumption",
+      "text": "A necessary-assumption answer states something the argument requires; negating a correct necessary assumption weakens the conclusion."
+    },
+    {
+      "id": "lsat-main-point",
+      "domain": "lsat",
+      "documentId": "fixture-lsat-reading-comprehension",
+      "locator": "lsat-rc:main-point",
+      "text": "A main-point answer captures the passage author's central claim rather than a supporting detail or example."
+    }
+  ],
+  "cases": [
+    {
+      "id": "cfa-duration-grounded",
+      "domain": "cfa",
+      "question": "What does modified duration estimate?",
+      "answer": "Modified duration estimates the percentage change in a bond price for a small parallel yield shift when expected cash flows are unchanged [1].",
+      "citations": [{ "number": 1, "chunkId": "cfa-duration" }],
+      "requiredTerms": ["modified duration", "percentage change", "yield"],
+      "expectGrounded": true
+    },
+    {
+      "id": "cfa-ddm-grounded",
+      "domain": "cfa",
+      "question": "How does the dividend discount model value equity?",
+      "answer": "The dividend discount model values common equity as the present value of expected future dividends discounted at the required return on equity [1].",
+      "citations": [{ "number": 1, "chunkId": "cfa-ddm" }],
+      "requiredTerms": ["dividend discount model", "present value", "required return"],
+      "expectGrounded": true
+    },
+    {
+      "id": "lsat-necessary-assumption-grounded",
+      "domain": "lsat",
+      "question": "What makes an answer a necessary assumption?",
+      "answer": "A necessary-assumption answer states something the argument requires, and negating the correct answer weakens the conclusion [1].",
+      "citations": [{ "number": 1, "chunkId": "lsat-necessary-assumption" }],
+      "requiredTerms": ["necessary-assumption", "requires", "negating"],
+      "expectGrounded": true
+    },
+    {
+      "id": "lsat-main-point-grounded",
+      "domain": "lsat",
+      "question": "What should a main-point answer capture?",
+      "answer": "A main-point answer should capture the passage author's central claim, not merely a supporting detail or example [1].",
+      "citations": [{ "number": 1, "chunkId": "lsat-main-point" }],
+      "requiredTerms": ["main-point", "central claim", "supporting detail"],
+      "expectGrounded": true
+    },
+    {
+      "id": "unsupported-cross-domain-rejected",
+      "domain": "cfa",
+      "question": "What does modified duration estimate?",
+      "answer": "Modified duration tells whether a necessary assumption weakens an LSAT conclusion [1].",
+      "citations": [{ "number": 1, "chunkId": "cfa-duration" }],
+      "requiredTerms": ["modified duration"],
+      "expectGrounded": false
+    }
+  ]
+}

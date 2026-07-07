@@ -12,6 +12,8 @@
  */
 
 import { DEFAULT_LLM_SETTINGS, getLlmSettings } from './localLlm';
+import { normalizeLoopbackHttpBaseUrl } from './localUrlPolicy';
+import { stripThink } from './stripThink';
 
 export interface VisionImageInput {
   /** PNG/JPEG/WebP bytes encoded as base64 (no data URL prefix; we add it). */
@@ -40,7 +42,10 @@ export interface VisionGenerateResult {
  * Kept local to avoid coupling against the `.js` module beyond what's needed.
  */
 function normalizeBaseUrl(baseUrl: string | undefined): string {
-  return (baseUrl || DEFAULT_LLM_SETTINGS.baseUrl).trim().replace(/\/+$/, '');
+  return normalizeLoopbackHttpBaseUrl(
+    baseUrl || DEFAULT_LLM_SETTINGS.baseUrl,
+    'Local vision model base URL',
+  );
 }
 
 /** Build the data URL for an image input, defaulting mime to PNG. */
@@ -108,5 +113,5 @@ export async function generateTextWithImages(
     choices?: Array<{ message?: { content?: string } }>;
   };
   const content = data?.choices?.[0]?.message?.content || '';
-  return { text: String(content), usedImages: images.length };
+  return { text: stripThink(String(content)), usedImages: images.length };
 }

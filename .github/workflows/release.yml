@@ -20,8 +20,8 @@
 #   ONB_GIT_URL repo variable is unset the open-notebook build step is skipped
 #   with a loud ::warning::, the build summary records "RAG: OFF", and the
 #   uploaded bundle's artifact name is suffixed `-norag` so it's unmistakable
-#   in the Release assets. Set ONB_GIT_URL (and optionally ONB_GIT_REF) to ship
-#   a full RAG-enabled build.
+#   in the Release assets. Set ONB_GIT_URL and full-SHA ONB_GIT_REF to ship a
+#   full RAG-enabled build.
 
 name: Release
 
@@ -38,7 +38,7 @@ jobs:
   verify:
     name: Verify (web build + tests)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
@@ -48,13 +48,75 @@ jobs:
           node-version: 24
           cache: npm
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - run: npm ci --legacy-peer-deps
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Provision LSAT backend venv
+        run: |
+          python -m venv .venv-lsat
+          .venv-lsat/bin/python -m pip install --upgrade pip wheel
+          .venv-lsat/bin/python -m pip install "services/lsat-backend"
+
+      - name: Verify release tag matches app version
+        run: npm run check:versions -- --git-tag
 
       - run: npm run lint
       - run: npx tsc --noEmit
+      - run: npm run typecheck:lsat
       - run: npm test
+      - run: npm run test:lsat:ci
       - run: npm run build
+      - run: npm run bundle:report
+      - run: npm run perf:regression
       - run: npm run content:validate
+      - run: npm run check:no-egress
+      - run: npm run check:sidecar-fetches
+      - run: npm run check:docs
+      - run: npm run vault-archive:drill
+      - name: Prompt regression fixture floor
+        run: |
+          node --import ./scripts/register-ts-loader.mjs scripts/prompt-regression-fixture-floor.mjs
+          (cd services/lsat-backend && ../../.venv-lsat/bin/python -m app.prompt_contracts --check)
+      - name: RAG retrieval-eval floor
+        run: node --import ./scripts/register-ts-loader.mjs scripts/rag-eval.mjs
+      - name: Citation faithfulness floor
+        run: node --import ./scripts/register-ts-loader.mjs scripts/citation-faithfulness-eval.mjs
+      - name: Source-grounded answer benchmark floor
+        run: node --import ./scripts/register-ts-loader.mjs scripts/source-grounded-answer-eval.mjs
+      - name: Generated content gate floor
+        run: node --import ./scripts/register-ts-loader.mjs scripts/generated-content-gate-eval.mjs
+      - name: Generation quality regression floor
+        working-directory: services/lsat-backend
+        env:
+          LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-generation-gate
+        run: |
+          ../../.venv-lsat/bin/python - <<'PY'
+          from sqlmodel import Session
+          from app.db import engine, init_db
+          from app import jobs
+
+          init_db()
+          with Session(engine) as session:
+              result = jobs.run_generation_gate_eval(session, notes="github_release_verify")
+          metrics = result["metrics"]
+          assert result["status"] == "ok", result
+          assert metrics["generation_quality_cases"] >= 3, metrics
+          assert metrics["generation_quality_failed_cases"] == 0.0, metrics
+          assert metrics["generation_quality_clean_pass"] >= 1.0, metrics
+          assert metrics["generation_quality_trap_metadata_rejected"] >= 1.0, metrics
+          assert metrics["generation_quality_weak_distractor_rejected"] >= 1.0, metrics
+          print(result["kind"], result["status"], metrics["generation_quality_cases"])
+          PY
+      - name: Explanation golden floor
+        working-directory: services/lsat-backend
+        env:
+          LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-explanation-gate
+        run: ../../.venv-lsat/bin/python -m app.eval --release-floor --check --seed
       - run: npm audit --omit=dev --audit-level=high
 
   build:
@@ -144,8 +206,8 @@ jobs:
 
       # open-notebook (RAG): an external project living in gitignored spike/, so
       # there is no committed source to build from. OPTIONAL sidecar (OPS-5):
-      # built ONLY when a clone source is configured via the ONB_GIT_URL (+
-      # optional ONB_GIT_REF) repo variables; otherwise the release is a
+      # built ONLY when a clone source is configured via the ONB_GIT_URL +
+      # full-SHA ONB_GIT_REF repo variables; otherwise the release is a
       # DELIBERATE RAG-less artifact and says so loudly. The Rust supervisor
       # (build_sidecar_specs) marks the open-notebook API + worker `optional`, so
       # a bundle without the open-notebook resource degrades gracefully (RAG
@@ -160,15 +222,22 @@ jobs:
           ONB_GIT_REF: ${{ vars.ONB_GIT_REF }}
         run: |
           if [ -z "${ONB_GIT_URL}" ]; then
-            echo "::warning title=RAG-less build::ONB_GIT_URL repo variable is not set — skipping the OPTIONAL open-notebook RAG sidecar. This bundle will NOT include RAG / notebook features and is labelled '-norag'. Set ONB_GIT_URL (and optionally ONB_GIT_REF) to ship a full RAG build."
+            echo "::warning title=RAG-less build::ONB_GIT_URL repo variable is not set — skipping the OPTIONAL open-notebook RAG sidecar. This bundle will NOT include RAG / notebook features and is labelled '-norag'. Set ONB_GIT_URL and full-SHA ONB_GIT_REF to ship a full RAG build."
             echo "rag_enabled=false" >> "$GITHUB_OUTPUT"
             echo "RAG_ENABLED=false" >> "$GITHUB_ENV"
             exit 0
           fi
-          git clone "${ONB_GIT_URL}" spike/open-notebook
-          if [ -n "${ONB_GIT_REF}" ]; then
-            git -C spike/open-notebook checkout "${ONB_GIT_REF}"
+          if [ -z "${ONB_GIT_REF}" ]; then
+            echo "::error title=Open Notebook source is not pinned::ONB_GIT_REF must be set to a full 40-character commit SHA when ONB_GIT_URL is set."
+            exit 1
           fi
+          if ! printf '%s' "${ONB_GIT_REF}" | grep -Eq '^[0-9a-fA-F]{40}$'; then
+            echo "::error title=Open Notebook source is not pinned::ONB_GIT_REF must be a full 40-character commit SHA, not a branch, tag, or short SHA."
+            exit 1
+          fi
+          git clone "${ONB_GIT_URL}" spike/open-notebook
+          git -C spike/open-notebook checkout --detach "${ONB_GIT_REF}"
+          npm run check:onb-source -- --dir spike/open-notebook --expected "${ONB_GIT_REF}"
           npm run build:onb-binary
           echo "rag_enabled=true" >> "$GITHUB_OUTPUT"
           echo "RAG_ENABLED=true" >> "$GITHUB_ENV"
@@ -191,6 +260,9 @@ jobs:
             fi
           done
           [ "$missing" = "0" ]
+
+      - name: Verify sidecar provenance manifest
+        run: npm run check:sidecar-provenance
 
       # OPS-5: record the required-vs-optional outcome in the job summary so the
       # RAG-less build is a deliberate, visible decision rather than a silent gap.
@@ -259,6 +331,13 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx tauri build ${{ matrix.target-args }}
 
+      - name: Generate release manifest and SBOM evidence
+        run: >
+          node scripts/release-manifest.mjs write
+          --require-assets
+          --require-sidecar-provenance
+          --output dist/studyvault-release-manifest-${{ matrix.os }}.json
+
       # OPS-5: a RAG-less build is labelled `-norag` so the artifact (and the
       # downstream Release asset) is unmistakably a deliberate, RAG-disabled
       # bundle. A full build keeps the plain `studyvault-<os>` name.
@@ -266,7 +345,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: studyvault-${{ matrix.os }}${{ steps.onb.outputs.rag_enabled == 'true' && '' || '-norag' }}
-          path: ${{ matrix.artifact-glob }}
+          path: |
+            ${{ matrix.artifact-glob }}
+            dist/studyvault-release-manifest-${{ matrix.os }}.json
           # audit M20 — fail the build if the installer glob matched nothing
           # (a bad glob / empty Tauri bundle dir) instead of publishing a release
           # with missing installers.

@@ -14,12 +14,12 @@
 //      top-level `seed` and honour `temperature`/`top_p`; we set all three so a
 //      structured call is as close to greedy-deterministic as the backend allows.
 //
-//   2. CONTENT-ADDRESSED CACHE KEY — `cacheKey({provider, model, temperature,
-//      seed, prompt})` returns a sha256 hex digest. The host caches generated
-//      content by this key; the backend (BACK-1, later) must reproduce the SAME
-//      key for the SAME inputs, so the exact serialization is frozen and
-//      documented below. DO NOT change it without bumping CACHE_KEY_VERSION and
-//      updating the backend.
+//   2. CONTENT-ADDRESSED CACHE KEY — `cacheKey({provider, model, system, format,
+//      temperature, top_p, seed, prompt})` returns a sha256 hex digest. The host
+//      caches generated content by this key; the backend (BACK-1, later) must
+//      reproduce the SAME key for the SAME inputs, so the exact serialization is
+//      frozen and documented below. DO NOT change it without bumping
+//      CACHE_KEY_VERSION and updating the backend.
 //
 // Everything here is pure + offline. sha256 uses Web Crypto `subtle.digest`
 // when available (browser + Tauri webview + jsdom/Node webcrypto) and falls
@@ -74,7 +74,7 @@ export function withDeterminism(body, opts = {}) {
 // Bump this if the key serialization below ever changes; the backend (BACK-1)
 // keys off the same version so a host/backend mismatch is detectable rather
 // than silently producing two different keys for the same logical input.
-export const CACHE_KEY_VERSION = 1;
+export const CACHE_KEY_VERSION = 2;
 
 /**
  * EXACT cache-key format — frozen contract for host <-> backend reproducibility.
@@ -85,18 +85,24 @@ export const CACHE_KEY_VERSION = 1;
  *     v<CACHE_KEY_VERSION>\n
  *     provider=<provider>\n
  *     model=<model>\n
+ *     system=<canonical system>\n
+ *     format=<canonical response format/schema>\n
  *     temperature=<temperatureCanonical>\n
+ *     top_p=<topPCanonical>\n
  *     seed=<seed>\n
  *     prompt=<prompt>
  *
  * Field rules (so independent implementations agree byte-for-byte):
  *   - provider / model : trimmed string; missing -> "" (empty).
+ *   - system / format  : JSON-canonical contract fields; missing -> "".
+ *                        Object keys sort recursively so equivalent schemas
+ *                        share a key independent of insertion order.
  *   - temperature      : canonical number string via canonicalNumber() — an
  *                        integer-valued temperature renders WITHOUT a trailing
  *                        ".0" (e.g. 0, not 0.0), non-integers via Number#toString.
  *                        Missing/non-finite -> "" (empty), so "no temperature"
  *                        and "temperature 0" are DISTINCT keys.
- *   - seed             : integer rendered via canonicalNumber(); missing -> "".
+ *   - top_p / seed     : rendered via canonicalNumber(); missing -> "".
  *   - prompt           : the full prompt string verbatim (NOT trimmed — leading/
  *                        trailing whitespace is significant to the model and so
  *                        to the key). Non-string -> "".
@@ -105,8 +111,26 @@ export const CACHE_KEY_VERSION = 1;
  * `prompt=` field and it is LAST, so a prompt containing newlines or `=` cannot
  * be confused with a later field (nothing follows it).
  */
-export async function cacheKey({ provider, model, temperature, seed, prompt } = {}) {
-  return sha256Hex(cacheKeyPreimage({ provider, model, temperature, seed, prompt }));
+export async function cacheKey({
+  provider,
+  model,
+  system,
+  format,
+  temperature,
+  top_p,
+  seed,
+  prompt,
+} = {}) {
+  return sha256Hex(cacheKeyPreimage({
+    provider,
+    model,
+    system,
+    format,
+    temperature,
+    top_p,
+    seed,
+    prompt,
+  }));
 }
 
 /**
@@ -114,13 +138,25 @@ export async function cacheKey({ provider, model, temperature, seed, prompt } = 
  * the conformance test) so the backend implementer can diff their serialization
  * against this without having to also match a hash.
  */
-export function cacheKeyPreimage({ provider, model, temperature, seed, prompt } = {}) {
+export function cacheKeyPreimage({
+  provider,
+  model,
+  system,
+  format,
+  temperature,
+  top_p,
+  seed,
+  prompt,
+} = {}) {
   const fields = [
     'llm-cache',
     `v${CACHE_KEY_VERSION}`,
     `provider=${str(provider)}`,
     `model=${str(model)}`,
+    `system=${contractValue(system)}`,
+    `format=${contractValue(format)}`,
     `temperature=${canonicalNumber(temperature)}`,
+    `top_p=${canonicalNumber(top_p)}`,
     `seed=${canonicalNumber(seed)}`,
     `prompt=${typeof prompt === 'string' ? prompt : ''}`,
   ];
@@ -129,6 +165,27 @@ export function cacheKeyPreimage({ provider, model, temperature, seed, prompt } 
 
 function str(v) {
   return typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim();
+}
+
+function contractValue(v) {
+  if (v == null) return '';
+  if (typeof v === 'string') return JSON.stringify(v);
+  try {
+    return JSON.stringify(stableJsonValue(v));
+  } catch {
+    return JSON.stringify(String(v));
+  }
+}
+
+function stableJsonValue(v) {
+  if (v == null || typeof v !== 'object') {
+    if (typeof v === 'number' && !Number.isFinite(v)) return String(v);
+    return v;
+  }
+  if (Array.isArray(v)) return v.map(stableJsonValue);
+  const out = {};
+  for (const key of Object.keys(v).sort()) out[key] = stableJsonValue(v[key]);
+  return out;
 }
 
 // Canonical numeric rendering for the key: finite numbers via Number#toString

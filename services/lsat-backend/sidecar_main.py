@@ -65,10 +65,12 @@ _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
-    # The local API is UNAUTHENTICATED and serves private study data and
-    # official-content previews. Binding it to a non-loopback interface would
-    # expose that to anyone on the network, so refuse unless the user has
-    # explicitly opted in. (Default 127.0.0.1 is unaffected.)
+    # The local API serves private study data and official-content previews. It
+    # is unauthenticated unless LSATLAB_LOCAL_API_TOKEN is set by the launcher,
+    # and even then the token is a local-process secret, not a remote-service
+    # hardening story. Binding to a non-loopback interface would expose the API
+    # to the network, so refuse unless the user has explicitly opted in.
+    # (Default 127.0.0.1 is unaffected.)
     allow_remote = os.environ.get("LSATLAB_ALLOW_REMOTE_API", "0").lower() in (
         "1", "true", "yes", "on",
     )

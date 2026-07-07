@@ -4,9 +4,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlmodel import Session, func, select
 
-from .. import ai, embeddings, queries, scoring, serializers
+from .. import ai, config, embeddings, queries, scoring, serializers
 from ..db import get_session
 from ..models import (
     Attempt,
@@ -23,9 +24,15 @@ from ..schemas import PrepTestSummary
 router = APIRouter()
 
 
-@router.get("/health", response_model=dict[str, bool])
-def health() -> dict[str, bool]:
-    return {"ok": True}
+class HealthResponse(BaseModel):
+    ok: bool
+    service: str
+    version: str
+
+
+@router.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    return HealthResponse(ok=True, service="lsat-backend", version=config.APP_VERSION)
 
 
 @router.get("/ai/health", response_model=dict[str, Any])

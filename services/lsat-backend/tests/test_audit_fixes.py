@@ -148,6 +148,7 @@ def test_settings_store_rejects_out_of_domain(monkeypatch):
 def test_cloud_generate_schema_uses_tool_use(monkeypatch):
     from app.llm import cloud
 
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
     captured: dict = {}
     # Don't touch the metrics DB in this transport-only test.
     monkeypatch.setattr(cloud.observability, "persist_cloud_usage", lambda *a, **k: 0.0)
@@ -193,6 +194,8 @@ def test_cloud_generate_schema_uses_tool_use(monkeypatch):
 def test_cloud_generate_raises_llmerror_on_terminal_error(monkeypatch):
     from app.llm import cloud
     from app.llm.base import LLMError
+
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
 
     class _Resp:
         def raise_for_status(self):

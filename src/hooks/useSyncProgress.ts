@@ -33,9 +33,9 @@ import type {
   CrossDomainMastery,
   CrossDomainReviewCard,
 } from '../lib/dataDictionary';
+import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 import { getStorage } from '../lib/storage';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 const PROGRESS_UPDATES_PATH = '/api/sync/progress-updates';
 
 /** ~5 minutes between background catch-up pushes. */
@@ -145,42 +145,36 @@ export async function pushHostProgress(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<
     return { ok: true, reachable: true, sent: 0, upserted: 0, detail: 'No host progress to sync.' };
   }
   const body: ProgressUpdatesBody = { snapshots };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${PROGRESS_UPDATES_PATH}`, {
-      signal: controller.signal,
-      method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      return {
-        ok: false,
-        reachable: true,
-        sent: snapshots.length,
-        detail: `LSAT backend responded ${res.status}.`,
-      };
-    }
-    let data: RawProgressUpdatesResponse = {};
-    try {
-      data = (await res.json()) as RawProgressUpdatesResponse;
-    } catch {
-      /* non-JSON body — still a 2xx, treat as accepted */
-    }
+  const res = await fetchLsatSidecarJson<RawProgressUpdatesResponse>(PROGRESS_UPDATES_PATH, {
+    timeoutMs,
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.reachable) {
     return {
-      ok: true,
+      ok: false,
+      reachable: false,
+      sent: snapshots.length,
+      detail: `Sidecar offline — ${res.error ?? 'unreachable'}.`,
+    };
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
       reachable: true,
       sent: snapshots.length,
-      upserted: typeof data.upserted === 'number' ? data.upserted : undefined,
-      detail: 'Host progress synced.',
+      detail: `LSAT backend responded ${res.status}.`,
     };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, reachable: false, sent: snapshots.length, detail: `Sidecar offline — ${msg}.` };
-  } finally {
-    clearTimeout(timer);
   }
+  const data = res.data ?? {};
+  return {
+    ok: true,
+    reachable: true,
+    sent: snapshots.length,
+    upserted: typeof data.upserted === 'number' ? data.upserted : undefined,
+    detail: 'Host progress synced.',
+  };
 }
 
 /** Options for {@link useSyncProgress}. */

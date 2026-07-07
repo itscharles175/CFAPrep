@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { applyTheme, getStoredTheme, migrateLegacyLsatTheme } from './lib/theme';
 import { bootstrapReadingPrefs } from './lib/reading/useReadingPrefs';
 import { bootstrapReadingTheme } from './lib/reading/readingTheme';
+import { bootstrapLsatSidecarAuthToken } from './lib/lsatSidecarClient';
 import ErrorBoundary from './components/ErrorBoundary';
 
 // K4-13 (final cutover): StudyVault now boots a SINGLE unified root. The host
@@ -36,7 +37,11 @@ function RootFallback() {
       aria-label="Loading StudyVault"
       style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: BOOT_BG }}
     >
-      <style>{'@keyframes qv-boot-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.qv-boot-ring{animation:none!important}}'}</style>
+      <style>
+        {
+          '@keyframes qv-boot-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.qv-boot-ring{animation:none!important}}'
+        }
+      </style>
       <span
         className="qv-boot-ring"
         aria-hidden="true"
@@ -59,9 +64,7 @@ function RootCrashFallback({ error, reset }) {
   // render throws above the in-app boundaries, show a recovery screen instead of
   // a blank page. A hard reload re-fetches chunks (a soft reset would just retry
   // the same failed import), so that's the primary action.
-  const isChunkError = /chunk|dynamically imported|importing a module|Failed to fetch/i.test(
-    error?.message || '',
-  );
+  const isChunkError = /chunk|dynamically imported|importing a module|Failed to fetch/i.test(error?.message || '');
   return (
     <div
       role="alert"
@@ -76,9 +79,7 @@ function RootCrashFallback({ error, reset }) {
       }}
     >
       <div style={{ maxWidth: 440, textAlign: 'center' }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 8px' }}>
-          StudyVault couldn&rsquo;t finish loading
-        </h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 8px' }}>StudyVault couldn&rsquo;t finish loading</h1>
         <p style={{ fontSize: 14, lineHeight: 1.6, opacity: 0.8, margin: '0 0 20px' }}>
           {isChunkError
             ? 'A part of the app failed to load — this usually clears after a reload (often a cached file from a previous version).'
@@ -158,16 +159,31 @@ applyTheme(getStoredTheme());
 bootstrapReadingTheme();
 bootstrapReadingPrefs();
 
-ReactDOM.createRoot(rootEl).render(
-  <React.StrictMode>
-    {/* Top-level safety net. The boundary wraps the Suspense (NOT the reverse) so
-        it also catches a rejected lazy import of the UnifiedRoot chunk — the
-        classic "white screen after deploy" / chunk-load failure — not just render
-        crashes. In-app route boundaries still handle per-route errors first. */}
-    <ErrorBoundary name="root" level="page" fallback={RootCrashFallback}>
-      <Suspense fallback={<RootFallback />}>
-        <UnifiedRoot />
-      </Suspense>
-    </ErrorBoundary>
-  </React.StrictMode>,
-);
+const root = ReactDOM.createRoot(rootEl);
+
+function renderApp() {
+  root.render(
+    <React.StrictMode>
+      {/* Top-level safety net. The boundary wraps the Suspense (NOT the reverse) so
+          it also catches a rejected lazy import of the UnifiedRoot chunk — the
+          classic "white screen after deploy" / chunk-load failure — not just render
+          crashes. In-app route boundaries still handle per-route errors first. */}
+      <ErrorBoundary name="root" level="page" fallback={RootCrashFallback}>
+        <Suspense fallback={<RootFallback />}>
+          <UnifiedRoot />
+        </Suspense>
+      </ErrorBoundary>
+    </React.StrictMode>,
+  );
+}
+
+async function start() {
+  root.render(<RootFallback />);
+  const auth = await bootstrapLsatSidecarAuthToken();
+  if (!auth.ok) {
+    console.warn('[lsatSidecar] local API token bootstrap failed:', auth.error);
+  }
+  renderApp();
+}
+
+void start();

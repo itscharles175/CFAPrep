@@ -12,6 +12,8 @@ from typing import Optional
 from sqlalchemy import Column, JSON
 from sqlmodel import Field, SQLModel
 
+from .db_field_crypto import EncryptedText
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -240,8 +242,14 @@ class ErrorLogEntry(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     attempt_id: int = Field(foreign_key="attempt.id", index=True)
     reason: ErrorReason
-    user_note: Optional[str] = None
-    ai_diagnosis: Optional[str] = None
+    user_note: Optional[str] = Field(
+        default=None,
+        sa_column=Column(EncryptedText("ErrorLogEntry.user_note")),
+    )
+    ai_diagnosis: Optional[str] = Field(
+        default=None,
+        sa_column=Column(EncryptedText("ErrorLogEntry.ai_diagnosis")),
+    )
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -616,13 +624,19 @@ class AttemptRationale(SQLModel, table=True):
     stage: str = Field(default="blind_review", index=True)
     answer: Optional[str] = None
     confidence: Optional[Confidence] = None
-    rationale_text: str = ""
+    rationale_text: str = Field(
+        default="",
+        sa_column=Column(EncryptedText("AttemptRationale.rationale_text")),
+    )
     trap_guess: Optional[str] = None
     # LSAT-3 — the short "why" note captured at reveal in the Blind Review screen
     # (the quick takeaway the user types while revealing), kept distinct from the
     # longer ``rationale_text`` the Socratic why-loop writes. Optional/additive
     # (migration 21); older rows leave it NULL.
-    br_note: Optional[str] = None
+    br_note: Optional[str] = Field(
+        default=None,
+        sa_column=Column(EncryptedText("AttemptRationale.br_note")),
+    )
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
@@ -642,7 +656,10 @@ class TutorTurn(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     conversation_id: int = Field(foreign_key="questionconversation.id", index=True)
     role: str = Field(default="assistant", index=True)
-    content: str = ""
+    content: str = Field(
+        default="",
+        sa_column=Column(EncryptedText("TutorTurn.content")),
+    )
     meta_json: dict = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow, index=True)
 
@@ -740,18 +757,22 @@ class LLMCacheEntry(SQLModel, table=True):
     One row per ``cache_key`` (a host-parity SHA-256 hex of the frozen pre-image
     in ``app/llm/cache.py`` / ``src/lib/llm/determinism.js``). Only deterministic
     calls (temperature 0 or a pinned seed) are cached, so the stored ``response``
-    is the reproducible output for that exact (provider, model, temperature, seed,
-    prompt). Survives a restart — the in-memory LRU in ``llm.cache`` is just the
+    is the reproducible output for that exact provider/model/system/format/
+    sampling/prompt contract. Survives a restart — the in-memory LRU in
+    ``llm.cache`` is just the
     hot tier in front of this table. ``hits`` counts re-reads for observability;
     ``key_version`` records the pre-image schema so a future format change can
     invalidate stale rows. Best-effort: a cache failure never breaks generation.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
     cache_key: str = Field(index=True)
-    key_version: int = Field(default=1, index=True)
+    key_version: int = Field(default=2, index=True)
     provider: str = ""
     model: str = ""
-    response: str = ""
+    response: str = Field(
+        default="",
+        sa_column=Column(EncryptedText("LLMCacheEntry.response")),
+    )
     hits: int = 0
     created_at: datetime = Field(default_factory=utcnow, index=True)
     last_hit_at: Optional[datetime] = None

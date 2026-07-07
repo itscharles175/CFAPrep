@@ -1,6 +1,8 @@
 """LLM provider layer: transient classification, retry, routing, cloud shape."""
 from __future__ import annotations
 
+import logging
+
 import httpx
 import pytest
 
@@ -78,6 +80,7 @@ def test_offline_generate_routes_to_cloud_when_configured(monkeypatch):
     monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
     monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
     monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
     monkeypatch.setattr(cloud.AnthropicProvider, "generate",
                         lambda self, model, prompt, system, timeout: f"cloud::{prompt}")
     assert llm.cloud_enabled() is True
@@ -85,11 +88,71 @@ def test_offline_generate_routes_to_cloud_when_configured(monkeypatch):
     assert llm.offline_generate("hello") == "cloud::hello"
 
 
+def test_cloud_configured_without_explicit_egress_falls_back_without_prompt_log(
+    monkeypatch, caplog
+):
+    import app.llm as llm
+    from app.llm import cloud
+
+    sentinel = "SECRET_PROMPT_SHOULD_NOT_APPEAR_IN_LOGS"
+    monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
+    monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
+    monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", False)
+    monkeypatch.setattr(config, "LLM_CACHE_ENABLED", False, raising=False)
+
+    def _boom(*a, **k):
+        raise AssertionError("cloud must not be called without explicit egress opt-in")
+
+    monkeypatch.setattr(cloud.AnthropicProvider, "generate", _boom)
+    monkeypatch.setattr(llm.ollama(), "generate",
+                        lambda model, prompt, system, timeout, **kw: f"local::{prompt}")
+
+    caplog.set_level(logging.INFO, logger="lsatlab.llm")
+    assert llm.cloud_configured() is True
+    assert llm.cloud_egress_allowed() is False
+    assert llm.cloud_enabled() is False
+    assert llm.offline_generate(sentinel, task="unit_cloud_denied") == f"local::{sentinel}"
+
+    logs = caplog.text
+    assert "cloud_egress" in logs
+    assert "allowed=False" in logs
+    assert "egress_not_explicitly_allowed" in logs
+    assert "prompt_logged=false" in logs
+    assert sentinel not in logs
+
+
+def test_cloud_egress_allow_log_excludes_prompt(monkeypatch, caplog):
+    import app.llm as llm
+    from app.llm import cloud
+
+    sentinel = "SECRET_ALLOWED_PROMPT_SHOULD_NOT_APPEAR_IN_LOGS"
+    monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
+    monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
+    monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
+    monkeypatch.setattr(config, "CLOUD_MONTHLY_BUDGET_USD", 0.0)
+    monkeypatch.setattr(config, "LLM_CACHE_ENABLED", False, raising=False)
+    monkeypatch.setattr(cloud.AnthropicProvider, "generate",
+                        lambda self, model, prompt, system, timeout, **kw: "cloud-ok")
+
+    caplog.set_level(logging.INFO, logger="lsatlab.llm")
+    assert llm.offline_generate(sentinel, task="unit_cloud_allowed") == "cloud-ok"
+
+    logs = caplog.text
+    assert "cloud_egress" in logs
+    assert "allowed=True" in logs
+    assert "explicit_opt_in" in logs
+    assert "prompt_logged=false" in logs
+    assert sentinel not in logs
+
+
 def test_cloud_provider_builds_cached_messages_request(monkeypatch):
     from app.llm import cloud
 
     # AI-10: opt out of the strict-offline fence so the provider can construct.
     monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
     captured = {}
 
     class _Resp:
@@ -121,9 +184,84 @@ def test_cloud_provider_builds_cached_messages_request(monkeypatch):
     assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
 
 
-def test_provider_info_shape():
+def test_cloud_facade_omits_unsupported_seed_but_keeps_supported_top_p(monkeypatch):
+    import app.llm as llm
+    from app.llm import cloud
+
+    monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
+    monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
+    monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
+    monkeypatch.setattr(config, "CLOUD_MONTHLY_BUDGET_USD", 0.0)
+    monkeypatch.setattr(config, "LLM_CACHE_ENABLED", False, raising=False)
+    captured = {}
+
+    def fake_generate(self, model, prompt, system, timeout, **kw):
+        captured.update(kw)
+        return "cloud-ok"
+
+    monkeypatch.setattr(cloud.AnthropicProvider, "generate", fake_generate)
+    assert llm.offline_generate("p", temperature=0.8, top_p=0.9, seed=7) == "cloud-ok"
+    assert captured == {"temperature": 0.8, "top_p": 0.9}
+
+
+def test_cloud_seed_alone_does_not_make_warm_call_cacheable(monkeypatch, db_session):
+    import app.llm as llm
+    from app.llm import cloud
+
+    monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
+    monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
+    monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
+    monkeypatch.setattr(config, "CLOUD_MONTHLY_BUDGET_USD", 0.0)
+    monkeypatch.setattr(config, "LLM_CACHE_ENABLED", True, raising=False)
+    calls = {"n": 0}
+
+    def fake_generate(self, model, prompt, system, timeout, **kw):
+        calls["n"] += 1
+        return f"cloud-{calls['n']}"
+
+    monkeypatch.setattr(cloud.AnthropicProvider, "generate", fake_generate)
+    a = llm.offline_generate("p", temperature=0.8, seed=7)
+    b = llm.offline_generate("p", temperature=0.8, seed=7)
+    assert (a, b) == ("cloud-1", "cloud-2")
+    assert calls["n"] == 2
+
+
+def test_facade_omits_unsupported_format_from_provider_and_cache(monkeypatch, db_session):
     import app.llm as llm
 
+    monkeypatch.setattr(config, "GEN_PROVIDER", "ollama")
+    monkeypatch.setattr(config, "LLM_CACHE_ENABLED", True, raising=False)
+    calls = {"n": 0}
+    seen: list[dict] = []
+
+    def fake_generate(model, prompt, system, timeout, **kw):
+        calls["n"] += 1
+        seen.append(kw)
+        return f"local-{calls['n']}"
+
+    monkeypatch.setattr(llm.ollama(), "generate", fake_generate)
+    a = llm.offline_generate("p", temperature=0, seed=7, format="yaml")
+    b = llm.offline_generate("p", temperature=0, seed=7, format=None)
+    assert (a, b) == ("local-1", "local-1")
+    assert seen == [{"temperature": 0, "seed": 7}]
+
+
+def test_provider_info_shape(monkeypatch):
+    import app.llm as llm
+
+    monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
+    monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", False)
     info = llm.provider_info()
     assert info["realtime_provider"] == "ollama"
     assert "explain_model" in info and "embed_model" in info
+    assert info["cloud_configured"] is True
+    assert info["cloud_egress_allowed"] is False
+    assert info["cloud_enabled"] is False
+    caps = info["capabilities"]
+    assert caps["realtime"]["provider"] == "ollama"
+    assert caps["offline"]["provider"] == "ollama"
+    assert caps["matrix"]["anthropic"]["sampling"]["seed"] is False
+    assert caps["matrix"]["ollama"]["structured_output"]["json_schema"] is True

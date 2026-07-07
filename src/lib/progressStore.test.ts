@@ -1,10 +1,18 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearMockSectionState,
+  decryptEncryptedNotesForSecureVault,
+  decryptEncryptedResultArtifactsForSecureVault,
+  decryptEncryptedSourceChunksForSecureVault,
+  encryptExistingNotesForSecureVault,
+  encryptExistingResultArtifactsForSecureVault,
+  encryptExistingSourceChunksForSecureVault,
   exportVaultData,
   forecastReviewLoad,
   getAnalyticsSummary,
   getConfidenceCalibration,
+  getNote,
+  getNotes,
   getMockSectionState,
   getReadinessByTopic,
   getReadinessByLevel,
@@ -37,6 +45,7 @@ import {
   restoreRollbackSnapshot,
   db,
   saveNote,
+  setNoteSecureVaultForTesting,
   saveMockSectionState,
   saveResultArtifact,
   saveStudyPlanSettings,
@@ -49,8 +58,9 @@ import {
   VAULT_SCHEMA_VERSION,
   validateVaultData,
 } from './progressStore';
-import { buildCfaSourceBundle, importCfaSourceBundle } from './cfaSourceVault';
+import { buildCfaSourceBundle, exportCfaSourceBundle, importCfaSourceBundle, searchCfaSourceVault } from './cfaSourceVault';
 import type { CfaSourceChunk, CfaSourceDocument } from './cfaSourceTypes';
+import { createMemoryKeyStore, SecureVault, type SecureVaultFlagStore } from './secureVault';
 
 const sourceImportedAt = '2026-05-06T12:00:00.000Z';
 
@@ -92,9 +102,250 @@ function sourceChunkRow(overrides: Partial<CfaSourceChunk> = {}): CfaSourceChunk
   };
 }
 
+function secureVaultFlag(initial = false): SecureVaultFlagStore {
+  let enabled = initial;
+  return {
+    get: () => enabled,
+    set: (value) => {
+      enabled = value;
+    },
+  };
+}
+
+async function enableTestSecureVault() {
+  const vault = new SecureVault(createMemoryKeyStore(), secureVaultFlag());
+  const result = await vault.enable();
+  expect(result.ok).toBe(true);
+  setNoteSecureVaultForTesting(vault);
+  return vault;
+}
+
 describe('local vault progress store', () => {
   beforeEach(async () => {
     await resetVaultData('full');
+  });
+
+  afterEach(() => {
+    setNoteSecureVaultForTesting(null);
+  });
+
+  it('encrypts secure-vault note title and body at rest while read APIs return plaintext', async () => {
+    await enableTestSecureVault();
+
+    const note = await saveNote({
+      type: 'general',
+      domain: 'cfa',
+      title: 'Secret ethics thesis',
+      body: 'sentinel-private-note-body',
+    });
+
+    const raw = await db.notes.get(note.id);
+    expect(raw?.title).toBe('[Secure Vault encrypted]');
+    expect(raw?.body).not.toContain('sentinel-private-note-body');
+    expect(raw?.secureVault?.scheme).toBe('secure-vault-note.v1');
+    expect(JSON.stringify(raw)).not.toContain('Secret ethics thesis');
+    expect(JSON.stringify(raw)).not.toContain('sentinel-private-note-body');
+
+    const read = await getNote({ type: 'general', domain: 'cfa' });
+    expect(read?.title).toBe('Secret ethics thesis');
+    expect(read?.body).toBe('sentinel-private-note-body');
+  });
+
+  it('decrypts secure-vault note lists while preserving updatedAt ordering', async () => {
+    await enableTestSecureVault();
+
+    const older = await saveNote({ type: 'general', domain: 'cfa', title: 'Older note', body: 'older-body' });
+    const newer = await saveNote({ type: 'formula', domain: 'cfa', formulaName: 'DCF', title: 'Newer note', body: 'newer-body' });
+    await db.notes.update(older.id, { updatedAt: '2026-01-01T00:00:00.000Z' });
+    await db.notes.update(newer.id, { updatedAt: '2026-01-02T00:00:00.000Z' });
+
+    const notes = await getNotes();
+    expect(notes.slice(0, 2).map((note) => note.title)).toEqual(['Newer note', 'Older note']);
+  });
+
+  it('rejects secure-vault note writes while locked without writing plaintext', async () => {
+    const vault = await enableTestSecureVault();
+    vault.lock();
+
+    await expect(
+      saveNote({
+        type: 'general',
+        domain: 'cfa',
+        title: 'Locked plaintext title',
+        body: 'locked-plaintext-body',
+      }),
+    ).rejects.toThrow(/locked/i);
+
+    const raw = await db.notes.toArray();
+    expect(raw).toEqual([]);
+  });
+
+  it('migrates existing notes into and out of secure-vault encrypted rows', async () => {
+    const note = await saveNote({
+      type: 'general',
+      domain: 'cfa',
+      title: 'Migration plaintext title',
+      body: 'migration-plaintext-body',
+    });
+    expect(JSON.stringify(await db.notes.get(note.id))).toContain('migration-plaintext-body');
+
+    const vault = await enableTestSecureVault();
+    expect(await encryptExistingNotesForSecureVault(vault)).toEqual({ encrypted: 1, alreadyEncrypted: 0 });
+    expect(await encryptExistingNotesForSecureVault(vault)).toEqual({ encrypted: 0, alreadyEncrypted: 1 });
+    const encrypted = await db.notes.get(note.id);
+    expect(encrypted?.secureVault?.scheme).toBe('secure-vault-note.v1');
+    expect(JSON.stringify(encrypted)).not.toContain('migration-plaintext-body');
+
+    expect(await decryptEncryptedNotesForSecureVault(vault)).toEqual({ decrypted: 1 });
+    const restored = await db.notes.get(note.id);
+    expect(restored?.secureVault).toBeUndefined();
+    expect(restored?.title).toBe('Migration plaintext title');
+    expect(restored?.body).toBe('migration-plaintext-body');
+  });
+
+  it('encrypts secure-vault result artifacts at rest while read APIs return plaintext', async () => {
+    await enableTestSecureVault();
+
+    const artifact = await saveResultArtifact({
+      type: 'calculator',
+      domain: 'cfa',
+      topic: 'fixed-income',
+      title: 'Private yield artifact',
+      summary: 'artifact-summary-sentinel',
+      assumptions: { note: 'artifact-assumption-sentinel', price: 98 },
+      metrics: { result: 'artifact-metric-sentinel', yieldToMaturity: 0.051 },
+      path: '/calculators',
+    });
+
+    const raw = await db.resultArtifacts.get(artifact.id);
+    expect(raw?.title).toBe('[Secure Vault encrypted artifact]');
+    expect(raw?.summary).not.toContain('artifact-summary-sentinel');
+    expect(raw?.assumptions).toEqual({});
+    expect(raw?.metrics).toEqual({});
+    expect(raw?.secureVault?.scheme).toBe('secure-vault-result-artifact.v1');
+    expect(JSON.stringify(raw)).not.toContain('Private yield artifact');
+    expect(JSON.stringify(raw)).not.toContain('artifact-summary-sentinel');
+    expect(JSON.stringify(raw)).not.toContain('artifact-assumption-sentinel');
+    expect(JSON.stringify(raw)).not.toContain('artifact-metric-sentinel');
+
+    const [read] = await getResultArtifacts('calculator');
+    expect(read.title).toBe('Private yield artifact');
+    expect(read.summary).toBe('artifact-summary-sentinel');
+    expect(read.assumptions.note).toBe('artifact-assumption-sentinel');
+    expect(read.metrics.result).toBe('artifact-metric-sentinel');
+    expect((await exportArtifactCsv('calculator'))).toContain('artifact-summary-sentinel');
+  });
+
+  it('reports secure-vault live coverage in vault health', async () => {
+    await enableTestSecureVault();
+
+    await saveNote({
+      type: 'general',
+      domain: 'cfa',
+      title: 'Coverage note',
+      body: 'coverage-note-body',
+    });
+    await saveResultArtifact({
+      type: 'calculator',
+      domain: 'cfa',
+      topic: 'fixed-income',
+      title: 'Coverage artifact',
+      summary: 'coverage-artifact-summary',
+      assumptions: {},
+      metrics: {},
+      path: '/calculators',
+    });
+    await db.settings.put({
+      key: 'open-notebook:answer:level1:ethics',
+      value: {
+        v: 1,
+        scheme: 'secure-vault-open-notebook-cache.v1',
+        payload: { iv: 'iv', ct: 'ct' },
+      },
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    await db.sourceDocuments.put(sourceDocumentRow());
+    await db.sourceChunks.put(sourceChunkRow());
+    await encryptExistingSourceChunksForSecureVault();
+
+    const report = await getVaultHealthReport();
+    expect(report.secureVault).toMatchObject({
+      enabled: true,
+      unlocked: true,
+      available: true,
+      status: 'encrypted',
+      encryptedRows: 4,
+      targetRows: 4,
+      coveragePct: 100,
+      rows: {
+        notes: { encrypted: 1, total: 1 },
+        resultArtifacts: { encrypted: 1, total: 1 },
+        openNotebookSettings: { encrypted: 1, total: 1 },
+        sourceChunks: { encrypted: 1, total: 1 },
+      },
+      outsideScopeRows: {
+        sourceVault: 1,
+      },
+    });
+  });
+
+  it('encrypts source chunk payload fields at rest while source APIs decrypt when unlocked', async () => {
+    await importCfaSourceBundle(buildCfaSourceBundle({ documents: [sourceDocumentRow()], chunks: [sourceChunkRow()] }));
+
+    const vault = await enableTestSecureVault();
+    expect(await encryptExistingSourceChunksForSecureVault(vault)).toEqual({ encrypted: 1, alreadyEncrypted: 0 });
+    expect(await encryptExistingSourceChunksForSecureVault(vault)).toEqual({ encrypted: 0, alreadyEncrypted: 1 });
+
+    const raw = await db.sourceChunks.get('source:progress-store-doc:chunk:0001');
+    expect(raw?.secureVault?.scheme).toBe('secure-vault-source-chunk.v1');
+    expect(raw?.text).not.toContain('Private synthetic source text');
+    expect(raw?.normalizedText).not.toContain('private synthetic source text');
+    expect(JSON.stringify(raw)).not.toContain('Private synthetic source text');
+    expect(JSON.stringify(raw)).not.toContain('Private ethics notes');
+
+    const searchResults = await searchCfaSourceVault('explicit backup inclusion');
+    expect(searchResults[0].chunk.text).toContain('Private synthetic source text');
+
+    const sourceBundle = await exportCfaSourceBundle();
+    expect(sourceBundle.chunks[0].text).toContain('Private synthetic source text');
+
+    expect(await decryptEncryptedSourceChunksForSecureVault(vault)).toEqual({ decrypted: 1 });
+    const restored = await db.sourceChunks.get('source:progress-store-doc:chunk:0001');
+    expect(restored?.secureVault).toBeUndefined();
+    expect(restored?.text).toContain('Private synthetic source text');
+    expect(restored?.heading).toBe('Private ethics notes');
+  });
+
+  it('migrates existing result artifacts into and out of secure-vault encrypted rows', async () => {
+    const artifact = await saveResultArtifact({
+      type: 'quant-lab',
+      domain: 'cfa',
+      topic: 'ethics',
+      title: 'Migration artifact title',
+      summary: 'migration-artifact-summary',
+      assumptions: { note: 'migration-artifact-assumption' },
+      metrics: { score: 'migration-artifact-metric' },
+      path: '/labs',
+    });
+    expect(JSON.stringify(await db.resultArtifacts.get(artifact.id))).toContain('migration-artifact-summary');
+
+    const vault = await enableTestSecureVault();
+    expect(await encryptExistingResultArtifactsForSecureVault(vault)).toEqual({ encrypted: 1, alreadyEncrypted: 0 });
+    expect(await encryptExistingResultArtifactsForSecureVault(vault)).toEqual({ encrypted: 0, alreadyEncrypted: 1 });
+    const encrypted = await db.resultArtifacts.get(artifact.id);
+    expect(encrypted?.secureVault?.scheme).toBe('secure-vault-result-artifact.v1');
+    expect(JSON.stringify(encrypted)).not.toContain('migration-artifact-summary');
+    expect(JSON.stringify(encrypted)).not.toContain('migration-artifact-assumption');
+
+    const [read] = await getResultArtifacts('quant-lab');
+    expect(read.title).toBe('Migration artifact title');
+    expect(read.assumptions.note).toBe('migration-artifact-assumption');
+
+    expect(await decryptEncryptedResultArtifactsForSecureVault(vault)).toEqual({ decrypted: 1 });
+    const restored = await db.resultArtifacts.get(artifact.id);
+    expect(restored?.secureVault).toBeUndefined();
+    expect(restored?.summary).toBe('migration-artifact-summary');
+    expect(restored?.metrics.score).toBe('migration-artifact-metric');
   });
 
   it('records quiz attempts into mastery and weak objective state', async () => {

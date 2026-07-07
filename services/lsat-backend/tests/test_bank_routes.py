@@ -25,10 +25,16 @@ def test_bank_import_rejects_unknown_source(client):
     assert r.status_code == 400
 
 
+def test_bank_import_requires_force_commit(client):
+    r = client.post("/api/bank/import", json={"sources": ["agieval-lsat-lr"]})
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"] == "force_commit_required"
+
+
 def test_bank_import_records_failed_run_for_missing_local_source(client):
     r = client.post(
         "/api/bank/import",
-        json={"sources": ["reclor"], "nc_acknowledged": True},
+        json={"sources": ["reclor"], "nc_acknowledged": True, "force_commit": True},
     )
     assert r.status_code == 200
     row = r.json()["results"][0]

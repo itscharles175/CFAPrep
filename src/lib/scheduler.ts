@@ -19,6 +19,7 @@
 import { createEmptyCard, default_w, default_request_retention, fsrs, Rating, State } from 'ts-fsrs';
 import type { Card, FSRS, Grade } from 'ts-fsrs';
 import type { Confidence, ErrorCategory, QuestionResult, ReviewItem } from './learningTypes';
+import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -69,8 +70,6 @@ export function getActiveScheduler(): FSRS {
  * to `null` and the host keeps its ts-fsrs library defaults / local fit — never
  * throws, never blocks render.
  */
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
-
 /**
  * Shape of `GET /api/srs/params` (backend `SrsParamsOut`). Declared inline
  * rather than imported from `@/domains/lsat/lib/api.gen` because this endpoint
@@ -93,31 +92,21 @@ export interface BackendSrsParams {
  * match the expected shape.
  */
 export async function fetchBackendSrsParams(timeoutMs = 2500): Promise<BackendSrsParams | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}/api/srs/params`, {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) return null;
-    const data: unknown = await res.json();
-    if (!data || typeof data !== 'object') return null;
-    const d = data as Partial<BackendSrsParams>;
-    const retention = typeof d.desired_retention === 'number' ? d.desired_retention : null;
-    if (retention === null) return null;
-    const weights = Array.isArray(d.weights)
-      ? d.weights.filter((w): w is number => typeof w === 'number')
-      : [];
-    return {
-      weights,
-      desired_retention: retention,
-      source: typeof d.source === 'string' ? d.source : 'backend',
-    };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
+  const res = await fetchLsatSidecarJson<Partial<BackendSrsParams>>('/api/srs/params', {
+    timeoutMs,
+    headers: { accept: 'application/json' },
+  });
+  if (!res.ok || !res.data || typeof res.data !== 'object') return null;
+  const d = res.data;
+  const retention = typeof d.desired_retention === 'number' ? d.desired_retention : null;
+  if (retention === null) return null;
+  const weights = Array.isArray(d.weights)
+    ? d.weights.filter((w): w is number => typeof w === 'number')
+    : [];
+  return {
+    weights,
+    desired_retention: retention,
+    source: typeof d.source === 'string' ? d.source : 'backend',
   }
 }
 

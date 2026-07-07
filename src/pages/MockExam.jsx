@@ -4,6 +4,8 @@ import { Download, Flag, ListChecks, PenLine, Timer, Trophy } from 'lucide-react
 import { loadCfaLevelContent, loadCfaMockExam } from '../domains/cfa/cfaLoaders';
 import { LEVEL3_PATHWAY_OPTIONS } from '../domains/cfa/cfaLevel3Pathways';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
+import AccessibleQuestionRunner from '../components/a11y/AccessibleQuestionRunner';
+import HandsFreeController from '../components/a11y/HandsFreeController';
 import { CaseViewer, EmptyPanel, InlineCluster, MetricCard, PageHeader, Panel, ProgressRail, QuestionStage, RubricPanel, SegmentedControl, StatusBadge, Surface } from '../components/ui/Primitives';
 import {
   clearMockSectionState,
@@ -75,7 +77,15 @@ function questionRowsFromItem(item) {
   return [];
 }
 
-function MockQuestion({ question, selected, submitted = false, onSelect }) {
+function MockQuestion({
+  question,
+  selected,
+  submitted = false,
+  onSelect,
+  readAloudQuestion,
+  preface,
+  testMode = false,
+}) {
   const letters = ['A', 'B', 'C', 'D'];
   return (
     <QuestionStage
@@ -84,26 +94,33 @@ function MockQuestion({ question, selected, submitted = false, onSelect }) {
       question={question.question}
       status={submitted ? (selected === question.correct ? 'success' : 'danger') : 'exam'}
     >
-      <div className="quiz-options">
-        {question.options.map((option, index) => {
-          const picked = selected === index;
-          const correct = submitted && index === question.correct;
-          const missed = submitted && picked && index !== question.correct;
-          return (
-            <button
-              key={option}
-              type="button"
-              className={`quiz-option ${picked ? 'selected' : ''} ${correct ? 'correct' : ''} ${missed ? 'incorrect' : ''}`}
-              disabled={submitted}
-              onClick={() => onSelect(index)}
-            >
-              <span className="quiz-option-letter">{letters[index]}</span>
-              <span style={{ textAlign: 'left' }}>{option}</span>
-            </button>
-          );
-        })}
-      </div>
-      {submitted && <p className="qv-text-secondary">{question.explanation}</p>}
+      {!submitted && (
+        <HandsFreeController
+          question={readAloudQuestion || question.question}
+          options={question.options.map((option, index) => ({
+            letter: letters[index],
+            text: option,
+          }))}
+          onSelect={onSelect}
+          testMode={testMode}
+          preface={preface}
+        />
+      )}
+      <AccessibleQuestionRunner
+        groupLabel="Mock question answer options"
+        question={question.question}
+        hideStem
+        options={question.options.map((option, index) => ({
+          id: `${question.id}-${index}`,
+          text: option,
+        }))}
+        selectedIndex={selected ?? null}
+        onSelect={onSelect}
+        confirmed={submitted}
+        correctIndex={question.correct}
+        explanation={submitted ? question.explanation : undefined}
+        letters={letters}
+      />
     </QuestionStage>
   );
 }
@@ -441,6 +458,7 @@ export default function MockExam() {
 
   useEffect(() => {
     function handleKeyboard(event) {
+      if (event.defaultPrevented) return;
       const target = event.target;
       if (target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
       if (paused || finished || !items.length) return;
@@ -889,6 +907,8 @@ export default function MockExam() {
             question={item.question}
             selected={selected[item.question.id]}
             onSelect={(index) => setSelected((existing) => ({ ...existing, [item.question.id]: index }))}
+            preface={`Mock section item ${current + 1} of ${items.length}.`}
+            testMode
           />
         )}
         {item.type === 'vignette' && (
@@ -896,12 +916,15 @@ export default function MockExam() {
             <CaseViewer title="Case Facts" exhibits={item.vignette.exhibits || []}>
               <p>{item.vignette.stem}</p>
             </CaseViewer>
-            {item.vignette.questions.map((question) => (
+            {item.vignette.questions.map((question, questionIndex) => (
               <MockQuestion
                 key={question.id}
                 question={question}
                 selected={selected[question.id]}
                 onSelect={(index) => setSelected((existing) => ({ ...existing, [question.id]: index }))}
+                readAloudQuestion={`Case facts. ${item.vignette.stem}\n\nQuestion. ${question.question}`}
+                preface={`Mock section item ${current + 1} of ${items.length}. Vignette question ${questionIndex + 1} of ${item.vignette.questions.length}.`}
+                testMode
               />
             ))}
           </>

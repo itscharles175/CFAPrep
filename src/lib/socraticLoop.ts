@@ -23,6 +23,7 @@
 
 import { hasSpeechRecognition, hasSpeechSynthesis, recognizeOnce, sanitizeForSpeech, speak, stopSpeaking } from './voice';
 import { generateText } from './localLlm';
+import { stripThink } from './stripThink';
 
 export type SocraticState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
@@ -158,7 +159,7 @@ export function openSocraticSession(opts: SocraticSessionOptions = {}): Socratic
     let coachText: string;
     try {
       const { text } = await generate({ prompt: transcript, system: systemPrompt });
-      coachText = (text || '').trim();
+      coachText = stripThink(text || '').trim();
     } catch (err) {
       setState('idle');
       const reason = err instanceof Error ? err.message : 'llm-failed';

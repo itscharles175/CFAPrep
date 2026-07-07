@@ -14,18 +14,23 @@ Implementation notes
   default offline build stays dependency-free and fully local.
 - The system prompt is sent with ``cache_control: ephemeral`` so the long, shared
   instruction prefix is prompt-cached across the many candidates in a batch run.
-- Activated only when ``GEN_PROVIDER=cloud`` AND an API key is present; otherwise
-  the facade routes offline generation back to Ollama.
+- Activated only when ``GEN_PROVIDER=cloud``, an API key is present,
+  ``LSATLAB_ENFORCE_OFFLINE=0``, and ``LSATLAB_CLOUD_EGRESS_ALLOWED=1``;
+  otherwise the facade routes offline generation back to the local provider.
 """
 from __future__ import annotations
 
 import json
+import logging
 from typing import Optional, Union
+from urllib.parse import urlparse
 
 import httpx
 
 from .. import config, observability
 from .base import retry_sync, sync_guard
+
+_log = logging.getLogger("lsatlab.llm.cloud")
 
 
 class AnthropicProvider:
@@ -42,7 +47,13 @@ class AnthropicProvider:
             raise RuntimeError(
                 "Strict offline fence is ON: refusing to instantiate the cloud "
                 "AnthropicProvider. StudyVault is local-only by default — no cloud, "
-                "no telemetry. Set LSATLAB_ENFORCE_OFFLINE=0 to opt out of the fence."
+                "no telemetry. Set LSATLAB_ENFORCE_OFFLINE=0 and "
+                "LSATLAB_CLOUD_EGRESS_ALLOWED=1 to opt out of the fence."
+            )
+        if not getattr(config, "CLOUD_EGRESS_ALLOWED", False):
+            raise RuntimeError(
+                "Cloud LLM egress is disabled: set LSATLAB_CLOUD_EGRESS_ALLOWED=1 "
+                "only when outbound Anthropic traffic is intentional."
             )
         if not api_key:
             raise ValueError("AnthropicProvider requires an API key")
@@ -73,13 +84,15 @@ class AnthropicProvider:
     def generate(self, model: Optional[str], prompt: str,
                  system: Optional[str] = None, timeout: Optional[float] = None, *,
                  temperature: Optional[float] = None,
+                 top_p: Optional[float] = None,
                  seed: Optional[int] = None,
                  format: Optional[Union[str, dict]] = None) -> str:
         """Generate via the Anthropic Messages API.
 
-        ``temperature`` is forwarded for deterministic gate calls (0 = greedy).
-        ``seed`` has no Anthropic analogue and is accepted-but-ignored so the
-        offline facade can pass the same kwargs to either provider.
+        ``temperature``/``top_p`` are forwarded for deterministic gate calls
+        (0 = greedy). ``seed`` has no Anthropic analogue and is accepted-but-
+        ignored so the offline facade can pass the same kwargs to either
+        provider.
 
         ``format`` requests guaranteed-parseable JSON (the cloud analogue of
         Ollama's ``format``):
@@ -106,6 +119,8 @@ class AnthropicProvider:
             }
             if temperature is not None:
                 body["temperature"] = temperature
+            if top_p is not None:
+                body["top_p"] = top_p
             # Force tool-use so the output is guaranteed-parseable JSON. A schema
             # dict constrains the response directly; "json" (or any other truthy
             # format) uses the generic single-field tool.
@@ -129,6 +144,13 @@ class AnthropicProvider:
                     "text": system,
                     "cache_control": {"type": "ephemeral"},
                 }]
+            _log.info(
+                "cloud_http_request provider=anthropic model=%s url_host=%s "
+                "max_tokens=%d prompt_logged=false",
+                body["model"],
+                urlparse(self.url).hostname or "",
+                self.max_tokens,
+            )
             with httpx.Client(timeout=timeout or config.GEN_REQUEST_TIMEOUT_S) as client:
                 resp = client.post(self.url, headers=headers, json=body)
                 resp.raise_for_status()

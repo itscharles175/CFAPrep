@@ -12,8 +12,11 @@ import { recordExplainLatency } from "./aiMetrics";
 // `@/` resolves to the host `/src` root (see vite + tsconfig.lsat aliases), so
 // this reaches across the vendored-domain boundary to the one stream reader.
 import { streamEvents, type SseParser } from "@/lib/streamingClient";
+import { withLsatSidecarAuthHeaders } from "@/lib/lsatSidecarClient";
+import { normalizeLoopbackHttpBaseUrl } from "@/lib/localUrlPolicy";
 import type { z } from "zod";
 import type { TrapPatternsMeta } from "./types-lsat2";
+import type { components as OpenApiComponents } from "./api.gen";
 import {
   activityEventSchema,
   artifactVersionSchema,
@@ -188,12 +191,17 @@ import type {
 } from "./types";
 import { appendDaysQuery } from "./analyticsParams";
 
+type HealthResponse = OpenApiComponents["schemas"]["HealthResponse"];
+
 // StudyVault: the LSAT backend sidecar listens on 127.0.0.1:8100 (see the
 // Tauri supervisor's `build_sidecar_specs` + tauri.conf CSP). It accepts
 // any-origin CORS, so we hit the absolute base directly in BOTH dev (host
 // Vite on :5173) and the packaged app — no Vite proxy needed. Override with
 // VITE_API_BASE if the port ever changes.
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8100";
+const API_BASE = normalizeLoopbackHttpBaseUrl(
+  import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8100",
+  "LSAT API base URL",
+);
 
 // Always absolute: the host app's origin (:5173 in dev, tauri:// in prod) is
 // never the backend's origin, so a relative prefix would 404.
@@ -263,10 +271,10 @@ async function request<T>(
     res = await fetch(`${PREFIX}${path}`, {
       ...rest,
       signal,
-      headers: {
+      headers: withLsatSidecarAuthHeaders({
         ...(json !== undefined ? { "Content-Type": "application/json" } : {}),
         ...(headers ?? {}),
-      },
+      }),
       body: json !== undefined ? JSON.stringify(json) : rest.body,
     });
   } catch (err) {
@@ -329,7 +337,7 @@ async function request<T>(
 
 export const api = {
   // Health
-  health: () => request<{ ok: boolean }>("/api/health"),
+  health: () => request<HealthResponse>("/api/health"),
   aiHealth: () => request<AiHealth>("/api/ai/health"),
 
   // PrepTests & content
@@ -389,6 +397,7 @@ export const api = {
       training_eligible?: boolean;
       training_role?: string;
       training_notes?: string;
+      force_commit?: boolean;
     },
   ) =>
     request<{ preptest_id: number }>("/api/import/commit", {
@@ -1044,6 +1053,7 @@ export const api = {
       training_eligible?: boolean;
       training_role?: string;
       training_notes?: string;
+      force_commit?: boolean;
     },
   ) =>
     request<{
@@ -1131,7 +1141,7 @@ export const api = {
     request<Record<string, unknown>>(
       `/api/bank/export?include_history=${includeHistory}`,
     ),
-  bankImportBackup: (payload: Record<string, unknown>) =>
+  bankImportBackup: (payload: Record<string, unknown>, forceCommit = true) =>
     request<{
       preptests: number;
       questions: number;
@@ -1139,7 +1149,7 @@ export const api = {
       unsectioned: number;
     }>("/api/bank/import-backup", {
       method: "POST",
-      json: { payload },
+      json: { payload, force_commit: forceCommit },
     }),
 
   // DATA-5 — unified {host, lsat} export/backup. One artifact, one checksum, one
@@ -1150,27 +1160,30 @@ export const api = {
       host_data?: Record<string, unknown> | null;
       include_history?: boolean;
       notes?: string | null;
+      passphrase?: string | null;
+      allow_plaintext?: boolean;
     } = {},
   ) =>
     request<Record<string, unknown>>("/api/export/backup", {
       method: "POST",
       json: body,
     }),
-  exportValidate: (envelope: Record<string, unknown>) =>
-    request<{ ok: boolean; errors: string[] }>("/api/export/validate", {
+  exportValidate: (envelope: Record<string, unknown>, passphrase?: string) =>
+    request<{ ok: boolean; errors: string[]; encrypted?: boolean }>("/api/export/validate", {
       method: "POST",
-      json: { envelope },
+      json: { envelope, passphrase },
     }),
-  exportImport: (envelope: Record<string, unknown>) =>
+  exportImport: (envelope: Record<string, unknown>, passphrase?: string) =>
     request<{
       ok: boolean;
       export_id: string;
       counts: Record<string, number>;
       restore_count: number;
       host_data_present: boolean;
+      encrypted?: boolean;
     }>("/api/export/import", {
       method: "POST",
-      json: { envelope },
+      json: { envelope, passphrase },
     }),
   exportList: (offset = 0, limit = 50) =>
     request<{
@@ -1611,10 +1624,10 @@ export async function streamExplain(
         `${PREFIX}/api/ai/explain`,
         {
           method: "POST",
-          headers: {
+          headers: withLsatSidecarAuthHeaders({
             "Content-Type": "application/json",
             Accept: "text/event-stream",
-          },
+          }),
           body: JSON.stringify(body),
         },
         {
@@ -1769,10 +1782,10 @@ export async function streamSocraticTurn(
     `${PREFIX}/api/conversations/${conversationId}/turns-stream`,
     {
       method: "POST",
-      headers: {
+      headers: withLsatSidecarAuthHeaders({
         "Content-Type": "application/json",
         Accept: "text/event-stream",
-      },
+      }),
       body: JSON.stringify({ auto_reply: true, role: "user", ...body }),
     },
     { signal, parseSse: parseSocraticSse },

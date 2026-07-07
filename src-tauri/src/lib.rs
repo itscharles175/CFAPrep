@@ -8,8 +8,10 @@
 // packaging (Pillar 0, still open) needs to bundle the Python backend via
 // PyInstaller into Tauri's `resourceDir()` and update this path resolution.
 // Set the `QV_SERVICES_DIR` env var to override the search at runtime.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -91,6 +93,19 @@ struct Sidecars(Mutex<Vec<SupervisedSidecar>>);
 #[derive(Default)]
 struct SkippedSidecars(Mutex<Vec<SidecarSpec>>);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BlockedSidecar {
+    spec: SidecarSpec,
+    reason: String,
+    provenance_status: Option<String>,
+}
+
+/// Required/optional sidecars refused before launch because the staged binary
+/// failed local provenance verification. Kept separately so the UI sees a clear
+/// "blocked" row rather than a generic missing process.
+#[derive(Default)]
+struct BlockedSidecars(Mutex<Vec<BlockedSidecar>>);
+
 /// NATIVE-1: the app-lifetime crash-reap process group (Windows Job Object /
 /// Unix PDEATHSIG / no-op). Managed as Tauri state so BOTH the initial spawn and
 /// the health-supervisor respawn path assign children to the SAME group — and so
@@ -102,6 +117,42 @@ impl Default for ProcessGroupState {
     fn default() -> Self {
         Self(Arc::from(process_group::create_process_group()))
     }
+}
+
+/// LSAT sidecar local API bearer-token env var. Generated once per desktop app
+/// run, passed only to the required LSAT backend sidecar, and exposed to the
+/// webview through a read-only Tauri command for in-memory header injection.
+const LSAT_LOCAL_API_TOKEN_ENV: &str = "LSATLAB_LOCAL_API_TOKEN";
+const LSAT_LOCAL_API_TOKEN_BYTES: usize = 32;
+const LSAT_DB_KEY_B64_ENV: &str = "LSATLAB_DB_KEY_B64";
+
+struct LsatLocalApiToken(String);
+
+impl LsatLocalApiToken {
+    fn generate() -> Self {
+        Self(
+            generate_lsat_local_api_token()
+                .expect("failed to generate LSAT local API token for sidecar launch"),
+        )
+    }
+}
+
+fn hex_encode_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let byte = *byte;
+        out.push(char::from(HEX[(byte >> 4) as usize]));
+        out.push(char::from(HEX[(byte & 0x0f) as usize]));
+    }
+    out
+}
+
+fn generate_lsat_local_api_token() -> Result<String, String> {
+    let mut bytes = [0u8; LSAT_LOCAL_API_TOKEN_BYTES];
+    getrandom::getrandom(&mut bytes)
+        .map_err(|e| format!("failed to generate LSAT local API token: {e}"))?;
+    Ok(hex_encode_lower(&bytes))
 }
 
 /// Max log lines retained per sidecar in the in-memory ring buffer. Once a
@@ -162,13 +213,37 @@ impl SidecarLogs {
 ///
 /// Used by both the initial spawn (`spawn_sidecars_with`) and the BA1 respawn
 /// path (`supervise_once`), so a respawned child re-attaches fresh capture.
-fn attach_log_capture(name: &str, child: &mut Child, logs: &SidecarLogs) {
+fn attach_log_capture(name: &str, child: &mut Child, logs: &SidecarLogs, env: &[(String, String)]) {
+    let sensitive_values = sensitive_sidecar_env_values(env);
     if let Some(stdout) = child.stdout.take() {
-        spawn_stream_reader(name.to_string(), stdout, logs.clone());
+        spawn_stream_reader(
+            name.to_string(),
+            stdout,
+            logs.clone(),
+            sensitive_values.clone(),
+        );
     }
     if let Some(stderr) = child.stderr.take() {
-        spawn_stream_reader(name.to_string(), stderr, logs.clone());
+        spawn_stream_reader(name.to_string(), stderr, logs.clone(), sensitive_values);
     }
+}
+
+fn sensitive_sidecar_env_values(env: &[(String, String)]) -> Vec<String> {
+    env.iter()
+        .filter(|(k, v)| {
+            (k == LSAT_LOCAL_API_TOKEN_ENV || k == LSAT_DB_KEY_B64_ENV) && !v.is_empty()
+        })
+        .map(|(_, v)| v.clone())
+        .collect()
+}
+
+fn redact_sidecar_log_line(mut text: String, sensitive_values: &[String]) -> String {
+    for value in sensitive_values {
+        if !value.is_empty() && text.contains(value) {
+            text = text.replace(value, "[redacted]");
+        }
+    }
+    text
 }
 
 /// NATIVE-1: bind a freshly-spawned `child` to the app's crash-reap process group
@@ -204,12 +279,13 @@ fn spawn_stream_reader<R: std::io::Read + Send + 'static>(
     name: String,
     stream: R,
     logs: SidecarLogs,
+    sensitive_values: Vec<String>,
 ) {
     std::thread::spawn(move || {
         let reader = BufReader::new(stream);
         for line in reader.lines() {
             match line {
-                Ok(text) => logs.push_line(&name, text),
+                Ok(text) => logs.push_line(&name, redact_sidecar_log_line(text, &sensitive_values)),
                 Err(_) => break,
             }
         }
@@ -218,6 +294,13 @@ fn spawn_stream_reader<R: std::io::Read + Send + 'static>(
 
 /// How often the background supervisor probes each sidecar's readiness port.
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(7);
+
+/// Crash-loop respawn backoff. A failing sidecar should get one immediate
+/// recovery attempt, then back off exponentially so the supervisor does not
+/// launch the same doomed process on every health poll forever.
+const SIDECAR_RESPAWN_BACKOFF_BASE: Duration = Duration::from_secs(7);
+const SIDECAR_RESPAWN_BACKOFF_CAP: Duration = Duration::from_secs(300);
+const SIDECAR_RESPAWN_BACKOFF_MAX_SHIFT: u32 = 6;
 
 /// Per-probe TCP connect timeout. Kept well under the poll interval so a slow
 /// or wedged port never stalls the supervisor loop for a full cycle.
@@ -255,8 +338,9 @@ struct SidecarStatus {
     pid: Option<u32>,
     /// Whether this sidecar is OPTIONAL (OPS-5). Additive field so a host UI can
     /// distinguish a down REQUIRED sidecar (a real problem) from an absent
-    /// OPTIONAL one (an expected RAG-less build). `false` for SurrealDB + the
-    /// LSAT backend; `true` for the open-notebook API + worker.
+    /// OPTIONAL one (an expected RAG-less build). `false` for the LSAT backend;
+    /// `true` for the open-notebook stack, including SurrealDB when its binary
+    /// is not bundled.
     optional: bool,
     /// Whether this sidecar's backing resource is present on disk (OPS-5).
     /// Additive field. `false` only for an optional sidecar that was skipped
@@ -264,6 +348,13 @@ struct SidecarStatus {
     /// key off `optional && !present` to render "RAG unavailable" rather than an
     /// error. Always `true` for launched sidecars and for resource-less ones.
     present: bool,
+    /// True when startup refused this sidecar before launch, currently because
+    /// its staged binary failed provenance verification.
+    blocked: bool,
+    /// Human-readable launch refusal reason. `None` for launched or skipped rows.
+    block_reason: Option<String>,
+    /// Machine-readable provenance verdict, e.g. `digest_mismatch`.
+    provenance_status: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -276,13 +367,18 @@ struct PdfEntry {
     relative: String,
 }
 
+const CFA_DESKTOP_PDF_MAX_BYTES: u64 = 50 * 1024 * 1024;
+
 /// Walk a folder recursively and return every PDF found. The path argument
 /// MUST be one the user just chose via the dialog plugin (the dialog narrows
 /// fs scope; we don't open arbitrary roots ourselves).
 #[tauri::command]
 fn cfa_list_pdfs(folder: String) -> Result<Vec<PdfEntry>, String> {
     let root = PathBuf::from(&folder);
-    if !root.is_dir() {
+    let root_meta =
+        std::fs::symlink_metadata(&root).map_err(|_| format!("Not a directory: {}", folder))?;
+    let root_type = root_meta.file_type();
+    if root_type.is_symlink() || !root_type.is_dir() {
         return Err(format!("Not a directory: {}", folder));
     }
     let mut out = Vec::new();
@@ -300,8 +396,18 @@ fn cfa_list_pdfs(folder: String) -> Result<Vec<PdfEntry>, String> {
         for entry in entries.flatten() {
             visited += 1;
             let path = entry.path();
-            if path.is_dir() {
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
                 stack.push(path);
+                continue;
+            }
+            if !file_type.is_file() {
                 continue;
             }
             let lowered = path
@@ -311,7 +417,10 @@ fn cfa_list_pdfs(folder: String) -> Result<Vec<PdfEntry>, String> {
             if lowered.as_deref() != Some("pdf") {
                 continue;
             }
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let size = match entry.metadata() {
+                Ok(metadata) if metadata.is_file() => metadata.len(),
+                _ => continue,
+            };
             let name = path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -386,13 +495,28 @@ fn cfa_read_pdf_bytes_impl(path: &str) -> Result<Vec<u8>, String> {
         return Err("Refusing to read non-PDF path.".into());
     }
     let p = Path::new(path);
-    if !p.exists() {
-        return Err(format!("File does not exist: {}", path));
+    let metadata = std::fs::symlink_metadata(p).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!("File does not exist: {}", path)
+        } else {
+            format!("metadata failed: {e}")
+        }
+    })?;
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err("Refusing to read symlinked PDF path.".into());
     }
-    if !p.is_file() {
+    if !file_type.is_file() {
         return Err(format!("Not a regular file: {}", path));
     }
-    std::fs::read(path).map_err(|e| format!("read failed: {e}"))
+    if metadata.len() > CFA_DESKTOP_PDF_MAX_BYTES {
+        return Err(format!(
+            "PDF is too large: {} bytes (max {}).",
+            metadata.len(),
+            CFA_DESKTOP_PDF_MAX_BYTES
+        ));
+    }
+    std::fs::read(p).map_err(|e| format!("read failed: {e}"))
 }
 
 /// Locate the local services directory. Search order:
@@ -559,8 +683,8 @@ struct SidecarSpec {
     /// backing resource is absent — its `resource_path` doesn't exist on disk —
     /// is logged and SKIPPED at startup rather than launched, and the app
     /// degrades gracefully (e.g. RAG/notebook features unavailable) instead of
-    /// surfacing a failed-to-start error. Required sidecars (`optional: false`,
-    /// the LSAT backend + SurrealDB) gate as before and are always attempted.
+    /// surfacing a failed-to-start error. The LSAT backend remains required and
+    /// is always attempted.
     /// This is the build-time RAG-less story: when `ONB_GIT_URL` was unset the
     /// release omits the open-notebook resource, so its directory is missing and
     /// the optional open-notebook sidecars self-skip on a real install.
@@ -569,10 +693,10 @@ struct SidecarSpec {
     /// resource is present (OPS-5). For the open-notebook API + worker this is
     /// the `<services_dir>/open-notebook` directory the build bundles only when
     /// RAG is included; for the worker it is the same directory. `None` means
-    /// "no resource gate" — the sidecar is considered always-present (SurrealDB,
-    /// whose binary path is checked by the launcher itself, and the LSAT backend,
-    /// a required sidecar guaranteed present by the release CI gate). Only
-    /// consulted for `optional` sidecars; required sidecars ignore it.
+    /// "no resource gate" — the sidecar is considered always-present. The LSAT
+    /// backend uses no resource gate because it is guaranteed present by the
+    /// release CI gate. Only consulted for `optional` sidecars; required
+    /// sidecars ignore it.
     resource_path: Option<PathBuf>,
 }
 
@@ -587,6 +711,257 @@ impl SidecarSpec {
             None => true,
         }
     }
+}
+
+const SIDECAR_PROVENANCE_MANIFEST: &str = "sidecar-provenance.json";
+const SIDECAR_PROVENANCE_SCHEMA: &str = "studyvault.sidecar-provenance.v1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SidecarProvenanceStatus {
+    NotApplicable,
+    NotConfigured,
+    Verified,
+    MissingEntry,
+    InvalidManifest,
+    InvalidEntry,
+    PathEscapesManifest,
+    MissingBinary,
+    DigestMismatch,
+    UnreadableBinary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SidecarProvenanceVerdict {
+    status: SidecarProvenanceStatus,
+    message: Option<String>,
+}
+
+impl SidecarProvenanceVerdict {
+    fn new(status: SidecarProvenanceStatus, message: impl Into<Option<String>>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
+    }
+
+    fn status_key(&self) -> &'static str {
+        match self.status {
+            SidecarProvenanceStatus::NotApplicable => "not_applicable",
+            SidecarProvenanceStatus::NotConfigured => "not_configured",
+            SidecarProvenanceStatus::Verified => "verified",
+            SidecarProvenanceStatus::MissingEntry => "missing_entry",
+            SidecarProvenanceStatus::InvalidManifest => "invalid_manifest",
+            SidecarProvenanceStatus::InvalidEntry => "invalid_entry",
+            SidecarProvenanceStatus::PathEscapesManifest => "path_escapes_manifest",
+            SidecarProvenanceStatus::MissingBinary => "missing_binary",
+            SidecarProvenanceStatus::DigestMismatch => "digest_mismatch",
+            SidecarProvenanceStatus::UnreadableBinary => "unreadable_binary",
+        }
+    }
+
+    fn blocks_launch(&self) -> bool {
+        matches!(
+            self.status,
+            SidecarProvenanceStatus::InvalidManifest
+                | SidecarProvenanceStatus::InvalidEntry
+                | SidecarProvenanceStatus::PathEscapesManifest
+                | SidecarProvenanceStatus::MissingBinary
+                | SidecarProvenanceStatus::DigestMismatch
+                | SidecarProvenanceStatus::UnreadableBinary
+        )
+    }
+
+    fn message(&self, spec_name: &str) -> String {
+        self.message
+            .clone()
+            .unwrap_or_else(|| format!("{spec_name} provenance status: {}", self.status_key()))
+    }
+}
+
+#[derive(Deserialize)]
+struct SidecarProvenanceManifest {
+    schema: String,
+    entries: Vec<SidecarProvenanceEntry>,
+}
+
+#[derive(Deserialize)]
+struct SidecarProvenanceEntry {
+    service: String,
+    path: String,
+    sha256: String,
+    size: u64,
+}
+
+fn normalize_manifest_path(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn manifest_entry_pathbuf(rel: &str) -> Option<PathBuf> {
+    let normalized = rel.replace('\\', "/").trim_start_matches('/').to_string();
+    if normalized.is_empty() {
+        return None;
+    }
+    let mut out = PathBuf::new();
+    for part in normalized.split('/') {
+        if part.is_empty() || part == "." || part == ".." {
+            return None;
+        }
+        out.push(part);
+    }
+    Some(out)
+}
+
+fn sidecar_provenance_manifest_for(program: &Path) -> Option<PathBuf> {
+    if !program.is_absolute() {
+        return None;
+    }
+    let mut cursor = program.parent();
+    while let Some(dir) = cursor {
+        let manifest = dir.join(SIDECAR_PROVENANCE_MANIFEST);
+        if manifest.is_file() {
+            return Some(manifest);
+        }
+        cursor = dir.parent();
+    }
+    None
+}
+
+fn sidecar_relative_manifest_path(manifest: &Path, program: &Path) -> Option<String> {
+    let root = manifest.parent()?;
+    let rel = program.strip_prefix(root).ok()?;
+    Some(normalize_manifest_path(rel))
+}
+
+fn sha256_file(path: &Path) -> Result<(String, u64), String> {
+    use std::io::Read as _;
+
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut size = 0u64;
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        size += n as u64;
+        hasher.update(&buf[..n]);
+    }
+    Ok((format!("{:x}", hasher.finalize()), size))
+}
+
+fn verify_sidecar_provenance_for_spec(spec: &SidecarSpec) -> SidecarProvenanceVerdict {
+    let Some(manifest_path) = sidecar_provenance_manifest_for(&spec.program) else {
+        return SidecarProvenanceVerdict::new(SidecarProvenanceStatus::NotConfigured, None);
+    };
+    let Some(expected_rel) = sidecar_relative_manifest_path(&manifest_path, &spec.program) else {
+        return SidecarProvenanceVerdict::new(
+            SidecarProvenanceStatus::NotApplicable,
+            Some(format!(
+                "{} is outside provenance root {}",
+                spec.program.display(),
+                manifest_path.display()
+            )),
+        );
+    };
+    let raw = match std::fs::read_to_string(&manifest_path) {
+        Ok(value) => value,
+        Err(e) => {
+            return SidecarProvenanceVerdict::new(
+                SidecarProvenanceStatus::InvalidManifest,
+                Some(format!(
+                    "{} provenance manifest cannot be read: {e}",
+                    manifest_path.display()
+                )),
+            )
+        }
+    };
+    let manifest: SidecarProvenanceManifest = match serde_json::from_str(&raw) {
+        Ok(value) => value,
+        Err(e) => {
+            return SidecarProvenanceVerdict::new(
+                SidecarProvenanceStatus::InvalidManifest,
+                Some(format!(
+                    "{} provenance manifest is invalid JSON/shape: {e}",
+                    manifest_path.display()
+                )),
+            )
+        }
+    };
+    if manifest.schema != SIDECAR_PROVENANCE_SCHEMA {
+        return SidecarProvenanceVerdict::new(
+            SidecarProvenanceStatus::InvalidManifest,
+            Some(format!(
+                "{} provenance manifest has unsupported schema {}",
+                manifest_path.display(),
+                manifest.schema
+            )),
+        );
+    }
+
+    let Some(entry) = manifest.entries.iter().find(|entry| {
+        entry.service == spec.name
+            || entry.path.replace('\\', "/").trim_start_matches('/') == expected_rel
+    }) else {
+        return SidecarProvenanceVerdict::new(SidecarProvenanceStatus::MissingEntry, None);
+    };
+
+    if entry.sha256.len() != 64 || !entry.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return SidecarProvenanceVerdict::new(
+            SidecarProvenanceStatus::InvalidEntry,
+            Some(format!(
+                "{} provenance entry has an invalid sha256",
+                spec.name
+            )),
+        );
+    }
+    let Some(entry_path) = manifest_entry_pathbuf(&entry.path) else {
+        return SidecarProvenanceVerdict::new(
+            SidecarProvenanceStatus::PathEscapesManifest,
+            Some(format!(
+                "{} provenance entry path escapes the manifest root",
+                spec.name
+            )),
+        );
+    };
+    let manifest_root = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let binary = manifest_root.join(entry_path);
+    if !binary.is_file() {
+        return SidecarProvenanceVerdict::new(
+            SidecarProvenanceStatus::MissingBinary,
+            Some(format!(
+                "{} provenance binary is missing: {}",
+                spec.name,
+                binary.display()
+            )),
+        );
+    }
+    let (actual_sha, actual_size) = match sha256_file(&binary) {
+        Ok(value) => value,
+        Err(e) => {
+            return SidecarProvenanceVerdict::new(
+                SidecarProvenanceStatus::UnreadableBinary,
+                Some(format!(
+                    "{} provenance binary cannot be hashed: {e}",
+                    binary.display()
+                )),
+            )
+        }
+    };
+    if actual_sha != entry.sha256.to_ascii_lowercase() || actual_size != entry.size {
+        return SidecarProvenanceVerdict::new(
+            SidecarProvenanceStatus::DigestMismatch,
+            Some(format!(
+                "{} provenance mismatch for {}",
+                spec.name,
+                binary.display()
+            )),
+        );
+    }
+    SidecarProvenanceVerdict::new(SidecarProvenanceStatus::Verified, None)
 }
 
 /// Abstraction over "spawn this child". The production impl shells out via
@@ -653,10 +1028,11 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
     let onb = dir.join("open-notebook");
     let env_file = onb.join(".env");
     let db = dir.join("surreal_data").join("db");
+    let surreal_binary = dir.join("bin").join(exe("surreal2"));
 
     let surreal = SidecarSpec {
         name: "SurrealDB".into(),
-        program: dir.join("bin").join(exe("surreal2")),
+        program: surreal_binary.clone(),
         args: vec![
             "start".into(),
             "--user".into(),
@@ -668,13 +1044,14 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
         env: vec![],
         // SurrealDB defaults to binding 127.0.0.1:8000.
         ready_port: Some(8000),
-        // The storage layer — nothing else can connect until it's up.
+        // The optional RAG storage layer — nothing else in that stack can
+        // connect until it's up.
         depends_on: vec![],
-        // SurrealDB is the storage backbone the open-notebook stack rides on, so
-        // it's launched whenever a services dir resolves; its binary presence is
-        // checked by the launcher. Not gated as optional here.
-        optional: false,
-        resource_path: None,
+        // SurrealDB is only needed when the open-notebook/RAG resources were
+        // bundled. RAG-less packages omit this binary, so skip it cleanly
+        // instead of logging a failed process spawn.
+        optional: true,
+        resource_path: Some(surreal_binary),
     };
 
     let api = SidecarSpec {
@@ -779,6 +1156,7 @@ fn build_sidecar_specs(dir: &Path) -> Vec<SidecarSpec> {
 struct SpawnOutcome {
     launched: Vec<SupervisedSidecar>,
     skipped: Vec<SidecarSpec>,
+    blocked: Vec<BlockedSidecar>,
 }
 
 /// Iterate the given launcher over `build_sidecar_specs(dir)` in dependency
@@ -790,18 +1168,20 @@ struct SpawnOutcome {
 ///
 /// OPS-5 graceful degrade: before gating + launching, each spec's optionality is
 /// checked. An OPTIONAL sidecar whose `resource_path` is absent on disk (a
-/// RAG-less build that didn't bundle `<dir>/open-notebook`) is logged and
+/// RAG-less build that didn't bundle SurrealDB or `<dir>/open-notebook`) is logged and
 /// SKIPPED — neither its dependency gate nor its launch runs — and recorded in
 /// `SpawnOutcome::skipped`. The app then degrades gracefully (RAG/notebook
 /// features off) instead of logging a launch error every poll. REQUIRED sidecars
-/// (SurrealDB, the LSAT backend) are never skipped and gate/launch as before.
+/// (the LSAT backend) are never skipped and gate/launch as before.
 ///
 /// Ordering (BA2): the specs are walked front-to-back, and before each is
 /// launched, every dependency named in its `depends_on` that exposes a
 /// readiness port is confirmed listening via a bounded `wait_for_port_ready`.
 /// Concretely this makes SurrealDB (:8000) ready before open-notebook's API
-/// (:5055) connects, and the API ready before the worker drains its queue. The
-/// LSAT backend declares no deps, so it starts without waiting. A dependency
+/// (:5055) connects, and the API ready before the worker drains its queue. Each
+/// socketed sidecar also gets a bounded post-launch readiness wait so the first
+/// boot-status snapshot does not race a required backend that is still binding.
+/// The LSAT backend declares no deps, so it starts without waiting. A dependency
 /// that fails to launch — or never binds within the budget — is logged and the
 /// dependent is started anyway in a degraded state, so one wedged sidecar can
 /// never hang the whole launch.
@@ -866,6 +1246,8 @@ fn spawn_sidecars_with_specs<L: SidecarLauncher>(
 
     let mut kids = Vec::new();
     let mut skipped = Vec::new();
+    let mut skipped_names: HashSet<String> = HashSet::new();
+    let mut blocked = Vec::new();
     for spec in specs {
         // OPS-5: graceful degrade for optional sidecars. If an optional sidecar's
         // backing resource is absent (a RAG-less build with no
@@ -882,7 +1264,45 @@ fn spawn_sidecars_with_specs<L: SidecarLauncher>(
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|| "<none>".into())
             );
+            skipped_names.insert(spec.name.clone());
             skipped.push(spec);
+            continue;
+        }
+
+        if spec.optional {
+            let skipped_deps: Vec<String> = spec
+                .depends_on
+                .iter()
+                .filter(|dep| skipped_names.contains(*dep))
+                .cloned()
+                .collect();
+            if !skipped_deps.is_empty() {
+                log::info!(
+                    "sidecar: {} is optional and its required sidecar(s) were skipped ({}); \
+                     skipping — feature unavailable, app continues degraded",
+                    spec.name,
+                    skipped_deps.join(", ")
+                );
+                skipped_names.insert(spec.name.clone());
+                skipped.push(spec);
+                continue;
+            }
+        }
+
+        let provenance = verify_sidecar_provenance_for_spec(&spec);
+        if provenance.blocks_launch() {
+            let reason = provenance.message(&spec.name);
+            log::error!(
+                "sidecar: {} refused before launch by provenance check ({}): {}",
+                spec.name,
+                provenance.status_key(),
+                reason
+            );
+            blocked.push(BlockedSidecar {
+                spec,
+                reason,
+                provenance_status: Some(provenance.status_key().to_string()),
+            });
             continue;
         }
 
@@ -922,10 +1342,14 @@ fn spawn_sidecars_with_specs<L: SidecarLauncher>(
         match launcher.launch(&spec) {
             Ok(mut child) => {
                 log::info!("sidecar: {} started (pid {})", spec.name, child.id());
-                attach_log_capture(&spec.name, &mut child, logs);
+                attach_log_capture(&spec.name, &mut child, logs, &spec.env);
                 // NATIVE-1: join the crash-reap group so a hard-kill of the app
                 // reaps this sidecar (no orphan holding its port).
                 assign_to_process_group(&spec.name, &child, group);
+                if let Some(port) = spec.ready_port {
+                    let label = format!("{} startup", spec.name);
+                    wait_for_port_ready(&label, port, readiness_budget, std::time::Instant::now);
+                }
                 kids.push(SupervisedSidecar::new(spec, child));
             }
             Err(e) => log::error!("sidecar: {} failed to start: {e}", spec.name),
@@ -934,6 +1358,15 @@ fn spawn_sidecars_with_specs<L: SidecarLauncher>(
     SpawnOutcome {
         launched: kids,
         skipped,
+        blocked,
+    }
+}
+
+fn set_sidecar_env(env: &mut Vec<(String, String)>, key: &str, value: String) {
+    if let Some(pair) = env.iter_mut().find(|(k, _)| k == key) {
+        pair.1 = value;
+    } else {
+        env.push((key.to_string(), value));
     }
 }
 
@@ -970,18 +1403,60 @@ fn apply_lsat_relocation_env(specs: &mut [SidecarSpec], new_dir: Option<PathBuf>
     );
     // Set or override LSATLAB_DATA_DIR; keep the existing (key, value) env-pair
     // shape `build_sidecar_specs` uses.
-    if let Some(pair) = lsat.env.iter_mut().find(|(k, _)| k == "LSATLAB_DATA_DIR") {
-        pair.1 = resolved_str;
-    } else {
-        lsat.env.push(("LSATLAB_DATA_DIR".into(), resolved_str));
+    set_sidecar_env(&mut lsat.env, "LSATLAB_DATA_DIR", resolved_str);
+}
+
+/// Apply the per-run local API token to the LSAT backend sidecar only.
+///
+/// The token is intentionally not part of `build_sidecar_specs`: that recipe
+/// stays pure and deterministic, while production launch mutates the required
+/// LSAT backend spec immediately before spawn with the run-scoped secret.
+fn apply_lsat_local_api_token_env(specs: &mut [SidecarSpec], token: &str) {
+    let token = token.trim();
+    if token.is_empty() {
+        return;
     }
+    let Some(lsat) = specs.iter_mut().find(|s| s.name == "LSAT backend") else {
+        return;
+    };
+    set_sidecar_env(&mut lsat.env, LSAT_LOCAL_API_TOKEN_ENV, token.to_string());
+}
+
+/// Apply the OS-keychain-custodied field-encryption key to the LSAT backend
+/// sidecar only. The backend consumes this as ``LSATLAB_DB_KEY_B64`` and keeps
+/// selected local-only SQLite fields encrypted at rest.
+fn apply_lsat_db_key_env(specs: &mut [SidecarSpec], key_b64: &str) {
+    let key_b64 = key_b64.trim();
+    if key_b64.is_empty() {
+        return;
+    }
+    let Some(lsat) = specs.iter_mut().find(|s| s.name == "LSAT backend") else {
+        return;
+    };
+    set_sidecar_env(&mut lsat.env, LSAT_DB_KEY_B64_ENV, key_b64.to_string());
+}
+
+fn block_lsat_backend_spec(specs: &mut Vec<SidecarSpec>, reason: String) -> Option<BlockedSidecar> {
+    let pos = specs.iter().position(|s| s.name == "LSAT backend")?;
+    let spec = specs.remove(pos);
+    Some(BlockedSidecar {
+        spec,
+        reason,
+        provenance_status: None,
+    })
 }
 
 /// The distinct readiness ports a set of specs OWNS (NATIVE-1/8). Used by the
 /// boot-time stale-port sweep to know which ports to clear of orphans before
-/// spawning, and to seed the owned-port registry. Pure — sorted + deduped.
+/// spawning. Optional sidecars whose resources are absent are not claimed, so a
+/// RAG-less package does not touch unrelated local services on the RAG ports.
+/// Sorted + deduped.
 fn owned_ready_ports(specs: &[SidecarSpec]) -> Vec<u16> {
-    let mut ports: Vec<u16> = specs.iter().filter_map(|s| s.ready_port).collect();
+    let mut ports: Vec<u16> = specs
+        .iter()
+        .filter(|s| !s.optional || s.resource_present())
+        .filter_map(|s| s.ready_port)
+        .collect();
     ports.sort_unstable();
     ports.dedup();
     ports
@@ -1037,7 +1512,11 @@ fn sweep_stale_ports(ports: &[u16]) {
     }
 }
 
-fn spawn_sidecars(logs: &SidecarLogs, group: &dyn process_group::ProcessGroup) -> SpawnOutcome {
+fn spawn_sidecars(
+    logs: &SidecarLogs,
+    group: &dyn process_group::ProcessGroup,
+    lsat_local_api_token: &str,
+) -> SpawnOutcome {
     let dir = services_dir();
     // DATA-7: only the host knows where app-data was relocated to; it pins the
     // LSAT data dir via the LSATLAB_DATA_DIR env. Detect an orphaned legacy store
@@ -1049,9 +1528,24 @@ fn spawn_sidecars(logs: &SidecarLogs, group: &dyn process_group::ProcessGroup) -
         .map(PathBuf::from);
     let mut specs = build_sidecar_specs(&dir);
     apply_lsat_relocation_env(&mut specs, new_dir);
+    apply_lsat_local_api_token_env(&mut specs, lsat_local_api_token);
+    let mut preblocked = Vec::new();
+    match keychain::get_or_create_lsat_db_dek_b64() {
+        Ok(key_b64) => apply_lsat_db_key_env(&mut specs, &key_b64),
+        Err(e) => {
+            let reason = format!("LSAT DB encryption key unavailable: {e}");
+            log::error!("sidecar: LSAT backend launch blocked: {reason}");
+            if let Some(blocked) = block_lsat_backend_spec(&mut specs, reason) {
+                preblocked.push(blocked);
+            }
+        }
+    }
     // NATIVE-1: clear any orphan squatting an owned port BEFORE we try to bind it.
     sweep_stale_ports(&owned_ready_ports(&specs));
-    spawn_sidecars_with_specs(&ProcessLauncher, specs, logs, READINESS_WAIT_BUDGET, group)
+    let mut outcome =
+        spawn_sidecars_with_specs(&ProcessLauncher, specs, logs, READINESS_WAIT_BUDGET, group);
+    outcome.blocked.extend(preblocked);
+    outcome
 }
 
 /// Probe one sidecar's readiness port. Sidecars with no `ready_port` (the
@@ -1109,9 +1603,10 @@ impl identity::IdentityProbe for HttpIdentityProbe {
 }
 
 /// Minimal blocking HTTP/1.0 GET over loopback, returning the response BODY as a
-/// string (headers stripped at the blank line). Bounded by `timeout_ms` on both
-/// connect and read so a wedged listener can't stall the supervisor. Strictly
-/// `127.0.0.1` — this is an internal identity handshake, never a general client.
+/// string only for 2xx responses (headers stripped at the blank line). Bounded by
+/// `timeout_ms` on both connect and read so a wedged listener can't stall the
+/// supervisor. Strictly `127.0.0.1` — this is an internal identity handshake,
+/// never a general client.
 fn http_get_loopback(port: u16, path: &str, timeout_ms: u64) -> Option<String> {
     use std::io::{Read, Write};
     let timeout = Duration::from_millis(timeout_ms);
@@ -1142,6 +1637,11 @@ fn http_get_loopback(port: u16, path: &str, timeout_ms: u64) -> Option<String> {
         }
     }
     let text = String::from_utf8_lossy(&raw);
+    let status_line = text.lines().next()?;
+    let status_code = status_line.split_whitespace().nth(1)?;
+    if !status_code.starts_with('2') {
+        return None;
+    }
     // Split headers from body at the first blank line.
     let body = text
         .split_once("\r\n\r\n")
@@ -1208,6 +1708,14 @@ fn kill_child_tree(child: &mut Child) {
     let _ = child.kill();
 }
 
+fn sidecar_respawn_backoff(consecutive_failures: u32) -> Duration {
+    let shift = consecutive_failures.min(SIDECAR_RESPAWN_BACKOFF_MAX_SHIFT);
+    let multiplier = 1u32.checked_shl(shift).unwrap_or(u32::MAX) as u64;
+    SIDECAR_RESPAWN_BACKOFF_BASE
+        .saturating_mul(multiplier as u32)
+        .min(SIDECAR_RESPAWN_BACKOFF_CAP)
+}
+
 fn supervise_once<L: SidecarLauncher>(
     launcher: &L,
     sidecars: &Mutex<Vec<SupervisedSidecar>>,
@@ -1256,11 +1764,9 @@ fn supervise_once<L: SidecarLauncher>(
         {
             let name = slot.spec.name.clone();
             slot.consecutive_failures = slot.consecutive_failures.saturating_add(1);
-            // 14s, 28s, 56s, … capped at 5 min; shift exponent capped to avoid overflow.
-            let backoff_secs = 7u64
-                .saturating_mul(1u64 << slot.consecutive_failures.min(6))
-                .min(300);
-            slot.backoff_until = Some(now + std::time::Duration::from_secs(backoff_secs));
+            let backoff = sidecar_respawn_backoff(slot.consecutive_failures);
+            slot.backoff_until = Some(now + backoff);
+            let backoff_secs = backoff.as_secs();
             log::warn!(
                 "sidecar: {name} appears down (port_down={port_down}, exited={process_exited}); \
                  respawn attempt #{} (next backoff {backoff_secs}s)",
@@ -1270,12 +1776,21 @@ fn supervise_once<L: SidecarLauncher>(
             // don't leak a zombie on Unix or orphan the Python workers on Windows.
             kill_child_tree(&mut slot.child);
             let _ = slot.child.wait();
+            let provenance = verify_sidecar_provenance_for_spec(&slot.spec);
+            if provenance.blocks_launch() {
+                log::error!(
+                    "sidecar: {name} respawn refused by provenance check ({}): {}",
+                    provenance.status_key(),
+                    provenance.message(&name)
+                );
+                continue;
+            }
             match launcher.launch(&slot.spec) {
                 Ok(mut child) => {
                     log::info!("sidecar: {name} respawned (pid {})", child.id());
                     // Re-attach capture: the new child has fresh stdout/stderr
                     // pipes, so its output keeps flowing into the ring buffer.
-                    attach_log_capture(&name, &mut child, logs);
+                    attach_log_capture(&name, &mut child, logs, &slot.spec.env);
                     // NATIVE-1: a respawn is a brand-new pid — re-join it to the
                     // crash-reap group so the orphan protection covers it too.
                     assign_to_process_group(&name, &child, group);
@@ -1351,6 +1866,9 @@ fn launched_sidecar_status(slot: &SupervisedSidecar) -> SidecarStatus {
         // A launched sidecar's resource was present (else it'd have been
         // skipped) — or it has no resource gate at all.
         present: true,
+        blocked: false,
+        block_reason: None,
+        provenance_status: None,
     }
 }
 
@@ -1369,6 +1887,33 @@ fn skipped_sidecar_status(spec: &SidecarSpec) -> SidecarStatus {
         pid: None,
         optional: spec.optional,
         present: false,
+        blocked: false,
+        block_reason: None,
+        provenance_status: None,
+    }
+}
+
+fn blocked_sidecar_status(row: &BlockedSidecar) -> SidecarStatus {
+    let present = row.spec.program.is_file()
+        || row
+            .spec
+            .resource_path
+            .as_ref()
+            .map(|path| path.exists())
+            .unwrap_or(false);
+    SidecarStatus {
+        name: row.spec.name.clone(),
+        port: row.spec.ready_port,
+        ready_port: row.spec.ready_port,
+        healthy: false,
+        ready: false,
+        depends_on: row.spec.depends_on.clone(),
+        pid: None,
+        optional: row.spec.optional,
+        present,
+        blocked: true,
+        block_reason: Some(row.reason.clone()),
+        provenance_status: row.provenance_status.clone(),
     }
 }
 
@@ -1382,6 +1927,7 @@ fn skipped_sidecar_status(spec: &SidecarSpec) -> SidecarStatus {
 fn get_sidecar_status(
     state: tauri::State<'_, Sidecars>,
     skipped: tauri::State<'_, SkippedSidecars>,
+    blocked: tauri::State<'_, BlockedSidecars>,
 ) -> Vec<SidecarStatus> {
     let guard = match state.0.lock() {
         Ok(g) => g,
@@ -1395,7 +1941,19 @@ fn get_sidecar_status(
         Err(poisoned) => poisoned.into_inner(),
     };
     out.extend(skipped_guard.iter().map(skipped_sidecar_status));
+    drop(skipped_guard);
+
+    let blocked_guard = match blocked.0.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    out.extend(blocked_guard.iter().map(blocked_sidecar_status));
     out
+}
+
+#[tauri::command]
+fn get_lsat_local_api_token(token: tauri::State<'_, LsatLocalApiToken>) -> String {
+    token.0.clone()
 }
 
 /// Tauri command backing the UI log viewer (BA8). Returns the most recent
@@ -1497,15 +2055,18 @@ fn second_instance_payload(argv: &[String], cwd: &str) -> SecondInstancePayload 
 
 /// NATIVE-6: the boot-status payload emitted on `BOOT_STATUS_EVENT`. `status` is
 /// the OPS-3 roll-up verdict ("ok"/"degraded"/"error"); `launched`/`skipped`
-/// count what ordered startup did; `degraded_reason` is a short human note when
-/// not "ok" (e.g. which optional sidecars were skipped / which required are down).
+/// /`blocked` count what ordered startup did; `degraded_reason` is a short human
+/// note when not "ok" (e.g. skipped optionals, blocked required sidecars).
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 struct BootStatus {
     status: String,
     launched: usize,
     skipped: usize,
+    blocked: usize,
     /// Names of optional sidecars skipped for an absent resource (OPS-5).
     skipped_names: Vec<String>,
+    /// Names of sidecars refused before launch by provenance verification.
+    blocked_names: Vec<String>,
     /// Names of REQUIRED sidecars that aren't ready right after boot.
     required_down_names: Vec<String>,
     /// Short human note when degraded/error; empty when "ok".
@@ -1517,21 +2078,33 @@ struct BootStatus {
 /// OPS-5 skipped optionals — so the boot verdict is unit-testable without a live
 /// app. A skipped optional sidecar yields "degraded" (feature unavailable, app
 /// works); a not-ready REQUIRED sidecar yields "error".
-fn build_boot_status(launched_rows: &[SidecarStatus], skipped: &[SidecarSpec]) -> BootStatus {
+fn build_boot_status(
+    launched_rows: &[SidecarStatus],
+    skipped: &[SidecarSpec],
+    blocked: &[BlockedSidecar],
+) -> BootStatus {
     // Fold the skipped optionals into the same row shape so the aggregate sees
-    // them as not-ready optionals → degraded (never error).
+    // them as not-ready optionals → degraded (never error). Fold blocked rows
+    // in too; a blocked required sidecar becomes a normal required-down row.
     let mut rows: Vec<SidecarStatus> = launched_rows.to_vec();
     rows.extend(skipped.iter().map(skipped_sidecar_status));
+    rows.extend(blocked.iter().map(blocked_sidecar_status));
     let agg = aggregate_sidecar_health(&rows);
 
     let skipped_names: Vec<String> = skipped.iter().map(|s| s.name.clone()).collect();
+    let blocked_names: Vec<String> = blocked.iter().map(|b| b.spec.name.clone()).collect();
     let degraded_reason = if agg.status == "error" {
         format!(
             "required sidecar(s) not ready: {}",
             agg.required_down_names.join(", ")
         )
     } else if agg.status == "degraded" {
-        if skipped_names.is_empty() {
+        if !blocked_names.is_empty() {
+            format!(
+                "optional sidecar(s) blocked before launch: {}",
+                blocked_names.join(", ")
+            )
+        } else if skipped_names.is_empty() {
             "an optional sidecar is not ready".to_string()
         } else {
             format!(
@@ -1547,7 +2120,9 @@ fn build_boot_status(launched_rows: &[SidecarStatus], skipped: &[SidecarSpec]) -
         status: agg.status,
         launched: launched_rows.len(),
         skipped: skipped.len(),
+        blocked: blocked.len(),
         skipped_names,
+        blocked_names,
         required_down_names: agg.required_down_names,
         degraded_reason,
     }
@@ -1561,6 +2136,7 @@ fn build_boot_status(launched_rows: &[SidecarStatus], skipped: &[SidecarSpec]) -
 fn get_system_health_aggregated(
     state: tauri::State<'_, Sidecars>,
     skipped: tauri::State<'_, SkippedSidecars>,
+    blocked: tauri::State<'_, BlockedSidecars>,
 ) -> SystemHealthAggregate {
     let guard = match state.0.lock() {
         Ok(g) => g,
@@ -1576,6 +2152,13 @@ fn get_system_health_aggregated(
     rows.extend(skipped_guard.iter().map(skipped_sidecar_status));
     drop(skipped_guard);
 
+    let blocked_guard = match blocked.0.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    rows.extend(blocked_guard.iter().map(blocked_sidecar_status));
+    drop(blocked_guard);
+
     aggregate_sidecar_health(&rows)
 }
 
@@ -1588,8 +2171,44 @@ mod tests {
     use std::cell::RefCell;
     use std::fs;
     use std::net::TcpListener;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
+
+    #[cfg(unix)]
+    fn try_symlink_file(src: &Path, dst: &Path) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(src, dst)
+    }
+
+    #[cfg(windows)]
+    fn try_symlink_file(src: &Path, dst: &Path) -> std::io::Result<()> {
+        std::os::windows::fs::symlink_file(src, dst)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn try_symlink_file(_src: &Path, _dst: &Path) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "symlinks are not supported on this platform",
+        ))
+    }
+
+    #[cfg(unix)]
+    fn try_symlink_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(src, dst)
+    }
+
+    #[cfg(windows)]
+    fn try_symlink_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+        std::os::windows::fs::symlink_dir(src, dst)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn try_symlink_dir(_src: &Path, _dst: &Path) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "symlinks are not supported on this platform",
+        ))
+    }
 
     // ---- pathdiff_to_string ----
 
@@ -1665,6 +2284,41 @@ mod tests {
         assert_eq!(entries[0].relative, "level1/level2/deep.pdf");
     }
 
+    #[test]
+    fn list_pdfs_skips_symlinked_pdf_files_when_supported() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let real = root.join("real.pdf");
+        let linked = root.join("linked.pdf");
+        fs::write(&real, b"%PDF-1.4 real").unwrap();
+        if let Err(err) = try_symlink_file(&real, &linked) {
+            eprintln!("skipping symlink assertion: {err}");
+            return;
+        }
+
+        let entries = cfa_list_pdfs(root.to_string_lossy().to_string()).expect("walk");
+        let names: std::collections::HashSet<_> = entries.into_iter().map(|e| e.name).collect();
+        assert!(names.contains("real.pdf"));
+        assert!(!names.contains("linked.pdf"));
+    }
+
+    #[test]
+    fn list_pdfs_does_not_recurse_symlinked_directories_when_supported() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path().join("root");
+        let outside = tmp.path().join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("outside.pdf"), b"%PDF-1.4 outside").unwrap();
+        if let Err(err) = try_symlink_dir(&outside, &root.join("linked")) {
+            eprintln!("skipping symlink assertion: {err}");
+            return;
+        }
+
+        let entries = cfa_list_pdfs(root.to_string_lossy().to_string()).expect("walk");
+        assert!(entries.is_empty(), "unexpected entries: {}", entries.len());
+    }
+
     // ---- cfa_read_pdf_bytes ----
 
     #[test]
@@ -1703,6 +2357,33 @@ mod tests {
             err.contains("Not a regular file"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn read_pdf_bytes_refuses_symlinked_pdf_when_supported() {
+        let tmp = tempdir().expect("tempdir");
+        let real = tmp.path().join("real.pdf");
+        let linked = tmp.path().join("linked.pdf");
+        fs::write(&real, b"%PDF-1.4 real").unwrap();
+        if let Err(err) = try_symlink_file(&real, &linked) {
+            eprintln!("skipping symlink assertion: {err}");
+            return;
+        }
+
+        let err = cfa_read_pdf_bytes_impl(linked.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("symlinked"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn read_pdf_bytes_refuses_oversized_pdf_before_reading() {
+        let tmp = tempdir().expect("tempdir");
+        let pdf = tmp.path().join("huge.pdf");
+        let file = fs::File::create(&pdf).unwrap();
+        file.set_len(CFA_DESKTOP_PDF_MAX_BYTES + 1).unwrap();
+        drop(file);
+
+        let err = cfa_read_pdf_bytes_impl(pdf.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("too large"), "unexpected error: {err}");
     }
 
     // ---- pick_folder_recv ----
@@ -1877,6 +2558,67 @@ mod tests {
         assert!(!is_port_listening("", 80, 50));
     }
 
+    fn serve_http_once(response: &'static str) -> (u16, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            use std::io::Write;
+            stream.write_all(response.as_bytes()).expect("write");
+        });
+        (port, handle)
+    }
+
+    #[test]
+    fn http_get_loopback_returns_body_for_2xx_only() {
+        let (ok_port, ok_thread) = serve_http_once(
+            "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"service\":\"lsat-backend\"}",
+        );
+        assert_eq!(
+            http_get_loopback(ok_port, "/api/health", 500).as_deref(),
+            Some("{\"service\":\"lsat-backend\"}")
+        );
+        ok_thread.join().unwrap();
+
+        let (err_port, err_thread) = serve_http_once(
+            "HTTP/1.0 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n{\"service\":\"lsat-backend\"}",
+        );
+        assert_eq!(http_get_loopback(err_port, "/api/health", 500), None);
+        err_thread.join().unwrap();
+    }
+
+    #[test]
+    fn http_identity_probe_verifies_lsat_health_shape_only_on_2xx() {
+        let probe = HttpIdentityProbe;
+
+        let (legacy_port, legacy_thread) = serve_http_once(
+            "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"ok\":true}",
+        );
+        assert_eq!(
+            identity::IdentityProbe::fetch_identity(&probe, legacy_port),
+            None
+        );
+        legacy_thread.join().unwrap();
+
+        let (healthy_port, healthy_thread) = serve_http_once(
+            "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"ok\":true,\"service\":\"lsat-backend\",\"version\":\"0.9.0\"}",
+        );
+        let echoed = identity::IdentityProbe::fetch_identity(&probe, healthy_port)
+            .expect("matching health identity");
+        assert_eq!(echoed.service.as_deref(), Some("lsat-backend"));
+        assert_eq!(echoed.version.as_deref(), Some("0.9.0"));
+        healthy_thread.join().unwrap();
+
+        let (error_port, error_thread) = serve_http_once(
+            "HTTP/1.0 503 Service Unavailable\r\nContent-Type: application/json\r\n\r\n{\"ok\":false,\"service\":\"lsat-backend\",\"version\":\"0.9.0\"}",
+        );
+        assert_eq!(
+            identity::IdentityProbe::fetch_identity(&probe, error_port),
+            None
+        );
+        error_thread.join().unwrap();
+    }
+
     // ---- supervisor (build_sidecar_specs + spawn_sidecars_with) ----
 
     #[test]
@@ -1939,6 +2681,109 @@ mod tests {
         // Other sidecars don't carry env overrides.
         assert!(specs[0].env.is_empty());
         assert!(specs[1].env.is_empty());
+    }
+
+    // ---- LSAT local API token handoff ----
+
+    #[test]
+    fn generate_lsat_local_api_token_returns_32_bytes_as_hex() {
+        let token = generate_lsat_local_api_token().expect("token");
+        assert_eq!(token.len(), LSAT_LOCAL_API_TOKEN_BYTES * 2);
+        assert!(
+            token.chars().all(|c| c.is_ascii_hexdigit()),
+            "token is lower/upper hex"
+        );
+        assert!(
+            token.chars().any(|c| c != '0'),
+            "token should not be all zeros"
+        );
+    }
+
+    #[test]
+    fn apply_lsat_local_api_token_env_sets_lsat_backend_only() {
+        let mut specs = build_sidecar_specs(&PathBuf::from("C:/qv/services"));
+
+        apply_lsat_local_api_token_env(&mut specs, " run-token ");
+
+        let lsat = specs.iter().find(|s| s.name == "LSAT backend").unwrap();
+        assert_eq!(
+            lsat.env
+                .iter()
+                .find(|(k, _)| k == LSAT_LOCAL_API_TOKEN_ENV)
+                .map(|(_, v)| v.as_str()),
+            Some("run-token")
+        );
+        assert!(specs
+            .iter()
+            .filter(|s| s.name != "LSAT backend")
+            .all(|s| !s.env.iter().any(|(k, _)| k == LSAT_LOCAL_API_TOKEN_ENV)));
+    }
+
+    #[test]
+    fn apply_lsat_local_api_token_env_overwrites_existing_value_and_ignores_empty() {
+        let mut specs = build_sidecar_specs(&PathBuf::from("C:/qv/services"));
+        apply_lsat_local_api_token_env(&mut specs, "first");
+        apply_lsat_local_api_token_env(&mut specs, "second");
+        apply_lsat_local_api_token_env(&mut specs, "   ");
+
+        let lsat = specs.iter().find(|s| s.name == "LSAT backend").unwrap();
+        let token_pairs: Vec<_> = lsat
+            .env
+            .iter()
+            .filter(|(k, _)| k == LSAT_LOCAL_API_TOKEN_ENV)
+            .collect();
+        assert_eq!(token_pairs.len(), 1);
+        assert_eq!(token_pairs[0].1, "second");
+    }
+
+    #[test]
+    fn apply_lsat_db_key_env_sets_lsat_backend_only() {
+        let mut specs = build_sidecar_specs(&PathBuf::from("C:/qv/services"));
+
+        apply_lsat_db_key_env(&mut specs, " db-key ");
+
+        let lsat = specs.iter().find(|s| s.name == "LSAT backend").unwrap();
+        assert_eq!(
+            lsat.env
+                .iter()
+                .find(|(k, _)| k == LSAT_DB_KEY_B64_ENV)
+                .map(|(_, v)| v.as_str()),
+            Some("db-key")
+        );
+        assert!(specs
+            .iter()
+            .filter(|s| s.name != "LSAT backend")
+            .all(|s| !s.env.iter().any(|(k, _)| k == LSAT_DB_KEY_B64_ENV)));
+    }
+
+    #[test]
+    fn apply_lsat_db_key_env_overwrites_existing_value_and_ignores_empty() {
+        let mut specs = build_sidecar_specs(&PathBuf::from("C:/qv/services"));
+        apply_lsat_db_key_env(&mut specs, "first");
+        apply_lsat_db_key_env(&mut specs, "second");
+        apply_lsat_db_key_env(&mut specs, "   ");
+
+        let lsat = specs.iter().find(|s| s.name == "LSAT backend").unwrap();
+        let key_pairs: Vec<_> = lsat
+            .env
+            .iter()
+            .filter(|(k, _)| k == LSAT_DB_KEY_B64_ENV)
+            .collect();
+        assert_eq!(key_pairs.len(), 1);
+        assert_eq!(key_pairs[0].1, "second");
+    }
+
+    #[test]
+    fn block_lsat_backend_spec_removes_only_lsat() {
+        let mut specs = build_sidecar_specs(&PathBuf::from("C:/qv/services"));
+
+        let blocked = block_lsat_backend_spec(&mut specs, "key unavailable".into())
+            .expect("blocked LSAT spec");
+
+        assert_eq!(blocked.spec.name, "LSAT backend");
+        assert_eq!(blocked.reason, "key unavailable");
+        assert!(specs.iter().all(|s| s.name != "LSAT backend"));
+        assert!(specs.iter().any(|s| s.name == "SurrealDB"));
     }
 
     // ---- DATA-7 relocation guard wiring (apply_lsat_relocation_env) ----
@@ -2021,14 +2866,162 @@ mod tests {
     }
 
     /// Create a temp services dir whose `open-notebook/` subdir exists, so the
-    /// OPS-5 optional-skip check sees the RAG resource as PRESENT and the full
+    /// OPS-5 optional-skip check sees the RAG resources as PRESENT and the full
     /// four-spec fan-out is exercised (tests of the *absent* path live below).
     /// Returns the tempdir guard (kept alive by the caller) and its path.
     fn services_dir_with_onb() -> (tempfile::TempDir, PathBuf) {
         let tmp = tempdir().expect("tempdir");
         let dir = tmp.path().join("services");
         fs::create_dir_all(dir.join("open-notebook")).unwrap();
+        let surreal = dir.join("bin").join(exe("surreal2"));
+        fs::create_dir_all(surreal.parent().unwrap()).unwrap();
+        fs::write(&surreal, b"test-surreal-sidecar").unwrap();
         (tmp, dir)
+    }
+
+    fn lsat_binary_path(services_dir: &Path) -> PathBuf {
+        services_dir
+            .join("lsat-backend")
+            .join(exe("lsatlab-backend"))
+    }
+
+    fn write_lsat_provenance_manifest(services_dir: &Path, sha256: &str, size: u64) {
+        let rel = format!("lsat-backend/{}", exe("lsatlab-backend"));
+        let manifest = serde_json::json!({
+            "schema": SIDECAR_PROVENANCE_SCHEMA,
+            "generatedAt": "2026-07-05T00:00:00.000Z",
+            "servicesRoot": "src-tauri/resources/services",
+            "entries": [{
+                "service": "LSAT backend",
+                "path": rel,
+                "sha256": sha256,
+                "size": size,
+                "optional": false,
+                "source": "test",
+                "recordedAt": "2026-07-05T00:00:00.000Z"
+            }]
+        });
+        fs::write(
+            services_dir.join(SIDECAR_PROVENANCE_MANIFEST),
+            format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap()),
+        )
+        .unwrap();
+    }
+
+    fn lsat_spec_for(services_dir: &Path) -> SidecarSpec {
+        build_sidecar_specs(services_dir)
+            .into_iter()
+            .find(|spec| spec.name == "LSAT backend")
+            .expect("LSAT spec")
+    }
+
+    #[test]
+    fn sidecar_provenance_accepts_matching_manifest() {
+        let (_tmp, dir) = services_dir_with_onb();
+        let binary = lsat_binary_path(&dir);
+        fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        fs::write(&binary, b"matching-lsat-sidecar").unwrap();
+        let (sha, size) = sha256_file(&binary).unwrap();
+        write_lsat_provenance_manifest(&dir, &sha, size);
+
+        let verdict = verify_sidecar_provenance_for_spec(&lsat_spec_for(&dir));
+
+        assert_eq!(verdict.status, SidecarProvenanceStatus::Verified);
+        assert!(!verdict.blocks_launch());
+    }
+
+    #[test]
+    fn sidecar_provenance_rejects_digest_mismatch() {
+        let (_tmp, dir) = services_dir_with_onb();
+        let binary = lsat_binary_path(&dir);
+        fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        fs::write(&binary, b"original-lsat-sidecar").unwrap();
+        let (sha, size) = sha256_file(&binary).unwrap();
+        write_lsat_provenance_manifest(&dir, &sha, size);
+        fs::write(&binary, b"tampered-lsat-sidecar").unwrap();
+
+        let verdict = verify_sidecar_provenance_for_spec(&lsat_spec_for(&dir));
+
+        assert_eq!(verdict.status, SidecarProvenanceStatus::DigestMismatch);
+        assert!(verdict.blocks_launch());
+    }
+
+    #[test]
+    fn spawn_sidecars_blocks_tampered_lsat_before_launch() {
+        let launcher = MockLauncher::new(vec![]);
+        let logs = SidecarLogs::default();
+        let (_tmp, dir) = services_dir_with_onb();
+        let binary = lsat_binary_path(&dir);
+        fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        fs::write(&binary, b"original-lsat-sidecar").unwrap();
+        let (sha, size) = sha256_file(&binary).unwrap();
+        write_lsat_provenance_manifest(&dir, &sha, size);
+        fs::write(&binary, b"tampered-lsat-sidecar").unwrap();
+        let specs = vec![lsat_spec_for(&dir)];
+
+        let group = process_group::NoopGroup;
+        let outcome = spawn_sidecars_with_specs(&launcher, specs, &logs, Duration::ZERO, &group);
+
+        assert!(outcome.launched.is_empty());
+        assert!(outcome.skipped.is_empty());
+        assert_eq!(outcome.blocked.len(), 1);
+        assert_eq!(outcome.blocked[0].spec.name, "LSAT backend");
+        assert_eq!(
+            outcome.blocked[0].provenance_status.as_deref(),
+            Some("digest_mismatch")
+        );
+        assert!(launcher.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn launched_lsat_spec_retains_token_without_status_exposure() {
+        let launcher = MockLauncher::new(vec![]);
+        let logs = SidecarLogs::default();
+        let (_tmp, dir) = services_dir_with_onb();
+        let mut specs = build_sidecar_specs(&dir);
+        apply_lsat_local_api_token_env(&mut specs, "retained-token");
+        apply_lsat_db_key_env(&mut specs, "retained-db-key");
+
+        let group = process_group::NoopGroup;
+        let mut outcome =
+            spawn_sidecars_with_specs(&launcher, specs, &logs, Duration::ZERO, &group);
+
+        let lsat = outcome
+            .launched
+            .iter()
+            .find(|s| s.spec.name == "LSAT backend")
+            .expect("LSAT backend launched");
+        assert_eq!(
+            lsat.spec
+                .env
+                .iter()
+                .find(|(k, _)| k == LSAT_LOCAL_API_TOKEN_ENV)
+                .map(|(_, v)| v.as_str()),
+            Some("retained-token")
+        );
+        assert_eq!(
+            lsat.spec
+                .env
+                .iter()
+                .find(|(k, _)| k == LSAT_DB_KEY_B64_ENV)
+                .map(|(_, v)| v.as_str()),
+            Some("retained-db-key")
+        );
+
+        let status_json = serde_json::to_string(&launched_sidecar_status(lsat)).unwrap();
+        assert!(
+            !status_json.contains("retained-token"),
+            "status payload must not leak the local API token"
+        );
+        assert!(
+            !status_json.contains("retained-db-key"),
+            "status payload must not leak the LSAT DB encryption key"
+        );
+
+        for s in outcome.launched.iter_mut() {
+            let _ = s.child.kill();
+            let _ = s.child.wait();
+        }
     }
 
     #[test]
@@ -2093,37 +3086,68 @@ mod tests {
     #[test]
     fn spawn_sidecars_with_skips_optional_onb_when_resource_absent() {
         // OPS-5 graceful degrade: with no `<dir>/open-notebook` resource (a
-        // RAG-less build), the two optional open-notebook sidecars are SKIPPED —
-        // never launched — while the required SurrealDB + LSAT backend still come
-        // up. The skipped specs are returned so the status payload can report it.
+        // RAG-less build) and no bundled SurrealDB binary, the optional RAG
+        // stack is SKIPPED — never launched — while the required LSAT backend
+        // still comes up. The skipped specs are returned so the status payload
+        // can report it.
         let launcher = MockLauncher::new(vec![]);
         let logs = SidecarLogs::default();
         let tmp = tempdir().expect("tempdir");
         let dir = tmp.path().join("services-no-rag"); // open-notebook/ absent
         let mut outcome = spawn_sidecars_with(&launcher, &dir, &logs, Duration::ZERO);
 
-        // Only the required sidecars were launched, in order.
+        // Only the required sidecar was launched.
         let launched_names: Vec<_> = outcome
             .launched
             .iter()
             .map(|s| s.spec.name.clone())
             .collect();
-        assert_eq!(launched_names, vec!["SurrealDB", "LSAT backend"]);
-        // The launcher was never even asked to start the optional pair.
+        assert_eq!(launched_names, vec!["LSAT backend"]);
+        // The launcher was never even asked to start the optional RAG stack.
         let attempted: Vec<_> = launcher
             .calls
             .borrow()
             .iter()
             .map(|s| s.name.clone())
             .collect();
-        assert_eq!(attempted, vec!["SurrealDB", "LSAT backend"]);
-        // The optional open-notebook API + worker were recorded as skipped.
+        assert_eq!(attempted, vec!["LSAT backend"]);
+        // The optional SurrealDB + open-notebook API + worker were recorded as skipped.
         let skipped_names: Vec<_> = outcome.skipped.iter().map(|s| s.name.clone()).collect();
         assert_eq!(
             skipped_names,
-            vec!["open-notebook API", "open-notebook worker"]
+            vec!["SurrealDB", "open-notebook API", "open-notebook worker"]
         );
         assert!(outcome.skipped.iter().all(|s| s.optional));
+
+        for s in outcome.launched.iter_mut() {
+            let _ = s.child.kill();
+            let _ = s.child.wait();
+        }
+    }
+
+    #[test]
+    fn spawn_sidecars_skips_optional_dependents_when_rag_dependency_absent() {
+        let launcher = MockLauncher::new(vec![]);
+        let logs = SidecarLogs::default();
+        let tmp = tempdir().expect("tempdir");
+        let dir = tmp.path().join("services-partial-rag");
+        fs::create_dir_all(dir.join("open-notebook")).unwrap();
+
+        let mut outcome = spawn_sidecars_with(&launcher, &dir, &logs, Duration::ZERO);
+
+        let attempted: Vec<_> = launcher
+            .calls
+            .borrow()
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+        assert_eq!(attempted, vec!["LSAT backend"]);
+
+        let skipped_names: Vec<_> = outcome.skipped.iter().map(|s| s.name.clone()).collect();
+        assert_eq!(
+            skipped_names,
+            vec!["SurrealDB", "open-notebook API", "open-notebook worker"]
+        );
 
         for s in outcome.launched.iter_mut() {
             let _ = s.child.kill();
@@ -2222,6 +3246,96 @@ mod tests {
     }
 
     #[test]
+    fn sidecar_respawn_backoff_exponentiates_and_caps() {
+        assert_eq!(sidecar_respawn_backoff(0), Duration::from_secs(7));
+        assert_eq!(sidecar_respawn_backoff(1), Duration::from_secs(14));
+        assert_eq!(sidecar_respawn_backoff(2), Duration::from_secs(28));
+        assert_eq!(sidecar_respawn_backoff(5), Duration::from_secs(224));
+        assert_eq!(sidecar_respawn_backoff(6), Duration::from_secs(300));
+        assert_eq!(sidecar_respawn_backoff(99), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn supervise_once_throttles_repeated_crash_loop_respawns() {
+        let spec = SidecarSpec {
+            name: "flapper".into(),
+            program: PathBuf::from("x"),
+            args: vec![],
+            env: vec![],
+            ready_port: None,
+            depends_on: vec![],
+            optional: false,
+            resource_path: None,
+        };
+        let setup = MockLauncher::new(vec![]);
+        let mut child = setup.launch(&spec).expect("initial launch");
+        let _ = child.wait();
+        let state: Mutex<Vec<SupervisedSidecar>> =
+            Mutex::new(vec![SupervisedSidecar::new(spec, child)]);
+
+        let launcher = MockLauncher::new(vec!["flapper"]);
+        let logs = SidecarLogs::default();
+        let group = process_group::NoopGroup;
+
+        let first = supervise_once(&launcher, &state, &logs, &group);
+        assert!(
+            first.is_empty(),
+            "failed relaunch returns no respawned names"
+        );
+        assert_eq!(launcher.calls.borrow().len(), 1);
+        {
+            let guard = state.lock().unwrap();
+            assert_eq!(guard[0].consecutive_failures, 1);
+            assert!(guard[0].backoff_until.is_some());
+        }
+
+        let second = supervise_once(&launcher, &state, &logs, &group);
+        assert!(
+            second.is_empty(),
+            "second sweep inside the backoff window must not relaunch"
+        );
+        assert_eq!(
+            launcher.calls.borrow().len(),
+            1,
+            "crash-loop backoff should suppress repeated launch attempts"
+        );
+    }
+
+    #[test]
+    fn supervise_once_clears_backoff_when_sidecar_is_healthy() {
+        let spec = SidecarSpec {
+            name: "recovered".into(),
+            program: PathBuf::from("x"),
+            args: vec![],
+            env: vec![],
+            ready_port: None,
+            depends_on: vec![],
+            optional: false,
+            resource_path: None,
+        };
+        let child = spawn_long_lived_child();
+        let mut slot = SupervisedSidecar::new(spec, child);
+        slot.consecutive_failures = 4;
+        slot.backoff_until = Some(std::time::Instant::now() + Duration::from_secs(300));
+        let state: Mutex<Vec<SupervisedSidecar>> = Mutex::new(vec![slot]);
+
+        let launcher = MockLauncher::new(vec![]);
+        let logs = SidecarLogs::default();
+        let group = process_group::NoopGroup;
+        let respawned = supervise_once(&launcher, &state, &logs, &group);
+        assert!(respawned.is_empty());
+        assert_eq!(launcher.calls.borrow().len(), 0);
+
+        let mut guard = state.lock().unwrap();
+        assert_eq!(guard[0].consecutive_failures, 0);
+        assert!(guard[0].backoff_until.is_none());
+        for slot in guard.iter_mut() {
+            let _ = slot.child.kill();
+            let _ = slot.child.wait();
+        }
+    }
+
+    #[test]
     fn supervise_once_leaves_a_healthy_portless_sidecar_alone() {
         // A long-lived port-less child that is still running must not be
         // respawned. We use a child that blocks so try_wait() reports running.
@@ -2293,6 +3407,9 @@ mod tests {
             pid: Some(1234),
             optional: true,
             present: true,
+            blocked: false,
+            block_reason: None,
+            provenance_status: None,
         };
         let json = serde_json::to_value(&status).expect("serialize");
         assert_eq!(json["name"], "open-notebook API");
@@ -2304,6 +3421,9 @@ mod tests {
         assert_eq!(json["pid"], 1234);
         assert_eq!(json["optional"], true);
         assert_eq!(json["present"], true);
+        assert_eq!(json["blocked"], false);
+        assert!(json["block_reason"].is_null());
+        assert!(json["provenance_status"].is_null());
     }
 
     // ---- aggregate_sidecar_health (OPS-3) ----
@@ -2319,6 +3439,9 @@ mod tests {
             pid: if ready { Some(1) } else { None },
             optional,
             present: ready,
+            blocked: false,
+            block_reason: None,
+            provenance_status: None,
         }
     }
 
@@ -2378,15 +3501,18 @@ mod tests {
 
     #[test]
     fn build_sidecar_specs_marks_onb_optional_and_lsat_required() {
-        // OPS-5: open-notebook API + worker are optional and gated on the
-        // `<dir>/open-notebook` resource; SurrealDB + the LSAT backend are
-        // required with no resource gate.
+        // OPS-5: the RAG stack is optional and gated on its bundled resources;
+        // the LSAT backend is required with no resource gate.
         let dir = PathBuf::from("C:/qv/services");
         let specs = build_sidecar_specs(&dir);
         let onb = dir.join("open-notebook");
+        let surreal = dir.join("bin").join(exe("surreal2"));
 
-        assert!(!specs[0].optional, "SurrealDB is required");
-        assert_eq!(specs[0].resource_path, None);
+        assert!(
+            specs[0].optional,
+            "SurrealDB is optional RAG infrastructure"
+        );
+        assert_eq!(specs[0].resource_path.as_deref(), Some(surreal.as_path()));
 
         assert!(specs[1].optional, "open-notebook API is optional");
         assert_eq!(specs[1].resource_path.as_deref(), Some(onb.as_path()));
@@ -2586,7 +3712,7 @@ mod tests {
         // reader thread reads to EOF then exits. Join via the snapshot once the
         // shared buffer reflects all three lines.
         let stream = Cursor::new(b"first\nsecond\nthird\n".to_vec());
-        spawn_stream_reader("api".to_string(), stream, logs.clone());
+        spawn_stream_reader("api".to_string(), stream, logs.clone(), vec![]);
 
         // The reader runs on its own thread; poll the snapshot briefly until it
         // has drained the cursor (bounded so a regression fails fast).
@@ -2609,6 +3735,33 @@ mod tests {
     }
 
     #[test]
+    fn spawn_stream_reader_redacts_sensitive_env_values() {
+        use std::io::Cursor;
+        let logs = SidecarLogs::default();
+        let stream = Cursor::new(b"token=run-secret\nsafe line\nkey=db-secret\n".to_vec());
+        spawn_stream_reader(
+            "LSAT backend".to_string(),
+            stream,
+            logs.clone(),
+            vec!["run-secret".to_string(), "db-secret".to_string()],
+        );
+
+        let mut snap = logs.snapshot("LSAT backend");
+        for _ in 0..100 {
+            if snap.len() == 3 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+            snap = logs.snapshot("LSAT backend");
+        }
+        let joined = snap.join("\n");
+        assert!(!joined.contains("run-secret"));
+        assert!(!joined.contains("db-secret"));
+        assert!(joined.contains("token=[redacted]"));
+        assert!(joined.contains("key=[redacted]"));
+    }
+
+    #[test]
     fn get_sidecar_logs_command_returns_named_buffer() {
         // Exercises the command's pure path (snapshot lookup) without bringing
         // up a Tauri State wrapper — the command body is a thin forward.
@@ -2622,9 +3775,18 @@ mod tests {
 
     #[test]
     fn owned_ready_ports_are_sorted_deduped_and_skip_portless() {
-        let specs = build_sidecar_specs(Path::new("C:/qv/services"));
+        let (_tmp, dir) = services_dir_with_onb();
+        let specs = build_sidecar_specs(&dir);
         // SurrealDB 8000, API 5055, worker None, LSAT 8100 → {5055, 8000, 8100}.
         assert_eq!(owned_ready_ports(&specs), vec![5055, 8000, 8100]);
+    }
+
+    #[test]
+    fn owned_ready_ports_skips_absent_optional_resources() {
+        let tmp = tempdir().expect("tempdir");
+        let dir = tmp.path().join("services-no-rag");
+        let specs = build_sidecar_specs(&dir);
+        assert_eq!(owned_ready_ports(&specs), vec![8100]);
     }
 
     // ---- NATIVE-8: expected identity + registry + classification ----
@@ -2737,7 +3899,7 @@ mod tests {
             status_row("SurrealDB", true, false),
             status_row("LSAT backend", true, false),
         ];
-        let boot = build_boot_status(&rows, &[]);
+        let boot = build_boot_status(&rows, &[], &[]);
         assert_eq!(boot.status, "ok");
         assert_eq!(boot.launched, 2);
         assert_eq!(boot.skipped, 0);
@@ -2760,7 +3922,7 @@ mod tests {
             optional: true,
             resource_path: Some(PathBuf::from("C:/qv/services/open-notebook")),
         }];
-        let boot = build_boot_status(&rows, &skipped);
+        let boot = build_boot_status(&rows, &skipped, &[]);
         assert_eq!(boot.status, "degraded");
         assert_eq!(boot.skipped, 1);
         assert_eq!(boot.skipped_names, vec!["open-notebook API".to_string()]);
@@ -2774,8 +3936,35 @@ mod tests {
             status_row("SurrealDB", true, false),
             status_row("LSAT backend", false, false),
         ];
-        let boot = build_boot_status(&rows, &[]);
+        let boot = build_boot_status(&rows, &[], &[]);
         assert_eq!(boot.status, "error");
+        assert_eq!(boot.required_down_names, vec!["LSAT backend".to_string()]);
+        assert!(boot.degraded_reason.contains("LSAT backend"));
+    }
+
+    #[test]
+    fn build_boot_status_is_error_when_required_sidecar_blocked() {
+        let rows = vec![status_row("SurrealDB", true, false)];
+        let blocked = vec![BlockedSidecar {
+            spec: SidecarSpec {
+                name: "LSAT backend".into(),
+                program: PathBuf::from("C:/qv/services/lsat-backend/lsatlab-backend.exe"),
+                args: vec![],
+                env: vec![],
+                ready_port: Some(8100),
+                depends_on: vec![],
+                optional: false,
+                resource_path: None,
+            },
+            reason: "digest mismatch".into(),
+            provenance_status: Some("digest_mismatch".into()),
+        }];
+
+        let boot = build_boot_status(&rows, &[], &blocked);
+
+        assert_eq!(boot.status, "error");
+        assert_eq!(boot.blocked, 1);
+        assert_eq!(boot.blocked_names, vec!["LSAT backend".to_string()]);
         assert_eq!(boot.required_down_names, vec!["LSAT backend".to_string()]);
         assert!(boot.degraded_reason.contains("LSAT backend"));
     }
@@ -2914,6 +4103,7 @@ pub fn run() {
             cfa_pick_folder,
             cfa_read_pdf_bytes,
             get_sidecar_status,
+            get_lsat_local_api_token,
             get_sidecar_logs,
             get_system_health_aggregated,
             // GAP-SEC-1: OS-keychain custody for the opt-in secure-vault key.
@@ -2923,7 +4113,9 @@ pub fn run() {
         ])
         .manage(Sidecars::default())
         .manage(SkippedSidecars::default())
+        .manage(BlockedSidecars::default())
         .manage(SidecarLogs::default())
+        .manage(LsatLocalApiToken::generate())
         // NATIVE-1: create the app-lifetime crash-reap process group (Windows Job
         // Object with KILL_ON_JOB_CLOSE / Unix PDEATHSIG / no-op) once, here, so
         // both the initial spawn and the health-supervisor respawn assign children
@@ -2973,6 +4165,10 @@ pub fn run() {
                 .try_state::<ProcessGroupState>()
                 .map(|s| s.0.clone())
                 .unwrap_or_else(|| Arc::new(process_group::NoopGroup));
+            let lsat_local_api_token = app
+                .try_state::<LsatLocalApiToken>()
+                .map(|s| s.0.clone())
+                .unwrap_or_default();
             // BA2: ordered startup gates each sidecar behind its dependencies'
             // readiness ports with a bounded (~30s/dep) wait, so this can block
             // for a noticeable stretch when a dependency is slow to bind. Run it
@@ -2983,7 +4179,7 @@ pub fn run() {
             // the state is still empty, so there's no race in starting it first.
             let startup_handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || {
-                let outcome = spawn_sidecars(&logs, group.as_ref());
+                let outcome = spawn_sidecars(&logs, group.as_ref(), &lsat_local_api_token);
                 // OPS-5: record any optional sidecars that were skipped for an
                 // absent resource so `get_sidecar_status` can report "feature
                 // unavailable" (e.g. RAG-less build) to the UI.
@@ -2994,6 +4190,18 @@ pub fn run() {
                         "sidecar: ordered startup skipped {} optional sidecar(s) for absent \
                          resources: {}",
                         outcome.skipped.len(),
+                        names.join(", ")
+                    );
+                }
+                if !outcome.blocked.is_empty() {
+                    let names: Vec<&str> = outcome
+                        .blocked
+                        .iter()
+                        .map(|s| s.spec.name.as_str())
+                        .collect();
+                    log::error!(
+                        "sidecar: ordered startup blocked {} sidecar(s) before launch: {}",
+                        outcome.blocked.len(),
                         names.join(", ")
                     );
                 }
@@ -3008,10 +4216,13 @@ pub fn run() {
                     .iter()
                     .map(launched_sidecar_status)
                     .collect();
-                let boot = build_boot_status(&launched_rows, &outcome.skipped);
+                let boot = build_boot_status(&launched_rows, &outcome.skipped, &outcome.blocked);
 
                 if let Some(skipped_state) = startup_handle.try_state::<SkippedSidecars>() {
                     *skipped_state.0.lock().unwrap() = outcome.skipped;
+                }
+                if let Some(blocked_state) = startup_handle.try_state::<BlockedSidecars>() {
+                    *blocked_state.0.lock().unwrap() = outcome.blocked;
                 }
                 if let Some(state) = startup_handle.try_state::<Sidecars>() {
                     // NATIVE-8: record the owned-port map {service → port, pid}
@@ -3030,10 +4241,11 @@ pub fn run() {
                 // NATIVE-6: emit the single boot-status event so the host can
                 // dismiss a splash / surface a degraded banner. Best-effort.
                 log::info!(
-                    "sidecar: boot status = {} (launched {}, skipped {}){}",
+                    "sidecar: boot status = {} (launched {}, skipped {}, blocked {}){}",
                     boot.status,
                     boot.launched,
                     boot.skipped,
+                    boot.blocked,
                     if boot.degraded_reason.is_empty() {
                         String::new()
                     } else {

@@ -154,7 +154,10 @@ def test_import_backup_route_marks_run_failed_not_committing(client):
     """The /api/bank/import-backup route catches the broad failure, rolls back,
     and records the ImportRun as failed (never stuck in 'committing')."""
     payload = _route_failure_payload()
-    r = client.post("/api/bank/import-backup", json={"payload": payload})
+    r = client.post(
+        "/api/bank/import-backup",
+        json={"payload": payload, "force_commit": True},
+    )
     assert r.status_code == 500
 
     # The ledger row exists and is terminal (failed), with the error captured.

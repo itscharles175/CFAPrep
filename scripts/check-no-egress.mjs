@@ -48,7 +48,7 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, '..');
@@ -85,15 +85,16 @@ const ALLOWLIST = [
     file: 'services/lsat-backend/app/llm/cloud.py',
     host: 'api.anthropic.com',
     reason:
-      'Opt-in Tier-B cloud generation (GEN_PROVIDER=cloud + API key). Offline ' +
-      'tiers only, never realtime/score-affecting; fenced by the W1 cloud gate.',
+      'Opt-in Tier-B cloud generation (GEN_PROVIDER=cloud + API key + ' +
+      'CLOUD_EGRESS_ALLOWED=1). Offline tiers only, never realtime/score-affecting; ' +
+      'fenced by the W1 cloud gate.',
   },
   {
     file: 'services/lsat-backend/app/config.py',
     host: 'api.anthropic.com',
     reason:
       'Default CLOUD_API_URL for the opt-in cloud path above. Env-overridable; ' +
-      'inert unless GEN_PROVIDER=cloud and a key is present.',
+      'inert unless GEN_PROVIDER=cloud, a key is present, and egress is admitted.',
   },
   {
     file: 'services/lsat-backend/app/import_dataset.py',
@@ -203,15 +204,8 @@ function* walk(dir) {
   }
 }
 
-function scanFile(file) {
+export function scanText(text, rel = 'fixture.js') {
   const findings = [];
-  let text;
-  try {
-    text = readFileSync(file, 'utf8');
-  } catch (err) {
-    throw new Error(`check-no-egress: cannot read ${file}`, { cause: err });
-  }
-  const rel = relative(REPO_ROOT, file);
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -232,6 +226,16 @@ function scanFile(file) {
     }
   }
   return findings;
+}
+
+function scanFile(file) {
+  let text;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (err) {
+    throw new Error(`check-no-egress: cannot read ${file}`, { cause: err });
+  }
+  return scanText(text, relative(REPO_ROOT, file));
 }
 
 function main() {
@@ -288,4 +292,6 @@ function main() {
   process.exit(1);
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

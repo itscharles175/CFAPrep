@@ -160,8 +160,15 @@ CORS: allow `http://localhost:5173` (Vite) and `tauri://localhost`.
 - `POST /api/import/reconcile` (answer-key); `GET /api/import/jobs[/{id}]`;
   `/import/parse` + `/commit` report `collision` and accept `replace`.
 - `GET /api/settings`, `PUT /api/settings` (model routing; secrets stay in env).
+  The returned `provider.capabilities` block exposes active realtime/offline
+  provider capability rows and the full Ollama/LM Studio/Anthropic matrix,
+  including sampling and structured-output degradations.
 - `GET /api/observability/status` → `{ gen_queued, gen_running, worker_alive,
   last_coach_refresh_ms, explain_p50_ms, embed_coverage_pct, models }`.
+  `models.capabilities`, `/api/ai/health.capabilities`, `/api/ready.ai.capabilities`,
+  and `/api/observability/health-aggregated.provider_capabilities` share the same
+  matrix so operators can distinguish missing models from unsupported provider
+  features.
 
 ## Notes for implementers
 - Test-mode responses MUST NOT leak `is_correct`/`correct_answer`/`explanation`.
@@ -173,3 +180,7 @@ CORS: allow `http://localhost:5173` (Vite) and `tauri://localhost`.
   (explain=`qwen3:8b`, generate=`qwen3:14b`). Strip `<think>...</think>` from qwen3
   output. Offline Tier-B generation may optionally use a cloud model
   (`LSATLAB_GEN_PROVIDER=cloud`); it never serves realtime or score-affecting paths.
+- Provider options are negotiated before generation and cache lookup. Unsupported
+  knobs are omitted from both the provider request and deterministic cache key:
+  for example, Anthropic does not support `seed`, so seed alone cannot make a
+  warm cloud call cacheable.

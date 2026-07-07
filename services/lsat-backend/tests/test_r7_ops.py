@@ -258,6 +258,7 @@ def test_offline_generate_cloud_accrues_to_ledger(db_session, monkeypatch):
 
     monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
     monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
     monkeypatch.setattr(config, "CLOUD_MONTHLY_BUDGET_USD", 0.0)  # unlimited
 
     # Fake the HTTP layer so the REAL provider.generate runs (incl. its usage
@@ -294,6 +295,7 @@ def test_over_budget_cloud_call_falls_back_to_local(db_session, monkeypatch):
 
     monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
     monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
     monkeypatch.setattr(config, "CLOUD_MONTHLY_BUDGET_USD", 1.00)
 
     # Pre-load ledger spend at/over the budget for this month.
@@ -338,6 +340,7 @@ def test_under_budget_cloud_call_proceeds(db_session, monkeypatch):
 
     monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
     monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
     monkeypatch.setattr(config, "CLOUD_MONTHLY_BUDGET_USD", 100.0)
     db_session.add(UsageLedger(model="m", cost_usd=1.0,
                                created_at=datetime.now(timezone.utc)))

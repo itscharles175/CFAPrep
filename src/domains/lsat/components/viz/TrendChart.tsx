@@ -10,16 +10,13 @@ import { ParentSize } from "@visx/responsive";
 import { LinearGradient } from "@visx/gradient";
 import { ReferenceLine, ChartAnnotation } from "./chart-kit";
 import { deriveTrendAnnotations } from "./trendAnnotations";
+import type { TrendDatum } from "./trend-types";
 import {
   LiveRegion,
   useThrottledAnnouncement,
 } from "@lsat/components/question/live-region";
 
-export interface TrendDatum {
-  /** ISO date string. */
-  date: string;
-  score: number;
-}
+export type { TrendDatum } from "./trend-types";
 
 export interface TrendChartProps {
   series: TrendDatum[];

@@ -74,7 +74,9 @@ export type HostRouteId =
   | 'system'
   | 'today'
   | 'knowledge-graph'
-  | 'style';
+  | 'style'
+  | 'leeches'
+  | 'preferences';
 
 /**
  * K4-5: ids for the merged LSAT surface. Each is the LSAT manifest path slug
@@ -190,7 +192,7 @@ type BaseAppRoute = Omit<
 >;
 
 const baseAppRoutes: BaseAppRoute[] = [
-  { id: 'dashboard', path: '/', expectedText: 'QuantVault', domain: 'home', navGroup: 'home', iconKey: 'home', accentRole: 'study', preferredLayout: 'dashboard', smokeRoute: '/', screenshotRoute: '/' },
+  { id: 'dashboard', path: '/', expectedText: 'StudyVault', domain: 'home', navGroup: 'home', iconKey: 'home', accentRole: 'study', preferredLayout: 'dashboard', smokeRoute: '/', screenshotRoute: '/' },
   { id: 'cfa-dashboard', path: '/cfa', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa', domain: 'cfa', navGroup: 'domains', iconKey: 'graduation-cap', accentRole: 'exam', preferredLayout: 'dashboard', smokeRoute: '/cfa', screenshotRoute: '/cfa' },
   { id: 'cfa-module', path: '/cfa/:level/:topic', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa-module', domain: 'cfa', navGroup: 'domains', iconKey: 'book-open', accentRole: 'exam', preferredLayout: 'learning', smokeRoute: '/cfa/level1/fixed-income', screenshotRoute: '/cfa/level1/fixed-income' },
   { id: 'cfa-quiz', path: '/cfa/:level/:topic/quiz', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa-quiz', domain: 'cfa', navGroup: 'practice', iconKey: 'target', accentRole: 'exam', preferredLayout: 'assessment', smokeRoute: '/cfa/level1/fixed-income/quiz', screenshotRoute: '/cfa/level1/fixed-income/quiz' },
@@ -213,6 +215,8 @@ const baseAppRoutes: BaseAppRoute[] = [
   { id: 'today', path: '/today', expectedText: 'Today', domain: 'home', navGroup: 'home', iconKey: 'sun', accentRole: 'study', preferredLayout: 'dashboard', smokeRoute: '/today', screenshotRoute: '/today' },
   { id: 'knowledge-graph', path: '/knowledge-graph', expectedText: 'Knowledge Graph', domain: 'analytics', navGroup: 'tools', iconKey: 'network', accentRole: 'analytics', preferredLayout: 'dashboard', smokeRoute: '/knowledge-graph', screenshotRoute: '/knowledge-graph' },
   { id: 'style', path: '/style', expectedText: 'Style', domain: 'tool', navGroup: 'tools', iconKey: 'palette', accentRole: 'study', preferredLayout: 'tool', smokeRoute: '/style', screenshotRoute: '/style' },
+  { id: 'leeches', path: '/leeches', expectedText: 'Leeches & Gaps', domain: 'vault', navGroup: 'practice', iconKey: 'flag', accentRole: 'vault', preferredLayout: 'dashboard' },
+  { id: 'preferences', path: '/preferences', expectedText: 'Preferences', domain: 'tool', navGroup: 'tools', iconKey: 'settings', accentRole: 'study', preferredLayout: 'tool' },
 ];
 
 const routeLabels: Partial<Record<AppRouteId, string>> = {
@@ -239,6 +243,8 @@ const routeLabels: Partial<Record<AppRouteId, string>> = {
   today: 'Today',
   'knowledge-graph': 'Knowledge Graph',
   style: 'Style Gallery',
+  leeches: 'Leeches & Gaps',
+  preferences: 'Preferences',
 };
 
 const offlineCriticalRouteIds = new Set<AppRouteId>([
@@ -457,7 +463,7 @@ export const commandRoutes: CommandRoute[] = [
   { id: 'command:system', title: 'Open System Health', subtitle: 'Offline cache, storage, and backup status', path: '/system', keywords: ['system health pwa offline storage backup'] },
   { id: 'command:today', title: 'Today — Focused Plan', subtitle: 'One-screen "what to do next" driven by the Study Director', path: '/today', keywords: ['today focused next action study director plan'] },
   { id: 'command:knowledge-graph', title: 'Open Knowledge Graph', subtitle: 'Interactive map of CFA topics across Levels I → III', path: '/knowledge-graph', keywords: ['knowledge graph topics map levels canvas'] },
-  { id: 'action:backup', title: 'Export Vault Backup', subtitle: 'Download all local data as JSON', path: '/vault', keywords: ['export backup vault json local data'], action: 'backup' },
+  { id: 'action:backup', title: 'Open Encrypted Backup', subtitle: 'Create a passphrase-protected local vault export', path: '/system', keywords: ['export backup vault encrypted passphrase local data'], action: 'backup' },
   { id: 'action:repair', title: 'Repair Local Vault', subtitle: 'Rebuild indexes and clean corrupted rows', path: '/review', keywords: ['repair vault rebuild indexes corrupted rows'], action: 'repair' },
   { id: 'action:theme', title: 'Toggle Theme', subtitle: 'Switch light or dark mode', path: '/', keywords: ['toggle theme light dark'], action: 'theme' },
   { id: 'command:preferences', title: 'Open Preferences', subtitle: 'Appearance, layout density, and reading aids', path: '/preferences', keywords: ['settings preferences appearance theme reading density dyslexia bionic spacing accessibility'] },

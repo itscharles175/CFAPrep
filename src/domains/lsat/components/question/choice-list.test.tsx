@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { useState } from "react";
 import { ChoiceList } from "./choice-list";
 import type { Choice } from "@lsat/lib/types";
 
@@ -12,6 +13,77 @@ const CHOICES: Choice[] = [
 ];
 
 describe("ChoiceList — Test-Mode integrity (R9 commit micro-moment)", () => {
+  it("uses shared roving radio behavior while keeping eliminate controls reachable", () => {
+    render(
+      <ChoiceList
+        choices={CHOICES}
+        selected={null}
+        eliminated={new Set()}
+        onSelect={() => {}}
+        onToggleEliminate={() => {}}
+        reveal={false}
+      />,
+    );
+    const radios = screen.getAllByRole("radio");
+    expect(radios.filter((radio) => radio.getAttribute("tabindex") === "0")).toHaveLength(1);
+    expect(radios.filter((radio) => radio.getAttribute("tabindex") === "-1")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Eliminate choice A" })).toBeInTheDocument();
+
+    radios[0].focus();
+    fireEvent.keyDown(radios[0], { key: "ArrowRight" });
+    expect(radios[1]).toHaveFocus();
+  });
+
+  it("selects by radio keyboard without leaking the event to exam-level shortcuts", () => {
+    function Harness() {
+      const [selected, setSelected] = useState<string | null>(null);
+      return (
+        <ChoiceList
+          choices={CHOICES}
+          selected={selected}
+          eliminated={new Set()}
+          onSelect={setSelected}
+          onToggleEliminate={() => {}}
+          reveal={false}
+        />
+      );
+    }
+    const onWindowKeydown = vi.fn();
+    window.addEventListener("keydown", onWindowKeydown);
+    render(<Harness />);
+    const radios = screen.getAllByRole("radio");
+
+    radios[0].focus();
+    fireEvent.keyDown(radios[0], { key: "c" });
+
+    expect(radios[2]).toHaveFocus();
+    expect(radios[2]).toHaveAttribute("aria-checked", "true");
+    expect(onWindowKeydown).not.toHaveBeenCalled();
+    window.removeEventListener("keydown", onWindowKeydown);
+  });
+
+  it("lets modified keys bubble so Shift+E elimination still belongs to the runner", () => {
+    const onWindowKeydown = vi.fn();
+    window.addEventListener("keydown", onWindowKeydown);
+    render(
+      <ChoiceList
+        choices={CHOICES}
+        selected="B"
+        eliminated={new Set()}
+        onSelect={() => {}}
+        onToggleEliminate={() => {}}
+        reveal={false}
+      />,
+    );
+    fireEvent.keyDown(screen.getByRole("radio", { name: /Second choice/ }), {
+      key: "E",
+      shiftKey: true,
+    });
+
+    expect(onWindowKeydown).toHaveBeenCalled();
+    window.removeEventListener("keydown", onWindowKeydown);
+  });
+
   it("reveals NO correctness while timed, even with is_correct/trap data present", () => {
     const { container } = render(
       <ChoiceList

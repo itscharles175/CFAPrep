@@ -8,6 +8,7 @@ creating artifacts, while the release gate can persist a snapshot.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -27,11 +28,17 @@ from .models import BenchmarkRun, ScheduledTask, SchedulerRun, SourceRegistry, T
 TrustTier = Literal["dev", "release", "packaged"]
 
 ROOT = config.BASE_DIR.parent
+REPO_ROOT = config.BASE_DIR.parent.parent
 FRONTEND = ROOT / "frontend"
 TAURI_CONF = FRONTEND / "src-tauri" / "tauri.conf.json"
 OPENAPI_SNAPSHOT = FRONTEND / "openapi.json"
-RELEASE_LOCAL_REPORT = ROOT / "dist" / "release_local_report.json"
+RELEASE_LOCAL_REPORT = REPO_ROOT / "dist" / "release_local_report.json"
+RELEASE_MANIFEST = REPO_ROOT / "dist" / "studyvault-release-manifest.json"
 PACKAGED_CONTRACTS = Path(getattr(sys, "_MEIPASS", config.BASE_DIR)) / "release_contracts"
+RELEASE_LOCAL_REPORT_SCHEMA = "lsatlab.release_local_report.v1"
+RELEASE_MANIFEST_SCHEMA = "studyvault.release-manifest.v1"
+SIDECAR_PROVENANCE_SCHEMA = "studyvault.sidecar-provenance.v1"
+REQUIRED_SIDECAR_PROVENANCE_SERVICES = ("LSAT backend",)
 
 REQUIRED_RELEASE_LOCAL_LABELS = (
     "backend compile",
@@ -40,11 +47,33 @@ REQUIRED_RELEASE_LOCAL_LABELS = (
     "backend benchmark smoke",
     "query plan budget",
     "scheduler evidence smoke",
+    "generation quality regression floor",
+    "explanation golden floor",
+    "prompt regression fixture floor",
+    "rag retrieval-eval floor",
+    "citation faithfulness floor",
+    "source-grounded answer benchmark floor",
+    "generated content gate floor",
     "backend pytest",
     "backend doctor",
     "frontend lint",
     "frontend test",
     "frontend build",
+    "version sync",
+    "frontend typecheck",
+    "lsat typecheck",
+    "lsat test",
+    "host mutation score gate",
+    "backend mutation score gate",
+    "bundle report",
+    "route performance budget gate",
+    "content validation",
+    "no-egress gate",
+    "direct sidecar fetch inventory gate",
+    "docs-drift gate",
+    "baseline catalog gate",
+    "vault archive restore drill",
+    "dependency audit",
 )
 
 PACKAGED_SMOKE_IN_PROGRESS_ENV = "LSATLAB_RELEASE_LOCAL_PACKAGED_SMOKE_IN_PROGRESS"
@@ -92,6 +121,7 @@ def build_release_trust_manifest(
     generated_at = datetime.now(timezone.utc).isoformat()
     checks = {
         "release_local": _release_local_check(tier),
+        "release_manifest": _release_manifest_check(tier),
         "model_readiness": _model_readiness_check(tier),
         "backend_readiness": _backend_readiness_check(tier),
         "backup_integrity": _backup_check(tier),
@@ -326,7 +356,7 @@ def _release_local_check(tier: TrustTier) -> dict[str, Any]:
             status=level,
             summary="release:local report is missing",
             detail={"candidate_paths": [str(path) for path in _release_report_candidates()]},
-            action="Run `uv run python scripts/release_local.py` before promotion.",
+            action="Run `python scripts/release_local.py` from the repository root before promotion.",
         )
     try:
         payload = json.loads(report.read_text(encoding="utf-8"))
@@ -338,12 +368,20 @@ def _release_local_check(tier: TrustTier) -> dict[str, Any]:
             action="Re-run the local release gate to regenerate release evidence.",
         )
 
-    checks = payload.get("checks") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict) or payload.get("schema") != RELEASE_LOCAL_REPORT_SCHEMA:
+        return _check(
+            status="block" if tier in {"release", "packaged"} else "warn",
+            summary="release:local report has an invalid schema",
+            detail={"path": str(report), "schema": payload.get("schema") if isinstance(payload, dict) else None},
+            action="Re-run the local release gate to regenerate release evidence.",
+        )
+
+    checks = payload.get("checks")
     if not isinstance(checks, list):
         return _check(
             status="block" if tier in {"release", "packaged"} else "warn",
             summary="release:local report has an invalid shape",
-            detail={"path": str(report), "schema": payload.get("schema") if isinstance(payload, dict) else None},
+            detail={"path": str(report), "schema": payload.get("schema")},
             action="Re-run the local release gate to regenerate release evidence.",
         )
     by_label = {
@@ -364,6 +402,8 @@ def _release_local_check(tier: TrustTier) -> dict[str, Any]:
         required_labels.append("tauri build")
         if not bool(options.get("skip_packaged_smoke")) and not packaged_smoke_in_progress:
             required_labels.append("packaged app smoke")
+        if not packaged_smoke_in_progress:
+            required_labels.append("release manifest/SBOM")
     missing = [label for label in required_labels if label not in by_label]
     failed = [
         {
@@ -400,7 +440,7 @@ def _release_local_check(tier: TrustTier) -> dict[str, Any]:
         failed=failed,
         report_status=status,
     )
-    blocking = status != "passed" or bool(missing or failed) or bool(
+    blocking = status != "passed" or stale or bool(missing or failed) or bool(
         freshness_contract["blocking_status_lines"]
         or freshness_contract["head_mismatch"]
     )
@@ -435,6 +475,92 @@ def _release_local_check(tier: TrustTier) -> dict[str, Any]:
             "tier": tier,
         },
         action=None if level == "ok" else "Run the full local release gate without skips before calling the build production-ready.",
+    )
+
+
+def _release_manifest_check(tier: TrustTier) -> dict[str, Any]:
+    strict = tier in {"release", "packaged"}
+    path = _first_existing(_release_manifest_candidates())
+    if path is None:
+        level = "block" if strict else "warn"
+        return _check(
+            status=level,
+            summary="release manifest/SBOM evidence is missing",
+            detail={"candidate_paths": [str(p) for p in _release_manifest_candidates()]},
+            action="Run `node scripts/release-manifest.mjs write --require-assets --require-sidecar-provenance` after building the Tauri bundle.",
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return _check(
+            status="block" if strict else "warn",
+            summary="release manifest/SBOM evidence cannot be read",
+            detail={"path": str(path), "error": str(exc)},
+            action="Regenerate the release manifest after the Tauri bundle is built.",
+        )
+
+    errors: list[str] = []
+    if not isinstance(payload, dict) or payload.get("schema") != RELEASE_MANIFEST_SCHEMA:
+        errors.append("invalid_schema")
+    versions = payload.get("versions") if isinstance(payload.get("versions"), dict) else {}
+    if versions.get("consistent") is not True:
+        errors.append("version_mismatch")
+    lockfiles = payload.get("lockfiles") if isinstance(payload.get("lockfiles"), list) else []
+    missing_inputs = [
+        item.get("path")
+        for item in lockfiles
+        if isinstance(item, dict)
+        and item.get("required") is True
+        and not (item.get("present") is True and item.get("sha256") and int(item.get("size") or 0) > 0)
+    ]
+    if missing_inputs:
+        errors.append("required_inputs_missing")
+    sbom = payload.get("sbom") if isinstance(payload.get("sbom"), dict) else {}
+    counts = sbom.get("counts") if isinstance(sbom.get("counts"), dict) else {}
+    component_counts = {name: int(counts.get(name) or 0) for name in ("npm", "cargo", "pypi")}
+    if any(value <= 0 for value in component_counts.values()):
+        errors.append("sbom_component_gap")
+
+    sidecar = payload.get("sidecarProvenance") if isinstance(payload.get("sidecarProvenance"), dict) else {}
+    sidecar_entries = sidecar.get("entries") if isinstance(sidecar.get("entries"), list) else []
+    has_lsat_sidecar = any(
+        isinstance(entry, dict) and entry.get("service") == "LSAT backend"
+        for entry in sidecar_entries
+    )
+    if strict and (sidecar.get("present") is not True or not has_lsat_sidecar):
+        errors.append("sidecar_provenance_missing")
+
+    assets = payload.get("bundleAssets") if isinstance(payload.get("bundleAssets"), list) else []
+    if strict and not assets:
+        errors.append("bundle_assets_missing")
+
+    recorded_sha = str(payload.get("manifestSha256") or "")
+    actual_sha = _sha256_file(path)
+    if recorded_sha and recorded_sha != actual_sha:
+        errors.append("manifest_digest_mismatch")
+
+    if errors:
+        level = "block" if strict else "warn"
+    else:
+        level = "ok"
+    return _check(
+        status=level,
+        summary="release manifest/SBOM evidence is present and complete"
+        if level == "ok" else "release manifest/SBOM evidence is missing or incomplete",
+        detail={
+            "path": str(path),
+            "schema": payload.get("schema") if isinstance(payload, dict) else None,
+            "sha256": actual_sha,
+            "errors": errors,
+            "missing_inputs": missing_inputs,
+            "component_counts": component_counts,
+            "bundle_asset_count": len(assets),
+            "sidecar_provenance_present": sidecar.get("present") is True,
+            "has_lsat_sidecar": has_lsat_sidecar,
+            "signing": payload.get("signing") if isinstance(payload, dict) else {},
+            "tier": tier,
+        },
+        action=None if level == "ok" else "Regenerate the release manifest after building sidecars and Tauri bundles.",
     )
 
 
@@ -639,6 +765,7 @@ def _model_readiness_check(tier: TrustTier) -> dict[str, Any]:
             "models": ai_report.get("models") or [],
             "expected_models": expected,
             "model_available": available,
+            "provider_capabilities": ai_report.get("capabilities") or {},
             "required_missing": required_missing,
             "degraded_missing": degraded_missing,
             "doctor_warnings": report.get("warnings") or [],
@@ -713,12 +840,14 @@ def _privacy_check(session: Session, tier: TrustTier) -> dict[str, Any]:
     content = content_health.health_report(session)
     firewall_ok = bool((content.get("official_firewall") or {}).get("ok"))
     cloud_enabled = llm.cloud_enabled()
-    cloud_generation_opt_in = (
-        config.GEN_PROVIDER == "cloud" and bool(config.CLOUD_API_KEY)
-    )
+    cloud_configured = llm.cloud_configured()
+    cloud_egress_allowed = llm.cloud_egress_allowed()
+    cloud_generation_opt_in = cloud_enabled
     budgeted = config.CLOUD_MONTHLY_BUDGET_USD > 0
     warnings: list[str] = []
-    if cloud_generation_opt_in and not budgeted:
+    if cloud_configured and not cloud_egress_allowed:
+        warnings.append("cloud_generation_requires_explicit_egress_opt_in")
+    if cloud_enabled and not budgeted:
         warnings.append("cloud_generation_has_no_budget")
     if config.LOCAL_PROVIDER not in {"ollama", "lmstudio"}:
         warnings.append("unknown_local_provider")
@@ -731,13 +860,15 @@ def _privacy_check(session: Session, tier: TrustTier) -> dict[str, Any]:
             "official_firewall_ok": firewall_ok,
             "local_provider": config.LOCAL_PROVIDER,
             "generation_provider": config.GEN_PROVIDER,
+            "cloud_configured": cloud_configured,
+            "cloud_egress_allowed": cloud_egress_allowed,
             "cloud_enabled": cloud_enabled,
             "cloud_generation_opt_in": cloud_generation_opt_in,
             "cloud_monthly_budget_usd": config.CLOUD_MONTHLY_BUDGET_USD,
             "warnings": warnings,
             "tier": tier,
         },
-        action=None if not block and not warnings else "Keep cloud generation opt-in, budgeted, and segregated from score prediction.",
+        action=None if not block and not warnings else "Keep cloud generation explicit, budgeted, and segregated from score prediction.",
     )
 
 
@@ -770,26 +901,161 @@ def _sidecar_check(tier: TrustTier) -> dict[str, Any]:
     )
     candidates = _sidecar_binary_candidates(external_bins)
     binary_present = any(path.exists() for path in candidates)
+    provenance_path = _first_existing(_sidecar_provenance_candidates())
+    provenance = _verify_sidecar_provenance(provenance_path)
     worker = jobs.get_worker()
     thread = worker._thread
     alive = thread is not None and thread.is_alive()
     missing_binary = bool(external_bins) and not binary_present
-    level = "ok"
+    problems = []
     if missing_binary:
-        level = "warn" if tier != "packaged" else "block"
+        problems.append("external_bin_missing")
+    if provenance["status"] != "ok":
+        problems.append("sidecar_provenance_not_verified")
+    if not problems:
+        level = "ok"
+    elif tier == "dev":
+        level = "warn"
+    else:
+        level = "block"
     return _check(
         status=level,
-        summary="sidecar configuration is observable"
-        if level == "ok" else "packaged sidecar binary is not present in the bundle path",
+        summary="sidecar configuration and provenance are observable"
+        if level == "ok" else "sidecar provenance or packaged binary evidence is incomplete",
         detail={
             "external_bin": external_bins,
             "binary_present": binary_present,
             "candidate_paths": [str(path) for path in candidates],
+            "provenance": provenance,
             "worker_alive": alive,
             "worker_enabled": config.JOBS_WORKER_ENABLED,
         },
-        action=None if level == "ok" else "Build the backend sidecar before packaged release smoke.",
+        action=None if level == "ok"
+        else "Build the backend sidecar and verify src-tauri/resources/services/sidecar-provenance.json before packaged release smoke.",
     )
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sidecar_provenance_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    explicit = os.environ.get("STUDYVAULT_SIDECAR_PROVENANCE")
+    if explicit:
+        candidates.append(Path(explicit))
+    candidates.extend(
+        [
+            REPO_ROOT / "src-tauri" / "resources" / "services" / "sidecar-provenance.json",
+            PACKAGED_CONTRACTS / "sidecar-provenance.json",
+            config.BASE_DIR / "release_contracts" / "sidecar-provenance.json",
+        ]
+    )
+    return candidates
+
+
+def _sidecar_provenance_entry_path(rel: str) -> Path | None:
+    parts = rel.replace("\\", "/").lstrip("/").split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        return None
+    return Path(*parts)
+
+
+def _verify_sidecar_provenance(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {
+            "status": "missing",
+            "path": None,
+            "candidate_paths": [str(p) for p in _sidecar_provenance_candidates()],
+            "verified": [],
+            "failures": [],
+            "missing_required_services": list(REQUIRED_SIDECAR_PROVENANCE_SERVICES),
+        }
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "status": "invalid",
+            "path": str(path),
+            "error": str(exc),
+            "verified": [],
+            "failures": [{"reason": "manifest_unreadable", "error": str(exc)}],
+            "missing_required_services": list(REQUIRED_SIDECAR_PROVENANCE_SERVICES),
+        }
+    entries = manifest.get("entries") if isinstance(manifest, dict) else None
+    if manifest.get("schema") != SIDECAR_PROVENANCE_SCHEMA or not isinstance(entries, list):
+        return {
+            "status": "invalid",
+            "path": str(path),
+            "schema": manifest.get("schema") if isinstance(manifest, dict) else None,
+            "verified": [],
+            "failures": [{"reason": "invalid_manifest_shape"}],
+            "missing_required_services": list(REQUIRED_SIDECAR_PROVENANCE_SERVICES),
+        }
+    services_root = path.parent
+    verified: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    services: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            failures.append({"reason": "invalid_entry"})
+            continue
+        service = str(entry.get("service") or "")
+        rel = str(entry.get("path") or "").replace("\\", "/").lstrip("/")
+        expected_sha = str(entry.get("sha256") or "")
+        services.add(service)
+        entry_path = _sidecar_provenance_entry_path(rel)
+        if (
+            not service
+            or entry_path is None
+            or len(expected_sha) != 64
+            or any(ch not in "0123456789abcdefABCDEF" for ch in expected_sha)
+        ):
+            failures.append({"service": service, "path": rel, "reason": "invalid_entry"})
+            continue
+        binary = services_root / entry_path
+        if not binary.is_file():
+            failures.append({"service": service, "path": rel, "reason": "missing_binary"})
+            continue
+        actual_size = binary.stat().st_size
+        actual_sha = _sha256_file(binary)
+        expected_size = entry.get("size")
+        if expected_sha.lower() != actual_sha or expected_size != actual_size:
+            failures.append({
+                "service": service,
+                "path": rel,
+                "reason": "digest_mismatch",
+                "expected_sha256": expected_sha,
+                "actual_sha256": actual_sha,
+                "expected_size": expected_size,
+                "actual_size": actual_size,
+            })
+            continue
+        verified.append({
+            "service": service,
+            "path": rel,
+            "sha256": actual_sha,
+            "size": actual_size,
+        })
+    missing_required = [
+        service for service in REQUIRED_SIDECAR_PROVENANCE_SERVICES
+        if service not in services
+    ]
+    status = "ok" if not failures and not missing_required else "mismatch"
+    return {
+        "status": status,
+        "path": str(path),
+        "schema": manifest.get("schema"),
+        "generated_at": manifest.get("generatedAt"),
+        "entry_count": len(entries),
+        "verified": verified,
+        "failures": failures,
+        "missing_required_services": missing_required,
+    }
 
 
 def _updater_check(tier: TrustTier) -> dict[str, Any]:
@@ -1047,6 +1313,21 @@ def _release_report_candidates() -> list[Path]:
             RELEASE_LOCAL_REPORT,
             PACKAGED_CONTRACTS / "release_local_report.json",
             config.BASE_DIR / "release_contracts" / "release_local_report.json",
+        ]
+    )
+    return candidates
+
+
+def _release_manifest_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    explicit = os.environ.get("STUDYVAULT_RELEASE_MANIFEST") or os.environ.get("LSATLAB_RELEASE_MANIFEST")
+    if explicit:
+        candidates.append(Path(explicit))
+    candidates.extend(
+        [
+            RELEASE_MANIFEST,
+            PACKAGED_CONTRACTS / "studyvault-release-manifest.json",
+            config.BASE_DIR / "release_contracts" / "studyvault-release-manifest.json",
         ]
     )
     return candidates

@@ -42,15 +42,37 @@ const SystemHealth = lazy(() => import('./pages/SystemHealth'));
 const Today = lazy(() => import('./pages/Today'));
 const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
 const StyleGallery = lazy(() => import('./pages/StyleGallery'));
-// LEARN-5 — standalone unified leech + concept-gap remediation page. Registered
-// additively below (its own /leeches route); not part of the typed routeManifest.
 const LeechesAndGaps = lazy(() => import('./pages/LeechesAndGaps'));
-// Wave 6 — host preferences page (appearance / density / reading aids via
-// <ReadingSettings/>). Registered additively below at the /preferences route
-// (NOT /settings, which the LSAT subtree owns), same as /leeches; kept out of
-// the typed routeManifest to stay least-invasive.
 const Settings = lazy(() => import('./pages/Settings'));
 const PwaInstallPrompt = lazy(() => import('./components/PwaInstallPrompt'));
+
+export const hostRouteElements = {
+  dashboard: <Dashboard />,
+  'cfa-dashboard': <CfaDashboard />,
+  'cfa-module': <CfaModule />,
+  'cfa-quiz': <CfaQuiz />,
+  'cfa-vignette': <CfaVignette />,
+  'cfa-constructed-response': <CfaConstructedResponse />,
+  'quant-dashboard': <QuantDashboard />,
+  'quant-module': <QuantModule />,
+  'excel-dashboard': <ExcelDashboard />,
+  'excel-module': <ExcelModule />,
+  calculators: <Calculators />,
+  formulas: <FormulaLibrary />,
+  review: <ReviewInbox />,
+  vault: <VaultCenter />,
+  flashcards: <Flashcards />,
+  mock: <MockExam />,
+  'level-mock': <MockExam />,
+  analytics: <Analytics />,
+  'content-ops': <ContentOps />,
+  system: <SystemHealth />,
+  today: <Today />,
+  'knowledge-graph': <KnowledgeGraph />,
+  style: <StyleGallery />,
+  leeches: <LeechesAndGaps />,
+  preferences: <Settings />,
+};
 
 /*
  * UX-5 — host soft-nav route-transition state.
@@ -209,6 +231,20 @@ function routeElementFor(definition, element) {
   return element;
 }
 
+function focusFirstVisibleSidebarTarget() {
+  const targets = Array.from(document.querySelectorAll('#main-sidebar a[href], #main-sidebar button:not([disabled])'));
+  const visibleTarget = targets.find((element) => {
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+  });
+  const target = visibleTarget ?? targets[0];
+  try {
+    target?.focus?.({ preventScroll: true });
+  } catch {
+    target?.focus?.();
+  }
+}
+
 export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -216,31 +252,6 @@ export default function App() {
   const location = useLocation();
   const mobileNavWasOpen = useRef(false);
   const mobileNavHidden = mobileViewport && !mobileNavOpen;
-  const routeElements = {
-    dashboard: <Dashboard />,
-    'cfa-dashboard': <CfaDashboard />,
-    'cfa-module': <CfaModule />,
-    'cfa-quiz': <CfaQuiz />,
-    'cfa-vignette': <CfaVignette />,
-    'cfa-constructed-response': <CfaConstructedResponse />,
-    'quant-dashboard': <QuantDashboard />,
-    'quant-module': <QuantModule />,
-    'excel-dashboard': <ExcelDashboard />,
-    'excel-module': <ExcelModule />,
-    calculators: <Calculators />,
-    formulas: <FormulaLibrary />,
-    review: <ReviewInbox />,
-    vault: <VaultCenter />,
-    flashcards: <Flashcards />,
-    mock: <MockExam />,
-    'level-mock': <MockExam />,
-    analytics: <Analytics />,
-    'content-ops': <ContentOps />,
-    system: <SystemHealth />,
-    today: <Today />,
-    'knowledge-graph': <KnowledgeGraph />,
-    style: <StyleGallery />,
-  };
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return undefined;
@@ -284,12 +295,15 @@ export default function App() {
       return undefined;
     }
     mobileNavWasOpen.current = true;
-    document.querySelector('#main-sidebar a, #main-sidebar button')?.focus?.();
+    const focusTimer = window.setTimeout(focusFirstVisibleSidebarTarget, 0);
     function handleKeyDown(event) {
       if (event.key === 'Escape') setMobileNavOpen(false);
     }
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [mobileNavOpen]);
 
   return (
@@ -327,6 +341,7 @@ export default function App() {
             id="main"
             className={`main-content ${sidebarCollapsed ? 'collapsed' : ''}`}
             role="main"
+            tabIndex={-1}
           >
             {/* UX-5: route-transition progress bar. The provider wraps the route
                 Suspense boundary so <RouteProgressSignal> (mounted in the fallback)
@@ -341,16 +356,9 @@ export default function App() {
                     <Route
                       key={definition.id}
                       path={definition.path}
-                      element={routeElementFor(definition, routeElements[definition.id])}
+                      element={routeElementFor(definition, hostRouteElements[definition.id])}
                     />
                   ))}
-                  {/* LEARN-5 — standalone unified leech + concept-gap remediation
-                      page. Registered here additively (its own route) rather than
-                      via the typed routeManifest. */}
-                  <Route path="/leeches" element={<LeechesAndGaps />} />
-                  {/* Wave 6 — host preferences page (appearance / density /
-                      reading aids). Additive route, same as /leeches above. */}
-                  <Route path="/preferences" element={<Settings />} />
                   <Route
                     path="*"
                     element={

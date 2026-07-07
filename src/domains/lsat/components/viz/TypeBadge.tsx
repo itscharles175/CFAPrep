@@ -1,6 +1,11 @@
 import { cn } from "@lsat/lib/utils";
 import { qTypeLabel } from "@lsat/lib/labels";
-import { typeColor, typeColorNeedsDarkText } from "@lsat/lib/labels";
+import {
+  typeColor,
+  typeColorNeedsDarkText,
+  typeFamily,
+  type TypeFamily,
+} from "@lsat/lib/labels";
 import type { QType } from "@lsat/lib/types";
 
 export interface TypeBadgeProps {
@@ -13,6 +18,17 @@ export interface TypeBadgeProps {
   label?: string;
 }
 
+const TYPE_COLOR_VAR: Record<TypeFamily, string> = {
+  Assumption: "--tcolor-assumption",
+  StrengthenWeaken: "--tcolor-strengthen-weaken",
+  FlawStructure: "--tcolor-flaw-structure",
+  Inference: "--tcolor-inference",
+  Principle: "--tcolor-principle",
+  Parallel: "--tcolor-parallel",
+  Paradox: "--tcolor-paradox",
+  RC: "--tcolor-rc",
+};
+
 /** Question-type pill using the stable Okabe–Ito `typeColor`. */
 export function TypeBadge({
   qType,
@@ -21,7 +37,8 @@ export function TypeBadge({
   className,
   label,
 }: TypeBadgeProps) {
-  const color = typeColor(qType);
+  const fallbackColor = typeColor(qType);
+  const color = `var(${TYPE_COLOR_VAR[typeFamily(qType)]}, ${fallbackColor})`;
   const text = label ?? qTypeLabel(qType);
 
   if (dot) {
@@ -61,9 +78,9 @@ export function TypeBadge({
         className,
       )}
       style={{
-        backgroundColor: `${color}22`,
-        color,
-        boxShadow: `inset 0 0 0 1px ${color}55`,
+        backgroundColor: `color-mix(in srgb, ${color} 13%, transparent)`,
+        color: "hsl(var(--foreground))",
+        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 33%, transparent)`,
       }}
     >
       <span

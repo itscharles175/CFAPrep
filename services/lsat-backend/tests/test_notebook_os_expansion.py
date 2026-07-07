@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import zipfile
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlmodel import Session
 
 from app import notebook_os
 from app.db import engine
 from app.models import AnswerChoice, NotebookNote, Question, QuestionSource, StudyArtifact
+from app.routers import notebook_os_routes
 
 
 def _official_question_id() -> int:
@@ -56,6 +60,21 @@ def _official_question_with_choice() -> tuple[int, int]:
         assert q.id is not None
         assert choice.id is not None
         return q.id, choice.id
+
+
+class _RecordingUpload:
+    filename = "large.txt"
+    content_type = "text/plain"
+
+    def __init__(self, payload: bytes):
+        self.payload = payload
+        self.read_sizes: list[int] = []
+
+    async def read(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        if size is None or size < 0:
+            return self.payload
+        return self.payload[:size]
 
 
 def test_notebook_os_workbench_round_trip(client):
@@ -694,6 +713,73 @@ def test_notebook_source_import_blocks_private_urls_and_large_uploads(client, mo
     assert too_large.status_code == 413
 
 
+def test_notebook_source_import_reads_uploads_with_route_limit(db_session, monkeypatch):
+    monkeypatch.setattr(notebook_os, "MAX_SOURCE_UPLOAD_BYTES", 8)
+    upload = _RecordingUpload(b"0123456789abcdef")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            notebook_os_routes.import_source(
+                title="Bounded upload",
+                source_type="text",
+                content_type="text/plain",
+                content="",
+                url="",
+                provider="local",
+                source_registry_key="",
+                refs="[]",
+                tags="[]",
+                official_firewall=False,
+                file=upload,  # type: ignore[arg-type]
+                session=db_session,
+            )
+        )
+
+    assert exc.value.status_code == 413
+    assert upload.read_sizes == [9]
+
+
+def test_notebook_source_import_rejects_oversized_refs_and_tags(client):
+    too_many_refs = client.post(
+        "/api/notebook-sources/import",
+        data={
+            "title": "Too many refs",
+            "source_type": "text",
+            "content": "Local notebook source.",
+            "provider": "local",
+            "refs": json.dumps([f"source:{idx}" for idx in range(101)]),
+        },
+    )
+    assert too_many_refs.status_code == 422
+    assert "Too many source refs" in too_many_refs.json()["detail"]
+
+    too_many_tags = client.post(
+        "/api/notebook-sources/import",
+        data={
+            "title": "Too many tags",
+            "source_type": "text",
+            "content": "Local notebook source.",
+            "provider": "local",
+            "tags": json.dumps([f"tag-{idx}" for idx in range(41)]),
+        },
+    )
+    assert too_many_tags.status_code == 422
+    assert "Too many source tags" in too_many_tags.json()["detail"]
+
+
+def test_notebook_source_import_rejects_extracted_content_over_limit(client, monkeypatch):
+    monkeypatch.setattr(notebook_os, "MAX_SOURCE_CONTENT_CHARS", 8)
+
+    too_large = client.post(
+        "/api/notebook-sources/import",
+        data={"title": "Too much extracted text", "source_type": "text", "provider": "local"},
+        files={"file": ("note.txt", b"0123456789", "text/plain")},
+    )
+
+    assert too_large.status_code == 413
+    assert "Source content is too large" in too_large.json()["detail"]
+
+
 def test_notebook_capabilities_and_search_health_are_public(client):
     capabilities = client.get("/api/notebook-capabilities").json()
     assert capabilities["schema"] == "lsatlab.notebook_capabilities.v1"
@@ -922,6 +1008,34 @@ def test_notebook_docx_import_and_official_export_redaction(client):
         },
     )
     assert blocked.status_code == 403
+
+
+def test_notebook_docx_import_rejects_oversized_document_xml(client, monkeypatch):
+    monkeypatch.setattr(notebook_os, "MAX_DOCX_DOCUMENT_XML_BYTES", 32)
+    docx = io.BytesIO()
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body><w:p><w:r><w:t>This document XML is intentionally too large.</w:t></w:r></w:p></w:body>"
+        "</w:document>"
+    )
+    with zipfile.ZipFile(docx, "w") as archive:
+        archive.writestr("word/document.xml", document_xml)
+
+    imported = client.post(
+        "/api/notebook-sources/import",
+        data={"title": "Oversized docx", "source_type": "auto", "provider": "local"},
+        files={
+            "file": (
+                "note.docx",
+                docx.getvalue(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+
+    assert imported.status_code == 413
+    assert "Source upload is too large" in imported.json()["detail"]
 
 
 def test_official_evidence_grounding_redacts_chat_transform_and_podcast(client):

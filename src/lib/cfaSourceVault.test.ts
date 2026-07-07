@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { exportVaultData, importVaultData, resetVaultData } from './progressStore';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { db, exportVaultData, importVaultData, resetVaultData } from './progressStore';
 import {
   buildCfaSourceBundle,
   buildCfaSourceTarget,
@@ -21,6 +21,8 @@ import {
   validateCfaSourceBundle,
 } from './cfaSourceVault';
 import type { CfaSourceChunk, CfaSourceDocument } from './cfaSourceTypes';
+import { createMemoryKeyStore, SecureVault, type SecureVaultFlagStore } from './secureVault';
+import { setSourceChunkSecureVaultForTesting } from './sourceChunkSecureVault';
 
 const importedAt = '2026-05-06T12:00:00.000Z';
 
@@ -62,9 +64,31 @@ function chunkRow(overrides: Partial<CfaSourceChunk> = {}): CfaSourceChunk {
   };
 }
 
+function secureVaultFlag(initial = false): SecureVaultFlagStore {
+  let enabled = initial;
+  return {
+    get: () => enabled,
+    set: (value) => {
+      enabled = value;
+    },
+  };
+}
+
+async function enableSourceChunkVault() {
+  const vault = new SecureVault(createMemoryKeyStore(), secureVaultFlag());
+  const result = await vault.enable();
+  expect(result.ok).toBe(true);
+  setSourceChunkSecureVaultForTesting(vault);
+  return vault;
+}
+
 describe('CFA source vault', () => {
   beforeEach(async () => {
     await resetVaultData('full');
+  });
+
+  afterEach(() => {
+    setSourceChunkSecureVaultForTesting(null);
   });
 
   it('imports private .qvsource bundles, indexes chunks, and searches locally', async () => {
@@ -87,6 +111,32 @@ describe('CFA source vault', () => {
       chunk: { id: 'source:test-doc:chunk:0001' },
     });
     expect(results[0].score).toBeGreaterThan(2);
+  });
+
+  it('encrypts imported source chunks at rest while source APIs decrypt when unlocked', async () => {
+    const vault = await enableSourceChunkVault();
+    const bundle = buildCfaSourceBundle({
+      documents: [documentRow()],
+      chunks: [chunkRow()],
+      createdAt: importedAt,
+    });
+
+    await importCfaSourceBundle(bundle);
+
+    const raw = await db.sourceChunks.get('source:test-doc:chunk:0001');
+    expect(raw?.secureVault?.scheme).toBe('secure-vault-source-chunk.v1');
+    expect(raw?.text).not.toContain('Synthetic fixed income');
+    expect(JSON.stringify(raw)).not.toContain('Synthetic fixed income');
+    expect(JSON.stringify(raw)).not.toContain('Duration');
+
+    const results = await searchCfaSourceVault('duration yield');
+    expect(results[0].chunk.text).toContain('Synthetic fixed income');
+
+    const exported = await exportCfaSourceBundle();
+    expect(exported.chunks[0].text).toContain('Synthetic fixed income');
+
+    vault.lock();
+    await expect(searchCfaSourceVault('duration yield')).rejects.toThrow(/locked/i);
   });
 
   it('excludes source text from standard vault exports unless explicitly requested', async () => {

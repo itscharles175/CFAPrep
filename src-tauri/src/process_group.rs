@@ -350,4 +350,47 @@ mod tests {
         );
         let _ = child.wait();
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_job_object_kills_assigned_child_on_drop() {
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        let group = create_process_group();
+        assert_eq!(group.kind(), "windows-job-object");
+
+        let mut child = Command::new("cmd")
+            .args(["/C", "ping", "127.0.0.1", "-n", "30"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn long-lived child");
+        let pid = child.id();
+        if let Err(err) = group.assign(pid) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("failed to assign child {pid} to Windows job object: {err}");
+        }
+
+        drop(group);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut exited = false;
+        while Instant::now() < deadline {
+            if child.try_wait().expect("try_wait child").is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if !exited {
+            let _ = child.kill();
+        }
+        let _ = child.wait();
+        assert!(
+            exited,
+            "dropping the kill-on-close Windows job object should terminate assigned child {pid}"
+        );
+    }
 }

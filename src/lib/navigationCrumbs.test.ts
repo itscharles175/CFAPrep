@@ -23,7 +23,7 @@ describe('crumbsForPath — host plane', () => {
   });
 
   it('degrades gracefully for an unknown host route', () => {
-    const crumbs = crumbsForPath('/leeches');
+    const crumbs = crumbsForPath('/not-in-manifest');
     expect(crumbs[0]).toEqual({ label: 'Dashboard', to: '/' });
     expect(crumbs[crumbs.length - 1].to).toBeUndefined();
   });

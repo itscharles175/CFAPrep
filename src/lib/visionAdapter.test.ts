@@ -97,6 +97,27 @@ describe('generateTextWithImages', () => {
     expect(result.usedImages).toBe(1);
   });
 
+  it('strips reasoning traces from multimodal responses before returning text', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          choices: [
+            { message: { content: '<think>inspect labels privately</think>The chart slopes downward.' } },
+          ],
+        }),
+      ),
+    );
+
+    const result = await generateTextWithImages({
+      prompt: 'Describe.',
+      images: [{ base64: 'A' }],
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+    });
+
+    expect(result).toEqual({ text: 'The chart slopes downward.', usedImages: 1 });
+  });
+
   it('wraps a network failure in the actionable LM Studio CORS message', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     await expect(
@@ -106,6 +127,20 @@ describe('generateTextWithImages', () => {
         settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
       }),
     ).rejects.toThrow(/CORS|OLLAMA_ORIGINS/);
+  });
+
+  it('rejects remote vision model bases before sending images', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      generateTextWithImages({
+        prompt: 'p',
+        images: [{ base64: 'A' }],
+        settings: { baseUrl: 'http://192.168.1.5:1234/v1', model: 'gemma' },
+      }),
+    ).rejects.toThrow(/loopback/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('throws when the server responds with a non-2xx status', async () => {

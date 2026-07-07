@@ -68,8 +68,9 @@ import { Button } from "@lsat/components/ui/button";
 import { Download } from "lucide-react";
 import { ChartDataTable } from "./chart-data-table";
 import { downloadCsv } from "./exportCsv";
+import type { Source } from "./types";
 
-export type Source = "official" | "all";
+export type { Source } from "./types";
 
 // R8 — visual weighting for tab content. Each tab leads with ONE hero card
 // (elevated, faint verdict-tinted edge, raised surface) and demotes its

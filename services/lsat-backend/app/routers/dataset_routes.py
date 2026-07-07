@@ -35,8 +35,9 @@ router = APIRouter(prefix="/bank")
 def _hash_path(path: str | None) -> str | None:
     if not path:
         return None
-    p = Path(path)
-    if not p.exists() or not p.is_file():
+    try:
+        p = import_dataset.safe_regular_file(path)
+    except (FileNotFoundError, ValueError, OSError):
         return None
     h = hashlib.sha256()
     with p.open("rb") as f:
@@ -185,6 +186,9 @@ class ImportBody(BaseModel):
     training_eligible: bool = False
     training_role: Optional[str] = None  # "anchor" | "distill" | "both"
     training_notes: Optional[str] = None
+    # Security Wave 3: imports that write the bank must opt into the commit phase.
+    # This keeps accidental POSTs/probes from silently mutating the local bank.
+    force_commit: bool = False
 
 
 @router.post("/import")
@@ -198,6 +202,15 @@ def import_research(body: ImportBody, session: Session = Depends(get_session)):
     unknown = [k for k in keys if k not in import_dataset.DATASETS]
     if unknown:
         raise HTTPException(400, f"Unknown dataset keys: {unknown}")
+    if not body.force_commit:
+        raise HTTPException(
+            409,
+            {
+                "error": "force_commit_required",
+                "message": "Set force_commit=true to commit imported dataset rows.",
+                "sources": keys,
+            },
+        )
     local_paths = body.local_paths or {}
     out = []
     for key in keys:
@@ -265,7 +278,20 @@ def import_research(body: ImportBody, session: Session = Depends(get_session)):
             "rows_seen": res.rows_seen,
             "inserted": res.inserted,
         }
-        run.dedup_json = {"skipped_duplicate": res.skipped_duplicate}
+        run.dedup_json = {
+            "skipped_duplicate": res.skipped_duplicate,
+            "force_commit": True,
+            "provenance": {
+                "dataset": key,
+                "license": spec.license,
+                "question_source": spec.question_source.value,
+                "file_hash": run.file_hash,
+                "local_path_supplied": key in local_paths,
+                "nc_acknowledged": body.nc_acknowledged,
+                "training_eligible": body.training_eligible,
+                "training_role": body.training_role,
+            },
+        }
         run.warnings_json = res.warnings
         run.preptest_id = res.preptest_id
         _finish_import_run(session, run, status=ImportRunStatus.done)
@@ -420,6 +446,9 @@ def export_bank(include_history: bool = True,
 
 class ImportBackupBody(BaseModel):
     payload: dict
+    # Portable JSON restores mutate the local bank; require an explicit commit
+    # acknowledgement just like dataset imports.
+    force_commit: bool = False
 
 
 @router.post("/import-backup")
@@ -428,6 +457,15 @@ def import_backup(body: ImportBackupBody,
     """Apply a previously-exported bank snapshot. Idempotent on PrepTest name +
     Question external_id/content_hash (and natural keys for the 5.5 user-data
     tables). Returns insertion counts plus a post-import verify-restore report."""
+    if not body.force_commit:
+        raise HTTPException(
+            409,
+            {
+                "error": "force_commit_required",
+                "message": "Set force_commit=true to commit the portable bank backup.",
+                "payload_hash": _hash_json(body.payload),
+            },
+        )
     run = ImportRun(
         source="portable_json_export",
         license="sanitized_local_export",
@@ -465,6 +503,14 @@ def import_backup(body: ImportBackupBody,
     run.row_counts_json = {
         key: value for key, value in counts.items()
         if isinstance(value, int | float | str | bool) or value is None
+    }
+    run.dedup_json = {
+        "force_commit": True,
+        "provenance": {
+            "payload_hash": run.file_hash,
+            "schema_version": body.payload.get("schema_version"),
+            "format": body.payload.get("format", "bank-json"),
+        },
     }
     _finish_import_run(session, run, status=ImportRunStatus.done)
     counts["import_run_id"] = run.id

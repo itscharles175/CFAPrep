@@ -8,8 +8,14 @@ actually wires the tick in, and that a failing scheduled task can't kill the loo
 """
 from __future__ import annotations
 
+import time
+from datetime import datetime, timedelta, timezone
+
+from sqlmodel import Session, select
+
 from app import jobs
 from app.db import engine
+from app.models import GenJob, GenStatus, ScheduledTask, SchedulerRun
 
 
 class _FakeClock:
@@ -102,6 +108,57 @@ def test_scheduler_tick_swallows_task_failure(monkeypatch, db_session):
     worker._run_scheduler_tick()
 
 
+def test_scheduler_tick_persists_due_task_evidence(monkeypatch, db_session):
+    """A worker tick runs due rows through the real scheduler evidence path."""
+    now = datetime.now(timezone.utc)
+    row = jobs.upsert_scheduled_task(
+        db_session,
+        key="scheduler_tick_evidence",
+        label="Scheduler tick evidence",
+        task_type="backup",
+        cadence_s=300,
+    )
+    row.next_run_at = now - timedelta(seconds=1)
+    db_session.add(row)
+    db_session.commit()
+
+    def fake_execute(session, task: ScheduledTask) -> dict:
+        return {"key": task.key, "source": "worker-tick"}
+
+    monkeypatch.setattr(jobs, "_execute_task", fake_execute)
+
+    worker = _make_worker(scheduler_tick_interval=3600.0)
+    worker._run_scheduler_tick()
+
+    runs = db_session.exec(
+        select(SchedulerRun).where(
+            SchedulerRun.task_key == "scheduler_tick_evidence"
+        )
+    ).all()
+    assert len(runs) == 1
+    run = runs[0]
+    assert run.task_type == "backup"
+    assert run.status == "ok"
+    assert run.error is None
+    assert run.result_json == {"key": "scheduler_tick_evidence", "source": "worker-tick"}
+
+    refreshed = db_session.exec(
+        select(ScheduledTask).where(ScheduledTask.key == "scheduler_tick_evidence")
+    ).one()
+    assert refreshed.status == "idle"
+    assert refreshed.last_run_at is not None
+    assert refreshed.next_run_at is not None
+    assert refreshed.next_run_at > refreshed.last_run_at
+
+    worker._run_scheduler_tick()
+    runs = db_session.exec(
+        select(SchedulerRun).where(
+            SchedulerRun.task_key == "scheduler_tick_evidence"
+        )
+    ).all()
+    assert len(runs) == 1
+
+
 def test_loop_invokes_scheduler_tick(monkeypatch, db_session):
     """End-to-end: the worker's _loop drives the scheduler tick on an idle pass."""
     calls: list[int] = []
@@ -129,6 +186,48 @@ def test_loop_invokes_scheduler_tick(monkeypatch, db_session):
         worker.stop()
 
     assert calls, "the worker loop should have invoked run_due_scheduled_tasks"
+
+
+def test_loop_drains_generation_job_before_scheduler_tick(monkeypatch, db_session):
+    """Queued generation remains higher priority than scheduled maintenance."""
+    events: list[str] = []
+
+    jid = jobs.enqueue(db_session, "Flaw", 1, status=GenStatus.queued)
+
+    def fake_runner(job_id: int) -> None:
+        events.append(f"job:{job_id}")
+        with Session(engine) as s:
+            job = s.get(GenJob, job_id)
+            job.status = GenStatus.done
+            job.accepted = 1
+            job.progress_pct = 100.0
+            s.add(job)
+            s.commit()
+
+    def fake_run_due(session, *, limit: int = 10) -> dict:
+        events.append("scheduler")
+        return {"ran": 0, "results": []}
+
+    monkeypatch.setattr(jobs, "run_due_scheduled_tasks", fake_run_due)
+
+    worker = jobs.JobWorker(
+        engine,
+        runner=fake_runner,
+        poll_interval=0.02,
+        scheduler_tick_interval=0.01,
+    )
+    worker.start()
+    try:
+        deadline = time.time() + 5
+        while time.time() < deadline and "scheduler" not in events:
+            time.sleep(0.02)
+    finally:
+        worker.stop()
+
+    assert events[0] == f"job:{jid}"
+    assert "scheduler" in events
+    with Session(engine) as s:
+        assert s.get(GenJob, jid).status == GenStatus.done
 
 
 def test_env_interval_default_and_clamp(monkeypatch):

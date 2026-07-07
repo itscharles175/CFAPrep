@@ -42,7 +42,10 @@ class LMStudioProvider:
 
     def __init__(self, base_url: Optional[str] = None) -> None:
         # base_url already includes the OpenAI-compatible /v1 prefix.
-        self.base_url = (base_url or config.LMSTUDIO_URL).rstrip("/")
+        self.base_url = config.validate_local_model_url(
+            base_url or config.LMSTUDIO_URL,
+            name="LSATLAB_LMSTUDIO_URL",
+        )
 
     @staticmethod
     def _response_format(
@@ -125,14 +128,15 @@ class LMStudioProvider:
     def generate(self, model: str, prompt: str, system: Optional[str] = None,
                  timeout: Optional[float] = None, *,
                  temperature: Optional[float] = None,
+                 top_p: Optional[float] = None,
                  seed: Optional[int] = None,
                  format: Optional[Union[str, dict[str, Any]]] = None) -> str:
         """Non-streaming generation, mapped onto ``/chat/completions``.
 
         A system+user message pair carries the same intent as Ollama's separate
-        prompt+system fields. ``temperature``/``seed`` map to the OpenAI fields so
-        the generation gate can run its solve/critique passes deterministically;
-        ``format`` maps to ``response_format``.
+        prompt+system fields. ``temperature``/``top_p``/``seed`` map to the
+        OpenAI fields so the generation gate can run its solve/critique passes
+        deterministically; ``format`` maps to ``response_format``.
         """
         def _call() -> str:
             messages: list[dict] = []
@@ -142,6 +146,8 @@ class LMStudioProvider:
             payload: dict = {"model": model, "messages": messages, "stream": False}
             if temperature is not None:
                 payload["temperature"] = temperature
+            if top_p is not None:
+                payload["top_p"] = top_p
             if seed is not None:
                 payload["seed"] = seed
             rf = self._response_format(format)

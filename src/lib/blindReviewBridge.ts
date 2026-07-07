@@ -23,8 +23,8 @@
  * operation once the contract is regenerated with the param.
  */
 import type { QuestionResult } from './learningTypes';
+import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 const BLIND_REVIEW_GAP_PATH = '/api/analytics/blind-review-gap';
 
 /** The four 2x2 blind-review outcomes (mirrors backend `blind_review_outcome`). */
@@ -177,26 +177,13 @@ async function fetchJson(
   path: string,
   timeoutMs: number,
 ): Promise<{ ok: boolean; status: number; data: unknown } | { ok: false; status: 0; error: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${path}`, {
-      signal: controller.signal,
-      method: 'GET',
-      headers: { accept: 'application/json' },
-    });
-    let data: unknown = null;
-    try {
-      data = await res.json();
-    } catch {
-      /* non-JSON body */
-    }
-    return { ok: res.ok, status: res.status, data };
-  } catch (err) {
-    return { ok: false, status: 0, error: err instanceof Error ? err.message : String(err) };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchLsatSidecarJson(path, {
+    timeoutMs,
+    method: 'GET',
+    headers: { accept: 'application/json' },
+  });
+  if (res.reachable) return { ok: res.ok, status: res.status, data: res.data };
+  return { ok: false, status: 0, error: res.error ?? 'LSAT backend unreachable' };
 }
 
 function num(value: unknown): number {

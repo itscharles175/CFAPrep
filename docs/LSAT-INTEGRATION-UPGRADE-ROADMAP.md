@@ -135,7 +135,7 @@ I·E·R = Impact (H/M/L) · Effort (S/M/L) · Risk (L/M/H). "Deps" lists prerequ
 
 | # | Item | What / why | I·E·R | Deps |
 |---|------|-----------|-------|------|
-| **QA-1** | **/lsat routes in the a11y + visual + smoke gates** | Merge the LSAT route manifest into `screenshotRoutes`/`smokeRoutes` and crawl it in `a11y-check.mjs` + `visual-regression.mjs` + `smoke.mjs` (both themes); bootstrap LSAT baselines. CI covers only host routes today. | H·M·L | none |
+| **QA-1** | **/lsat routes in the a11y + visual + smoke gates** | Merge the LSAT route manifest into `screenshotRoutes`/`smokeRoutes` and crawl it in `a11y-check.mjs` + `visual-regression.mjs` + `smoke.mjs` (both themes); restore approved LSAT visual baselines and fail closed when they are missing. CI covers only host routes today. | H·M·L | none |
 | **QA-2** | **Cross-domain e2e + sidecar integration harness** | A Playwright `e2e-integration.mjs` booting the LSAT sidecar (test db): Review Inbox → due populates → deep-link /lsat/srs → complete a card → back → assert count decremented; plus a suite that kills the sidecar mid-request and asserts graceful `{ok:false}`. Today the bridge is tested only with mocked fetch. | H·M·M | QA-1 |
 | **QA-3** | **PR-gate sidecar smoke + schema-snapshot baseline** *(re-scope per critic)* | *Binary smoke already runs in `release.yml`* — re-scope to a **PR-gate** run of `smoke-sidecar.mjs` + a `schemas-baseline.json` snapshot diff in `test_openapi_contract.py` (catch silent field removals). | M·S·M | DATA-1 |
 | **QA-4** | **Replace the `@lsat/*` any-shim with typed project references** | Swap `src/lsat-domain.d.ts`'s blanket `declare module '@lsat/*'` (resolves everything to `any`) for a tsconfig project reference + a granular `d.ts` of the real public surface; document a host↔LSAT API coverage matrix in `docs/TESTING.md`. Hardens the boundary's type-safety. | M·M·M | DATA-1 |
@@ -317,4 +317,3 @@ rollback. Critic verdict: strategy is sound (strangler-fig, gate-first, flag-gat
 **conditional on** the K4-0 prerequisites (gate-extension, manifest-collision + AppMode,
 Tailwind-glob split, ⌘K/runner decoupling, accent + print + provider gaps) landing before the
 structural merge — all folded into the table above.
-

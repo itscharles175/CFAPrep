@@ -1,7 +1,7 @@
 import { getStorage } from './storage';
 import { packExcerpts, pickBudget, renderExcerpts } from './contextBudget';
 import { streamSse, isStreamTimeout } from './streamingClient';
-import { stripThink } from './stripThink';
+import { createThinkStreamFilter, stripThink } from './stripThink';
 // Wave 2 SLICE A — host-LLM determinism contract + structured-output engine +
 // content-quality gate + prompt registry. The STRUCTURED (JSON-producing)
 // generators below route through these; the creative/streaming paths
@@ -11,6 +11,7 @@ import { withDeterminism } from './llm/determinism';
 import { generateStructured, StructuredOutputError } from './llm/structured';
 import { gateBatch } from './llm/contentGate';
 import { renderPrompt } from './llm/promptRegistry';
+import { normalizeLoopbackHttpBaseUrl } from './localUrlPolicy';
 
 // Local-LLM integration. Targets an OpenAI-compatible chat endpoint exposed by a
 // local model server (Ollama at :11434/v1, LM Studio at :1234/v1). No cloud, no
@@ -95,6 +96,14 @@ function requestSignature(endpoint, salient) {
     payload = `__nondeterministic__${Math.random()}`;
   }
   return `${endpoint}\n${payload}`;
+}
+
+function cleanModelText(content, emptyMessage) {
+  const clean = stripThink(typeof content === 'string' ? content : '');
+  if (!clean) {
+    throw new Error(emptyMessage);
+  }
+  return clean;
 }
 
 /**
@@ -219,45 +228,22 @@ export async function saveLlmSettings(settings) {
   return merged;
 }
 
-/** audit M11 — is this host a loopback or private-LAN address (i.e. safe to send
- *  prompts/source text to without breaking the offline/no-cloud promise)? A
- *  self-hosted model on another box on your LAN is fine; a public host is not. */
-function isLocalLlmHost(hostname) {
-  const h = (hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
-  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
-  if (/^127\./.test(h)) return true;
-  if (/^10\./.test(h)) return true;
-  if (/^192\.168\./.test(h)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
-  return false;
-}
-
 function normalizeBaseUrl(baseUrl) {
-  const raw = (baseUrl || DEFAULT_LLM_SETTINGS.baseUrl).trim().replace(/\/+$/, '');
   // audit M11 — the base URL is user-settable AND restored verbatim from a backup
   // (progressStore imports the settings store wholesale), so a crafted backup or
   // setting could otherwise redirect every generation — prompt + grounded source
   // text — to a REMOTE endpoint, silently breaking the offline/no-cloud promise.
-  // Only loopback + private-LAN hosts may receive traffic; anything else falls
-  // back to the safe localhost default (a public model server must be reached via
-  // an explicit LAN IP, not a public host).
-  try {
-    const parsed = new URL(raw);
-    if (!isLocalLlmHost(parsed.hostname)) {
-      console.warn(
-        `[localLlm] Ignoring non-local model endpoint "${raw}" — falling back to ${DEFAULT_LLM_SETTINGS.baseUrl} to preserve offline-only operation.`,
-      );
-      return DEFAULT_LLM_SETTINGS.baseUrl;
-    }
-  } catch {
-    return DEFAULT_LLM_SETTINGS.baseUrl;
-  }
-  return raw;
+  // Runtime model endpoints must be loopback-only; remote/LAN model servers need
+  // an explicit backend-side opt-out, not a browser fetch of study material.
+  return normalizeLoopbackHttpBaseUrl(
+    baseUrl || DEFAULT_LLM_SETTINGS.baseUrl,
+    'Local model base URL',
+  );
 }
 
 export async function checkLlmConnection(settings) {
-  const base = normalizeBaseUrl(settings?.baseUrl);
   try {
+    const base = normalizeBaseUrl(settings?.baseUrl);
     const response = await fetch(`${base}/models`, { method: 'GET' });
     if (!response.ok) return { ok: false, error: `Server responded ${response.status}` };
     const data = await response.json();
@@ -381,22 +367,17 @@ export async function generateQuestionsFromCurriculum({ settings, topicTitle, ch
     throw error;
   }
 
-  // Legacy normalization (preserved): an out-of-range / non-integer `correct`
-  // index is clamped to 0 BEFORE the gate. This is the historical contract — a
-  // model that mis-indexes still yields a usable item rather than being dropped.
-  // The gate then runs on the NORMALIZED index, so it only quarantines the
-  // genuinely unrecoverable failures (blank/duplicate options, empty stem,
-  // meta-options, ungrounded content) rather than re-flagging the clamp.
-  const normalized = parsed.map((item) => ({
+  // Keep the model's answer index intact for the gate. An out-of-range or
+  // non-integer `correct` is content-quality evidence and must be quarantined,
+  // not silently repaired into option 0 before validation.
+  const gateInput = parsed.map((item) => ({
     ...item,
     options: item.options.map((option) => String(option)),
-    correct:
-      Number.isInteger(item.correct) && item.correct >= 0 && item.correct < item.options.length ? item.correct : 0,
   }));
 
   // AI-2 — universal content gate: quarantine MCQs that fail option sanity or
   // aren't grounded in the curriculum, instead of emitting them.
-  const { accepted } = gateBatch({ kind: 'mcq', items: normalized, context });
+  const { accepted } = gateBatch({ kind: 'mcq', items: gateInput, context });
 
   return accepted.map((item, index) => ({
     id: `ai-${index + 1}`,
@@ -460,11 +441,8 @@ export async function explainWrongAnswer({ settings, question, options, correctI
     if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
-      throw new Error('The model returned an empty explanation. Try a more capable local model.');
-    }
     // AI-8 — drop any <think> reasoning trace before showing the explanation.
-    return stripThink(content);
+    return cleanModelText(content, 'The model returned an empty explanation. Try a more capable local model.');
   });
 }
 
@@ -531,11 +509,8 @@ export async function critiqueConstructedResponse({ settings, prompt, response, 
     if (!fetchResponse.ok) throw new Error(`Local model server responded ${fetchResponse.status}.`);
     const data = await fetchResponse.json();
     const content = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
-      throw new Error('The model returned an empty critique. Try a more capable local model.');
-    }
     // AI-8 — drop any <think> reasoning trace before showing the critique.
-    return stripThink(content);
+    return cleanModelText(content, 'The model returned an empty critique. Try a more capable local model.');
   });
 }
 
@@ -734,11 +709,8 @@ export async function narrateStudyPlan({ settings, plan, signal }) {
     if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
-      throw new Error('The model returned an empty narrative. Try a more capable local model.');
-    }
     // AI-8 — drop any <think> reasoning trace before showing the narrative.
-    return stripThink(content);
+    return cleanModelText(content, 'The model returned an empty narrative. Try a more capable local model.');
   });
 }
 
@@ -796,11 +768,8 @@ export async function summarizeTopicFromCurriculum({ settings, topicTitle, chunk
     if (!response.ok) throw new Error(`Local model server responded ${response.status}.`);
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
-      throw new Error('The model returned an empty summary. Try a more capable local model.');
-    }
     // AI-8 — drop any <think> reasoning trace before showing the summary.
-    return stripThink(content);
+    return cleanModelText(content, 'The model returned an empty summary. Try a more capable local model.');
   });
 }
 
@@ -1043,6 +1012,8 @@ export async function streamText({
   const endpoint = `${base}/chat/completions`;
 
   let text = '';
+  const thinkFilter = createThinkStreamFilter();
+  let terminalHandled = false;
   // The CORS-actionable wrapper the non-streaming path uses, so callers matching
   // on /CORS|OLLAMA_ORIGINS/ keep working when the stream cannot even connect.
   const wrapConnectError = (cause) =>
@@ -1061,24 +1032,27 @@ export async function streamText({
       },
       {
         onDelta: (token) => {
-          // AI-8 — mid-stream deltas pass through RAW so live tokens aren't
-          // corrupted; the reasoning trace is removed once at finalization
-          // (onDone / stream end) below, never on a partial delta.
           text += token;
-          onToken?.(token);
+          const cleanToken = thinkFilter.feed(token);
+          if (cleanToken) onToken?.(cleanToken);
         },
         onDone: () => {
           // AI-8 — filter the fully-assembled text so no <think> reasoning
           // reaches onDone consumers or the resolved value (incl. the coach/TTS).
+          terminalHandled = true;
+          const tail = thinkFilter.flush();
+          if (tail) onToken?.(tail);
           const clean = stripThink(text);
           onDone?.(clean);
           resolve({ text: clean });
         },
         onTimeout: (error) => {
+          terminalHandled = true;
           onTimeout?.(error);
           reject(error);
         },
         onError: (error) => {
+          terminalHandled = true;
           // A non-OK status carries `.status`; mirror the non-streaming message.
           const wrapped =
             typeof error?.status === 'number'
@@ -1103,6 +1077,9 @@ export async function streamText({
         // with neither done nor error (e.g. a caller abort), settle so awaiting
         // callers are never left hanging. (AI-8: filter here too — the resolved
         // value must never carry a partial reasoning trace.)
+        if (terminalHandled) return;
+        const tail = thinkFilter.flush();
+        if (tail) onToken?.(tail);
         resolve({ text: stripThink(text) });
       },
       // streamSse never rejects, but guard defensively.

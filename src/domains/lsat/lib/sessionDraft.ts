@@ -23,7 +23,7 @@
  * for diagnostics only.
  */
 
-import type { ChoiceEventRecord, QState } from "@lsat/components/question/section-runner";
+import type { ChoiceEventRecord, QState } from "@lsat/components/question/section-state";
 import type { Highlight } from "@lsat/components/question/highlightable-text";
 
 const PREFIX = "lsatlab.sessionDraft.";
@@ -53,6 +53,8 @@ interface SessionDraft {
   index: number;
   /** Seconds left on the section clock at the last save (null = untimed). */
   timeLeft: number | null;
+  /** Absolute wall-clock deadline for timed runs; preserves crash/reload truth. */
+  deadlineMs?: number | null;
   updatedAt: number;
 }
 
@@ -108,6 +110,7 @@ export interface RehydratedDraft {
   states: Record<number, QState>;
   index: number;
   timeLeft: number | null;
+  deadlineMs: number | null;
 }
 
 /** Read + rehydrate a draft. Returns null when absent, stale, or unparsable. */
@@ -130,6 +133,10 @@ export function loadSessionDraft(scope: string): RehydratedDraft | null {
         parsed.timeLeft === null || typeof parsed.timeLeft === "number"
           ? (parsed.timeLeft ?? null)
           : null,
+      deadlineMs:
+        parsed.deadlineMs === null || typeof parsed.deadlineMs === "number"
+          ? (parsed.deadlineMs ?? null)
+          : null,
     };
   } catch {
     return null;
@@ -138,7 +145,12 @@ export function loadSessionDraft(scope: string): RehydratedDraft | null {
 
 export function saveSessionDraft(
   scope: string,
-  draft: { states: Record<number, QState>; index: number; timeLeft: number | null },
+  draft: {
+    states: Record<number, QState>;
+    index: number;
+    timeLeft: number | null;
+    deadlineMs?: number | null;
+  },
 ): void {
   try {
     const payload: SessionDraft = {
@@ -146,6 +158,7 @@ export function saveSessionDraft(
       states: serializeStates(draft.states),
       index: draft.index,
       timeLeft: draft.timeLeft,
+      deadlineMs: draft.deadlineMs ?? null,
       updatedAt: Date.now(),
     };
     localStorage.setItem(storageKey(scope), JSON.stringify(payload));

@@ -1,4 +1,6 @@
 import { getStorage } from './storage';
+import { normalizeLoopbackHttpBaseUrl } from './localUrlPolicy';
+import { secureVault, type SecureCipher, type SecureVault } from './secureVault';
 
 // Embedded open-notebook integration. open-notebook runs as a local Tauri
 // sidecar (FastAPI on :5055, backed by SurrealDB and a surreal-commands job
@@ -18,6 +20,13 @@ import { getStorage } from './storage';
 //   POST   /api/search/ask/simple {...}-> { answer, ... }
 
 const SETTINGS_KEY = 'open-notebook';
+const SECURE_CACHE_SCHEME = 'secure-vault-open-notebook-cache.v1';
+
+let openNotebookSecureVault: SecureVault = secureVault;
+
+export function setOpenNotebookSecureVaultForTesting(vault: SecureVault | null) {
+  openNotebookSecureVault = vault ?? secureVault;
+}
 
 export interface OpenNotebookSettings {
   /** When false, the UI hides RAG features and never calls the backend. */
@@ -70,13 +79,17 @@ export interface OnbConnection {
 }
 
 function normalizeBaseUrl(baseUrl?: string): string {
-  return (baseUrl || DEFAULT_OPEN_NOTEBOOK_SETTINGS.baseUrl).trim().replace(/\/+$/, '');
+  return normalizeLoopbackHttpBaseUrl(
+    baseUrl || DEFAULT_OPEN_NOTEBOOK_SETTINGS.baseUrl,
+    'open-notebook base URL',
+  );
 }
 
 export async function getOpenNotebookSettings(): Promise<OpenNotebookSettings> {
   try {
     const row = await getStorage().settings.get(SETTINGS_KEY);
-    return { ...DEFAULT_OPEN_NOTEBOOK_SETTINGS, ...((row?.value as Partial<OpenNotebookSettings>) || {}) };
+    const loaded = { ...DEFAULT_OPEN_NOTEBOOK_SETTINGS, ...((row?.value as Partial<OpenNotebookSettings>) || {}) };
+    return { ...loaded, baseUrl: normalizeBaseUrl(loaded.baseUrl) };
   } catch {
     return { ...DEFAULT_OPEN_NOTEBOOK_SETTINGS };
   }
@@ -85,7 +98,11 @@ export async function getOpenNotebookSettings(): Promise<OpenNotebookSettings> {
 export async function saveOpenNotebookSettings(
   settings: Partial<OpenNotebookSettings>,
 ): Promise<OpenNotebookSettings> {
-  const merged = { ...DEFAULT_OPEN_NOTEBOOK_SETTINGS, ...settings };
+  const merged = {
+    ...DEFAULT_OPEN_NOTEBOOK_SETTINGS,
+    ...settings,
+    baseUrl: normalizeBaseUrl(settings.baseUrl || DEFAULT_OPEN_NOTEBOOK_SETTINGS.baseUrl),
+  };
   await getStorage().settings.put({ key: SETTINGS_KEY, value: merged, updatedAt: new Date().toISOString() });
   return merged;
 }
@@ -133,8 +150,8 @@ async function request<T>(baseUrl: string, path: string, opts: RequestOptions = 
 export async function checkOpenNotebookConnection(
   settings?: Pick<OpenNotebookSettings, 'baseUrl'>,
 ): Promise<OnbConnection> {
-  const base = normalizeBaseUrl(settings?.baseUrl);
   try {
+    const base = normalizeBaseUrl(settings?.baseUrl);
     const models = await request<OnbModel[]>(base, '/api/models', { timeoutMs: 8_000 });
     const list = Array.isArray(models) ? models : [];
     const languageModel = list.find((m) => m.type === 'language')?.id;
@@ -379,19 +396,24 @@ type TopicNotebookMap = Record<string, TopicNotebookEntry | string>;
 async function loadTopicNotebookMap(): Promise<Record<string, TopicNotebookEntry>> {
   try {
     const row = await getStorage().settings.get(NOTEBOOK_MAP_KEY);
-    const raw = (row?.value as TopicNotebookMap) || {};
+    const raw = row ? await decodeOpenNotebookCacheValue<TopicNotebookMap>(NOTEBOOK_MAP_KEY, row.value, {}) : {};
     const normalized: Record<string, TopicNotebookEntry> = {};
     for (const [key, value] of Object.entries(raw)) {
       normalized[key] = typeof value === 'string' ? { notebookId: value } : value;
     }
     return normalized;
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && /Secure Vault/i.test(err.message)) throw err;
     return {};
   }
 }
 
 async function saveTopicNotebookMap(map: Record<string, TopicNotebookEntry>): Promise<void> {
-  await getStorage().settings.put({ key: NOTEBOOK_MAP_KEY, value: map, updatedAt: new Date().toISOString() });
+  await getStorage().settings.put({
+    key: NOTEBOOK_MAP_KEY,
+    value: await encodeOpenNotebookCacheValue(NOTEBOOK_MAP_KEY, map),
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 /**
@@ -664,8 +686,100 @@ export interface CachedGroundedAnswer {
   answeredAt: string;
 }
 
+interface SecureOpenNotebookCacheValue {
+  v: 1;
+  scheme: typeof SECURE_CACHE_SCHEME;
+  payload: SecureCipher;
+}
+
 function answerCacheKey(level: string, topic: string): string {
   return `open-notebook:answer:${level}:${topic}`;
+}
+
+function isAnswerCacheKey(key: string): boolean {
+  return key === NOTEBOOK_MAP_KEY || key.startsWith('open-notebook:answer:') || key.startsWith('open-notebook:answer-history:');
+}
+
+function isSecureOpenNotebookCacheValue(value: unknown): value is SecureOpenNotebookCacheValue {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as SecureOpenNotebookCacheValue).v === 1 &&
+    (value as SecureOpenNotebookCacheValue).scheme === SECURE_CACHE_SCHEME &&
+    typeof (value as SecureOpenNotebookCacheValue).payload?.iv === 'string' &&
+    typeof (value as SecureOpenNotebookCacheValue).payload?.ct === 'string'
+  );
+}
+
+function assertOpenNotebookCacheUnlocked(vault: SecureVault = openNotebookSecureVault) {
+  if (!vault.isUnlocked()) {
+    throw new Error('Secure Vault is enabled but locked. Unlock it before reading or writing encrypted open-notebook settings rows.');
+  }
+}
+
+async function encodeOpenNotebookCacheValue(
+  key: string,
+  value: unknown,
+  vault: SecureVault = openNotebookSecureVault,
+): Promise<unknown> {
+  if (!isAnswerCacheKey(key) || !vault.isEnabled()) return value;
+  assertOpenNotebookCacheUnlocked(vault);
+  return {
+    v: 1,
+    scheme: SECURE_CACHE_SCHEME,
+    payload: await vault.encrypt(JSON.stringify(value)),
+  } satisfies SecureOpenNotebookCacheValue;
+}
+
+async function decodeOpenNotebookCacheValue<T>(
+  key: string,
+  value: unknown,
+  fallback: T,
+  vault: SecureVault = openNotebookSecureVault,
+): Promise<T> {
+  if (!isAnswerCacheKey(key) || !isSecureOpenNotebookCacheValue(value)) return (value as T) ?? fallback;
+  assertOpenNotebookCacheUnlocked(vault);
+  return JSON.parse(await vault.decrypt(value.payload)) as T;
+}
+
+export async function encryptExistingOpenNotebookAnswerCacheForSecureVault(vault: SecureVault = openNotebookSecureVault) {
+  if (!vault.isEnabled()) return { encrypted: 0, alreadyEncrypted: 0 };
+  assertOpenNotebookCacheUnlocked(vault);
+  const settings = getStorage().settings;
+  const rows = (await settings.toArray()).filter((row) => isAnswerCacheKey(row.key));
+  let encrypted = 0;
+  let alreadyEncrypted = 0;
+  for (const row of rows) {
+    if (isSecureOpenNotebookCacheValue(row.value)) {
+      alreadyEncrypted += 1;
+      continue;
+    }
+    await settings.put({
+      ...row,
+      value: await encodeOpenNotebookCacheValue(row.key, row.value, vault),
+      updatedAt: new Date().toISOString(),
+    });
+    encrypted += 1;
+  }
+  return { encrypted, alreadyEncrypted };
+}
+
+export async function decryptEncryptedOpenNotebookAnswerCacheForSecureVault(vault: SecureVault = openNotebookSecureVault) {
+  assertOpenNotebookCacheUnlocked(vault);
+  const settings = getStorage().settings;
+  const rows = (await settings.toArray()).filter(
+    (row) => isAnswerCacheKey(row.key) && isSecureOpenNotebookCacheValue(row.value),
+  );
+  let decrypted = 0;
+  for (const row of rows) {
+    await settings.put({
+      ...row,
+      value: await decodeOpenNotebookCacheValue(row.key, row.value, row.value, vault),
+      updatedAt: new Date().toISOString(),
+    });
+    decrypted += 1;
+  }
+  return { decrypted };
 }
 
 /** Last grounded Q&A for a topic, so it survives navigation/reload. */
@@ -674,8 +788,9 @@ export async function getCachedGroundedAnswer(
   topic: string,
 ): Promise<CachedGroundedAnswer | null> {
   try {
-    const row = await getStorage().settings.get(answerCacheKey(level, topic));
-    return (row?.value as CachedGroundedAnswer) || null;
+    const key = answerCacheKey(level, topic);
+    const row = await getStorage().settings.get(key);
+    return row ? await decodeOpenNotebookCacheValue<CachedGroundedAnswer | null>(key, row.value, null) : null;
   } catch {
     return null;
   }
@@ -687,7 +802,12 @@ export async function saveCachedGroundedAnswer(
   entry: { question: string; answer: string },
 ): Promise<CachedGroundedAnswer> {
   const payload: CachedGroundedAnswer = { ...entry, answeredAt: new Date().toISOString() };
-  await getStorage().settings.put({ key: answerCacheKey(level, topic), value: payload, updatedAt: payload.answeredAt });
+  const key = answerCacheKey(level, topic);
+  await getStorage().settings.put({
+    key,
+    value: await encodeOpenNotebookCacheValue(key, payload),
+    updatedAt: payload.answeredAt,
+  });
   // Also append to the rolling history (capped at 10 entries per topic).
   await appendCachedGroundedAnswerHistory(level, topic, payload);
   return payload;
@@ -705,8 +825,9 @@ export async function getCachedGroundedAnswerHistory(
   topic: string,
 ): Promise<CachedGroundedAnswer[]> {
   try {
-    const row = await getStorage().settings.get(answerHistoryCacheKey(level, topic));
-    const list = row?.value as CachedGroundedAnswer[] | undefined;
+    const key = answerHistoryCacheKey(level, topic);
+    const row = await getStorage().settings.get(key);
+    const list = row ? await decodeOpenNotebookCacheValue<CachedGroundedAnswer[]>(key, row.value, []) : [];
     return Array.isArray(list) ? list : [];
   } catch {
     return [];
@@ -726,9 +847,10 @@ async function appendCachedGroundedAnswerHistory(
         ? prior.slice(1)
         : prior;
     const next = [entry, ...filtered].slice(0, ANSWER_HISTORY_MAX);
+    const key = answerHistoryCacheKey(level, topic);
     await getStorage().settings.put({
-      key: answerHistoryCacheKey(level, topic),
-      value: next,
+      key,
+      value: await encodeOpenNotebookCacheValue(key, next),
       updatedAt: entry.answeredAt,
     });
   } catch {

@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { streamExplain } from "./api";
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { streamExplain, streamSocraticTurn } from './api';
 
 const enc = new TextEncoder();
 
@@ -27,21 +27,31 @@ function sseResponse(
   } as unknown as Response;
 }
 
-describe("streamExplain reconnect (5.7)", () => {
-  beforeEach(() => localStorage.clear());
-  afterEach(() => vi.restoreAllMocks());
+describe('streamExplain reconnect (5.7)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    delete window.__STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__;
+    delete window.__LSATLAB_LOCAL_API_TOKEN__;
+  });
+  afterEach(() => {
+    delete window.__STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__;
+    delete window.__LSATLAB_LOCAL_API_TOKEN__;
+    vi.restoreAllMocks();
+  });
 
-  const body = { question_id: 1, chosen_answer: "A" as string | null };
+  const body = { question_id: 1, chosen_answer: 'A' as string | null };
 
-  it("streams tokens then completes on a clean done", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      sseResponse([
-        { data: JSON.stringify({ token: "Hello " }) },
-        { data: JSON.stringify({ token: "world" }) },
-        { data: JSON.stringify({ done: true, explanation_id: 7 }) },
-      ]),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+  it('streams tokens then completes on a clean done', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        sseResponse([
+          { data: JSON.stringify({ token: 'Hello ' }) },
+          { data: JSON.stringify({ token: 'world' }) },
+          { data: JSON.stringify({ done: true, explanation_id: 7 }) },
+        ]),
+      );
+    vi.stubGlobal('fetch', fetchMock);
 
     const tokens: string[] = [];
     let doneId: number | undefined;
@@ -52,15 +62,38 @@ describe("streamExplain reconnect (5.7)", () => {
       onError: () => (errored = true),
     });
 
-    expect(tokens.join("")).toBe("Hello world");
+    expect(tokens.join('')).toBe('Hello world');
     expect(doneId).toBe(7);
     expect(errored).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards notebook context provenance from done metadata", async () => {
+  it('attaches the local API token to streaming explanation requests', async () => {
+    window.__STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__ = 'run-token';
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse([{ data: JSON.stringify({ done: true }) }]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await streamExplain(body, { onToken: () => {} });
+
+    const init = fetchMock.mock.calls[0]?.[1] ?? {};
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer run-token');
+  });
+
+  it('attaches the local API token to Socratic turn streams', async () => {
+    window.__STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__ = 'run-token';
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse([{ data: JSON.stringify({ done: true }) }]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await streamSocraticTurn(77, { content: 'Why this choice?' }, { onToken: () => {} });
+
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(input)).toContain('/api/conversations/77/turns-stream');
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer run-token');
+  });
+
+  it('forwards notebook context provenance from done metadata', async () => {
     vi.stubGlobal(
-      "fetch",
+      'fetch',
       vi.fn().mockResolvedValue(
         sseResponse([
           {
@@ -71,10 +104,10 @@ describe("streamExplain reconnect (5.7)", () => {
                 count: 1,
                 items: [
                   {
-                    kind: "note",
+                    kind: 'note',
                     id: 12,
-                    title: "Scope shift memo",
-                    reason: "question",
+                    title: 'Scope shift memo',
+                    reason: 'question',
                   },
                 ],
               },
@@ -84,18 +117,18 @@ describe("streamExplain reconnect (5.7)", () => {
       ),
     );
 
-    let title = "";
+    let title = '';
     await streamExplain(body, {
       onToken: () => {},
       onDone: (_id, meta) => {
-        title = meta?.notebook_context?.items[0]?.title ?? "";
+        title = meta?.notebook_context?.items[0]?.title ?? '';
       },
     });
 
-    expect(title).toBe("Scope shift memo");
+    expect(title).toBe('Scope shift memo');
   });
 
-  it("posts attempt and forwards Socratic reveal metadata", async () => {
+  it('posts attempt and forwards Socratic reveal metadata', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       sseResponse([
         {
@@ -108,26 +141,26 @@ describe("streamExplain reconnect (5.7)", () => {
               conversation_id: 77,
               rationale_count: 1,
               turn_count: 2,
-              trap_guess: "correlation_causation",
+              trap_guess: 'correlation_causation',
             },
           }),
         },
       ]),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal('fetch', fetchMock);
 
-    let trapGuess = "";
+    let trapGuess = '';
     await streamExplain(
       {
         question_id: 1,
-        chosen_answer: "A",
+        chosen_answer: 'A',
         attempt_id: 42,
         conversation_id: 77,
       },
       {
         onToken: () => {},
         onDone: (_id, meta) => {
-          trapGuess = meta?.socratic_context?.trap_guess ?? "";
+          trapGuess = meta?.socratic_context?.trap_guess ?? '';
         },
       },
     );
@@ -135,29 +168,23 @@ describe("streamExplain reconnect (5.7)", () => {
     const payload = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
     expect(payload).toMatchObject({
       question_id: 1,
-      chosen_answer: "A",
+      chosen_answer: 'A',
       attempt_id: 42,
       conversation_id: 77,
     });
-    expect(trapGuess).toBe("correlation_causation");
+    expect(trapGuess).toBe('correlation_causation');
   });
 
-  it("auto-reconnects after a mid-stream drop and fires onReconnect", async () => {
+  it('auto-reconnects after a mid-stream drop and fires onReconnect', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        sseResponse([
-          { data: JSON.stringify({ token: "partial" }) },
-          { throwErr: new TypeError("network error") },
-        ]),
+        sseResponse([{ data: JSON.stringify({ token: 'partial' }) }, { throwErr: new TypeError('network error') }]),
       )
       .mockResolvedValueOnce(
-        sseResponse([
-          { data: JSON.stringify({ token: "full answer" }) },
-          { data: JSON.stringify({ done: true }) },
-        ]),
+        sseResponse([{ data: JSON.stringify({ token: 'full answer' }) }, { data: JSON.stringify({ done: true }) }]),
       );
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal('fetch', fetchMock);
 
     const tokens: string[] = [];
     const reconnects: number[] = [];
@@ -173,18 +200,18 @@ describe("streamExplain reconnect (5.7)", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(reconnects).toEqual([1]);
-    expect(tokens.join("")).toBe("full answer");
+    expect(tokens.join('')).toBe('full answer');
     expect(errored).toBe(false);
   });
 
-  it("does not retry an explicit abort", async () => {
+  it('does not retry an explicit abort', async () => {
     const ctrl = new AbortController();
     const fetchMock = vi.fn().mockImplementation(() => {
-      const err = new Error("aborted");
-      err.name = "AbortError";
+      const err = new Error('aborted');
+      err.name = 'AbortError';
       return Promise.reject(err);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal('fetch', fetchMock);
     ctrl.abort();
 
     let errored = false;
@@ -199,11 +226,9 @@ describe("streamExplain reconnect (5.7)", () => {
     expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(1);
   });
 
-  it("surfaces a definitive 4xx without retrying", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(sseResponse([], { ok: false, status: 400 }));
-    vi.stubGlobal("fetch", fetchMock);
+  it('surfaces a definitive 4xx without retrying', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse([], { ok: false, status: 400 }));
+    vi.stubGlobal('fetch', fetchMock);
 
     let errored = false;
     await streamExplain(body, {

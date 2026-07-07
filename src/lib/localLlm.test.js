@@ -13,11 +13,29 @@ import {
   getLlmSettings,
   narrateStudyPlan,
   saveLlmSettings,
+  streamText,
 } from './localLlm';
 import { db } from './progressStore';
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+function streamResponse(chunks) {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  );
+}
+
+function sseDelta(content) {
+  return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
 }
 
 describe('Local LLM settings + connection', () => {
@@ -66,6 +84,17 @@ describe('Local LLM settings + connection', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain('503');
   });
+
+  it('checkLlmConnection rejects remote model bases before fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await checkLlmConnection({ baseUrl: 'http://192.168.1.5:1234/v1' });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/loopback/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('generateQuestionsFromCurriculum', () => {
@@ -96,7 +125,7 @@ describe('generateQuestionsFromCurriculum', () => {
     expect(questions[1].id).toBe('ai-2');
   });
 
-  it('clamps an out-of-range `correct` index to 0', async () => {
+  it('quarantines an out-of-range `correct` index instead of clamping it', async () => {
     const modelOutput = '[{"question":"q","options":["a","b"],"correct":7,"explanation":""}]';
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ choices: [{ message: { content: modelOutput } }] })));
     const questions = await generateQuestionsFromCurriculum({
@@ -105,7 +134,7 @@ describe('generateQuestionsFromCurriculum', () => {
       chunks,
       count: 1,
     });
-    expect(questions[0].correct).toBe(0);
+    expect(questions).toEqual([]);
   });
 
   it('drops malformed items and throws when nothing parses', async () => {
@@ -201,6 +230,38 @@ describe('explainWrongAnswer', () => {
       explainWrongAnswer({
         settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
         question: 'q', options: ['a', 'b', 'c'], correctIndex: 0, userIndex: 1,
+      }),
+    ).rejects.toThrow(/empty explanation/);
+  });
+
+  it('strips reasoning traces before returning an explanation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      choices: [{ message: { content: '<think>private chain</think>Modified duration adjusts Macaulay duration.' } }],
+    })));
+
+    const explanation = await explainWrongAnswer({
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+      question: 'q',
+      options: ['a', 'b', 'c'],
+      correctIndex: 0,
+      userIndex: 1,
+    });
+
+    expect(explanation).toBe('Modified duration adjusts Macaulay duration.');
+  });
+
+  it('rejects when stripping leaves no user-facing explanation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      choices: [{ message: { content: '<think>private chain only</think>' } }],
+    })));
+
+    await expect(
+      explainWrongAnswer({
+        settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+        question: 'q',
+        options: ['a', 'b', 'c'],
+        correctIndex: 0,
+        userIndex: 1,
       }),
     ).rejects.toThrow(/empty explanation/);
   });
@@ -486,6 +547,19 @@ describe('BB3: in-flight request dedup', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(pending).toBe(2);
   });
+
+  it('rejects remote generation bases before sending the prompt', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      generateText({
+        prompt: 'private study prompt',
+        settings: { baseUrl: 'http://192.168.1.5:1234/v1', model: 'gemma' },
+      }),
+    ).rejects.toThrow(/loopback/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('BB3: cancellable timeout guard', () => {
@@ -546,6 +620,20 @@ describe('BB3: cancellable timeout guard', () => {
     await vi.advanceTimersByTimeAsync(LLM_TIMEOUT_GENERATION_MS + 1);
   });
 
+  it('strips reasoning traces from raw text generations', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ choices: [{ message: { content: '<think>private plan</think>public answer' } }] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await generateText({
+      prompt: 'explain',
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+    });
+
+    expect(result).toEqual({ text: 'public answer' });
+  });
+
   it('still honours a caller-supplied AbortSignal (re-thrown unchanged, not as a timeout)', async () => {
     const controller = new AbortController();
     const fetchMock = vi.fn(
@@ -570,5 +658,41 @@ describe('BB3: cancellable timeout guard', () => {
     await assertion;
     // Caller cancellation is NOT a timeout.
     await promise.catch((err) => expect(err.message).not.toMatch(/timed out/i));
+  });
+});
+
+describe('streamText AI-8 reasoning filter', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('filters split reasoning tags before calling onToken, onDone, or resolving', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        streamResponse([
+          sseDelta('Visible'),
+          sseDelta('<thi'),
+          sseDelta('nk>private chain'),
+          sseDelta('</thi'),
+          sseDelta('nk>'),
+          sseDelta(' answer'),
+          'data: [DONE]\n\n',
+        ]),
+      ),
+    );
+    const onToken = vi.fn();
+    const onDone = vi.fn();
+
+    const result = await streamText({
+      prompt: 'Explain modified duration.',
+      settings: { baseUrl: 'http://localhost:1234/v1', model: 'gemma' },
+      onToken,
+      onDone,
+    });
+
+    expect(result).toEqual({ text: 'Visible answer' });
+    expect(onDone).toHaveBeenCalledWith('Visible answer');
+    const streamed = onToken.mock.calls.map(([token]) => token).join('');
+    expect(streamed).toBe('Visible answer');
+    expect(streamed).not.toMatch(/think|private|<\/thi/i);
   });
 });

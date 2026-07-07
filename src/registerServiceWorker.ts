@@ -1,7 +1,7 @@
 export function registerServiceWorker(): void {
   if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return;
 
-  window.addEventListener('load', () => {
+  const register = () => {
     navigator.serviceWorker
       .register('/sw.js')
       .then((registration) => {
@@ -46,5 +46,11 @@ export function registerServiceWorker(): void {
       .catch(() => {
         // Offline support is a progressive enhancement; the app remains usable without it.
       });
-  });
+  };
+
+  if (document.readyState === 'complete') {
+    register();
+  } else {
+    window.addEventListener('load', register, { once: true });
+  }
 }

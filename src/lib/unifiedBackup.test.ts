@@ -15,6 +15,7 @@ vi.mock('./progressStore', () => ({
 }));
 
 import { exportUnifiedBackup, importUnifiedBackup, UnifiedBackupError } from './unifiedBackup';
+import { encryptVaultBackup } from './encryptedBackup';
 import { buildUnifiedEnvelope } from './unifiedExportEnvelope';
 
 beforeEach(() => {
@@ -29,27 +30,50 @@ afterEach(() => {
 });
 
 describe('exportUnifiedBackup', () => {
+  it('requires a passphrase unless plaintext export is explicitly allowed', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(exportUnifiedBackup()).rejects.toThrowError(/encrypted by default/i);
+    expect(exportVaultData).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('POSTs the host export and returns the backend-built envelope', async () => {
     const envelope = buildUnifiedEnvelope({ preptests: [] }, { schemaVersion: 11 });
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => envelope });
     vi.stubGlobal('fetch', fetchMock);
 
-    const out = await exportUnifiedBackup();
+    const out = await exportUnifiedBackup({ allowPlaintext: true });
     expect(out.exportId).toBe(envelope.exportId);
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/api/export/backup');
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.host_data).toMatchObject({ schemaVersion: 11 });
+    expect(body.allow_plaintext).toBe(true);
+  });
+
+  it('POSTs the host export and encrypts the downloaded unified envelope when given a passphrase', async () => {
+    const envelope = buildUnifiedEnvelope({ preptests: [] }, { schemaVersion: 11 });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => envelope });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await exportUnifiedBackup({ passphrase: 'unified passphrase' });
+    expect(out.exportId).toBe(envelope.exportId);
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.host_data).toMatchObject({ schemaVersion: 11 });
+    expect(body.allow_plaintext).toBe(true);
   });
 
   it('throws a UnifiedBackupError when the backend is unreachable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
-    await expect(exportUnifiedBackup()).rejects.toBeInstanceOf(UnifiedBackupError);
+    await expect(exportUnifiedBackup({ passphrase: 'unified passphrase' })).rejects.toBeInstanceOf(UnifiedBackupError);
   });
 
   it('throws on a non-2xx backend response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
-    await expect(exportUnifiedBackup()).rejects.toBeInstanceOf(UnifiedBackupError);
+    await expect(exportUnifiedBackup({ passphrase: 'unified passphrase' })).rejects.toBeInstanceOf(UnifiedBackupError);
   });
 });
 
@@ -64,6 +88,7 @@ describe('importUnifiedBackup', () => {
 
     const result = await importUnifiedBackup(JSON.stringify(envelope));
     expect(result.hostApplied).toBe(true);
+    expect(result.encrypted).toBe(false);
     expect(result.exportId).toBe(envelope.exportId);
     expect(String(fetchMock.mock.calls[0][0])).toContain('/api/export/import');
     // The host half is applied to Dexie by us (the backend never writes it).
@@ -82,6 +107,33 @@ describe('importUnifiedBackup', () => {
     vi.stubGlobal('fetch', fetchMock);
     await expect(importUnifiedBackup(JSON.stringify(tampered))).rejects.toBeInstanceOf(UnifiedBackupError);
     expect(fetchMock).not.toHaveBeenCalled(); // never hits the backend with a bad envelope
+  });
+
+  it('decrypts encrypted unified backups before validation and restore', async () => {
+    const envelope = buildUnifiedEnvelope({ preptests: [] }, { schemaVersion: 11, lessonProgress: [{ id: 'a' }] });
+    const encrypted = await encryptVaultBackup(JSON.stringify(envelope), 'restore passphrase');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, export_id: envelope.exportId, counts: { questions: 0 }, host_data_present: true }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await importUnifiedBackup(JSON.stringify(encrypted), { passphrase: 'restore passphrase' });
+    expect(result.encrypted).toBe(true);
+    expect(result.hostApplied).toBe(true);
+    expect(importVaultData).toHaveBeenCalledWith(envelope.hostData, 'merge');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/export/import');
+  });
+
+  it('does not restore encrypted unified backups without a passphrase', async () => {
+    const envelope = buildUnifiedEnvelope({ preptests: [] }, { schemaVersion: 11 });
+    const encrypted = await encryptVaultBackup(JSON.stringify(envelope), 'restore passphrase');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(importUnifiedBackup(JSON.stringify(encrypted))).rejects.toThrowError(/encrypted/i);
+    expect(importVaultData).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('skips the Dexie re-apply when the envelope carries no host half', async () => {

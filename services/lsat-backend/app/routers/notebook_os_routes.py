@@ -17,6 +17,10 @@ from ..models import NotebookWorkspace, StudyArtifact
 
 router = APIRouter()
 
+MAX_IMPORT_REFS = 100
+MAX_IMPORT_TAGS = 40
+MAX_IMPORT_LIST_JSON_CHARS = 50_000
+
 
 class WorkspaceBody(BaseModel):
     key: str = Field(default="default", max_length=80)
@@ -338,16 +342,19 @@ async def import_source(
     url: str = Form(default="", max_length=2000),
     provider: str = Form(default="local", max_length=80),
     source_registry_key: str = Form(default="", max_length=120),
-    refs: str = Form(default="[]"),
-    tags: str = Form(default="[]"),
+    refs: str = Form(default="[]", max_length=MAX_IMPORT_LIST_JSON_CHARS),
+    tags: str = Form(default="[]", max_length=MAX_IMPORT_LIST_JSON_CHARS),
     official_firewall: bool = Form(default=False),
     file: UploadFile | None = File(default=None),
     session: Session = Depends(get_session),
 ):
     try:
-        parsed_refs = _json_list(refs)
-        parsed_tags = [str(item) for item in _json_list(tags)]
-        data = await file.read() if file else None
+        parsed_refs = _json_list(refs, max_items=MAX_IMPORT_REFS, too_many_code="too_many_refs")
+        parsed_tags = [
+            str(item)
+            for item in _json_list(tags, max_items=MAX_IMPORT_TAGS, too_many_code="too_many_tags")
+        ]
+        data = await _read_upload_bounded(file) if file else None
         row = notebook_os.import_source(
             session,
             {
@@ -376,6 +383,11 @@ async def import_source(
             "url_host_unresolved": (400, "Source URL host could not be resolved"),
             "source_upload_too_large": (413, "Source upload is too large"),
             "source_url_too_large": (413, "Source URL response is too large"),
+            "source_content_too_large": (413, "Source content is too large"),
+            "json_list_too_large": (422, "Source refs/tags metadata is too large"),
+            "too_many_refs": (422, "Too many source refs"),
+            "too_many_tags": (422, "Too many source tags"),
+            "invalid_json_list": (422, "Source refs/tags metadata must be valid JSON arrays"),
             "pdf_extractor_unavailable": (422, "PDF extraction is unavailable"),
             "docx_parse_failed": (422, "DOCX text extraction failed"),
         }
@@ -590,9 +602,23 @@ def create_context_preset(body: ContextPresetBody, session: Session = Depends(ge
     return notebook_os.context_preset_payload(row)
 
 
-def _json_list(raw: str) -> list[Any]:
+async def _read_upload_bounded(file: UploadFile) -> bytes:
+    limit = notebook_os.MAX_SOURCE_UPLOAD_BYTES
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("source_upload_too_large")
+    return data
+
+
+def _json_list(raw: str, *, max_items: int, too_many_code: str) -> list[Any]:
+    if len(raw or "") > MAX_IMPORT_LIST_JSON_CHARS:
+        raise ValueError("json_list_too_large")
     try:
         value = json.loads(raw or "[]")
     except json.JSONDecodeError as exc:
         raise ValueError("invalid_json_list") from exc
-    return value if isinstance(value, list) else []
+    if not isinstance(value, list):
+        return []
+    if len(value) > max_items:
+        raise ValueError(too_many_code)
+    return value

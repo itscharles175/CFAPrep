@@ -504,7 +504,7 @@ function ElevationSection() {
           ...compactGrid(150),
           gap: 'var(--space-6)',
           padding: 'clamp(var(--space-4), 5vw, var(--space-8))',
-          background: 'rgba(0,0,0,0.18)',
+          background: 'var(--surface-data)',
           borderRadius: 'var(--radius-lg)',
         }}
       >

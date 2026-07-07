@@ -15,6 +15,7 @@
  * module is imported dynamically and only under Tauri, so the web bundle never
  * pulls it in.
  */
+import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
 /**
  * Per-sidecar status snapshot — mirrors the Rust `SidecarStatus` payload
@@ -163,22 +164,15 @@ export interface BackendHealthAggregate {
 export async function getBackendHealthAggregated(
   timeoutMs = 2500,
 ): Promise<BackendHealthAggregate | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch('http://127.0.0.1:8100/api/observability/health-aggregated', {
-      signal: controller.signal,
+  const res = await fetchLsatSidecarJson<Partial<BackendHealthAggregate>>(
+    '/api/observability/health-aggregated',
+    {
+      timeoutMs,
       headers: { accept: 'application/json' },
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as Partial<BackendHealthAggregate> | null;
-    if (!data || typeof data !== 'object') return null;
-    return data as BackendHealthAggregate;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+    },
+  );
+  if (!res.ok || !res.data || typeof res.data !== 'object') return null;
+  return res.data as BackendHealthAggregate;
 }
 
 /** The combined ok/degraded/error verdict + the two sources behind it. */

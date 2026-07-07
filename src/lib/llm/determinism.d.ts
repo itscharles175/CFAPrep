@@ -26,7 +26,10 @@ export function withDeterminism<T extends Record<string, unknown>>(
 export interface CacheKeyArgs {
   provider?: string;
   model?: string;
+  system?: string;
+  format?: unknown;
   temperature?: number;
+  top_p?: number;
   seed?: number;
   prompt?: string;
 }

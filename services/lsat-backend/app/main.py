@@ -19,6 +19,7 @@ from sqlmodel import Session, select
 
 from . import ai, audit, backup, coach, config, jobs, llm, observability, settings_store
 from .db import engine, init_db
+from .local_api_auth import local_api_token_middleware
 from .routers import (
     ai_routes,
     analytics_routes,
@@ -224,12 +225,17 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(
             "Strict offline fence is ON but LSATLAB_GEN_PROVIDER='cloud' is "
             "configured. StudyVault is local-only by default — no cloud, no "
-            "telemetry. Set LSATLAB_GEN_PROVIDER=ollama (or lmstudio), or "
-            "LSATLAB_ENFORCE_OFFLINE=0 to opt out of the fence."
+            "telemetry. Set LSATLAB_GEN_PROVIDER=ollama and choose Ollama vs "
+            "LM Studio with LSATLAB_LOCAL_PROVIDER, or LSATLAB_ENFORCE_OFFLINE=0 "
+            "to opt out of the fence."
         )
-    # B20: warn if cloud generation is enabled with an unrecognised model slug
-    # (only reachable when the offline fence is opted out).
-    if config.GEN_PROVIDER == "cloud" and config.CLOUD_API_KEY:
+    # B20: warn if configured cloud generation uses an unrecognised model slug.
+    if llm.cloud_configured() and not llm.cloud_egress_allowed():
+        log.warning(
+            "Cloud provider is configured but LSATLAB_CLOUD_EGRESS_ALLOWED is "
+            "not set; offline generation will use the local provider."
+        )
+    if llm.cloud_configured():
         if not _ANTHROPIC_MODEL_RE.match(config.CLOUD_GEN_MODEL):
             log.warning(
                 "CLOUD_GEN_MODEL=%r does not match the Anthropic model pattern "
@@ -302,7 +308,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="LSAT Lab Backend", version=config.APP_VERSION, lifespan=lifespan)
 
-# Request-correlation + one-line-per-request logging.
+# Optional local API token gate. Disabled by default for backward compatibility;
+# when LSATLAB_LOCAL_API_TOKEN is set, every non-health /api route must present
+# the per-run token.
+app.middleware("http")(local_api_token_middleware)
+# Request-correlation + one-line-per-request logging. Registered after local
+# auth so it wraps 401 responses too.
 app.middleware("http")(observability.request_logging_middleware)
 
 

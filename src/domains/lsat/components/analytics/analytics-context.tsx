@@ -1,7 +1,6 @@
 import { createContext, useContext } from "react";
 import type { QType } from "@lsat/lib/types";
-import type { AnalyticsRange } from "./AnalyticsFilters";
-import type { Source } from "./tabs";
+import type { AnalyticsRange, Source } from "./types";
 
 export interface AnalyticsContextValue {
   source: Source;

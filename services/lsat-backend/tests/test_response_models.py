@@ -18,14 +18,18 @@ Typing is read off the live FastAPI route table (``app.routes``) — a route's
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi.routing import APIRoute
 
 from app.main import app
 from app.schemas import (
+    AdaptiveNextResponse,
     BankStats,
     DatasetSource,
     PrepTestSummary,
     SessionSummary,
+    StudyTodayResponse,
 )
 
 
@@ -36,6 +40,8 @@ _TYPED_ROUTES: dict[tuple[str, str], type] = {
     ("/api/sessions", "GET"): list[SessionSummary],
     ("/api/bank/sources", "GET"): list[DatasetSource],
     ("/api/bank/stats", "GET"): BankStats,
+    ("/api/adaptivity/next", "POST"): AdaptiveNextResponse,
+    ("/api/study/today", "GET"): StudyTodayResponse,
 }
 
 # The bare-list endpoints that gained OPTIONAL limit/offset in this slice. Their
@@ -47,18 +53,30 @@ _PAGINATED_LIST_ROUTES = [
 ]
 
 
-def _api_routes() -> list[APIRoute]:
-    return [r for r in app.routes if isinstance(r, APIRoute) and r.path.startswith("/api/")]
+def _api_routes() -> list[Any]:
+    routes: list[Any] = []
+    for route in app.routes:
+        if isinstance(route, APIRoute) and route.path.startswith("/api/"):
+            routes.append(route)
+            continue
+        contexts = getattr(route, "effective_route_contexts", None)
+        if callable(contexts):
+            routes.extend(
+                ctx
+                for ctx in contexts()
+                if str(getattr(ctx, "path", "")).startswith("/api/")
+            )
+    return routes
 
 
-def _route_for(path: str, method: str) -> APIRoute:
+def _route_for(path: str, method: str) -> Any:
     for r in _api_routes():
         if r.path == path and method in r.methods:
             return r
     raise AssertionError(f"route not found: {method} {path}")
 
 
-def _query_param_names(route: APIRoute) -> set[str]:
+def _query_param_names(route: Any) -> set[str]:
     return {p.name for p in route.dependant.query_params}
 
 
@@ -137,12 +155,20 @@ def test_openapi_uses_typed_models_not_legacy_fallback(client):
     way; this asserts we upgraded BEYOND the LegacySuccessResponse fallback)."""
     spec = client.get("/openapi.json").json()
     schemas = spec["components"]["schemas"]
-    for name in ("PrepTestSummary", "SessionSummary", "DatasetSource", "BankStats"):
+    for name in (
+        "HealthResponse",
+        "PrepTestSummary",
+        "SessionSummary",
+        "DatasetSource",
+        "BankStats",
+        "AdaptiveNextResponse",
+        "StudyTodayResponse",
+    ):
         assert name in schemas, f"{name} missing from OpenAPI components"
 
-    def _ok_schema_ref(path: str) -> str:
+    def _ok_schema_ref(path: str, method: str = "get") -> str:
         return (
-            spec["paths"][path]["get"]["responses"]["200"]["content"]
+            spec["paths"][path][method]["responses"]["200"]["content"]
             ["application/json"]["schema"]
         ).__str__()
 
@@ -151,6 +177,8 @@ def test_openapi_uses_typed_models_not_legacy_fallback(client):
         assert "LegacySuccessResponse" not in _ok_schema_ref(path), (
             f"{path} still uses the LegacySuccessResponse fallback"
         )
+    assert "LegacySuccessResponse" not in _ok_schema_ref("/api/adaptivity/next", "post")
+    assert "LegacySuccessResponse" not in _ok_schema_ref("/api/study/today", "get")
 
 
 def test_remaining_list_endpoints_without_pagination_are_recorded():

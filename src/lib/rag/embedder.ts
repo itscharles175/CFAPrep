@@ -17,10 +17,9 @@
  *     resumable: each pass embeds only the not-yet-embedded remainder, and it
  *     bails cleanly the moment the server stops responding.
  *
- * The base URL is resolved through the SAME `getLlmSettings()` + `normalizeBaseUrl`
- * the rest of the host LLM path uses, so the offline/no-cloud egress guard (only
- * loopback / private-LAN hosts) is inherited — embeddings of curriculum text can
- * never be POSTed to a public endpoint.
+ * The base URL is resolved through the SAME local-only egress guard the rest of
+ * the host LLM path uses — embeddings of curriculum text can never be POSTed to
+ * a remote endpoint.
  *
  * Vector-blend ON/OFF is a measured decision (see ragEval embedding harness):
  * the host wires the query embedding into retrieval only when it improves nDCG on
@@ -28,29 +27,19 @@
  */
 
 import { getLlmSettings, DEFAULT_LLM_SETTINGS } from '../localLlm';
+import { normalizeLoopbackHttpBaseUrl } from '../localUrlPolicy';
 import { getStorage } from '../storage';
 import type { SourceChunkInput } from '../storage/types';
 
-/** Reuse the host's loopback/private-LAN egress guard semantics. */
-function isLocalLlmHost(hostname: string): boolean {
-  const h = (hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
-  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
-  if (/^127\./.test(h)) return true;
-  if (/^10\./.test(h)) return true;
-  if (/^192\.168\./.test(h)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
-  return false;
-}
-
 function normalizeBaseUrl(baseUrl?: string): string {
-  const raw = (baseUrl || DEFAULT_LLM_SETTINGS.baseUrl).trim().replace(/\/+$/, '');
   try {
-    const parsed = new URL(raw);
-    if (!isLocalLlmHost(parsed.hostname)) return DEFAULT_LLM_SETTINGS.baseUrl;
+    return normalizeLoopbackHttpBaseUrl(
+      baseUrl || DEFAULT_LLM_SETTINGS.baseUrl,
+      'Local embedding model base URL',
+    );
   } catch {
     return DEFAULT_LLM_SETTINGS.baseUrl;
   }
-  return raw;
 }
 
 export interface EmbedderSettings {

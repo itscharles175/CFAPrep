@@ -1,0 +1,417 @@
+{
+  "schemaVersion": "studyvault.route-performance-baseline.v1",
+  "generatedAt": "2026-07-06T00:00:00.000Z",
+  "tolerance": {
+    "durationRatio": 0.2,
+    "durationMs": 250,
+    "cls": 0.02
+  },
+  "routes": {
+    "dashboard": {
+      "path": "/",
+      "expectedText": "StudyVault",
+      "viewports": {
+        "desktop": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 5000,
+              "domContentLoadedMs": 8000,
+              "loadMs": 9000,
+              "fcpMs": 3500,
+              "lcpMs": 5000,
+              "cls": 0.08,
+              "tbtMs": 2500,
+              "maxLongTaskMs": 500,
+              "inpMs": 500
+            },
+            "warm": {
+              "routeReadyMs": 3500,
+              "domContentLoadedMs": 5000,
+              "loadMs": 6000,
+              "fcpMs": 2500,
+              "lcpMs": 3500,
+              "cls": 0.08,
+              "tbtMs": 1500,
+              "maxLongTaskMs": 375,
+              "inpMs": 500
+            }
+          }
+        },
+        "mobile": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 5500,
+              "domContentLoadedMs": 9000,
+              "loadMs": 10000,
+              "fcpMs": 4000,
+              "lcpMs": 5500,
+              "cls": 0.1,
+              "tbtMs": 3000,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            },
+            "warm": {
+              "routeReadyMs": 4000,
+              "domContentLoadedMs": 6000,
+              "loadMs": 7000,
+              "fcpMs": 3000,
+              "lcpMs": 4000,
+              "cls": 0.1,
+              "tbtMs": 2000,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            }
+          }
+        }
+      }
+    },
+    "cfa-dashboard": {
+      "path": "/cfa",
+      "expectedText": "CFA",
+      "viewports": {
+        "desktop": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 5000,
+              "domContentLoadedMs": 8000,
+              "loadMs": 9000,
+              "fcpMs": 3500,
+              "lcpMs": 5000,
+              "cls": 0.08,
+              "tbtMs": 2500,
+              "maxLongTaskMs": 500,
+              "inpMs": 500
+            },
+            "warm": {
+              "routeReadyMs": 3500,
+              "domContentLoadedMs": 5000,
+              "loadMs": 6000,
+              "fcpMs": 2500,
+              "lcpMs": 3500,
+              "cls": 0.08,
+              "tbtMs": 1500,
+              "maxLongTaskMs": 375,
+              "inpMs": 500
+            }
+          }
+        },
+        "mobile": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 5500,
+              "domContentLoadedMs": 9000,
+              "loadMs": 10000,
+              "fcpMs": 4000,
+              "lcpMs": 5500,
+              "cls": 0.1,
+              "tbtMs": 3000,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            },
+            "warm": {
+              "routeReadyMs": 4000,
+              "domContentLoadedMs": 6000,
+              "loadMs": 7000,
+              "fcpMs": 3000,
+              "lcpMs": 4000,
+              "cls": 0.1,
+              "tbtMs": 2000,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            }
+          }
+        }
+      }
+    },
+    "cfa-vignette": {
+      "path": "/cfa/level2/equity/vignette",
+      "expectedText": "CFA",
+      "viewports": {
+        "desktop": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 7000,
+              "domContentLoadedMs": 12000,
+              "loadMs": 14000,
+              "fcpMs": 5000,
+              "lcpMs": 7000,
+              "cls": 0.1,
+              "tbtMs": 4000,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            },
+            "warm": {
+              "routeReadyMs": 5000,
+              "domContentLoadedMs": 8000,
+              "loadMs": 9000,
+              "fcpMs": 3500,
+              "lcpMs": 5000,
+              "cls": 0.1,
+              "tbtMs": 2500,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            }
+          }
+        },
+        "mobile": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 8000,
+              "domContentLoadedMs": 14000,
+              "loadMs": 16000,
+              "fcpMs": 6000,
+              "lcpMs": 8000,
+              "cls": 0.12,
+              "tbtMs": 5000,
+              "maxLongTaskMs": 500,
+              "inpMs": 700
+            },
+            "warm": {
+              "routeReadyMs": 6000,
+              "domContentLoadedMs": 9000,
+              "loadMs": 11000,
+              "fcpMs": 4500,
+              "lcpMs": 6000,
+              "cls": 0.12,
+              "tbtMs": 3200,
+              "maxLongTaskMs": 500,
+              "inpMs": 700
+            }
+          }
+        }
+      }
+    },
+    "cfa-constructed-response": {
+      "path": "/cfa/level3/performance/constructed-response",
+      "expectedText": "LEVEL III RESPONSE",
+      "viewports": {
+        "desktop": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 7000,
+              "domContentLoadedMs": 12000,
+              "loadMs": 14000,
+              "fcpMs": 5000,
+              "lcpMs": 7000,
+              "cls": 0.1,
+              "tbtMs": 4000,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            },
+            "warm": {
+              "routeReadyMs": 5000,
+              "domContentLoadedMs": 8000,
+              "loadMs": 9000,
+              "fcpMs": 3500,
+              "lcpMs": 5000,
+              "cls": 0.1,
+              "tbtMs": 2500,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            }
+          }
+        },
+        "mobile": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 8000,
+              "domContentLoadedMs": 14000,
+              "loadMs": 16000,
+              "fcpMs": 6000,
+              "lcpMs": 8000,
+              "cls": 0.12,
+              "tbtMs": 5000,
+              "maxLongTaskMs": 500,
+              "inpMs": 700
+            },
+            "warm": {
+              "routeReadyMs": 6000,
+              "domContentLoadedMs": 9000,
+              "loadMs": 11000,
+              "fcpMs": 4500,
+              "lcpMs": 6000,
+              "cls": 0.12,
+              "tbtMs": 3200,
+              "maxLongTaskMs": 500,
+              "inpMs": 700
+            }
+          }
+        }
+      }
+    },
+    "level-mock": {
+      "path": "/cfa/level3/mock",
+      "expectedText": "Mock",
+      "viewports": {
+        "desktop": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 7000,
+              "domContentLoadedMs": 12000,
+              "loadMs": 14000,
+              "fcpMs": 5000,
+              "lcpMs": 7000,
+              "cls": 0.1,
+              "tbtMs": 4000,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            },
+            "warm": {
+              "routeReadyMs": 5000,
+              "domContentLoadedMs": 8000,
+              "loadMs": 9000,
+              "fcpMs": 3500,
+              "lcpMs": 5000,
+              "cls": 0.1,
+              "tbtMs": 2500,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            }
+          }
+        },
+        "mobile": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 8000,
+              "domContentLoadedMs": 14000,
+              "loadMs": 16000,
+              "fcpMs": 6000,
+              "lcpMs": 8000,
+              "cls": 0.12,
+              "tbtMs": 5000,
+              "maxLongTaskMs": 500,
+              "inpMs": 700
+            },
+            "warm": {
+              "routeReadyMs": 6000,
+              "domContentLoadedMs": 9000,
+              "loadMs": 11000,
+              "fcpMs": 4500,
+              "lcpMs": 6000,
+              "cls": 0.12,
+              "tbtMs": 3200,
+              "maxLongTaskMs": 500,
+              "inpMs": 700
+            }
+          }
+        }
+      }
+    },
+    "lsat-home": {
+      "path": "/lsat",
+      "expectedText": "Notebook OS",
+      "viewports": {
+        "desktop": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 7000,
+              "domContentLoadedMs": 12000,
+              "loadMs": 14000,
+              "fcpMs": 5000,
+              "lcpMs": 7000,
+              "cls": 0.1,
+              "tbtMs": 4000,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            },
+            "warm": {
+              "routeReadyMs": 5000,
+              "domContentLoadedMs": 8000,
+              "loadMs": 9000,
+              "fcpMs": 3500,
+              "lcpMs": 5000,
+              "cls": 0.1,
+              "tbtMs": 2500,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            }
+          }
+        },
+        "mobile": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 8000,
+              "domContentLoadedMs": 14000,
+              "loadMs": 16000,
+              "fcpMs": 6000,
+              "lcpMs": 8000,
+              "cls": 0.12,
+              "tbtMs": 5000,
+              "maxLongTaskMs": 500,
+              "inpMs": 700
+            },
+            "warm": {
+              "routeReadyMs": 6000,
+              "domContentLoadedMs": 9000,
+              "loadMs": 11000,
+              "fcpMs": 4500,
+              "lcpMs": 6000,
+              "cls": 0.12,
+              "tbtMs": 3200,
+              "maxLongTaskMs": 500,
+              "inpMs": 700
+            }
+          }
+        }
+      }
+    },
+    "lsat-preptests": {
+      "path": "/lsat/preptests",
+      "expectedText": "PrepTests",
+      "viewports": {
+        "desktop": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 7000,
+              "domContentLoadedMs": 12000,
+              "loadMs": 14000,
+              "fcpMs": 5000,
+              "lcpMs": 7000,
+              "cls": 0.1,
+              "tbtMs": 4000,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            },
+            "warm": {
+              "routeReadyMs": 5000,
+              "domContentLoadedMs": 8000,
+              "loadMs": 9000,
+              "fcpMs": 3500,
+              "lcpMs": 5000,
+              "cls": 0.1,
+              "tbtMs": 2500,
+              "maxLongTaskMs": 500,
+              "inpMs": 600
+            }
+          }
+        },
+        "mobile": {
+          "phases": {
+            "cold": {
+              "routeReadyMs": 8000,
+              "domContentLoadedMs": 14000,
+              "loadMs": 16000,
+              "fcpMs": 6000,
+              "lcpMs": 8000,
+              "cls": 0.12,
+              "tbtMs": 5000,
+              "maxLongTaskMs": 500,
+              "inpMs": 700
+            },
+            "warm": {
+              "routeReadyMs": 6000,
+              "domContentLoadedMs": 9000,
+              "loadMs": 11000,
+              "fcpMs": 4500,
+              "lcpMs": 6000,
+              "cls": 0.12,
+              "tbtMs": 3200,
+              "maxLongTaskMs": 500,
+              "inpMs": 700
+            }
+          }
+        }
+      }
+    }
+  }
+}

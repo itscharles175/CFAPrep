@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decryptVaultBackup,
   encryptVaultBackup,
+  isEncryptedBackupBlob,
   type EncryptedBackupBlob,
 } from './encryptedBackup';
 
@@ -38,6 +39,14 @@ describe('encryptVaultBackup / decryptVaultBackup', () => {
     expect(blob.ciphertext.length).toBeGreaterThan(0);
     expect(typeof blob.createdAt).toBe('string');
     expect(Number.isNaN(new Date(blob.createdAt).getTime())).toBe(false);
+    expect(isEncryptedBackupBlob(blob)).toBe(true);
+  });
+
+  it('recognizes only the supported encrypted backup envelope shape', () => {
+    expect(isEncryptedBackupBlob({ version: 1, algorithm: 'AES-GCM-256', kdf: 'PBKDF2-SHA256-200000', salt: 's', iv: 'i', ciphertext: 'c' })).toBe(true);
+    expect(isEncryptedBackupBlob({ version: 1, algorithm: 'AES-GCM-256', kdf: 'PBKDF2-SHA256-200000', salt: 's', iv: 'i' })).toBe(false);
+    expect(isEncryptedBackupBlob({ version: 1, algorithm: 'AES-CBC-256', kdf: 'PBKDF2-SHA256-200000', salt: 's', iv: 'i', ciphertext: 'c' })).toBe(false);
+    expect(isEncryptedBackupBlob(null)).toBe(false);
   });
 
   it('produces different ciphertexts when the same plaintext is encrypted twice (random salt + IV)', async () => {

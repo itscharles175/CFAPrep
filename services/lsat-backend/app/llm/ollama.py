@@ -32,7 +32,10 @@ class OllamaProvider:
     name = "ollama"
 
     def __init__(self, base_url: Optional[str] = None) -> None:
-        self.base_url = (base_url or config.OLLAMA_URL).rstrip("/")
+        self.base_url = config.validate_local_model_url(
+            base_url or config.OLLAMA_URL,
+            name="LSATLAB_OLLAMA_URL",
+        )
 
     # --- streaming chat (realtime, yields raw deltas) ----------------------
     async def chat_stream(self, model: str, messages: list[dict],
@@ -86,15 +89,16 @@ class OllamaProvider:
     def generate(self, model: str, prompt: str, system: Optional[str] = None,
                  timeout: Optional[float] = None, *,
                  temperature: Optional[float] = None,
+                 top_p: Optional[float] = None,
                  seed: Optional[int] = None,
                  format: Optional[Union[str, dict[str, Any]]] = None) -> str:
         """Non-streaming generate.
 
-        ``temperature``/``seed`` map to Ollama's ``options`` block so the gate's
-        solve/critique calls can run DETERMINISTICALLY (temp 0 + fixed seed),
-        making the correctness signal measure item soundness rather than sampling
-        luck. ``format`` may be ``"json"`` (free-shape JSON) or a JSON Schema
-        ``dict`` (Ollama 0.5+ structured outputs) — the latter pins the
+        ``temperature``/``top_p``/``seed`` map to Ollama's ``options`` block so
+        the gate's solve/critique calls can run DETERMINISTICALLY (temp 0 +
+        fixed seed), making the correctness signal measure item soundness rather
+        than sampling luck. ``format`` may be ``"json"`` (free-shape JSON) or a
+        JSON Schema ``dict`` (Ollama 0.5+ structured outputs) — the latter pins the
         candidate envelope so even when the model paraphrases freely the wrapper
         shape stays parseable.
         """
@@ -105,6 +109,8 @@ class OllamaProvider:
             options: dict = {}
             if temperature is not None:
                 options["temperature"] = temperature
+            if top_p is not None:
+                options["top_p"] = top_p
             if seed is not None:
                 options["seed"] = seed
             if options:

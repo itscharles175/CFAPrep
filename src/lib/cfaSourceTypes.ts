@@ -52,6 +52,14 @@ export type CfaSourceChunk = {
   learningOutcomes?: string[];
   /** Lowercased, deduplicated action verbs that opened each detected LOS. */
   losVerbs?: string[];
+  secureVault?: {
+    v: 1;
+    scheme: 'secure-vault-source-chunk.v1';
+    text: { v: 1; iv: string; ct: string };
+    normalizedText?: { v: 1; iv: string; ct: string };
+    heading?: { v: 1; iv: string; ct: string };
+    learningOutcomes?: { v: 1; iv: string; ct: string };
+  };
 };
 
 export type CfaSourceIndex = {

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 from sqlmodel import Session
 
@@ -57,5 +57,8 @@ def get_settings(session: Session = Depends(get_session)):
 @router.put("")
 def put_settings(body: SettingsPatch, session: Session = Depends(get_session)):
     patch = {k: v for k, v in body.model_dump().items() if v is not None}
-    effective = settings_store.update_settings(session, patch)
+    try:
+        effective = settings_store.update_settings(session, patch)
+    except (settings_store.SettingsValidationError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"settings": effective, "provider": llm.provider_info()}

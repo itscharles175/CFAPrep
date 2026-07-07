@@ -122,6 +122,25 @@ export function QuestionBrowser({
     setBankQuestionsCache(next);
   }
 
+  function openPreview(item: BrowseQuestion) {
+    setPreview(item);
+    // Bank browse has no attempt context, so a reveal fetch 403s; keep
+    // the test-mode preview already set above and swallow the failure
+    // instead of leaving an unhandled rejection.
+    void api
+      .question(item.id, true)
+      .then((full) => {
+        setPreview((p) =>
+          p?.id === item.id
+            ? { ...p, ...full, stem: full.stem, prompt: full.prompt }
+            : p,
+        );
+      })
+      .catch(() => {
+        /* reveal not authorized for bank browse - test-mode preview stands */
+      });
+  }
+
   if (loading) return <SkeletonList rows={6} />;
   if (loadError)
     return <ErrorState error={loadError} onRetry={() => load(true)} />;
@@ -148,7 +167,7 @@ export function QuestionBrowser({
             />
           </div>
           <Select value={qType} onValueChange={setQType}>
-            <SelectTrigger className="w-44">
+            <SelectTrigger className="w-44" aria-label="Question type filter">
               <SelectValue placeholder="Type" />
             </SelectTrigger>
             <SelectContent>
@@ -161,7 +180,7 @@ export function QuestionBrowser({
             </SelectContent>
           </Select>
           <Select value={difficulty} onValueChange={setDifficulty}>
-            <SelectTrigger className="w-32">
+            <SelectTrigger className="w-32" aria-label="Difficulty filter">
               <SelectValue placeholder="Difficulty" />
             </SelectTrigger>
             <SelectContent>
@@ -235,35 +254,14 @@ export function QuestionBrowser({
         className="rounded-md border"
         renderItem={(item) => (
           <div
-            role="button"
-            tabIndex={0}
-            className="flex cursor-pointer items-center justify-between border-b p-3 last:border-b-0 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-            onClick={() => {
-              setPreview(item);
-              // Bank browse has no attempt context, so a reveal fetch 403s; keep
-              // the test-mode preview already set above and swallow the failure
-              // instead of leaving an unhandled rejection.
-              void api
-                .question(item.id, true)
-                .then((full) => {
-                  setPreview((p) =>
-                    p?.id === item.id
-                      ? { ...p, ...full, stem: full.stem, prompt: full.prompt }
-                      : p,
-                  );
-                })
-                .catch(() => {
-                  /* reveal not authorized for bank browse — test-mode preview stands */
-                });
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setPreview(item);
-              }
-            }}
+            className="flex items-center justify-between border-b p-3 last:border-b-0 hover:bg-accent/50"
           >
-            <div className="min-w-0 space-y-1 pr-3">
+            <button
+              type="button"
+              className="min-w-0 flex-1 space-y-1 rounded-sm pr-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              onClick={() => openPreview(item)}
+              aria-label={`Preview ${qTypeLabel(item.q_type)} question ${item.id}`}
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary">{qTypeLabel(item.q_type)}</Badge>
                 <Badge variant="outline">{item.difficulty}★</Badge>
@@ -280,15 +278,12 @@ export function QuestionBrowser({
                 )}
               </div>
               <p className="truncate text-sm">{item.prompt || item.stem}</p>
-            </div>
+            </button>
             <div className="flex shrink-0 items-center gap-1">
               <Button
                 size="sm"
                 variant="outline"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigate(`/explanation/${item.id}`);
-                }}
+                onClick={() => navigate(`/explanation/${item.id}`)}
               >
                 Open
               </Button>
@@ -296,10 +291,7 @@ export function QuestionBrowser({
                 size="icon"
                 variant="ghost"
                 className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(item);
-                }}
+                onClick={() => handleDelete(item)}
                 aria-label={`Delete question ${item.id}`}
                 title="Soft-delete (recoverable)"
               >

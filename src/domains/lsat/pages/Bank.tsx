@@ -36,10 +36,13 @@ import {
   sourceLabel,
 } from "@lsat/components/bank/provenance-badge";
 import { Skeleton } from "@lsat/components/states";
+import { parseJsonFile } from "@/lib/jsonFilePreflight";
 import { api } from "@lsat/lib/api";
 import { useBankSources, useBankStats } from "@lsat/lib/hooks";
 import { toast } from "@lsat/lib/toast";
 import { countLabel } from "@lsat/lib/utils";
+
+const BANK_BACKUP_IMPORT_MAX_BYTES = 100 * 1024 * 1024;
 
 export default function Bank() {
   const qc = useQueryClient();
@@ -112,6 +115,7 @@ export default function Bank() {
         local_paths: Object.keys(localPaths).length ? localPaths : undefined,
         training_eligible: trainingEligible || undefined,
         training_notes: trainingNotes.trim() || undefined,
+        force_commit: true,
       });
       const errored = res.results.filter((r) => r.error);
       const totalInserted = res.results.reduce(
@@ -194,9 +198,8 @@ export default function Bank() {
   async function importBackupFile(file: File) {
     setBusy("import-backup");
     try {
-      const text = await file.text();
-      const payload = JSON.parse(text);
-      const res = await api.bankImportBackup(payload);
+      const { payload } = await parseJsonFile(file, { maxBytes: BANK_BACKUP_IMPORT_MAX_BYTES });
+      const res = await api.bankImportBackup(payload as Record<string, unknown>, true);
       toast.success(
         `Restored ${res.questions} new + ${countLabel(res.questions_existing, "existing question")} across ${countLabel(res.preptests, "PrepTest")}.`,
       );

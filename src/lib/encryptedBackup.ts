@@ -141,6 +141,19 @@ function ensureBlobShape(blob: EncryptedBackupBlob): void {
   }
 }
 
+export function isEncryptedBackupBlob(value: unknown): value is EncryptedBackupBlob {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { version?: unknown }).version === 1 &&
+    (value as { algorithm?: unknown }).algorithm === 'AES-GCM-256' &&
+    (value as { kdf?: unknown }).kdf === 'PBKDF2-SHA256-200000' &&
+    typeof (value as { salt?: unknown }).salt === 'string' &&
+    typeof (value as { iv?: unknown }).iv === 'string' &&
+    typeof (value as { ciphertext?: unknown }).ciphertext === 'string'
+  );
+}
+
 /**
  * Decrypt an encrypted backup blob with the user-supplied passphrase.
  *

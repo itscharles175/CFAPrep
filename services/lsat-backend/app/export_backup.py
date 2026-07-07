@@ -35,11 +35,17 @@ via the unified path either.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from sqlmodel import Session, select
 
 from . import bank_export, config
@@ -52,10 +58,99 @@ SCHEMA_VERSION = 1
 FORMAT = "unified-json"
 
 OFFICIAL = QuestionSource.official.value
+ENCRYPTED_BACKUP_VERSION = 1
+ENCRYPTED_BACKUP_ALGORITHM = "AES-GCM-256"
+ENCRYPTED_BACKUP_KDF = "PBKDF2-SHA256-200000"
+PBKDF2_ITERATIONS = 200_000
+BACKUP_SALT_BYTES = 16
+BACKUP_IV_BYTES = 12
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _b64encode(raw: bytes) -> str:
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _b64decode(value: str) -> bytes:
+    return base64.b64decode(value.encode("ascii"), validate=True)
+
+
+def _derive_backup_key(passphrase: str, salt: bytes) -> bytes:
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=PBKDF2_ITERATIONS,
+    )
+    return kdf.derive(passphrase.encode("utf-8"))
+
+
+def is_encrypted_backup_blob(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("version") == ENCRYPTED_BACKUP_VERSION
+        and value.get("algorithm") == ENCRYPTED_BACKUP_ALGORITHM
+        and value.get("kdf") == ENCRYPTED_BACKUP_KDF
+        and isinstance(value.get("salt"), str)
+        and isinstance(value.get("iv"), str)
+        and isinstance(value.get("ciphertext"), str)
+    )
+
+
+def encrypt_backup_payload(payload: dict[str, Any], passphrase: str) -> dict[str, Any]:
+    """Encrypt a JSON-ready backup payload using the host-compatible envelope.
+
+    The shape and crypto parameters intentionally match ``src/lib/encryptedBackup.ts``
+    so a backend-encrypted artifact can be restored by the host and vice versa.
+    """
+    if not passphrase:
+        raise ValueError("backup passphrase required")
+    salt = os.urandom(BACKUP_SALT_BYTES)
+    iv = os.urandom(BACKUP_IV_BYTES)
+    key = _derive_backup_key(passphrase, salt)
+    plaintext = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    ciphertext = AESGCM(key).encrypt(iv, plaintext, salt)
+    return {
+        "version": ENCRYPTED_BACKUP_VERSION,
+        "algorithm": ENCRYPTED_BACKUP_ALGORITHM,
+        "kdf": ENCRYPTED_BACKUP_KDF,
+        "salt": _b64encode(salt),
+        "iv": _b64encode(iv),
+        "ciphertext": _b64encode(ciphertext),
+        "createdAt": _now_iso(),
+    }
+
+
+def decrypt_backup_payload(blob: dict[str, Any], passphrase: str) -> dict[str, Any]:
+    if not passphrase:
+        raise ValueError("encrypted backup passphrase required")
+    if not is_encrypted_backup_blob(blob):
+        raise ValueError("invalid encrypted backup blob")
+    try:
+        salt = _b64decode(str(blob["salt"]))
+        iv = _b64decode(str(blob["iv"]))
+        ciphertext = _b64decode(str(blob["ciphertext"]))
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("invalid passphrase or corrupted blob") from None
+    key = _derive_backup_key(passphrase, salt)
+    try:
+        plaintext = AESGCM(key).decrypt(iv, ciphertext, salt)
+    except InvalidTag:
+        raise ValueError("invalid passphrase or corrupted blob") from None
+    try:
+        decoded = json.loads(plaintext.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ValueError("encrypted backup decrypted but payload is not valid JSON") from None
+    if not isinstance(decoded, dict):
+        raise ValueError("encrypted backup decrypted but payload is not a JSON object")
+    return decoded
 
 
 def _canonical_json(obj: Any) -> str:

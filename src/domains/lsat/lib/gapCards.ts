@@ -9,7 +9,7 @@
 // these calls behave identically to the rest of the client and degrade the same
 // way when the sidecar is unreachable.
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8100";
+import { fetchLsatSidecar } from "@/lib/lsatSidecarClient";
 
 /** A single auto-generated cloze/pattern "Gap" card (one per concept gap). */
 export interface GapCard {
@@ -47,7 +47,7 @@ export interface BlindReviewNoteResult {
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchLsatSidecar(path, {
     method: "POST",
     headers: body !== undefined ? { "Content-Type": "application/json" } : {},
     body: body !== undefined ? JSON.stringify(body) : undefined,

@@ -3,10 +3,11 @@
 Routing policy (docs/00-vision.md):
 - Realtime tasks (explain, diagnose, tag) ALWAYS use the selected LOCAL
   provider: Ollama by default, or LMStudio when ``LOCAL_PROVIDER=lmstudio``.
-- Offline Tier-B generation MAY use an optional cloud provider when the user sets
-  ``LSATLAB_GEN_PROVIDER=cloud`` and provides an API key; otherwise it also uses
-  the selected local provider. Cloud is never used for realtime paths or
-  score-affecting content.
+- Offline Tier-B generation MAY use an optional cloud provider only when the
+  user sets ``LSATLAB_GEN_PROVIDER=cloud``, provides an API key, opts out of the
+  strict offline fence, and sets ``LSATLAB_CLOUD_EGRESS_ALLOWED=1``; otherwise
+  it also uses the selected local provider. Cloud is never used for realtime
+  paths or score-affecting content.
 
 Callers use the small surface here (``offline_generate``, ``embed_sync``,
 ``local_provider()``) rather than importing providers directly, so the routing
@@ -14,10 +15,12 @@ decision lives in one place.
 """
 from __future__ import annotations
 
+import copy
 from typing import Any, Optional, Union
 
 import logging
 import math
+from urllib.parse import urlparse
 
 from .. import config, observability
 from ..observability import time_llm_call
@@ -39,17 +42,72 @@ __all__ = [
     "critic_generate",
     "offline_provider_name",
     "critic_model_name",
+    "cloud_configured",
+    "cloud_egress_allowed",
     "cloud_enabled",
     "assert_cloud_allowed",
     "cloud_budget_status",
     "cloud_budget_dry_run",
     "embed_sync",
     "provider_info",
+    "provider_capabilities",
+    "provider_capability_matrix",
     "cache",
     "cache_stats",
 ]
 
 _log = logging.getLogger("lsatlab.llm")
+
+_PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
+    "ollama": {
+        "provider": "ollama",
+        "local": True,
+        "cloud": False,
+        "system_prompt": True,
+        "sampling": {"temperature": True, "top_p": True, "seed": True},
+        "structured_output": {"json_mode": True, "json_schema": True},
+        "chat_stream": True,
+        "embeddings": True,
+        "keep_alive": True,
+        "degradations": [],
+    },
+    "lmstudio": {
+        "provider": "lmstudio",
+        "local": True,
+        "cloud": False,
+        "system_prompt": True,
+        "sampling": {"temperature": True, "top_p": True, "seed": True},
+        "structured_output": {"json_mode": True, "json_schema": True},
+        "chat_stream": True,
+        "embeddings": True,
+        "keep_alive": False,
+        "degradations": [
+            {
+                "field": "keep_alive",
+                "behavior": "no_op",
+                "reason": "LM Studio's OpenAI-compatible API has no keep-alive verb.",
+            },
+        ],
+    },
+    "anthropic": {
+        "provider": "anthropic",
+        "local": False,
+        "cloud": True,
+        "system_prompt": True,
+        "sampling": {"temperature": True, "top_p": True, "seed": False},
+        "structured_output": {"json_mode": True, "json_schema": True},
+        "chat_stream": False,
+        "embeddings": False,
+        "keep_alive": False,
+        "degradations": [
+            {
+                "field": "seed",
+                "behavior": "omitted",
+                "reason": "Anthropic Messages has no seed parameter; seed alone is not a deterministic cache contract.",
+            },
+        ],
+    },
+}
 
 _ollama: Optional[OllamaProvider] = None
 _lmstudio: Optional[LMStudioProvider] = None
@@ -83,15 +141,19 @@ def local_provider() -> Union[OllamaProvider, LMStudioProvider]:
     return ollama()
 
 
-def cloud_enabled() -> bool:
-    """Cloud offline generation is configured AND has a key.
-
-    This is a pure config read (no side effects) so status/health endpoints can
-    report routing accurately. The actual egress is gated separately by the
-    strict-offline fence (:func:`assert_cloud_allowed`), enforced at the point
-    the cloud provider is selected/instantiated in :func:`offline_generate`.
-    """
+def cloud_configured() -> bool:
+    """Cloud offline generation is selected and has credential material."""
     return config.GEN_PROVIDER == "cloud" and bool(config.CLOUD_API_KEY)
+
+
+def cloud_egress_allowed() -> bool:
+    """Whether the user explicitly admitted outbound cloud model traffic."""
+    return bool(getattr(config, "CLOUD_EGRESS_ALLOWED", False))
+
+
+def cloud_enabled() -> bool:
+    """Cloud offline generation is configured and explicitly egress-enabled."""
+    return cloud_configured() and cloud_egress_allowed()
 
 
 def assert_cloud_allowed() -> None:
@@ -102,19 +164,27 @@ def assert_cloud_allowed() -> None:
     build) and the cloud provider is configured (``GEN_PROVIDER=cloud`` + a key),
     raise a clear :class:`RuntimeError` naming the offending env var so the egress
     path to api.anthropic.com is unreachable. The cloud code itself stays in the
-    tree for opt-out/standalone use — set ``LSATLAB_ENFORCE_OFFLINE=0`` to allow
-    it. No-op when the fence is off or cloud isn't configured.
+    tree for opt-out/standalone use, but selecting it also requires
+    ``LSATLAB_CLOUD_EGRESS_ALLOWED=1``.
     """
     if not config.ENFORCE_OFFLINE:
+        if cloud_configured() and not cloud_egress_allowed():
+            raise RuntimeError(
+                "Cloud LLM egress is disabled: LSATLAB_GEN_PROVIDER='cloud' and "
+                "an API key are configured, but LSATLAB_CLOUD_EGRESS_ALLOWED is "
+                "not set. Set LSATLAB_CLOUD_EGRESS_ALLOWED=1 only when outbound "
+                "model-provider traffic is intentional."
+            )
         return
-    if config.GEN_PROVIDER != "cloud":
-        return
-    raise RuntimeError(
-        "Strict offline fence is ON: the cloud LLM provider is blocked "
-        "(LSATLAB_GEN_PROVIDER='cloud'). StudyVault is local-only by default — "
-        "no cloud, no telemetry. Set LSATLAB_GEN_PROVIDER=ollama (or lmstudio) to "
-        "use a local model, or LSATLAB_ENFORCE_OFFLINE=0 to opt out of the fence."
-    )
+    if config.GEN_PROVIDER == "cloud":
+        raise RuntimeError(
+            "Strict offline fence is ON: the cloud LLM provider is blocked "
+            "(LSATLAB_GEN_PROVIDER='cloud'). StudyVault is local-only by default - "
+            "no cloud, no telemetry. Set LSATLAB_GEN_PROVIDER=ollama (or lmstudio) to "
+            "use a local model, or LSATLAB_ENFORCE_OFFLINE=0 and "
+            "LSATLAB_CLOUD_EGRESS_ALLOWED=1 to opt out of the fence and admit "
+            "cloud egress."
+        )
 
 
 def cloud_budget_status() -> dict:
@@ -170,6 +240,8 @@ def cloud_budget_dry_run(
     return {
         **status,
         "cloud_enabled": cloud_enabled(),
+        "cloud_configured": cloud_configured(),
+        "cloud_egress_allowed": cloud_egress_allowed(),
         "dry_run": bool(config.CLOUD_DRY_RUN),
         "pricing": {
             "input_cost_per_mtok_usd": config.CLOUD_INPUT_COST_PER_MTOK,
@@ -225,56 +297,246 @@ def _cloud_within_budget(estimate_usd: float = 0.0) -> bool:
     return (spend + max(0.0, estimate_usd)) <= budget
 
 
+def _cloud_url_host() -> str:
+    try:
+        return urlparse(config.CLOUD_API_URL).hostname or ""
+    except Exception:
+        return ""
+
+
+def _log_cloud_egress_decision(
+    *,
+    task: str,
+    model: str,
+    allowed: bool,
+    reason: str,
+    input_tokens_estimate: int,
+    worst_case_usd: float,
+) -> None:
+    _log.info(
+        "cloud_egress task=%s provider=anthropic model=%s allowed=%s reason=%s "
+        "input_tokens_est=%d max_output_tokens=%d worst_case_usd=%.6f "
+        "budget_usd=%s url_host=%s prompt_logged=false",
+        task,
+        model,
+        allowed,
+        reason,
+        input_tokens_estimate,
+        config.CLOUD_MAX_TOKENS,
+        worst_case_usd,
+        config.CLOUD_MONTHLY_BUDGET_USD if config.CLOUD_MONTHLY_BUDGET_USD > 0 else None,
+        _cloud_url_host(),
+    )
+
+
 def offline_provider_name() -> str:
     return "anthropic" if cloud_enabled() else config.LOCAL_PROVIDER
+
+
+def provider_capabilities(provider_name: Optional[str] = None) -> dict[str, Any]:
+    """Static capability/degradation contract for a known LLM provider.
+
+    The matrix is deliberately conservative: if a provider cannot honor a knob
+    (notably Anthropic ``seed``), the facade must omit that knob from the
+    provider request and from the cache determinism contract.
+    """
+    name = (provider_name or offline_provider_name() or "").lower()
+    caps = _PROVIDER_CAPABILITIES.get(name)
+    if caps is None:
+        return {
+            "provider": name,
+            "known": False,
+            "local": False,
+            "cloud": False,
+            "system_prompt": False,
+            "sampling": {"temperature": False, "top_p": False, "seed": False},
+            "structured_output": {"json_mode": False, "json_schema": False},
+            "chat_stream": False,
+            "embeddings": False,
+            "keep_alive": False,
+            "degradations": [{"field": "*", "behavior": "unsupported",
+                              "reason": "Unknown provider."}],
+        }
+    out = copy.deepcopy(caps)
+    out["known"] = True
+    return out
+
+
+def provider_capability_matrix() -> dict[str, dict[str, Any]]:
+    """All supported provider capability rows, keyed by provider name."""
+    return {name: provider_capabilities(name) for name in sorted(_PROVIDER_CAPABILITIES)}
+
+
+def _negotiate_generation_options(
+    provider_name: str,
+    opts: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, str]]]:
+    """Return provider kwargs plus the effective cache-key contract.
+
+    The returned ``contract`` mirrors the actual provider request after any
+    degradation. This prevents unsupported knobs from making a cache key look
+    more deterministic or schema-constrained than the provider can really honor.
+    """
+    caps = provider_capabilities(provider_name)
+    effective = dict(opts)
+    degradations: list[dict[str, str]] = []
+
+    sampling = caps["sampling"]
+    if "seed" in effective and not sampling.get("seed"):
+        effective.pop("seed", None)
+        degradations.append({
+            "field": "seed",
+            "behavior": "omitted",
+            "reason": "provider_does_not_support_seed",
+        })
+    if "top_p" in effective and not sampling.get("top_p"):
+        effective.pop("top_p", None)
+        degradations.append({
+            "field": "top_p",
+            "behavior": "omitted",
+            "reason": "provider_does_not_support_top_p",
+        })
+    if "temperature" in effective and not sampling.get("temperature"):
+        effective.pop("temperature", None)
+        degradations.append({
+            "field": "temperature",
+            "behavior": "omitted",
+            "reason": "provider_does_not_support_temperature",
+        })
+
+    structured = caps["structured_output"]
+    if "format" in effective:
+        fmt = effective.get("format")
+        if isinstance(fmt, dict) and not structured.get("json_schema"):
+            if structured.get("json_mode"):
+                effective["format"] = "json"
+                degradations.append({
+                    "field": "format",
+                    "behavior": "json_schema_to_json",
+                    "reason": "provider_does_not_support_json_schema",
+                })
+            else:
+                effective.pop("format", None)
+                degradations.append({
+                    "field": "format",
+                    "behavior": "omitted",
+                    "reason": "provider_does_not_support_structured_output",
+                })
+        elif fmt is not None and not isinstance(fmt, dict) and fmt != "json":
+            effective.pop("format", None)
+            degradations.append({
+                "field": "format",
+                "behavior": "omitted",
+                "reason": "unsupported_format_value",
+            })
+        elif fmt is not None and not isinstance(fmt, dict) and not structured.get("json_mode"):
+            effective.pop("format", None)
+            degradations.append({
+                "field": "format",
+                "behavior": "omitted",
+                "reason": "provider_does_not_support_json_mode",
+            })
+
+    contract = {
+        "temperature": effective.get("temperature"),
+        "top_p": effective.get("top_p"),
+        "seed": effective.get("seed"),
+        "format": effective.get("format"),
+    }
+    return effective, contract, degradations
 
 
 def offline_generate(prompt: str, system: Optional[str] = None,
                      timeout: Optional[float] = None, *,
                      model: Optional[str] = None,
                      temperature: Optional[float] = None,
+                     top_p: Optional[float] = None,
                      seed: Optional[int] = None,
                      format: Optional[Union[str, dict[str, Any]]] = None,
                      task: str = "offline_generate") -> str:
     """Sync text generation for OFFLINE tiers (generate, solve, critique, structure).
 
     Routes to the cloud provider when configured, else the local gen model. The
-    ``temperature``/``seed``/``format`` knobs are forwarded so the generation gate
-    can run its solve/critique passes DETERMINISTICALLY and ask for guaranteed
-    JSON. Raises ``LLMError`` on failure (callers decide whether to quarantine /
-    fall back).
+    ``temperature``/``top_p``/``seed``/``format`` knobs are forwarded so the
+    generation gate can run its solve/critique passes DETERMINISTICALLY and ask
+    for guaranteed JSON. Raises ``LLMError`` on failure (callers decide whether
+    to quarantine / fall back).
     """
     # Only forward the deterministic/structured options when set, so callers
     # (and test fakes) that don't use them keep the simple 4-arg signature.
     opts: dict = {}
     if temperature is not None:
         opts["temperature"] = temperature
+    if top_p is not None:
+        opts["top_p"] = top_p
     if seed is not None:
         opts["seed"] = seed
     if format is not None:
         opts["format"] = format
-    if cloud_enabled():
+    if cloud_configured():
+        target = model or config.CLOUD_GEN_MODEL
+        input_tokens_estimate = _estimate_input_tokens(prompt, system)
+        worst_case = observability.estimate_cloud_cost_usd(
+            input_tokens_estimate, config.CLOUD_MAX_TOKENS
+        )
         # AI-10 — strict offline fence: before doing ANYTHING cloud-bound, refuse
         # (with a clear, env-var-naming RuntimeError) when enforcement is on. This
         # is the selection point that makes the api.anthropic.com egress path
         # unreachable in the normal StudyVault build.
+        if config.ENFORCE_OFFLINE:
+            _log_cloud_egress_decision(
+                task=task,
+                model=target,
+                allowed=False,
+                reason="strict_offline_fence",
+                input_tokens_estimate=input_tokens_estimate,
+                worst_case_usd=worst_case,
+            )
+            assert_cloud_allowed()
+        if not cloud_egress_allowed():
+            _log_cloud_egress_decision(
+                task=task,
+                model=target,
+                allowed=False,
+                reason="egress_not_explicitly_allowed",
+                input_tokens_estimate=input_tokens_estimate,
+                worst_case_usd=worst_case,
+            )
+            prov = local_provider()
+            target = model or config.GEN_MODEL
+            return _cached_generate(
+                prov, prov.name, target, prompt, system, timeout,
+                opts=opts, task=task,
+            )
         assert_cloud_allowed()
         # 7.3 — ENFORCE the monthly budget: refuse the (paid) cloud call when its
         # WORST-CASE cost would push month-to-date spend past the cap, so a single
         # large call can't overshoot the budget. We fall back to the local model so
         # generation still proceeds — never silently overspending. The local Ollama
         # path below is free and is never budget-checked.
-        worst_case = observability.estimate_cloud_cost_usd(
-            _estimate_input_tokens(prompt, system), config.CLOUD_MAX_TOKENS
-        )
         if _cloud_within_budget(worst_case):
             from .cloud import AnthropicProvider
             prov = AnthropicProvider(config.CLOUD_API_KEY)
-            target = model or config.CLOUD_GEN_MODEL
+            _log_cloud_egress_decision(
+                task=task,
+                model=target,
+                allowed=True,
+                reason="explicit_opt_in",
+                input_tokens_estimate=input_tokens_estimate,
+                worst_case_usd=worst_case,
+            )
             return _cached_generate(
                 prov, "anthropic", target, prompt, system, timeout,
-                temperature=temperature, seed=seed, opts=opts, task=task,
+                opts=opts, task=task,
             )
+        _log_cloud_egress_decision(
+            task=task,
+            model=target,
+            allowed=False,
+            reason="budget_would_be_exceeded",
+            input_tokens_estimate=input_tokens_estimate,
+            worst_case_usd=worst_case,
+        )
         _log.warning(
             "cloud monthly budget would be exceeded (spend=%.4f + worst_case=%.4f "
             "> budget=%.2f); falling back to local model for task=%s",
@@ -285,46 +547,54 @@ def offline_generate(prompt: str, system: Optional[str] = None,
     target = model or config.GEN_MODEL
     return _cached_generate(
         prov, prov.name, target, prompt, system, timeout,
-        temperature=temperature, seed=seed, opts=opts, task=task,
+        opts=opts, task=task,
     )
 
 
 def _cached_generate(prov, provider_name: str, target: str, prompt: str,
                      system: Optional[str], timeout: Optional[float], *,
-                     temperature: Optional[float], seed: Optional[int],
                      opts: dict, task: str) -> str:
     """BACK-1 — wrap a provider ``generate`` call with the deterministic cache.
 
     For a DETERMINISTIC call (temp 0 / seeded) and ``config.LLM_CACHE_ENABLED``:
-    look up the content-addressed cache first (provider+model+temperature+seed+
-    prompt, host-parity key); on a hit return the stored text WITHOUT a model call
-    (still recorded as a hit for the rate counter). On a miss, call the model
-    under the usual ``time_llm_call`` timing seam and STORE the result before
-    returning. Warm/creative calls bypass the cache entirely and behave exactly as
-    before. The cache layer is best-effort — any cache error degrades to a plain
-    model call, never a crash.
-
-    NOTE: the cache key intentionally OMITS ``system``/``format``/``timeout``. The
-    generation gate's deterministic calls (the only cacheable ones in practice)
-    fold everything score-affecting into ``prompt``; the host contract keys on the
-    same five fields, so this preserves host<->backend key parity. A caller that
-    varies ``system`` for the SAME prompt at temp 0 is not a pattern in this
-    codebase; if that ever changes, fold system into the prompt at the call site.
+    look up the content-addressed cache first using the full output-affecting
+    contract (provider, model, system prompt, structured-output format/schema,
+    sampling knobs, and prompt). On a hit return the stored text WITHOUT a model
+    call (still recorded as a hit for the rate counter). On a miss, call the
+    model under the usual ``time_llm_call`` timing seam and STORE the result
+    before returning. Warm/creative calls bypass the cache entirely and behave
+    exactly as before. The cache layer is best-effort — any cache error degrades
+    to a plain model call, never a crash. Timeout is intentionally omitted: it
+    affects failure behavior, not the model output contract.
     """
+    effective_opts, contract, degradations = _negotiate_generation_options(
+        provider_name, opts,
+    )
+    if degradations:
+        _log.info(
+            "llm_provider_degradation provider=%s model=%s fields=%s prompt_logged=false",
+            provider_name,
+            target,
+            ",".join(d["field"] for d in degradations),
+        )
     cache_on = getattr(config, "LLM_CACHE_ENABLED", True)
     if cache_on:
         cached = cache.get(
             provider=provider_name, model=target,
-            temperature=temperature, seed=seed, prompt=prompt,
+            system=system, format=contract["format"],
+            temperature=contract["temperature"], top_p=contract["top_p"],
+            seed=contract["seed"], prompt=prompt,
         )
         if cached is not None:
             return cached
     with time_llm_call(task, provider=provider_name, model=target):
-        result = prov.generate(target, prompt, system, timeout, **opts)
+        result = prov.generate(target, prompt, system, timeout, **effective_opts)
     if cache_on:
         cache.put(
             provider=provider_name, model=target,
-            temperature=temperature, seed=seed, prompt=prompt,
+            system=system, format=contract["format"],
+            temperature=contract["temperature"], top_p=contract["top_p"],
+            seed=contract["seed"], prompt=prompt,
             response=result,
         )
     return result
@@ -343,13 +613,14 @@ def critic_model_name() -> str:
 def critic_generate(prompt: str, system: Optional[str] = None,
                     timeout: Optional[float] = None, *,
                     temperature: Optional[float] = None,
+                    top_p: Optional[float] = None,
                     seed: Optional[int] = None,
                     format: Optional[Union[str, dict[str, Any]]] = None) -> str:
     """Like :func:`offline_generate` but routed to the CRITIC model so the gate's
     solve/critique passes are decorrelated from generation."""
     return offline_generate(prompt, system, timeout, model=critic_model_name(),
-                            temperature=temperature, seed=seed, format=format,
-                            task="gate_critic")
+                            temperature=temperature, top_p=top_p, seed=seed,
+                            format=format, task="gate_critic")
 
 
 def embed_sync(text: str, model: Optional[str] = None) -> list[float]:
@@ -386,7 +657,14 @@ def provider_info() -> dict:
         "local_provider": config.LOCAL_PROVIDER,
         "lmstudio_url": config.LMSTUDIO_URL,
         "offline_provider": offline_provider_name(),
+        "cloud_configured": cloud_configured(),
+        "cloud_egress_allowed": cloud_egress_allowed(),
         "cloud_enabled": cloud_enabled(),
+        "capabilities": {
+            "realtime": provider_capabilities(config.LOCAL_PROVIDER),
+            "offline": provider_capabilities(offline_provider_name()),
+            "matrix": provider_capability_matrix(),
+        },
         "explain_model": _ai.resolve_explain_model(),
         "explain_model_configured": config.EXPLAIN_MODEL,
         "explain_model_fallback": config.EXPLAIN_FALLBACK_MODEL,

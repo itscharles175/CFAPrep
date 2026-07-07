@@ -75,6 +75,16 @@ def latency_p50(task: str) -> Optional[float]:
     return round(ordered[len(ordered) // 2], 1)
 
 
+def llm_egress_class(provider: str | None) -> str:
+    """Classify model traffic without inspecting or logging prompt content."""
+    name = (provider or "").strip().lower()
+    if name in {"ollama", "lmstudio"}:
+        return "local_loopback"
+    if name in {"anthropic"}:
+        return "cloud_provider"
+    return "unknown"
+
+
 def record_cloud_tokens(input_tokens: int, output_tokens: int) -> None:
     global _CLOUD_INPUT_TOKENS, _CLOUD_OUTPUT_TOKENS
     _CLOUD_INPUT_TOKENS += max(0, int(input_tokens))
@@ -789,6 +799,7 @@ async def request_logging_middleware(request: Any, call_next: Any):
 
 @contextlib.contextmanager
 def time_llm_call(task: str, *, provider: str, model: str,
+                  egress_class: str | None = None,
                   logger: Optional[logging.Logger] = None) -> Iterator[dict]:
     """Time a single model call and log uniform telemetry.
 
@@ -799,6 +810,8 @@ def time_llm_call(task: str, *, provider: str, model: str,
             span["tokens"] = n   # optional extra fields
 
     Logs ``ok=...`` and ``dur_ms=...`` on exit, even when the call raises.
+    Prompt content is never logged; the explicit ``prompt_logged=false`` field is
+    part of the audit contract for AI/provider routes.
     """
     log = logger or logging.getLogger("lsatlab.llm")
     span: dict[str, Any] = {}
@@ -814,7 +827,9 @@ def time_llm_call(task: str, *, provider: str, model: str,
         record_latency(task, dur_ms)            # RAM fast path (existing)
         persist_latency_sample(task, dur_ms, provider=provider, model=model)  # 7.3 durable
         extra = " ".join(f"{k}={v}" for k, v in span.items())
+        egress = egress_class or llm_egress_class(provider)
         log.info(
-            "llm task=%s provider=%s model=%s ok=%s dur_ms=%s %s",
-            task, provider, model, ok, dur_ms, extra,
+            "llm task=%s provider=%s model=%s egress_class=%s ok=%s dur_ms=%s "
+            "prompt_logged=false %s",
+            task, provider, model, egress, ok, dur_ms, extra,
         )

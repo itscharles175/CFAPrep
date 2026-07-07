@@ -77,7 +77,7 @@ def test_lmstudio_generate_maps_to_chat_completions(monkeypatch):
 
     prov = lms.LMStudioProvider("http://localhost:1234/v1")
     out = prov.generate("local-model", "make a question",
-                        system="You are strict.", temperature=0, seed=7,
+                        system="You are strict.", temperature=0, top_p=0.9, seed=7,
                         format="json")
     assert out == "GENERATED"
     assert captured["url"].endswith("/chat/completions")
@@ -89,6 +89,7 @@ def test_lmstudio_generate_maps_to_chat_completions(monkeypatch):
     ]
     assert body["stream"] is False
     assert body["temperature"] == 0
+    assert body["top_p"] == 0.9
     assert body["seed"] == 7
     # format="json" -> OpenAI json_object response_format.
     assert body["response_format"] == {"type": "json_object"}
@@ -265,13 +266,14 @@ def test_cloud_still_wins_over_lmstudio_for_offline(monkeypatch):
     import app.llm as llm
     from app.llm import cloud
 
-    # LMStudio is the local provider, but GEN_PROVIDER=cloud + a key must still
-    # route OFFLINE generation to Anthropic (cloud is orthogonal to LOCAL).
+    # LMStudio is the local provider, but GEN_PROVIDER=cloud + key + explicit
+    # egress opt-in still routes OFFLINE generation to Anthropic.
     # AI-10: opt out of the strict-offline fence so the cloud path is reachable.
     monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
     monkeypatch.setattr(config, "LOCAL_PROVIDER", "lmstudio")
     monkeypatch.setattr(config, "GEN_PROVIDER", "cloud")
     monkeypatch.setattr(config, "CLOUD_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
     monkeypatch.setattr(cloud.AnthropicProvider, "generate",
                         lambda self, model, prompt, system, timeout: f"cloud::{prompt}")
     assert llm.offline_provider_name() == "anthropic"
@@ -286,6 +288,9 @@ def test_provider_info_reports_lmstudio(monkeypatch):
     assert info["realtime_provider"] == "lmstudio"
     assert info["local_provider"] == "lmstudio"
     assert info["lmstudio_url"]  # surfaced for the settings UI
+    assert info["capabilities"]["realtime"]["provider"] == "lmstudio"
+    assert info["capabilities"]["realtime"]["keep_alive"] is False
+    assert info["capabilities"]["matrix"]["ollama"]["sampling"]["seed"] is True
 
 
 def test_resolve_explain_model_skips_probe_for_lmstudio(monkeypatch):
@@ -619,6 +624,7 @@ def test_ready_provider_neutral_when_lmstudio_reachable(client, monkeypatch):
     body = r.json()
     assert body["ai"]["ready"] is True
     assert body["ai"]["provider_reachable"] is True
+    assert body["ai"]["capabilities"]["realtime"]["provider"] == "lmstudio"
     assert "ollama_unreachable" not in body["warnings"]
     assert "ai_not_ready" not in body["warnings"]
 
@@ -651,5 +657,6 @@ def test_trust_not_blocked_by_lmstudio_when_reachable(client, monkeypatch):
     monkeypatch.setattr(ai, "health", _fake_health(dict(_LMS_REACHABLE)))
     res = trust._model_readiness_check("packaged")
     assert res["detail"]["provider_reachable"] is True
+    assert res["detail"]["provider_capabilities"]["realtime"]["provider"] == "lmstudio"
     assert "provider" not in res["detail"]["required_missing"]
     assert res["status"] == "ok"

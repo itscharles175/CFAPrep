@@ -1,27 +1,14 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import type { CommandAction } from "./command-palette-types";
+
+export type { CommandAction } from "./command-palette-types";
 
 // G7 — lazy-load the cmdk dialog body so cmdk (~35 KB) is excluded from the
 // initial bundle and only fetched the first time the palette is opened.
 const CommandPaletteDialog = lazy(
   () => import("@lsat/components/command-palette-dialog"),
 );
-
-export interface CommandAction {
-  id: string;
-  label: string;
-  group?: string;
-  /** Optional lucide (or any) icon node. */
-  icon?: React.ReactNode;
-  /** Extra search terms (keywords) for fuzzy matching. */
-  keywords?: string[];
-  /**
-   * Optional keyboard-shortcut hint, rendered as keycap chips on the row
-   * (e.g. ["⌘/Ctrl", "K"]). Purely informational — does not bind the key.
-   */
-  shortcut?: string[];
-  perform: () => void;
-}
 
 interface CommandPaletteState {
   open: boolean;

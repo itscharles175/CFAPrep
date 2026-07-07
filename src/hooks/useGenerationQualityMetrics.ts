@@ -23,8 +23,8 @@
  * machine and nothing is written back.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 const QUALITY_METRICS_PATH = '/api/gen/generation/quality-metrics';
 const AUDIT_LOG_PATH = '/api/gen/generation/audit-log';
 
@@ -229,20 +229,11 @@ interface FetchResult {
 
 /** Degrading JSON GET — resolves to null on any failure (never throws). */
 async function getJson(path: string, timeoutMs: number): Promise<{ data: unknown; reachable: boolean }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${path}`, {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) return { data: null, reachable: true };
-    return { data: await res.json(), reachable: true };
-  } catch {
-    return { data: null, reachable: false };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchLsatSidecarJson(path, {
+    timeoutMs,
+    headers: { accept: 'application/json' },
+  });
+  return { data: res.ok ? res.data : null, reachable: res.reachable };
 }
 
 /**

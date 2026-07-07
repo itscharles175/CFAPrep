@@ -18,10 +18,13 @@ _SCHEMA_BASELINE = Path(__file__).with_name("schemas-baseline.json")
 # A field present in the baseline but missing from the live spec is a BREAKING
 # removal for an existing host caller; adding fields is always compatible.
 _GUARDED_ROUTES: tuple[tuple[str, str], ...] = (
+    ("/api/health", "get"),
     ("/api/preptests", "get"),
     ("/api/sessions", "get"),
     ("/api/bank/sources", "get"),
     ("/api/bank/stats", "get"),
+    ("/api/adaptivity/next", "post"),
+    ("/api/study/today", "get"),
 )
 
 
@@ -132,6 +135,7 @@ def test_launch_readiness_routes_have_openapi_response_schemas(client):
     spec = client.get("/openapi.json").json()
     assert "ErrorEnvelope" in spec["components"]["schemas"]
     assert "LegacySuccessResponse" in spec["components"]["schemas"]
+    assert "HealthResponse" in spec["components"]["schemas"]
     expected = [
         ("/api/health", "get"),
         ("/api/ready", "get"),
@@ -150,6 +154,19 @@ def test_launch_readiness_routes_have_openapi_response_schemas(client):
             op["responses"]["422"]["content"]["application/json"]["schema"]["$ref"]
             == "#/components/schemas/ErrorEnvelope"
         )
+
+
+def test_launch_health_response_schema_includes_sidecar_identity(client):
+    spec = client.get("/openapi.json").json()
+    schema = (
+        spec["paths"]["/api/health"]["get"]["responses"]["200"]["content"]
+        ["application/json"]["schema"]
+    )
+    assert schema["$ref"] == "#/components/schemas/HealthResponse"
+    props = spec["components"]["schemas"]["HealthResponse"]["properties"]
+    assert set(props) >= {"ok", "service", "version"}
+    assert props["service"]["type"] == "string"
+    assert props["version"]["type"] == "string"
 
 
 def test_all_api_routes_have_success_and_error_schemas(client):

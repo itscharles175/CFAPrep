@@ -50,6 +50,17 @@ describe('RAG-2 — embedder (offline-graceful)', () => {
     expect(out).toBeNull();
   });
 
+  it('never sends embedding text to a remote configured base URL', async () => {
+    const fetchImpl = fakeEmbedFetch((t) => [t.length]);
+
+    await embedTexts(['private curriculum chunk'], {
+      settings: { baseUrl: 'http://192.168.1.5:1234/v1' },
+      fetchImpl,
+    });
+
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://localhost:11434/v1/embeddings');
+  });
+
   it('empty input is a trivial empty result (no fetch)', async () => {
     const fetchImpl = vi.fn();
     expect(await embedTexts([], { fetchImpl })).toEqual([]);

@@ -25,23 +25,24 @@
     /* graphite-100 */
     --secondary: 226 22% 96%;
     --secondary-foreground: 229 26% 11%;
-    /* graphite-100 / graphite-500 */
+    /* graphite-100 / graphite-500. Darkened from L49 to L45 so small muted
+       labels clear AA on white and graphite-50 surfaces with margin. */
     --muted: 226 22% 96%;
-    --muted-foreground: 222 11% 49%;
+    --muted-foreground: 222 11% 45%;
     --accent: 226 22% 96%;
     --accent-foreground: 229 26% 11%;
     /* danger */
-    --destructive: 358 70% 54%;
+    --destructive: 358 70% 50%;
     --destructive-foreground: 0 0% 100%;
     --success: 152 58% 42%;
-    --success-foreground: 0 0% 100%;
+    --success-foreground: 229 26% 11%;
     --warning: 38 92% 50%;
     --warning-foreground: 229 26% 11%;
     /* a11y: amber --warning fails WCAG AA as TEXT on light surfaces; warning TEXT
        uses this darker amber in light mode (bg-warning keeps --warning). */
     --warning-text: 38 100% 30%;
     --info: 200 85% 46%;
-    --info-foreground: 0 0% 100%;
+    --info-foreground: 229 26% 11%;
     /* graphite-200 */
     --border: 224 18% 91%;
     --input: 224 18% 91%;
@@ -158,13 +159,13 @@
        Checked: success hsl(142 70% 55%) ≈ #3dba6c, contrast ~5.1:1.
                 destructive hsl(0 90% 70%) ≈ #f4706e, contrast ~4.6:1. */
     --destructive: 0 90% 70%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive-foreground: 231 30% 7%;
     --success: 142 70% 55%;
-    --success-foreground: 0 0% 100%;
+    --success-foreground: 231 30% 7%;
     --warning: 38 92% 50%;
     --warning-foreground: 229 26% 11%;
     --info: 200 85% 46%;
-    --info-foreground: 0 0% 100%;
+    --info-foreground: 231 30% 7%;
     /* graphite-800 */
     --border: 227 22% 17%;
     --input: 227 22% 17%;
@@ -741,4 +742,251 @@ html.theme-transition *::after {
    the warning Badge variant are unaffected. */
 .text-warning {
   color: hsl(var(--warning-text, var(--warning)));
+}
+
+/* ---------------------------------------------------------------------------
+   A11Y-4 — OS contrast preferences and Windows forced-colors.
+   The LSAT theme already has an in-app high-contrast class; these media layers
+   honor OS-level requests without requiring the user to find that setting first.
+   --------------------------------------------------------------------------- */
+@media (prefers-contrast: more) {
+  :root {
+    --a11y-contrast-mode: more;
+    --foreground: 0 0% 0%;
+    --background: 0 0% 100%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+    --muted-foreground: 0 0% 25%;
+    --secondary-foreground: 0 0% 0%;
+    --accent-foreground: 0 0% 0%;
+    --border: 0 0% 0%;
+    --input: 0 0% 0%;
+    --ring: 262 100% 35%;
+    --primary: 262 100% 35%;
+    --success: 152 100% 22%;
+    --warning: 38 100% 30%;
+    --info: 200 100% 28%;
+    --destructive: 358 90% 40%;
+    --aurora-strength: 0;
+    --glow-strength: 0;
+    --surface-1: 0 0% 100%;
+    --surface-2: 0 0% 96%;
+    --surface-3: 0 0% 92%;
+  }
+
+  .dark {
+    --foreground: 0 0% 100%;
+    --background: 0 0% 0%;
+    --card: 0 0% 8%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 100%;
+    --muted-foreground: 0 0% 80%;
+    --secondary-foreground: 0 0% 100%;
+    --accent-foreground: 0 0% 100%;
+    --border: 0 0% 100%;
+    --input: 0 0% 100%;
+    --primary: 258 100% 82%;
+    --ring: 258 100% 82%;
+    --success: 152 70% 62%;
+    --warning: 45 100% 62%;
+    --info: 200 90% 66%;
+    --aurora-strength: 0;
+    --glow-strength: 0;
+    --surface-1: 0 0% 8%;
+    --surface-2: 0 0% 14%;
+    --surface-3: 0 0% 20%;
+  }
+
+  kbd {
+    background: hsl(var(--card)) !important;
+    color: hsl(var(--foreground)) !important;
+    border-color: hsl(var(--border)) !important;
+  }
+
+  .border,
+  .border-border,
+  .border-input,
+  .border-primary,
+  .border-muted {
+    border-color: hsl(var(--border)) !important;
+    border-style: solid !important;
+    border-width: 1px !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --a11y-forced-colors: active;
+    --a11y-contrast-mode: forced-colors;
+    --aurora-strength: 0;
+    --glow-strength: 0;
+    --glass-alpha: 1;
+    --glass-blur: 0px;
+    --hl-alpha: 1;
+  }
+
+  html,
+  body,
+  #root,
+  [data-app-root],
+  main {
+    background: Canvas !important;
+    color: CanvasText !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  :focus-visible,
+  .focus-visible\:ring-2:focus-visible,
+  .focus-visible\:ring-ring:focus-visible,
+  .focus-visible\:outline-ring:focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  [role="button"],
+  [role="radio"],
+  [role="tab"],
+  [role="menuitem"] {
+    border-color: ButtonBorder !important;
+  }
+
+  button,
+  [role="button"] {
+    background-color: ButtonFace !important;
+    background-image: none !important;
+    color: ButtonText !important;
+  }
+
+  a {
+    color: LinkText !important;
+  }
+
+  input,
+  select,
+  textarea,
+  [contenteditable="true"] {
+    background: Field !important;
+    color: FieldText !important;
+  }
+
+  kbd {
+    background: ButtonFace !important;
+    background-image: none !important;
+    color: ButtonText !important;
+    border: 1px solid ButtonBorder !important;
+  }
+
+  .glass,
+  .chrome-glass,
+  .bg-background,
+  .bg-card,
+  .bg-surface-0,
+  .bg-surface-1,
+  .bg-surface-2,
+  .bg-surface-3,
+  .bg-muted,
+  .bg-accent,
+  .bg-secondary,
+  .bg-popover,
+  .rounded-card,
+  section,
+  article,
+  aside {
+    background: Canvas !important;
+    background-image: none !important;
+    color: CanvasText !important;
+    border-color: CanvasText !important;
+  }
+
+  .bg-primary,
+  .data-\[state\=active\]\:bg-primary[data-state="active"] {
+    background: Highlight !important;
+    color: HighlightText !important;
+    border-color: Highlight !important;
+  }
+
+  [aria-current="true"],
+  [aria-pressed="true"],
+  [role="radio"][aria-checked="true"] {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px !important;
+    border-color: Highlight !important;
+  }
+
+  [role="radio"][aria-labelledby*="choice-elim"] {
+    text-decoration-line: line-through;
+    text-decoration-thickness: 2px;
+    text-decoration-color: CanvasText;
+  }
+
+  .text-muted-foreground,
+  .text-foreground,
+  .text-card-foreground,
+  .text-popover-foreground,
+  .text-warning,
+  .text-success,
+  .text-destructive,
+  .text-info {
+    color: CanvasText !important;
+  }
+
+  .border,
+  .border-border,
+  .border-input,
+  .border-primary,
+  .border-muted,
+  .divide-border > :not([hidden]) ~ :not([hidden]) {
+    border-color: CanvasText !important;
+    border-style: solid !important;
+    border-width: 1px !important;
+  }
+
+  .aurora::before,
+  .card-interactive::after {
+    display: none !important;
+  }
+
+  .hl-yellow,
+  .hl-green,
+  .hl-pink {
+    background-color: Highlight !important;
+    color: HighlightText !important;
+  }
+
+  [data-heatmap-root] [role="img"] {
+    background-color: Canvas !important;
+    background-image: none !important;
+    border: 1px solid CanvasText !important;
+  }
+
+  svg line,
+  svg path,
+  svg circle,
+  svg rect {
+    stroke: CanvasText !important;
+  }
+
+  svg [fill]:not([fill="none"]) {
+    fill: Canvas !important;
+  }
+
+  svg text {
+    fill: CanvasText !important;
+    stroke: none !important;
+  }
 }

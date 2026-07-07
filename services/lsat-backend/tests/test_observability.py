@@ -42,8 +42,25 @@ def test_time_llm_call_yields_span_and_logs(caplog):
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert "task=explain" in msgs
     assert "provider=ollama" in msgs
+    assert "egress_class=local_loopback" in msgs
+    assert "prompt_logged=false" in msgs
     assert "ok=True" in msgs
     assert "tokens=42" in msgs
+
+
+def test_time_llm_call_classifies_cloud_provider_without_prompt(caplog):
+    from app import observability
+
+    sentinel = "SECRET_PROMPT_MUST_NOT_APPEAR"
+    with caplog.at_level(logging.INFO, logger="lsatlab.llm"):
+        with observability.time_llm_call(
+            "generate", provider="anthropic", model="claude-opus-4-7"
+        ):
+            _ = sentinel
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    assert "egress_class=cloud_provider" in msgs
+    assert "prompt_logged=false" in msgs
+    assert sentinel not in msgs
 
 
 def test_time_llm_call_logs_failure(caplog):
@@ -57,12 +74,16 @@ def test_time_llm_call_logs_failure(caplog):
             pass
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert "ok=False" in msgs
+    assert "egress_class=local_loopback" in msgs
+    assert "prompt_logged=false" in msgs
 
 
 def test_health_still_works_with_middleware(client):
     r = client.get("/api/health")
     assert r.status_code == 200
-    assert r.json() == {"ok": True}
+    assert r.json()["ok"] is True
+    assert r.json()["service"] == "lsat-backend"
+    assert isinstance(r.json()["version"], str) and r.json()["version"]
 
 
 def test_status_includes_backend_readiness(client):
@@ -114,6 +135,8 @@ def test_ready_endpoint_reports_launch_readiness(client, monkeypatch):
     assert body["ai"]["ready"] is True
     assert body["ai"]["ollama_reachable"] is True
     assert body["ai"]["model_available"]["explain"] is True
+    assert body["ai"]["capabilities"]["realtime"]["provider"] == "ollama"
+    assert body["ai"]["capabilities"]["matrix"]["anthropic"]["sampling"]["seed"] is False
 
 
 def test_runtime_evidence_reads_local_logs_and_metrics(client, db_session, monkeypatch, tmp_path):

@@ -25,15 +25,16 @@
 
 import {
   forwardRef,
-  useCallback,
-  useEffect,
   useId,
   useImperativeHandle,
   useMemo,
   useRef,
-  useState,
 } from 'react';
 import { cn } from '../ui/cn';
+import AccessibleChoiceGroup, {
+  type AccessibleChoiceGroupHandle,
+  type AccessibleChoiceGroupOption,
+} from './AccessibleChoiceGroup';
 
 export interface RunnerOption {
   /** Stable key (falls back to index when absent). */
@@ -110,101 +111,25 @@ export const AccessibleQuestionRunner = forwardRef<
 ) {
   const stemId = useId();
   const feedbackId = useId();
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  // The roving focus target. Starts on the selection (or the first option) so a
-  // resumed/answered question lands focus sensibly.
-  const [activeIndex, setActiveIndex] = useState<number>(
-    selectedIndex != null ? selectedIndex : 0,
+  const groupRef = useRef<AccessibleChoiceGroupHandle>(null);
+
+  const runnerOptions = useMemo<AccessibleChoiceGroupOption<number>[]>(
+    () =>
+      options.map((option, index) => ({
+        id: option.id ?? index,
+        value: index,
+        shortcut: letters[index],
+      })),
+    [letters, options],
   );
-
-  // Keep the roving index in sync when the parent changes the selection (e.g.
-  // hands-free voice selection or a reset between questions).
-  useEffect(() => {
-    if (selectedIndex != null) setActiveIndex(selectedIndex);
-  }, [selectedIndex]);
-
-  // When the option set changes (next question), reset the roving target so we
-  // never point past the end of a shorter list.
-  useEffect(() => {
-    setActiveIndex((prev) => (prev >= options.length ? 0 : prev));
-  }, [options.length]);
-
-  const focusOption = useCallback((index: number) => {
-    const clamped = Math.max(0, Math.min(index, optionRefs.current.length - 1));
-    setActiveIndex(clamped);
-    optionRefs.current[clamped]?.focus();
-  }, []);
 
   useImperativeHandle(
     ref,
     () => ({
-      focusOption,
-      focusActive: () => focusOption(selectedIndex != null ? selectedIndex : activeIndex),
+      focusOption: (index: number) => groupRef.current?.focusOption(index),
+      focusActive: () => groupRef.current?.focusActive(),
     }),
-    [focusOption, selectedIndex, activeIndex],
-  );
-
-  const select = useCallback(
-    (index: number) => {
-      if (confirmed || disabled) return;
-      setActiveIndex(index);
-      onSelect(index);
-    },
-    [confirmed, disabled, onSelect],
-  );
-
-  const move = useCallback(
-    (delta: number) => {
-      const count = options.length;
-      if (count === 0) return;
-      const next = (activeIndex + delta + count) % count;
-      focusOption(next);
-    },
-    [activeIndex, options.length, focusOption],
-  );
-
-  const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (disabled) return;
-      switch (event.key) {
-        case 'ArrowDown':
-        case 'ArrowRight':
-          event.preventDefault();
-          move(1);
-          break;
-        case 'ArrowUp':
-        case 'ArrowLeft':
-          event.preventDefault();
-          move(-1);
-          break;
-        case 'Home':
-          event.preventDefault();
-          focusOption(0);
-          break;
-        case 'End':
-          event.preventDefault();
-          focusOption(options.length - 1);
-          break;
-        case ' ':
-        case 'Enter':
-          // Space/Enter selects the focused option (radio semantics).
-          event.preventDefault();
-          select(activeIndex);
-          break;
-        default: {
-          // Letter shortcut: jump to + select the matching option.
-          const idx = letters.findIndex(
-            (letter) => letter.toLowerCase() === event.key.toLowerCase(),
-          );
-          if (idx >= 0 && idx < options.length) {
-            event.preventDefault();
-            focusOption(idx);
-            select(idx);
-          }
-        }
-      }
-    },
-    [activeIndex, disabled, focusOption, letters, move, options.length, select],
+    [],
   );
 
   const feedback = useMemo(() => {
@@ -222,42 +147,33 @@ export const AccessibleQuestionRunner = forwardRef<
         {question}
       </p>
 
-      <div
-        role="radiogroup"
-        aria-label={groupLabel}
-        aria-describedby={stemId}
-        aria-disabled={disabled || undefined}
+      <AccessibleChoiceGroup
+        ref={groupRef}
+        options={runnerOptions}
+        selectedValue={selectedIndex}
+        onSelect={(value) => onSelect(Number(value))}
+        groupLabel={groupLabel}
+        describedBy={stemId}
+        disabled={disabled}
+        readOnly={confirmed}
         className="quiz-options"
-        onKeyDown={handleKeyDown}
       >
-        {options.map((option, index) => {
+        {({ index, radioProps }) => {
+          const option = options[index];
           const isSelected = selectedIndex === index;
           const isCorrect = confirmed && correctIndex === index;
           const isMissed = confirmed && isSelected && correctIndex !== index;
-          // Roving tabindex: only the active option is in the Tab order.
-          const tabbable = index === activeIndex;
           const optionLabel = `${letters[index] ?? index + 1}. ${option.text}`;
           return (
             <button
               key={option.id ?? index}
-              type="button"
-              ref={(node) => {
-                optionRefs.current[index] = node;
-              }}
-              role="radio"
-              aria-checked={isSelected}
+              {...radioProps}
               aria-label={optionLabel}
-              aria-keyshortcuts={letters[index]}
-              tabIndex={tabbable ? 0 : -1}
-              disabled={disabled}
-              aria-disabled={confirmed || undefined}
               className={cn('quiz-option', {
                 selected: isSelected && !confirmed,
                 correct: isCorrect,
                 incorrect: isMissed,
               })}
-              onClick={() => select(index)}
-              onFocus={() => setActiveIndex(index)}
             >
               <span className="quiz-option-letter" aria-hidden="true">
                 {letters[index] ?? index + 1}
@@ -265,8 +181,8 @@ export const AccessibleQuestionRunner = forwardRef<
               <span style={{ flex: 1, textAlign: 'left' }}>{option.text}</span>
             </button>
           );
-        })}
-      </div>
+        }}
+      </AccessibleChoiceGroup>
 
       {/* aria-live feedback: SR users hear the result + explanation on confirm. */}
       <div id={feedbackId} aria-live="polite" role="status" className="aqr-feedback">

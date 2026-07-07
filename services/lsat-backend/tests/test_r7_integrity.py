@@ -486,7 +486,10 @@ def test_full_backup_include_official_opt_in_keeps_embeddings(db_session):
 
 def test_import_backup_endpoint_returns_verify(client):
     exported = client.get("/api/bank/export").json()
-    r = client.post("/api/bank/import-backup", json={"payload": exported})
+    r = client.post(
+        "/api/bank/import-backup",
+        json={"payload": exported, "force_commit": True},
+    )
     assert r.status_code == 200
     body = r.json()
     # Existing count keys preserved (frontend contract) + new verify block.

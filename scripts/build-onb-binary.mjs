@@ -37,6 +37,8 @@ import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkOpenNotebookSourcePin } from './check-onb-source-pin.mjs';
+import { recordSidecarProvenance } from './sidecar-provenance.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(__filename, '..', '..');
@@ -81,6 +83,20 @@ function exists(path) {
   }
 }
 
+function gitOutput(args) {
+  try {
+    return (
+      execSync(`git -C "${ONB_DIR}" ${args}`, {
+        encoding: 'utf8',
+        shell: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim() || null
+    );
+  } catch {
+    return null;
+  }
+}
+
 /** Resolve a base Python interpreter on PATH (python, then python3). */
 function resolveBasePython() {
   for (const cmd of [process.env.PYTHON, 'python', 'python3'].filter(Boolean)) {
@@ -104,6 +120,13 @@ function venvPython() {
 
 ensure(existsSync(ONB_DIR), `Could not find spike/open-notebook/ at ${ONB_DIR}. Clone it before running this script.`);
 ensure(existsSync(ENTRY), `Could not find FastAPI entry at ${ENTRY}.`);
+
+const expectedOnbRef = process.env.ONB_GIT_SHA || process.env.ONB_GIT_REF || '';
+if (expectedOnbRef || process.env.CI) {
+  const pin = checkOpenNotebookSourcePin({ dir: ONB_DIR, expectedRef: expectedOnbRef });
+  ensure(pin.ok, pin.errors.join('; '));
+}
+const onbSourceHead = gitOutput('rev-parse HEAD');
 
 if (CLEAN) {
   for (const p of [PYINST_BUILD, PYINST_DIST]) {
@@ -344,6 +367,13 @@ if (existsSync(dest)) rmSync(dest);
 const { copyFileSync, chmodSync } = await import('node:fs');
 copyFileSync(built, dest);
 if (process.platform !== 'win32') chmodSync(dest, 0o755);
+const provenance = await recordSidecarProvenance({
+  service: 'open-notebook binary',
+  binaryPath: dest,
+  source: onbSourceHead ? `spike/open-notebook@${onbSourceHead}` : 'scripts/build-onb-binary.mjs',
+  optional: true,
+});
 
 console.log(`\n✓ Bundled open-notebook binary -> ${dest.split(sep).slice(-4).join(sep)}`);
+console.log(`  Provenance -> ${provenance.sha256.slice(0, 12)}… (${provenance.size} bytes)`);
 console.log(`  Tauri release builds will now include it under bundle.resources.`);

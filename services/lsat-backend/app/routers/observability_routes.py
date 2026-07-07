@@ -18,6 +18,23 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _provider_capabilities_from_health(ai_health: dict[str, Any]) -> dict[str, Any]:
+    capabilities = ai_health.get("capabilities")
+    if isinstance(capabilities, dict):
+        return capabilities
+    realtime = (
+        ai_health.get("provider")
+        or ai_health.get("realtime_provider")
+        or config.LOCAL_PROVIDER
+    )
+    offline = ai_health.get("offline_provider") or llm.offline_provider_name()
+    return {
+        "realtime": llm.provider_capabilities(realtime),
+        "offline": llm.provider_capabilities(offline),
+        "matrix": llm.provider_capability_matrix(),
+    }
+
+
 @router.get("/observability/status", response_model=dict[str, Any])
 def status(session: Session = Depends(get_session)) -> dict[str, Any]:
     """Live backend health: gen queue depth, worker liveness, coach freshness,
@@ -127,6 +144,7 @@ async def ready(session: Session = Depends(get_session)) -> dict[str, Any]:
     active_provider = (
         ai_health.get("provider") or ai_health.get("realtime_provider") or "ollama"
     )
+    capabilities = _provider_capabilities_from_health(ai_health)
     ai_ready = (
         provider_reachable
         and explain_ready
@@ -160,6 +178,7 @@ async def ready(session: Session = Depends(get_session)) -> dict[str, Any]:
             "model_available": model_available,
             "provider": ai_health.get("offline_provider"),
             "realtime_provider": ai_health.get("realtime_provider"),
+            "capabilities": capabilities,
         },
         "errors": readiness["errors"],
         "warnings": warnings,
@@ -301,6 +320,10 @@ def health_aggregated(session: Session = Depends(get_session)) -> dict[str, Any]
     tokens = observability.cloud_token_totals()
     budget = config.CLOUD_MONTHLY_BUDGET_USD
     budget_status = llm.cloud_budget_status()
+    provider_capabilities = _provider_capabilities_from_health({
+        "realtime_provider": config.LOCAL_PROVIDER,
+        "offline_provider": llm.offline_provider_name(),
+    })
 
     # Single rolled-up verdict. backend_readiness already classifies itself as
     # ok/warning/error; map "warning" → "degraded" for the host badge vocabulary
@@ -338,6 +361,7 @@ def health_aggregated(session: Session = Depends(get_session)) -> dict[str, Any]
         "cloud_budget_within": budget_status["within_budget"],
         # DB health: PRAGMA / WAL / SQLITE_BUSY contention snapshot.
         "sqlite_health": db_health,
+        "provider_capabilities": provider_capabilities,
         # Full nested readiness for drill-down (same shape as /observability/status).
         "readiness": readiness,
     }

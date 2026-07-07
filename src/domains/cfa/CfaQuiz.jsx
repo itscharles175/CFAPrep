@@ -183,8 +183,9 @@ export default function CfaQuiz() {
 
   useEffect(() => {
     function handleKeyboard(event) {
+      if (event.defaultPrevented) return;
       const target = event.target;
-      if (target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'A'].includes(target.tagName)) return;
       if (!q || finished) return;
       const key = event.key.toLowerCase();
       const optionIndex = letters.findIndex((letter) => letter.toLowerCase() === key);

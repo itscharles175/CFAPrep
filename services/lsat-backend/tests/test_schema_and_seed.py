@@ -39,4 +39,7 @@ def test_preptests_endpoint(client):
 
 
 def test_health(client):
-    assert client.get("/api/health").json() == {"ok": True}
+    body = client.get("/api/health").json()
+    assert body["ok"] is True
+    assert body["service"] == "lsat-backend"
+    assert isinstance(body["version"], str) and body["version"]

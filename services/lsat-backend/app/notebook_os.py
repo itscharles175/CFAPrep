@@ -15,7 +15,9 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import threading
 import zipfile
+from contextlib import contextmanager
 from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
@@ -28,6 +30,7 @@ from sqlalchemy import and_, or_, text
 from sqlmodel import Session, select
 
 from . import config, embeddings, llm
+from .ai import strip_think
 from .search import _fts_query
 from .models import (
     ActivityEvent,
@@ -115,6 +118,8 @@ OFFICIAL_SIMILARITY_THRESHOLD = 0.92
 _SIMILARITY_MIN_BODY_CHARS = 40
 MAX_SOURCE_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_URL_SOURCE_BYTES = 5 * 1024 * 1024
+MAX_SOURCE_CONTENT_CHARS = 300_000
+MAX_DOCX_DOCUMENT_XML_BYTES = 2 * 1024 * 1024
 
 
 class _TextExtractor(HTMLParser):
@@ -490,11 +495,32 @@ def source_from_upload(
     return {
         "source_type": inferred,
         "content_type": media_type,
-        "content": text,
+        "content": _bounded_source_content(text),
     }
 
 
 MAX_URL_REDIRECTS = 5
+_URL_DNS_PIN_LOCK = threading.RLock()
+
+
+def _read_url_response_bounded(response: httpx.Response) -> bytes:
+    declared_length = response.headers.get("content-length")
+    if declared_length:
+        try:
+            if int(declared_length) > MAX_URL_SOURCE_BYTES:
+                raise ValueError("source_url_too_large")
+        except ValueError:
+            if declared_length.strip().isdigit():
+                raise
+
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_bytes():
+        total += len(chunk)
+        if total > MAX_URL_SOURCE_BYTES:
+            raise ValueError("source_url_too_large")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def source_from_url(url: str, *, requested_type: str = "web") -> dict[str, str]:
@@ -509,43 +535,40 @@ def source_from_url(url: str, *, requested_type: str = "web") -> dict[str, str]:
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("unsupported_url")
     next_url = url
-    with httpx.Client(timeout=12.0, follow_redirects=False) as client:
+    body = b""
+    content_type = "text/html"
+    encoding = "utf-8"
+    with httpx.Client(timeout=12.0, follow_redirects=False, trust_env=False) as client:
         for _ in range(MAX_URL_REDIRECTS + 1):
             hop = urlparse(next_url)
             if hop.scheme not in {"http", "https"}:
                 raise ValueError("unsupported_url")
-            _validate_public_url(hop.hostname or "")
-            response = client.get(next_url)
-            if response.is_redirect:
-                location = response.headers.get("location")
-                if not location:
+            with _public_url_dns_guard(hop.hostname or ""):
+                with client.stream("GET", next_url) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location:
+                            response.raise_for_status()
+                        next_url = str(httpx.URL(next_url).join(location))
+                        continue
+                    response.raise_for_status()
+                    body = _read_url_response_bounded(response)
+                    content_type = response.headers.get("content-type", "").split(";", 1)[0] or "text/html"
+                    encoding = response.encoding or "utf-8"
                     break
-                next_url = str(httpx.URL(next_url).join(location))
-                continue
-            break
         else:
             raise ValueError("too_many_redirects")
-        response.raise_for_status()
-    declared_length = response.headers.get("content-length")
-    if declared_length:
-        try:
-            if int(declared_length) > MAX_URL_SOURCE_BYTES:
-                raise ValueError("source_url_too_large")
-        except ValueError:
-            if declared_length.strip().isdigit():
-                raise
-    if len(response.content) > MAX_URL_SOURCE_BYTES:
-        raise ValueError("source_url_too_large")
-    content_type = response.headers.get("content-type", "").split(";", 1)[0] or "text/html"
     source_type = requested_type if requested_type != "auto" else "web"
+    response_text = body.decode(encoding, errors="replace")
     if "html" in content_type:
-        text = _html_to_text(response.text)
+        text = _html_to_text(response_text)
     elif source_type in TRANSCRIPT_TYPES or url.lower().endswith((".vtt", ".srt")):
-        text = _normalize_transcript(response.text)
+        text = _normalize_transcript(response_text)
         if source_type == "web":
             source_type = "video_transcript"
     else:
-        text = response.text
+        text = response_text
+    text = _bounded_source_content(text)
     return {
         "source_type": source_type,
         "content_type": content_type,
@@ -553,14 +576,33 @@ def source_from_url(url: str, *, requested_type: str = "web") -> dict[str, str]:
     }
 
 
-def _validate_public_url(hostname: str) -> None:
-    host = hostname.strip().strip("[]").lower()
+def _bounded_source_content(text: str) -> str:
+    if len(text) > MAX_SOURCE_CONTENT_CHARS:
+        raise ValueError("source_content_too_large")
+    return text
+
+
+def _normalize_url_host(hostname: str) -> str:
+    return hostname.strip().strip("[]").lower()
+
+
+def _validate_public_url(hostname: str) -> set[str]:
+    """Return validated public IPs for ``hostname`` or raise.
+
+    The returned addresses are later pinned through the actual request so a host
+    cannot validate as public and then re-resolve to a private address at connect
+    time.
+    """
+
+    host = _normalize_url_host(hostname)
     if not host or host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
         raise ValueError("private_url_blocked")
     try:
         addresses = {info[4][0] for info in socket.getaddrinfo(host, None)}
     except socket.gaierror as exc:
         raise ValueError("url_host_unresolved") from exc
+    if not addresses:
+        raise ValueError("url_host_unresolved")
     for address in addresses:
         ip = ipaddress.ip_address(address)
         if (
@@ -570,8 +612,36 @@ def _validate_public_url(hostname: str) -> None:
             or ip.is_multicast
             or ip.is_reserved
             or ip.is_unspecified
+            or not ip.is_global
         ):
             raise ValueError("private_url_blocked")
+    return addresses
+
+
+@contextmanager
+def _public_url_dns_guard(hostname: str):
+    host = _normalize_url_host(hostname)
+    with _URL_DNS_PIN_LOCK:
+        addresses = _validate_public_url(host)
+        original_getaddrinfo = socket.getaddrinfo
+
+        def pinned_getaddrinfo(query_host, port, family=0, type=0, proto=0, flags=0):  # noqa: ANN001
+            query = _normalize_url_host(str(query_host))
+            if query != host:
+                return original_getaddrinfo(query_host, port, family, type, proto, flags)
+            results = []
+            for address in sorted(addresses):
+                ip = ipaddress.ip_address(address)
+                addr_family = socket.AF_INET6 if ip.version == 6 else socket.AF_INET
+                sockaddr = (address, port, 0, 0) if ip.version == 6 else (address, port)
+                results.append((addr_family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", sockaddr))
+            return results
+
+        socket.getaddrinfo = pinned_getaddrinfo
+        try:
+            yield
+        finally:
+            socket.getaddrinfo = original_getaddrinfo
 
 
 def _infer_source_type(*, filename: str, content_type: str, requested: str) -> str:
@@ -649,7 +719,12 @@ def _extract_pdf_text(data: bytes) -> str:
 def _extract_docx_text(data: bytes) -> str:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            xml = archive.read("word/document.xml")
+            info = archive.getinfo("word/document.xml")
+            if info.file_size > MAX_DOCX_DOCUMENT_XML_BYTES:
+                raise ValueError("source_upload_too_large")
+            xml = archive.read(info)
+    except ValueError:
+        raise
     except (KeyError, zipfile.BadZipFile) as exc:
         raise ValueError("docx_parse_failed") from exc
     root = ElementTree.fromstring(xml)
@@ -2490,13 +2565,6 @@ def _clip(value: str, limit: int = 420) -> str:
     return text[: max(0, limit - 3)].rstrip() + "..."
 
 
-_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-
-
-def _strip_think(value: str) -> str:
-    return _THINK_BLOCK_RE.sub("", value or "").replace("<think>", "").replace("</think>", "").strip()
-
-
 def _model_assisted_text(
     *,
     provider: str,
@@ -2540,7 +2608,7 @@ def _model_assisted_text(
             system=system,
             timeout=min(float(config.EXPLAIN_REQUEST_TIMEOUT_S), 45.0),
         )
-        text = _strip_think(str(raw))
+        text = strip_think(str(raw))
         if not text:
             return fallback, {
                 "mode": "template_fallback",

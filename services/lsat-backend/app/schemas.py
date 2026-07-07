@@ -16,6 +16,8 @@ coverage in ``tests/test_response_models.py``.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -203,3 +205,98 @@ class CrossDomainAnalytics(_AdditiveModel):
     accuracy_by_domain: list[CrossDomainDomainStat]
     weakest_types: list[CrossDomainWeakType]
     trend_30d: list[CrossDomainTrendPoint]
+
+
+# --- DATA-1/LEARN-3/LEARN-6 — host-consumed adaptive planning contracts -------
+
+
+class AdaptiveNextRecommendation(_AdditiveModel):
+    """One item from ``POST /api/adaptivity/next``.
+
+    The route returns either LSAT-native recommendations (``question_id`` +
+    embedded ``question``) or host-plane recommendations (``content_id``/``key``).
+    Optional fields keep both shapes under one additive schema without changing
+    either payload.
+    """
+
+    question_id: int | None = None
+    content_id: str | None = None
+    key: str | None = None
+    domain: str | None = None
+    q_type: str | None = None
+    difficulty: int | None = None
+    difficulty_estimate: float | None = None
+    mastery_fraction: float | None = None
+    expected_success: float
+    information_score: float | None = None
+    raw_information: float | None = None
+    utility_score: float
+    zpd_fit: float
+    reason: str
+    source: str | None = None
+    selector_strategy: str | None = None
+    question: dict[str, Any] | None = None
+    leech: bool | None = None
+    attempts: int | None = None
+
+
+class AdaptiveNextResponse(_AdditiveModel):
+    """``POST /api/adaptivity/next`` response envelope."""
+
+    ability: dict[str, Any]
+    selector: dict[str, Any]
+    count: int
+    recommendations: list[AdaptiveNextRecommendation]
+    guardrails: dict[str, Any]
+    domain: str | None = None
+
+
+class StudyTodayTask(_AdditiveModel):
+    """One task from ``GET /api/study/today``.
+
+    The task list is intentionally additive: LSAT tasks, host drills, pacing
+    drills, and future planner rows all share the headline fields below while
+    preserving their specialized keys.
+    """
+
+    type: str
+    label: str
+    est_minutes: float | None = None
+    count: int | None = None
+    q_type: str | None = None
+    domain: str | None = None
+    utility_model: str | None = None
+    utility_score: float | None = None
+    selector_strategy: str | None = None
+    target_difficulty: float | None = None
+
+
+class StudyTodayResponse(_AdditiveModel):
+    """``GET /api/study/today`` daily plan envelope."""
+
+    has_plan: bool
+    target_score: int | None
+    exam_date: str | None
+    daily_minutes: int | None
+    days_to_exam: int | None
+    predicted_score: int | None
+    forecast: dict[str, Any]
+    due_count: int
+    weakest_types: list[dict[str, Any]]
+    tasks: list[StudyTodayTask]
+    notebook_context: dict[str, Any]
+    intensity: str
+    minutes_budget: int
+    estimated_minutes: float
+    leech_count: int
+    concept_gap_count: int
+    rationale: str
+    ability_selector: dict[str, Any]
+    utility_model: str
+    utility: dict[str, Any] | None
+    selector_summary: dict[str, Any]
+    include_host: bool | None = None
+    planes_merged: list[str] | None = None
+    host_task_count: int | None = None
+    budget_source: str | None = None
+    cross_domain: dict[str, Any] | None = None

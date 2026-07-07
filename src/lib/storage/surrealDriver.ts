@@ -188,7 +188,8 @@ export function decodeId(slug: string): string {
   const bytes: number[] = [];
   for (let i = 0; i < slug.length; i += 1) {
     const ch = slug[i];
-    if (ch === '%') {
+    const hex = slug.slice(i + 1, i + 3);
+    if (ch === '%' && /^[0-9A-Fa-f]{2}$/.test(hex)) {
       bytes.push(parseInt(slug.slice(i + 1, i + 3), 16));
       i += 2;
     } else {
@@ -196,6 +197,31 @@ export function decodeId(slug: string): string {
     }
   }
   return new TextDecoder().decode(Uint8Array.from(bytes));
+}
+
+function recordIdPart(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  return recordIdPart(record.name ?? record.value ?? record.id ?? record.tb ?? record.table ?? record.rid);
+}
+
+function hostIdFromSurrealRecordId(rawId: unknown, table: string): string {
+  if (rawId == null) return '';
+  if (typeof rawId === 'string') {
+    const prefix = `${table}:`;
+    return rawId.startsWith(prefix) ? decodeId(rawId.slice(prefix.length)) : rawId;
+  }
+  if (typeof rawId === 'object') {
+    const record = rawId as Record<string, unknown>;
+    const rid = recordIdPart(record.rid);
+    if (rid) return hostIdFromSurrealRecordId(rid, table);
+    const tableName = recordIdPart(record.tb ?? record.table);
+    const id = recordIdPart(record.id);
+    if (tableName === table && id != null) return decodeId(id);
+  }
+  return String(rawId);
 }
 
 function encodeSettingKey(key: string): string {
@@ -281,12 +307,9 @@ const chunks: ChunkStore = {
     const rows = await client.select<SurrealRecord>('chunks');
     const arr = Array.isArray(rows) ? rows : [];
     return arr.map((r) => {
-      // Recover the original host id: the record id is `chunks:<sanitiseId(id)>`,
-      // so decode the slug after the table prefix. (A bare string with no ':' is
-      // already the raw id.)
-      const rawId = r['id'];
-      const idStr = typeof rawId === 'string' ? rawId : String(rawId ?? '');
-      const id = idStr.includes(':') ? decodeId(idStr.slice(idStr.indexOf(':') + 1)) : idStr;
+      // Recover the original host id from `chunks:<sanitiseId(id)>`. If a mock
+      // or older row returns a raw payload id instead, leave it untouched.
+      const id = hostIdFromSurrealRecordId(r['id'], 'chunks');
       const out: SourceChunkInput = {
         id,
         documentId: String(r['documentId'] ?? ''),
@@ -355,8 +378,7 @@ const chunks: ChunkStore = {
       else if (hasEmbedding) score = vec;
       else if (hasQuery) score = bm;
       else score = 0;
-      const idValue = r['id'];
-      const id = typeof idValue === 'string' ? idValue : String(idValue ?? '');
+      const id = hostIdFromSurrealRecordId(r['id'], 'chunks');
       return {
         id,
         documentId: String(r['documentId'] ?? ''),

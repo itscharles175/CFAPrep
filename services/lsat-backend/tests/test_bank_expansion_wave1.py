@@ -7,6 +7,7 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
 from sqlmodel import select
 
 from app import dataset_normalizers as dn
@@ -146,6 +147,34 @@ def test_reclor_zip_loader_reads_local_json_files(tmp_path, db_session):
         db_session, "reclor", local_path=str(zpath), nc_acknowledged=True,
     )
     assert res.inserted == 1
+
+
+def test_reclor_zip_loader_rejects_path_traversal_members(tmp_path):
+    zpath = tmp_path / "reclor-traversal.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("../train.json", json.dumps([_RECLOR_ROW]))
+
+    with pytest.raises(ValueError, match="reclor_zip_invalid_member_path"):
+        list(import_dataset.read_reclor_zip(zpath))
+
+
+def test_reclor_zip_loader_rejects_oversized_json_members(tmp_path, monkeypatch):
+    monkeypatch.setattr(import_dataset, "MAX_RECLOR_MEMBER_BYTES", 8)
+    zpath = tmp_path / "reclor-huge-member.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("train.json", json.dumps([_RECLOR_ROW]))
+
+    with pytest.raises(ValueError, match="reclor_zip_member_too_large"):
+        list(import_dataset.read_reclor_zip(zpath))
+
+
+def test_reclor_zip_loader_rejects_unexpected_json_members(tmp_path):
+    zpath = tmp_path / "reclor-unexpected-json.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("answers.json", json.dumps([_RECLOR_ROW]))
+
+    with pytest.raises(ValueError, match="reclor_zip_unexpected_json_member"):
+        list(import_dataset.read_reclor_zip(zpath))
 
 
 # --- 1.4 lexical-leak gate -------------------------------------------------

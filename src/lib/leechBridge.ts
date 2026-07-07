@@ -31,8 +31,8 @@ import {
   type CrossDomainReviewCard,
   type RawLsatSrsCard,
 } from './dataDictionary';
+import { fetchLsatSidecar } from './lsatSidecarClient';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 const LEECHES_PATH = '/api/srs/leeches';
 const CONCEPT_GAP_PATH = '/api/srs/concept-gap-queue';
 
@@ -111,8 +111,10 @@ async function fetchQueue(
   includeHost: boolean,
   signal: AbortSignal,
 ): Promise<CrossDomainReviewCard[]> {
-  const url = `${LSAT_API_BASE}${path}${includeHost ? '?include_host=true' : ''}`;
-  const res = await fetch(url, { signal, headers: { accept: 'application/json' } });
+  const res = await fetchLsatSidecar(`${path}${includeHost ? '?include_host=true' : ''}`, {
+    signal,
+    headers: { accept: 'application/json' },
+  });
   if (!res.ok) throw new Error(`LSAT backend responded ${res.status}.`);
   const data = (await res.json()) as RawQueueResponse;
   const lsatRows = Array.isArray(data.cards) ? data.cards : [];

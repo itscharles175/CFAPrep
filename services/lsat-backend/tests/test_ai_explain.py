@@ -11,6 +11,12 @@ from app import ai
 def test_strip_think():
     assert ai.strip_think("<think>reasoning</think>Answer") == "Answer"
     assert ai.strip_think("a<think>x</think>b") == "ab"
+    assert ai.strip_think("<reasoning>private</reasoning>Answer") == "Answer"
+    assert ai.strip_think("<thought>private</thought>Answer") == "Answer"
+    assert ai.strip_think("<thinking mode='deep'>private</thinking>Answer") == "Answer"
+    assert ai.strip_think("A<think>outer <think>inner</think> still outer</think>B") == "AB"
+    assert ai.strip_think("Visible <think>truncated reasoning") == "Visible"
+    assert ai.strip_think("```thinking\nprivate\n```\nAnswer") == "Answer"
     assert ai.strip_think("no tags here") == "no tags here"
 
 
@@ -22,6 +28,29 @@ def test_think_filter_streaming():
     out += flt.flush()
     assert "secret" not in out
     assert "Hello" in out and "world" in out
+
+
+def test_think_filter_streaming_variants_and_fences():
+    flt = ai._ThinkFilter()
+    out = ""
+    for chunk in ["```thi", "nking\nprivate", "\n``", "`\nAnswer"]:
+        out += flt.feed(chunk)
+    out += flt.flush()
+    assert out == "Answer"
+
+    flt = ai._ThinkFilter()
+    out = ""
+    for chunk in ["A", "<reason", "ing>secret", "</reason", "ing>B"]:
+        out += flt.feed(chunk)
+    out += flt.flush()
+    assert out == "AB"
+
+    flt = ai._ThinkFilter()
+    out = ""
+    for chunk in ["Intro ", "<thought>private"]:
+        out += flt.feed(chunk)
+    out += flt.flush()
+    assert out == "Intro "
 
 
 def _parse_sse(text: str):

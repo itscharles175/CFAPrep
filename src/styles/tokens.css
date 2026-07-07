@@ -423,8 +423,8 @@
     --surface-soft:  rgba(37, 99, 235, 0.08);
   }
   :root[data-theme="light"] [data-domain="excel"] {
-    --accent:        hsl(142.4 71.8% 29.2%); /* #15803D */
-    --accent-hover:  hsl(142.8 64.2% 24.1%); /* #166534 */
+    --accent:        hsl(142.8 64.2% 24.1%); /* #166534 */
+    --accent-hover:  hsl(143.8 61.2% 20.2%); /* #14532D */
     --surface-soft:  rgba(21, 128, 61, 0.10);
   }
   :root[data-theme="light"] [data-domain="quant"] {

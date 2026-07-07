@@ -15,19 +15,17 @@
  * renders nothing (or an unobtrusive offline note in `full` mode) so a missing
  * sidecar never blocks the host's local-first plan above it.
  *
- * DATA-1: `/api/study/today` predates the next `api.gen.ts` regeneration, so the
- * path is a string literal and the body is parsed defensively (same idiom as
- * LEARN-2's `/api/study/due-unified`). Swap to `keyof paths` once the contract is
- * regenerated with the `include_host` query param.
+ * DATA-1: `/api/study/today` is present in the generated OpenAPI path map. The
+ * body is still parsed defensively because the section must degrade cleanly if a
+ * user runs an older or unreachable sidecar.
  */
 import { useEffect, useState } from 'react';
 import { GraduationCap, BrainCircuit, Table2, BookOpen, Layers, Inbox, RefreshCw, Target, Timer } from 'lucide-react';
 import { Surface, StatusBadge, InlineCluster } from '../ui/Primitives';
+import { fetchLsatSidecarJson } from '../../lib/lsatSidecarClient';
+import type { paths } from '../../domains/lsat/lib/api.gen';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
-// Not yet bound to `keyof paths` — the `include_host` query ships ahead of the
-// next contract regeneration.
-const STUDY_TODAY_PATH = '/api/study/today';
+const STUDY_TODAY_PATH = '/api/study/today' satisfies keyof paths;
 /** Deep-link into the LSAT app for an LSAT-native task (host hard-navigates). */
 const LSAT_DOMAIN_PATH = '/lsat';
 
@@ -134,37 +132,29 @@ export async function fetchUnifiedPlan(
   opts: { timeoutMs?: number } = {},
 ): Promise<UnifiedPlanResult> {
   const { timeoutMs = 3000 } = opts;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${STUDY_TODAY_PATH}?include_host=true`, {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) {
-      return { ok: false, fromBackend: false, plan: null, error: `Sidecar responded ${res.status}.` };
-    }
-    let data: unknown = null;
-    try {
-      data = await res.json();
-    } catch {
-      return { ok: false, fromBackend: false, plan: null, error: 'Unparseable plan body.' };
-    }
-    const plan = planFromRaw(data);
-    if (!plan) {
-      return { ok: false, fromBackend: false, plan: null, error: 'Unexpected plan shape.' };
-    }
-    return { ok: true, fromBackend: true, plan };
-  } catch (err) {
+  const res = await fetchLsatSidecarJson(`${STUDY_TODAY_PATH}?include_host=true`, {
+    timeoutMs,
+    headers: { accept: 'application/json' },
+  });
+  if (!res.reachable) {
     return {
       ok: false,
       fromBackend: false,
       plan: null,
-      error: err instanceof Error ? err.message : String(err),
+      error: res.error,
     };
-  } finally {
-    clearTimeout(timer);
   }
+  if (!res.ok) {
+    return { ok: false, fromBackend: false, plan: null, error: `Sidecar responded ${res.status}.` };
+  }
+  if (res.data == null) {
+    return { ok: false, fromBackend: false, plan: null, error: 'Unparseable plan body.' };
+  }
+  const plan = planFromRaw(res.data);
+  if (!plan) {
+    return { ok: false, fromBackend: false, plan: null, error: 'Unexpected plan shape.' };
+  }
+  return { ok: true, fromBackend: true, plan };
 }
 
 function iconForTask(task: UnifiedPlanTask, size: number) {

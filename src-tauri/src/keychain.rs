@@ -18,9 +18,17 @@
 //! (e.g. `studyvault/vault-dek`). The secret blob is the UTF-8 bytes of the
 //! base64 DEK.
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+const APP_KEYCHAIN_SERVICE: &str = "studyvault";
+const APP_KEYCHAIN_ACCOUNT: &str = "vault-dek";
+const LSAT_DB_DEK_ACCOUNT: &str = "lsat-db-dek";
+const LSAT_DB_DEK_BYTES: usize = 32;
+
 /// Tauri command: store (or overwrite) a secret in the OS keychain.
 #[tauri::command]
 pub fn keychain_set(service: String, account: String, secret: String) -> Result<(), String> {
+    validate_app_keychain_target(&service, &account)?;
     platform::set(&service, &account, &secret)
 }
 
@@ -28,6 +36,7 @@ pub fn keychain_set(service: String, account: String, secret: String) -> Result<
 /// is stored for `{service}/{account}` (distinct from an error).
 #[tauri::command]
 pub fn keychain_get(service: String, account: String) -> Result<Option<String>, String> {
+    validate_app_keychain_target(&service, &account)?;
     platform::get(&service, &account)
 }
 
@@ -35,12 +44,53 @@ pub fn keychain_get(service: String, account: String) -> Result<Option<String>, 
 /// secret is a no-op success.
 #[tauri::command]
 pub fn keychain_delete(service: String, account: String) -> Result<(), String> {
+    validate_app_keychain_target(&service, &account)?;
     platform::delete(&service, &account)
+}
+
+/// Internal desktop-supervisor helper: fetch or create the LSAT SQLite
+/// field-encryption key. This target is intentionally NOT exposed through the
+/// webview-facing keychain commands above.
+pub fn get_or_create_lsat_db_dek_b64() -> Result<String, String> {
+    if let Some(existing) = platform::get(APP_KEYCHAIN_SERVICE, LSAT_DB_DEK_ACCOUNT)? {
+        validate_lsat_db_dek_b64(&existing)?;
+        return Ok(existing);
+    }
+    let generated = generate_lsat_db_dek_b64()?;
+    platform::set(APP_KEYCHAIN_SERVICE, LSAT_DB_DEK_ACCOUNT, &generated)?;
+    Ok(generated)
+}
+
+pub fn generate_lsat_db_dek_b64() -> Result<String, String> {
+    let mut bytes = [0u8; LSAT_DB_DEK_BYTES];
+    getrandom::getrandom(&mut bytes)
+        .map_err(|e| format!("failed to generate LSAT DB encryption key: {e}"))?;
+    Ok(STANDARD.encode(bytes))
+}
+
+pub fn validate_lsat_db_dek_b64(secret: &str) -> Result<(), String> {
+    let decoded = STANDARD
+        .decode(secret.as_bytes())
+        .map_err(|e| format!("LSAT DB encryption key is not valid base64: {e}"))?;
+    if decoded.len() != LSAT_DB_DEK_BYTES {
+        return Err(format!(
+            "LSAT DB encryption key must decode to {LSAT_DB_DEK_BYTES} bytes"
+        ));
+    }
+    Ok(())
 }
 
 /// The credential target name for a `{service}/{account}` pair.
 fn target_name(service: &str, account: &str) -> String {
     format!("{service}/{account}")
+}
+
+fn validate_app_keychain_target(service: &str, account: &str) -> Result<(), String> {
+    if service == APP_KEYCHAIN_SERVICE && account == APP_KEYCHAIN_ACCOUNT {
+        Ok(())
+    } else {
+        Err("keychain access is restricted to StudyVault's secure-vault key".into())
+    }
 }
 
 #[cfg(windows)]
@@ -161,7 +211,11 @@ mod platform {
 
 #[cfg(test)]
 mod tests {
-    use super::target_name;
+    use super::{
+        generate_lsat_db_dek_b64, target_name, validate_app_keychain_target,
+        validate_lsat_db_dek_b64,
+    };
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     #[test]
     fn target_name_joins_service_and_account() {
@@ -169,5 +223,31 @@ mod tests {
             target_name("studyvault", "vault-dek"),
             "studyvault/vault-dek"
         );
+    }
+
+    #[test]
+    fn keychain_target_validation_allows_only_secure_vault_key() {
+        assert!(validate_app_keychain_target("studyvault", "vault-dek").is_ok());
+        assert!(
+            validate_app_keychain_target("studyvault", "lsat-db-dek").is_err(),
+            "the LSAT DB key is internal to the sidecar supervisor, not exposed to webview commands"
+        );
+        assert!(validate_app_keychain_target("studyvault", "other").is_err());
+        assert!(validate_app_keychain_target("other", "vault-dek").is_err());
+    }
+
+    #[test]
+    fn generate_lsat_db_dek_b64_returns_32_bytes_as_base64() {
+        let key = generate_lsat_db_dek_b64().expect("generated key");
+        let decoded = STANDARD.decode(key.as_bytes()).expect("base64");
+        assert_eq!(decoded.len(), 32);
+        assert!(validate_lsat_db_dek_b64(&key).is_ok());
+    }
+
+    #[test]
+    fn validate_lsat_db_dek_b64_rejects_wrong_length() {
+        let short = STANDARD.encode([7u8; 31]);
+        assert!(validate_lsat_db_dek_b64(&short).is_err());
+        assert!(validate_lsat_db_dek_b64("not base64").is_err());
     }
 }

@@ -7,6 +7,7 @@ deterministically.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,28 @@ def test_tasksource_rc_groups_passages_by_id_string():
     assert any("199106_1-RC_1" in g for g in groups)
     # All come in as RC.
     assert all(r["section_type"] == "RC" for r in recs)
+
+
+def test_read_jsonl_rejects_oversized_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(import_dataset, "MAX_JSONL_BYTES", 8)
+    path = tmp_path / "too-big.jsonl"
+    path.write_text('{"row": 1}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="dataset_file_too_large"):
+        list(read_jsonl(path))
+
+
+def test_read_jsonl_rejects_symlinked_files_when_supported(tmp_path):
+    real = tmp_path / "real.jsonl"
+    link = tmp_path / "linked.jsonl"
+    real.write_text('{"row": 1}\n', encoding="utf-8")
+    try:
+        os.symlink(real, link)
+    except OSError as exc:
+        pytest.skip(f"symlink fixture unavailable: {exc}")
+
+    with pytest.raises(ValueError, match="dataset_path_symlink"):
+        list(read_jsonl(link))
 
 
 def test_content_hash_is_order_insensitive_for_choices():

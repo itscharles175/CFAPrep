@@ -208,6 +208,38 @@ describe('HandsFreeController (A11Y-3)', () => {
     fireEvent.click(screen.getByRole('button', { name: /answer by voice/i }));
     await screen.findByText(/Didn’t catch an option/i);
   });
+
+  it('accepts domain style hooks while preserving button names and status semantics', async () => {
+    const engine = new HandsFreeEngine({ recognize: vi.fn().mockResolvedValue({ transcript: 'option B' }) });
+    render(
+      <HandsFreeController
+        question="Q"
+        options={VOICE_OPTIONS}
+        onSelect={vi.fn()}
+        engine={engine}
+        testMode
+        className="lsat-hands-free"
+        buttonClassName="lsat-button"
+        primaryButtonClassName="lsat-primary"
+        secondarySmallButtonClassName="lsat-secondary-small"
+        statusClassName="lsat-status"
+        confirmRowClassName="lsat-confirm-row"
+        mutedTextClassName="lsat-muted"
+        errorClassName="lsat-error"
+        spinnerClassName="lsat-spin"
+      />,
+    );
+
+    const group = screen.getByRole('group', { name: /hands-free study controls/i });
+    expect(group).toHaveClass('hands-free-controller');
+    expect(group).toHaveClass('lsat-hands-free');
+    expect(screen.getByRole('button', { name: /answer by voice/i })).toHaveClass('lsat-button');
+
+    fireEvent.click(screen.getByRole('button', { name: /answer by voice/i }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveClass('lsat-status');
+    expect(screen.getByRole('button', { name: /confirm option b/i })).toHaveClass('lsat-primary');
+  });
 });
 
 /**
@@ -270,6 +302,54 @@ describe('CfaQuiz adoption shape', () => {
     fireEvent.click(screen.getByRole('button', { name: /answer by voice/i }));
     await waitFor(() =>
       expect(screen.getAllByRole('radio')[2]).toHaveAttribute('aria-checked', 'true'),
+    );
+  });
+});
+
+describe('CFA mock/vignette hands-free adoption shape', () => {
+  const VOICE_OPTIONS = OPTIONS.map((o, i) => ({ letter: ['A', 'B', 'C', 'D'][i], text: o.text }));
+
+  beforeAll(() => {
+    (window as unknown as { speechSynthesis: unknown }).speechSynthesis = {};
+    (window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = function () {};
+  });
+  afterAll(() => {
+    delete (window as unknown as { speechSynthesis?: unknown }).speechSynthesis;
+    delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
+  });
+
+  it('timed mock shape requires voice confirmation before applying the numeric selected index', async () => {
+    function Page() {
+      const [selected, setSelected] = useState<number | null>(null);
+      const engine = new HandsFreeEngine({ recognize: vi.fn().mockResolvedValue({ transcript: 'option B' }) });
+      return (
+        <>
+          <HandsFreeController
+            question="Case facts. The project has uneven cash flows. Question. What is the NPV?"
+            options={VOICE_OPTIONS}
+            onSelect={setSelected}
+            testMode
+            engine={engine}
+          />
+          <AccessibleQuestionRunner
+            question="What is the NPV?"
+            hideStem
+            options={OPTIONS}
+            selectedIndex={selected}
+            onSelect={setSelected}
+          />
+        </>
+      );
+    }
+    render(<Page />);
+
+    fireEvent.click(screen.getByRole('button', { name: /answer by voice/i }));
+    await screen.findByText(/Confirm to apply/i);
+    expect(screen.getAllByRole('radio')[1]).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm option b/i }));
+    await waitFor(() =>
+      expect(screen.getAllByRole('radio')[1]).toHaveAttribute('aria-checked', 'true'),
     );
   });
 });

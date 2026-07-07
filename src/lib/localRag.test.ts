@@ -142,6 +142,26 @@ describe('localGroundedAnswer', () => {
     expect(result.citations[0].number).toBe(1);
   });
 
+  it('strips reasoning traces from an injected generator before returning the answer', async () => {
+    await getStorage().chunks!.bulkUpsert([
+      chunk('1', 'Duration measures bond price sensitivity to yield.'),
+    ]);
+    const generate = vi.fn(async () => ({
+      text: '<think>private chain of thought</think>Duration measures bond price sensitivity [1].',
+    }));
+
+    const result = await localGroundedAnswer({
+      question: 'what is duration',
+      domain: 'cfa',
+      generate,
+      entailUseLlm: false,
+    });
+
+    expect(result.answer).toBe('Duration measures bond price sensitivity [1].');
+    expect(result.answer).not.toContain('<think>');
+    expect(result.grounded).toBe(true);
+  });
+
   it('falls back to all used chunks when the answer has no [n] markers', async () => {
     await getStorage().chunks!.bulkUpsert([
       chunk('1', 'Duration measures bond price sensitivity.'),
@@ -150,6 +170,25 @@ describe('localGroundedAnswer', () => {
     const generate = vi.fn(async () => ({ text: 'A plain answer with no citation markers.' }));
     const result = await localGroundedAnswer({ question: 'duration', domain: 'cfa', generate });
     expect(result.citations.length).toBeGreaterThanOrEqual(1);
+    expect(result.verification).toEqual([]);
+    expect(result.grounded).toBe(false);
+  });
+
+  it('marks invalid citation markers as ungrounded', async () => {
+    await getStorage().chunks!.bulkUpsert([
+      chunk('1', 'Duration measures bond price sensitivity.'),
+    ]);
+    const generate = vi.fn(async () => ({ text: 'Duration measures bond price sensitivity [99].' }));
+    const result = await localGroundedAnswer({
+      question: 'duration',
+      domain: 'cfa',
+      generate,
+      entailUseLlm: false,
+    });
+    expect(result.grounded).toBe(false);
+    expect(result.verification).toEqual([
+      expect.objectContaining({ number: 99, entailed: false, score: 0 }),
+    ]);
   });
 
   it('throws a clear error when nothing matches', async () => {
@@ -294,6 +333,17 @@ describe('verifyAnswerCitations (RAG-4 unit)', () => {
       { useLlm: false },
     );
     expect(results[0].entailed).toBe(false);
+  });
+
+  it('marks a cited claim with a missing citation number as not entailed', async () => {
+    const results = await verifyAnswerCitations(
+      'Convexity captures curvature [99].',
+      numbered,
+      { useLlm: false },
+    );
+    expect(results).toEqual([
+      expect.objectContaining({ number: 99, entailed: false, score: 0 }),
+    ]);
   });
 });
 

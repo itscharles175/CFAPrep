@@ -1657,6 +1657,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content-factory/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Content Factory Plan
+         * @description Preview (or, with ``activate=true`` + the flag ON, enqueue) the gated plan.
+         *
+         *     Without ``activate`` this is a PURE dry run: it ranks coverage deficits by
+         *     thinness x weak-topic analytics, attaches per-target citations, and writes
+         *     nothing — safe offline. With ``activate=true`` AND
+         *     ``config.CONTENT_FACTORY_ENABLED`` it enqueues one gated ``GenJob`` per target
+         *     (the worker runs ``validate_candidate`` on every candidate; no gate is
+         *     skipped) and records a rollback-able provenance batch.
+         */
+        post: operations["content_factory_plan_api_content_factory_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content-factory/{batch_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Content Factory Rollback
+         * @description Reverse a factory batch: cancel pending jobs + soft-delete produced items.
+         *
+         *     Idempotent: a second call is a clean no-op (already-terminal jobs and
+         *     already-tombstoned questions are counted but left alone).
+         */
+        post: operations["content_factory_rollback_api_content_factory__batch_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/content-factory/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Content Factory Batches
+         * @description Recent factory batches (newest first) for the trust cockpit / UI.
+         */
+        get: operations["content_factory_batches_api_content_factory_batches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/import/parse": {
         parameters: {
             query?: never;
@@ -2417,6 +2487,35 @@ export interface paths {
          */
         put: operations["put_profile_api_study_profile_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/study/simulate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Simulate
+         * @description PSY-2 — preview the effect of plan edits on projected readiness (NO write).
+         *
+         *     Strictly pure: reads the active ``StudyPlan`` + the shared ``analytics.forecast``
+         *     math, computes a BASELINE scenario (current plan, or the optional ``baseline``
+         *     override) and a PROJECTED scenario (baseline patched with ``edits``), and
+         *     returns both plus the delta — without touching the DB. ``target_score`` and
+         *     ``exam_date`` are real forecast inputs; ``daily_minutes`` and ``weak_topic_focus``
+         *     are modelled as a transparent, clamped effective-slope adjustment (the
+         *     multiplier + its rationale are returned in ``notes``). Two identical requests
+         *     return identical bodies; nothing is persisted (``mutated`` is always False).
+         */
+        post: operations["simulate_api_study_simulate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4656,6 +4755,85 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * AdaptiveNextRecommendation
+         * @description One item from ``POST /api/adaptivity/next``.
+         *
+         *     The route returns either LSAT-native recommendations (``question_id`` +
+         *     embedded ``question``) or host-plane recommendations (``content_id``/``key``).
+         *     Optional fields keep both shapes under one additive schema without changing
+         *     either payload.
+         */
+        AdaptiveNextRecommendation: {
+            /** Question Id */
+            question_id?: number | null;
+            /** Content Id */
+            content_id?: string | null;
+            /** Key */
+            key?: string | null;
+            /** Domain */
+            domain?: string | null;
+            /** Q Type */
+            q_type?: string | null;
+            /** Difficulty */
+            difficulty?: number | null;
+            /** Difficulty Estimate */
+            difficulty_estimate?: number | null;
+            /** Mastery Fraction */
+            mastery_fraction?: number | null;
+            /** Expected Success */
+            expected_success: number;
+            /** Information Score */
+            information_score?: number | null;
+            /** Raw Information */
+            raw_information?: number | null;
+            /** Utility Score */
+            utility_score: number;
+            /** Zpd Fit */
+            zpd_fit: number;
+            /** Reason */
+            reason: string;
+            /** Source */
+            source?: string | null;
+            /** Selector Strategy */
+            selector_strategy?: string | null;
+            /** Question */
+            question?: {
+                [key: string]: unknown;
+            } | null;
+            /** Leech */
+            leech?: boolean | null;
+            /** Attempts */
+            attempts?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * AdaptiveNextResponse
+         * @description ``POST /api/adaptivity/next`` response envelope.
+         */
+        AdaptiveNextResponse: {
+            /** Ability */
+            ability: {
+                [key: string]: unknown;
+            };
+            /** Selector */
+            selector: {
+                [key: string]: unknown;
+            };
+            /** Count */
+            count: number;
+            /** Recommendations */
+            recommendations: components["schemas"]["AdaptiveNextRecommendation"][];
+            /** Guardrails */
+            guardrails: {
+                [key: string]: unknown;
+            };
+            /** Domain */
+            domain?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
         /** AnnotationBody */
         AnnotationBody: {
             /**
@@ -4754,6 +4932,13 @@ export interface components {
             include_history: boolean;
             /** Notes */
             notes?: string | null;
+            /** Passphrase */
+            passphrase?: string | null;
+            /**
+             * Allow Plaintext
+             * @default false
+             */
+            allow_plaintext: boolean;
         };
         /**
          * BankStats
@@ -4903,10 +5088,7 @@ export interface components {
         };
         /** Body_parse_api_import_parse_post */
         Body_parse_api_import_parse_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** BootstrapBody */
@@ -5440,6 +5622,8 @@ export interface components {
             envelope: {
                 [key: string]: unknown;
             };
+            /** Passphrase */
+            passphrase?: string | null;
         };
         /** ErrorLogBody */
         ErrorLogBody: {
@@ -5512,6 +5696,217 @@ export interface components {
             refs?: (string | {
                 [key: string]: unknown;
             })[];
+        };
+        /** FactoryBatch */
+        FactoryBatch: {
+            /** Batch Id */
+            batch_id: number;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            /** Provenance */
+            provenance: string;
+            /**
+             * Gate Bypassed
+             * @default false
+             */
+            gate_bypassed: boolean;
+            /**
+             * Rolled Back
+             * @default false
+             */
+            rolled_back: boolean;
+            /** Job Ids */
+            job_ids?: number[];
+            /** Targets */
+            targets?: {
+                [key: string]: unknown;
+            }[];
+            /** Rollback */
+            rollback?: {
+                [key: string]: unknown;
+            } | null;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** FactoryBatchList */
+        FactoryBatchList: {
+            /** Batches */
+            batches?: components["schemas"]["FactoryBatch"][];
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** FactoryEnqueuedJob */
+        FactoryEnqueuedJob: {
+            /** Job Id */
+            job_id: number;
+            /** Q Type */
+            q_type: string;
+            /** Count */
+            count: number;
+            /** Priority */
+            priority: number;
+        };
+        /**
+         * FactoryPlanBody
+         * @description A request to plan (and optionally enqueue) coverage-driven generation.
+         */
+        FactoryPlanBody: {
+            /**
+             * Activate
+             * @default false
+             */
+            activate: boolean;
+            /** Coverage Floor */
+            coverage_floor?: number | null;
+            /** Max Per Type */
+            max_per_type?: number | null;
+            /** Max Types */
+            max_types?: number | null;
+            /** Q Types */
+            q_types?: string[] | null;
+        };
+        /**
+         * FactoryPlanResponse
+         * @description The plan + (when activated) the enqueued, gated batch.
+         */
+        FactoryPlanResponse: {
+            /** Provenance */
+            provenance: string;
+            /**
+             * Domain
+             * @default lsat
+             */
+            domain: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Coverage Floor */
+            coverage_floor: number;
+            /** Max Per Type */
+            max_per_type: number;
+            /** Max Types */
+            max_types: number;
+            /** Gate */
+            gate: string;
+            /**
+             * Gate Bypassed
+             * @default false
+             */
+            gate_bypassed: boolean;
+            /** Targets */
+            targets?: components["schemas"]["FactoryTarget"][];
+            /** Skipped */
+            skipped?: components["schemas"]["FactorySkip"][];
+            /**
+             * Target Count
+             * @default 0
+             */
+            target_count: number;
+            /**
+             * Total Candidates
+             * @default 0
+             */
+            total_candidates: number;
+            /**
+             * Enqueued
+             * @default false
+             */
+            enqueued: boolean;
+            /** Reason */
+            reason?: string | null;
+            /** Batch Id */
+            batch_id?: number | null;
+            /** Jobs */
+            jobs?: components["schemas"]["FactoryEnqueuedJob"][];
+        };
+        /** FactoryRollbackResponse */
+        FactoryRollbackResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Batch Id */
+            batch_id?: number | null;
+            /**
+             * Jobs Cancelled
+             * @default 0
+             */
+            jobs_cancelled: number;
+            /**
+             * Jobs Already Terminal
+             * @default 0
+             */
+            jobs_already_terminal: number;
+            /**
+             * Questions Soft Deleted
+             * @default 0
+             */
+            questions_soft_deleted: number;
+            /**
+             * Questions Already Deleted
+             * @default 0
+             */
+            questions_already_deleted: number;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** FactorySkip */
+        FactorySkip: {
+            /** Q Type */
+            q_type: string;
+            /**
+             * Servable
+             * @default 0
+             */
+            servable: number;
+            /**
+             * Anchors
+             * @default 0
+             */
+            anchors: number;
+            /**
+             * Deficit
+             * @default 0
+             */
+            deficit: number;
+            /** Reason */
+            reason: string;
+        };
+        /** FactoryTarget */
+        FactoryTarget: {
+            /** Q Type */
+            q_type: string;
+            /** Servable */
+            servable: number;
+            /** Anchors */
+            anchors: number;
+            /**
+             * Quarantined
+             * @default 0
+             */
+            quarantined: number;
+            /** Coverage Floor */
+            coverage_floor: number;
+            /** Deficit */
+            deficit: number;
+            /** Count */
+            count: number;
+            /** Mastery */
+            mastery: number;
+            /** Mastery Lower Bound */
+            mastery_lower_bound: number;
+            /** Weakness */
+            weakness: number;
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number;
+            /** Priority */
+            priority: number;
+            /** Citations */
+            citations?: string[];
         };
         /** ForTypeBody */
         ForTypeBody: {
@@ -5820,6 +6215,15 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HealthResponse */
+        HealthResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Service */
+            service: string;
+            /** Version */
+            version: string;
+        };
         /** HintBody */
         HintBody: {
             /** Question Id */
@@ -5836,6 +6240,11 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+            /**
+             * Force Commit
+             * @default false
+             */
+            force_commit: boolean;
         };
         /** ImportBody */
         ImportBody: {
@@ -5861,6 +6270,11 @@ export interface components {
             training_role?: string | null;
             /** Training Notes */
             training_notes?: string | null;
+            /**
+             * Force Commit
+             * @default false
+             */
+            force_commit: boolean;
         };
         /** ImportBundleBody */
         ImportBundleBody: {
@@ -6502,6 +6916,136 @@ export interface components {
             updated_at?: string | null;
         };
         /**
+         * SimulateBody
+         * @description A what-if request: the baseline is the active plan; ``edits`` is the patch.
+         *
+         *     ``baseline`` optionally overrides the comparison baseline (else the active
+         *     ``StudyPlan`` is used) so the UI can compare two hypotheticals without a plan.
+         */
+        SimulateBody: {
+            edits?: components["schemas"]["SimulateEdits"];
+            baseline?: components["schemas"]["SimulateEdits"] | null;
+        };
+        /**
+         * SimulateDelta
+         * @description projected - baseline for the headline readiness signals.
+         */
+        SimulateDelta: {
+            /** Projected Score */
+            projected_score?: number | null;
+            /** Projected Percentile */
+            projected_percentile?: number | null;
+            /**
+             * Effective Slope Per Week
+             * @default 0
+             */
+            effective_slope_per_week: number;
+            /** Days To Exam */
+            days_to_exam?: number | null;
+            /**
+             * On Track Changed
+             * @default false
+             */
+            on_track_changed: boolean;
+            /**
+             * Feasible Changed
+             * @default false
+             */
+            feasible_changed: boolean;
+        };
+        /**
+         * SimulateEdits
+         * @description Proposed plan edits to preview. Every field optional — unset = unchanged.
+         */
+        SimulateEdits: {
+            /** Target Score */
+            target_score?: number | null;
+            /** Exam Date */
+            exam_date?: string | null;
+            /** Daily Minutes */
+            daily_minutes?: number | null;
+            /** Weak Topic Focus */
+            weak_topic_focus?: number | null;
+        };
+        /** SimulateResponse */
+        SimulateResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Mutated
+             * @default false
+             */
+            mutated: boolean;
+            /**
+             * Has Plan
+             * @default false
+             */
+            has_plan: boolean;
+            baseline: components["schemas"]["SimulateScenario"];
+            projected: components["schemas"]["SimulateScenario"];
+            delta: components["schemas"]["SimulateDelta"];
+            /** Notes */
+            notes?: string[];
+        };
+        /**
+         * SimulateScenario
+         * @description One side of the comparison (baseline or projected).
+         */
+        SimulateScenario: {
+            /** Target Score */
+            target_score: number;
+            /** Exam Date */
+            exam_date?: string | null;
+            /** Daily Minutes */
+            daily_minutes: number;
+            /** Weak Topic Focus */
+            weak_topic_focus: number;
+            /** Days To Exam */
+            days_to_exam?: number | null;
+            /** Current Score */
+            current_score?: number | null;
+            /** Projected Score */
+            projected_score?: number | null;
+            /** Projected Percentile */
+            projected_percentile?: number | null;
+            /**
+             * Base Slope Per Week
+             * @default 0
+             */
+            base_slope_per_week: number;
+            /**
+             * Effective Slope Per Week
+             * @default 0
+             */
+            effective_slope_per_week: number;
+            /**
+             * Slope Multiplier
+             * @default 1
+             */
+            slope_multiplier: number;
+            /** Required Slope Per Week */
+            required_slope_per_week?: number | null;
+            /** On Track */
+            on_track?: boolean | null;
+            /** Trajectory Feasible */
+            trajectory_feasible?: boolean | null;
+            /** Gap To Target */
+            gap_to_target?: number | null;
+            /**
+             * Low Confidence
+             * @default true
+             */
+            low_confidence: boolean;
+            /**
+             * Method
+             * @default insufficient_data
+             */
+            method: string;
+        };
+        /**
          * SrsParamsOut
          * @description The backend's effective FSRS parameters (py-fsrs). ``weights`` are the
          *     per-user optimized weights when present, else the empty list (host then keeps
@@ -6770,6 +7314,112 @@ export interface components {
             /** Last Writer */
             last_writer?: string | null;
         };
+        /**
+         * StudyTodayResponse
+         * @description ``GET /api/study/today`` daily plan envelope.
+         */
+        StudyTodayResponse: {
+            /** Has Plan */
+            has_plan: boolean;
+            /** Target Score */
+            target_score: number | null;
+            /** Exam Date */
+            exam_date: string | null;
+            /** Daily Minutes */
+            daily_minutes: number | null;
+            /** Days To Exam */
+            days_to_exam: number | null;
+            /** Predicted Score */
+            predicted_score: number | null;
+            /** Forecast */
+            forecast: {
+                [key: string]: unknown;
+            };
+            /** Due Count */
+            due_count: number;
+            /** Weakest Types */
+            weakest_types: {
+                [key: string]: unknown;
+            }[];
+            /** Tasks */
+            tasks: components["schemas"]["StudyTodayTask"][];
+            /** Notebook Context */
+            notebook_context: {
+                [key: string]: unknown;
+            };
+            /** Intensity */
+            intensity: string;
+            /** Minutes Budget */
+            minutes_budget: number;
+            /** Estimated Minutes */
+            estimated_minutes: number;
+            /** Leech Count */
+            leech_count: number;
+            /** Concept Gap Count */
+            concept_gap_count: number;
+            /** Rationale */
+            rationale: string;
+            /** Ability Selector */
+            ability_selector: {
+                [key: string]: unknown;
+            };
+            /** Utility Model */
+            utility_model: string;
+            /** Utility */
+            utility: {
+                [key: string]: unknown;
+            } | null;
+            /** Selector Summary */
+            selector_summary: {
+                [key: string]: unknown;
+            };
+            /** Include Host */
+            include_host?: boolean | null;
+            /** Planes Merged */
+            planes_merged?: string[] | null;
+            /** Host Task Count */
+            host_task_count?: number | null;
+            /** Budget Source */
+            budget_source?: string | null;
+            /** Cross Domain */
+            cross_domain?: {
+                [key: string]: unknown;
+            } | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * StudyTodayTask
+         * @description One task from ``GET /api/study/today``.
+         *
+         *     The task list is intentionally additive: LSAT tasks, host drills, pacing
+         *     drills, and future planner rows all share the headline fields below while
+         *     preserving their specialized keys.
+         */
+        StudyTodayTask: {
+            /** Type */
+            type: string;
+            /** Label */
+            label: string;
+            /** Est Minutes */
+            est_minutes?: number | null;
+            /** Count */
+            count?: number | null;
+            /** Q Type */
+            q_type?: string | null;
+            /** Domain */
+            domain?: string | null;
+            /** Utility Model */
+            utility_model?: string | null;
+            /** Utility Score */
+            utility_score?: number | null;
+            /** Selector Strategy */
+            selector_strategy?: string | null;
+            /** Target Difficulty */
+            target_difficulty?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
         /** TagBody */
         TagBody: {
             /**
@@ -6971,6 +7621,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /** ValidatorRunBody */
         ValidatorRunBody: {
@@ -7167,9 +7821,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: boolean;
-                    };
+                    "application/json": components["schemas"]["HealthResponse"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -12075,6 +12727,182 @@ export interface operations {
             };
         };
     };
+    content_factory_plan_api_content_factory_plan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["FactoryPlanBody"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FactoryPlanResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    content_factory_rollback_api_content_factory__batch_id__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FactoryRollbackResponse"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    content_factory_batches_api_content_factory_batches_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FactoryBatchList"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     parse_api_import_parse_post: {
         parameters: {
             query?: never;
@@ -14234,7 +15062,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["StudyTodayResponse"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -14351,6 +15179,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SharedStudyProfileOut"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Uniform backend error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    simulate_api_study_simulate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimulateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulateResponse"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -17324,7 +18212,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["AdaptiveNextResponse"];
                 };
             };
             /** @description Uniform backend error envelope */

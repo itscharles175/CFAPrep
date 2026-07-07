@@ -1,7 +1,14 @@
 import type { Table } from 'dexie';
-import { db } from '../progressStore';
 import { createCrossDomainBridge } from '../dataDictionary';
 import type { MasterySnapshot, QuestionResult, ReviewItem } from '../learningTypes';
+import { db } from '../progressDb';
+import {
+  decryptSourceChunkForRead,
+  decryptSourceChunksForRead,
+  encryptSourceChunkForStorage,
+  encryptSourceChunksForStorage,
+  isSecureSourceChunk,
+} from '../sourceChunkSecureVault';
 import type {
   ChunkSearchOptions,
   ChunkSearchResult,
@@ -124,13 +131,14 @@ const chunks: ChunkStore = {
     // Extra fields (`domain`, `topic`, `page`, `embedding`) ride along in the
     // IndexedDB record even though the Dexie schema only indexes the
     // historical CFA chunk fields. Dexie just stores them as-is.
-    await db.sourceChunks.put(chunk as unknown as Parameters<typeof db.sourceChunks.put>[0]);
+    const row = await encryptSourceChunkForStorage(chunk);
+    await db.sourceChunks.put(row as unknown as Parameters<typeof db.sourceChunks.put>[0]);
   },
 
   async bulkUpsert(input: SourceChunkInput[]): Promise<void> {
     if (input.length === 0) return;
     for (let i = 0; i < input.length; i += BULK_CHUNK_SIZE) {
-      const batch = input.slice(i, i + BULK_CHUNK_SIZE);
+      const batch = await encryptSourceChunksForStorage(input.slice(i, i + BULK_CHUNK_SIZE));
       await db.sourceChunks.bulkPut(batch as unknown as Parameters<typeof db.sourceChunks.bulkPut>[0]);
     }
   },
@@ -146,7 +154,7 @@ const chunks: ChunkStore = {
     // re-embedding. Mirrors the field projection `search()` uses; optional
     // fields are only emitted when present so a re-`bulkUpsert` round-trips
     // byte-for-byte through `canonicalJson` (no `undefined`-vs-absent drift).
-    const all = await db.sourceChunks.toArray();
+    const all = await decryptSourceChunksForRead((await db.sourceChunks.toArray()) as unknown as SourceChunkInput[]);
     return all.map((raw) => {
       const r = raw as unknown as SourceChunkInput;
       const out: SourceChunkInput = {
@@ -171,7 +179,7 @@ const chunks: ChunkStore = {
     // Pull all matching rows. Domain is the highest-cardinality filter — we
     // currently keep it as a JS filter because the Dexie schema doesn't index
     // `domain` (rows added via `chunks.upsert` are extra-field rows).
-    const all = await db.sourceChunks.toArray();
+    const all = await decryptSourceChunksForRead((await db.sourceChunks.toArray()) as unknown as SourceChunkInput[]);
     const filtered: CandidateRow[] = [];
     for (const raw of all) {
       const r = raw as unknown as SourceChunkInput;
@@ -344,29 +352,49 @@ function createDexieTable<T>(name: string): KeyedTable<T> {
   // key generics are erased to `any` here because the caller pins them via
   // `KeyedTable<T>`; behaviour is unchanged from the direct `db.<table>` call.
   const tbl = () => db.table(name) as unknown as Table<T, string | number>;
+  const decryptRow = async (row: T | undefined): Promise<T | undefined> => {
+    if (name !== 'sourceChunks' || !row) return row;
+    return decryptSourceChunkForRead(row as T & { text: string }) as Promise<T | undefined>;
+  };
+  const decryptRows = async (rows: T[]): Promise<T[]> => {
+    if (name !== 'sourceChunks') return rows;
+    return decryptSourceChunksForRead(rows as Array<T & { text: string }>) as Promise<T[]>;
+  };
+  const encryptRow = async (row: T): Promise<T> => {
+    if (name !== 'sourceChunks' || isSecureSourceChunk(row as { secureVault?: unknown })) return row;
+    return encryptSourceChunkForStorage(row as T & { text: string }) as Promise<T>;
+  };
+  const encryptRows = async (rows: T[]): Promise<T[]> => {
+    if (name !== 'sourceChunks' || rows.every((row) => isSecureSourceChunk(row as { secureVault?: unknown }))) {
+      return rows;
+    }
+    return encryptSourceChunksForStorage(rows as Array<T & { text: string }>) as Promise<T[]>;
+  };
 
   return {
     async get(key) {
-      return tbl().get(key);
+      return decryptRow(await tbl().get(key));
     },
 
     async bulkGet(keys) {
-      return tbl().bulkGet(keys);
+      const rows = await tbl().bulkGet(keys);
+      if (name !== 'sourceChunks') return rows;
+      return Promise.all(rows.map((row) => decryptRow(row)));
     },
 
     async put(row) {
-      await tbl().put(row);
+      await tbl().put(await encryptRow(row));
     },
 
     async bulkPut(rows) {
       if (rows.length === 0) return;
-      await tbl().bulkPut(rows);
+      await tbl().bulkPut(await encryptRows(rows));
     },
 
     async add(row) {
       // Dexie `add` assigns and returns the new primary key (the `++id` value
       // for auto-id stores). We surface it for parity with the SurrealDB driver.
-      return tbl().add(row);
+      return tbl().add(await encryptRow(row));
     },
 
     async delete(key) {
@@ -378,7 +406,7 @@ function createDexieTable<T>(name: string): KeyedTable<T> {
     },
 
     async toArray() {
-      return tbl().toArray();
+      return decryptRows(await tbl().toArray());
     },
 
     async count() {
@@ -390,11 +418,11 @@ function createDexieTable<T>(name: string): KeyedTable<T> {
     },
 
     async whereEquals(field, value) {
-      return tbl().where(field).equals(value as string | number).toArray();
+      return decryptRows(await tbl().where(field).equals(value as string | number).toArray());
     },
 
     async whereAnyOf(field, values) {
-      return tbl().where(field).anyOf(values as Array<string | number>).toArray();
+      return decryptRows(await tbl().where(field).anyOf(values as Array<string | number>).toArray());
     },
 
     async orderedBy(field, options: KeyedTableOrderOptions = {}) {
@@ -402,7 +430,7 @@ function createDexieTable<T>(name: string): KeyedTable<T> {
       if (options.desc) collection = collection.reverse();
       if (options.offset != null) collection = collection.offset(options.offset);
       if (options.limit != null) collection = collection.limit(options.limit);
-      return collection.toArray();
+      return decryptRows(await collection.toArray());
     },
   };
 }

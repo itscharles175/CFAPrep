@@ -25,7 +25,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
-import { domainForPath, type Domain } from './domainNav';
+import { domainForPath, type Domain } from './domainPath';
 
 export const NAV_HISTORY_EVENT = 'study-vault:nav-history';
 const STORAGE_KEY = 'study-vault:nav-history';

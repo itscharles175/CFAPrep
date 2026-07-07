@@ -5,6 +5,7 @@ description = "LSAT Lab backend: local FastAPI study engine over SQLite + Ollama
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "cryptography>=48.0.0",
     "fastapi>=0.136.1",
     "fsrs>=6.3.1",
     "httpx>=0.28.1",
@@ -27,6 +28,17 @@ dev = [
     "pytest-cov>=7.1.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "hypothesis>=6.152.9",
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["logs*", "scripts*", "tests*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
@@ -42,6 +54,8 @@ omit = [
 
 [tool.coverage.report]
 # A floor, not a ceiling. The live-Ollama paths can't run in CI so 100% is moot.
+fail_under = 85
+show_missing = true
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",

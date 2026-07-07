@@ -45,6 +45,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripThink } from '../src/lib/stripThink.js';
 
 const DEFAULTS = {
   bundle: 'public/cfa-source.qvsource',
@@ -131,7 +132,7 @@ async function callLlmChat({ baseUrl, model, temperature, system, user }) {
     throw new Error(`Local model server responded ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
   }
   const data = await response.json();
-  return data?.choices?.[0]?.message?.content || '';
+  return stripThink(String(data?.choices?.[0]?.message?.content || ''));
 }
 
 // Same prompt shape as src/lib/localLlm.js generateQuestionsFromCurriculum.

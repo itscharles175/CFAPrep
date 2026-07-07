@@ -20,6 +20,7 @@ import type {
   CfaSourceTarget,
   CfaSourceVaultStores,
 } from './cfaSourceTypes';
+import { decryptSourceChunksForRead, encryptSourceChunksForStorage } from './sourceChunkSecureVault';
 
 export type {
   CfaSourceBundle,
@@ -270,20 +271,24 @@ async function candidateChunksForTerms(terms: string[], documentIds?: Set<string
   const indexedChunkIds = new Set(indexRows.flatMap((row) => row.chunkIds));
   const chunksById = new Map<string, CfaSourceChunk>();
   if (indexedChunkIds.size) {
-    (await db.sourceChunks.bulkGet([...indexedChunkIds])).filter(Boolean).forEach((chunk) => {
-      if (!documentIds?.size || documentIds.has(chunk!.documentId)) chunksById.set(chunk!.id, chunk!);
+    const indexedChunks = await decryptSourceChunksForRead(
+      (await db.sourceChunks.bulkGet([...indexedChunkIds])).filter(Boolean) as CfaSourceChunk[],
+    );
+    indexedChunks.forEach((chunk) => {
+      if (!documentIds?.size || documentIds.has(chunk.documentId)) chunksById.set(chunk.id, chunk);
     });
   }
   if (documentIds?.size) {
-    (
+    const documentChunks = await decryptSourceChunksForRead(
       await db.sourceChunks
         .where('documentId')
         .anyOf([...documentIds])
-        .toArray()
-    ).forEach((chunk) => chunksById.set(chunk.id, chunk));
+        .toArray(),
+    );
+    documentChunks.forEach((chunk) => chunksById.set(chunk.id, chunk));
   }
   if (terms.length && (!indexedChunkIds.size || indexRows.length < terms.length)) {
-    const fallbackChunks = await db.sourceChunks.toArray();
+    const fallbackChunks = await decryptSourceChunksForRead(await db.sourceChunks.toArray());
     fallbackChunks
       .filter((chunk) => !documentIds?.size || documentIds.has(chunk.documentId))
       .filter((chunk) => {
@@ -414,6 +419,7 @@ export async function importCfaSourceBundle(payload: unknown, options: { mode?: 
   if (!validation.valid || !validation.bundle) throw new Error(validation.errors.join(' '));
   const bundle = validation.bundle;
   const indexes = bundle.indexes?.length ? bundle.indexes : buildCfaSourceIndexRows(bundle.chunks);
+  const chunksForStorage = await encryptSourceChunksForStorage(bundle.chunks);
   const mode = options.mode || 'replace';
   await db.transaction(
     'rw',
@@ -438,7 +444,7 @@ export async function importCfaSourceBundle(payload: unknown, options: { mode?: 
       }
       await Promise.all([
         db.sourceDocuments.bulkPut(bundle.documents),
-        db.sourceChunks.bulkPut(bundle.chunks),
+        db.sourceChunks.bulkPut(chunksForStorage),
         db.sourceIndexes.bulkPut(indexes),
         db.sourceIngestionRuns.bulkPut(bundle.runs || []),
         db.sourceLinks.clear(),
@@ -466,7 +472,7 @@ export async function exportCfaSourceBundle(documentIds?: string[]) {
     : await db.sourceDocuments.toArray();
   const filteredDocuments = documents.filter(Boolean) as CfaSourceDocument[];
   const ids = new Set(filteredDocuments.map((document) => document.id));
-  const chunks = (await db.sourceChunks.toArray()).filter((chunk) => ids.has(chunk.documentId));
+  const chunks = await decryptSourceChunksForRead((await db.sourceChunks.toArray()).filter((chunk) => ids.has(chunk.documentId)));
   const indexes = buildCfaSourceIndexRows(chunks);
   const runs = await db.sourceIngestionRuns.toArray();
   return buildCfaSourceBundle({ documents: filteredDocuments, chunks, indexes, runs });
@@ -477,7 +483,7 @@ export async function getCfaSourceDocuments() {
 }
 
 export async function getCfaSourceChunks(documentId: string) {
-  return db.sourceChunks.where('documentId').equals(documentId).sortBy('chunkIndex');
+  return decryptSourceChunksForRead(await db.sourceChunks.where('documentId').equals(documentId).sortBy('chunkIndex'));
 }
 
 // Ordered curriculum reading for a topic: the best-matching ingested document
@@ -497,7 +503,7 @@ export async function getCfaSourceReadingForTopic(
     (a, b) => Number(Boolean(b.canonical)) - Number(Boolean(a.canonical)) || (b.chunkCount || 0) - (a.chunkCount || 0),
   )[0];
   if (!best) return { document: null, chunks: [] };
-  const chunks = await db.sourceChunks.where('documentId').equals(best.id).sortBy('chunkIndex');
+  const chunks = await decryptSourceChunksForRead(await db.sourceChunks.where('documentId').equals(best.id).sortBy('chunkIndex'));
   return { document: best, chunks };
 }
 
@@ -628,7 +634,7 @@ export async function getCfaSourceSnippetsForTarget(
     linksForTarget(target, Math.max(limit * 2, 6)),
     db.sourceLinkOverrides.where('targetId').equals(target.id).toArray(),
     db.sourceDocuments.toArray(),
-    db.sourceChunks.toArray(),
+    decryptSourceChunksForRead(await db.sourceChunks.toArray()),
   ]);
   const overrideByChunk = new Map(overrides.map((override) => [override.chunkId, override]));
   const documentsById = new Map(documents.map((document) => [document.id, document]));
@@ -892,7 +898,7 @@ export async function deleteCfaSourceDocument(documentId: string) {
       await db.sourceLinkOverrides.bulkDelete(
         overrides.filter((override) => chunkIds.includes(override.chunkId)).map((override) => override.id),
       );
-      const remainingChunks = await db.sourceChunks.toArray();
+      const remainingChunks = await decryptSourceChunksForRead(await db.sourceChunks.toArray());
       await db.sourceIndexes.clear();
       await db.sourceIndexes.bulkPut(buildCfaSourceIndexRows(remainingChunks));
     },

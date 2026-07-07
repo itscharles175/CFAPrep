@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { hostRouteElements } from '../App';
 import {
   appRoutes,
   canonicalRoutePath,
@@ -10,6 +13,15 @@ import {
   screenshotRoutes,
   smokeRoutes,
 } from './routeManifest';
+
+const appSource = readFileSync(path.join(process.cwd(), 'src/App.jsx'), 'utf8');
+const hostManifestRenderExclusions = new Set<string>();
+
+function hostRoutePathProps() {
+  return Array.from(appSource.matchAll(/<Route\b[^>]*\bpath=(\{[^}]+\}|["'][^"']+["'])/g), (match) =>
+    match[1].replace(/\s+/g, ''),
+  );
+}
 
 describe('route visual metadata', () => {
   it('assigns cockpit metadata to every app route', () => {
@@ -67,6 +79,23 @@ describe('route visual metadata', () => {
     expect(today?.navGroup).toBe('home');
     expect(today?.preferredLayout).toBe('dashboard');
     expect(today?.iconKey).toBe('sun');
+  });
+
+  it('keeps host rendered routes aligned with the typed route manifest', () => {
+    const manifestIds = new Set<string>(appRoutes.map((route) => route.id));
+    const renderedIds = Object.keys(hostRouteElements);
+
+    const renderedWithoutMetadata = renderedIds.filter((id) => !manifestIds.has(id));
+    expect(renderedWithoutMetadata).toEqual([]);
+
+    const manifestWithoutTargets = appRoutes
+      .filter((route) => !Object.prototype.hasOwnProperty.call(hostRouteElements, route.id))
+      .filter((route) => !hostManifestRenderExclusions.has(route.id))
+      .map((route) => route.id);
+    expect(manifestWithoutTargets).toEqual([]);
+
+    const nonManifestRouteExpressions = hostRoutePathProps().filter((pathProp) => !['{definition.path}', '"*"', "'*'"].includes(pathProp));
+    expect(nonManifestRouteExpressions).toEqual([]);
   });
 });
 

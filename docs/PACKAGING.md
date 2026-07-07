@@ -121,8 +121,11 @@ Releases page — see "Check for updates" in System Health (when wired).
 The Tauri Rust supervisor (`src-tauri/src/lib.rs`) looks for sidecar binaries
 under `spike/` in dev, and under `resources/services/` next to the installed
 executable in production (`services_dir()` searches both). The packaged
-distribution ships the open-notebook Python backend + SurrealDB binary in that
-`resources/services/` slot via `tauri.conf.json` → `bundle.resources`.
+distribution always ships the LSAT backend in that `resources/services/` slot
+via `tauri.conf.json` -> `bundle.resources`. The open-notebook backend and its
+SurrealDB binary are optional RAG resources: when they are absent, the Rust
+supervisor skips those sidecars and reports degraded boot status rather than a
+required-sidecar error.
 
 ### Building the open-notebook backend binary
 
@@ -165,13 +168,20 @@ vendored backend's own, purpose-built spec:
 4. Runs the backend's own `lsatlab.spec` (collects uvicorn/fastapi/sqlmodel/
    fsrs/mcp/pymupdf/sqlite_vec hidden-imports + data files) and copies
    `lsatlab-backend.exe` into `src-tauri/resources/services/lsat-backend/`.
+5. Records the binary size and SHA-256 in
+   `src-tauri/resources/services/sidecar-provenance.json`.
 
 Validated end-to-end: the produced binary boots, runs its 19 SQLite
 migrations, starts the job worker, and serves on `127.0.0.1:8100`
-(`/openapi.json` → 200, `/api/health` → `{"ok":true}`). The Rust supervisor's
-4th `SidecarSpec` ('LSAT backend') launches it with `LSATLAB_PORT=8100`; the
-SQLite bank is created under the OS app-data dir on first run (never shipped).
-`tauri.conf.json` CSP `connect-src` includes `http://localhost:8100`.
+(`/openapi.json` -> 200, `/api/health` ->
+`{"ok":true,"service":"lsat-backend","version":"..."}`). The Rust supervisor's
+4th `SidecarSpec` ('LSAT backend') launches it with `LSATLAB_PORT=8100` and a
+per-run `LSATLAB_LOCAL_API_TOKEN`; it only verifies the LSAT port when a 2xx
+health response carries `service:"lsat-backend"` so a foreign listener on
+`8100` is not treated as healthy. The SQLite bank is created under the OS
+app-data dir on first run (never shipped). `tauri.conf.json` CSP `connect-src`
+includes both `http://localhost:8100` and the client default
+`http://127.0.0.1:8100`.
 
 ### Packaging gotchas the spec handles (validated end-to-end)
 
@@ -202,9 +212,14 @@ and registers every open-notebook command — then reaches FastAPI app config.
 The only thing left at that point is runtime configuration (a SurrealDB sidecar
 at `:8000` + env), which is operational, not a packaging concern.
 
-### Until the SurrealDB binary is also staged
+### RAG-less package behavior
 
 - The packaged app launches fine and the React UI works.
+- The Rust supervisor skips the optional SurrealDB/open-notebook sidecars when
+  `resources/services/bin/surreal2(.exe)` or `resources/services/open-notebook/`
+  is absent.
+- The boot status is `degraded`, not `error`, and the owned-port registry claims
+  only the required LSAT backend port (`8100`) in a RAG-less bundle.
 - Grounded RAG falls back to the **fully-local path** (`src/lib/localRag.ts`)
   through the storage abstraction + local LLM — no sidecar required.
 - Features that prefer the open-notebook backend surface their connection
@@ -227,18 +242,52 @@ the sidecar is down at startup the app silently stays on Dexie.
 Before tagging a release:
 
 ```bash
-npm run verify              # lint + 450+ tests + build
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust unit tests (incl. 4-sidecar supervisor)
-npm audit --omit=dev --audit-level=high           # 0 vulnerabilities
-npm run content:validate    # all CFA levels exam-ready
-npm run build:onb-binary    # open-notebook sidecar → resources/services/open-notebook/
-npm run build:lsat-binary   # LSAT sidecar → resources/services/lsat-backend/
-npm run tauri:build:debug   # smoke: bundle builds end-to-end (ships both sidecars)
+python scripts/release_local.py --timeout 3600
 ```
 
-The two Python backend sidecars are built locally before tagging (not in CI —
-they're large and the personal-use workflow builds on the dev box). Both land
-in `src-tauri/resources/services/` and are gitignored.
+The local release gate runs the frontend, LSAT, backend, content, no-egress,
+RAG-eval, citation-faithfulness, source-grounded answer benchmark,
+generated-content gate, explanation-golden, prompt-regression fixture,
+generation-quality regression, route performance budget, dependency-audit,
+sidecar provenance, Tauri build, packaged-app smoke, and release manifest/SBOM
+checks. It writes repo-root
+`dist/release_local_report.json`, `dist/release_trust.json`, and
+`dist/studyvault-release-manifest.json`; a production release requires
+`release_trust.status` to be `ok` with no blockers. The packaged smoke launches
+the built desktop app, verifies LSAT sidecar identity, terminates the app, and
+fails if any owned sidecar port (`8000`, `5055`, or `8100`) remains open after
+cleanup. The release manifest records Node/Rust/Python dependency evidence,
+lockfile hashes, sidecar provenance, bundle SHA-256 hashes, and signing
+configuration status. Tagged-release verification mirrors the always-on static
+and eval floors before building bundles, including LSAT typecheck/tests,
+no-egress, sidecar-fetch inventory, docs drift, baseline catalog, RAG retrieval eval,
+citation-faithfulness, source-grounded answer benchmark, generated-content gate,
+explanation golden, prompt-regression fixture, host/backend mutation score
+gates, route performance budget, and the deterministic generation-quality
+regression floor. `npm run bundle:report` also
+checks `tests/bundle-baseline.json` and writes
+`dist/reports/bundle-report.md`; refresh that baseline only with
+`npm run bundle:baseline` after an intentional bundle-size change.
+`npm run check:baselines` keeps `tests/baseline-catalog.json` and
+`docs/TESTING-BASELINES.md` synchronized for every release baseline/golden.
+`npm run mutation:host` and `npm run mutation:backend` publish the curated
+TEST-9 mutation floor reports under `dist/reports/mutation-*.json`.
+The explanation-golden check is `python -m app.eval --release-floor --check --seed`
+run against a disposable `LSATLAB_DATA_DIR`; prompt regression runs the host
+`scripts/prompt-regression-fixture-floor.mjs` gate and backend
+`python -m app.prompt_contracts --check`.
+
+The required LSAT backend sidecar is built by the local release gate and by the
+GitHub Actions release matrix before `tauri build`. The open-notebook sidecar is
+built only when the release workflow is given `ONB_GIT_URL` and a full
+40-character commit SHA in `ONB_GIT_REF`; otherwise the artifact is deliberately
+labelled RAG-less. The workflow checks out that exact commit detached, runs
+`npm run check:onb-source`, and the sidecar provenance records the packaged
+`spike/open-notebook@<sha>` source revision. Built sidecars land in
+`src-tauri/resources/services/` and are gitignored. The provenance manifest is
+shipped beside them, checked before bundling, reported in the LSAT trust
+manifest, and re-checked by the Rust supervisor before launch when a manifest is
+present.
 
 Then bump the three versions to match:
 

@@ -24,7 +24,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { Ear, Loader2, Mic, Volume2, X } from 'lucide-react';
+import { cn } from '../ui/cn';
 import {
   buildReadAloudScript,
   detectVoiceCapabilities,
@@ -54,6 +56,19 @@ export interface HandsFreeControllerProps {
   engineOptions?: HandsFreeEngineOptions;
   /** Pre-built engine (tests). Takes precedence over engineOptions. */
   engine?: HandsFreeEngine;
+  /** Optional class hooks let LSAT use its Tailwind button vocabulary. */
+  className?: string;
+  buttonClassName?: string;
+  primaryButtonClassName?: string;
+  secondarySmallButtonClassName?: string;
+  statusClassName?: string;
+  confirmRowClassName?: string;
+  mutedTextClassName?: string;
+  errorClassName?: string;
+  spinnerClassName?: string;
+  style?: CSSProperties;
+  statusStyle?: CSSProperties;
+  confirmRowStyle?: CSSProperties;
 }
 
 type Phase =
@@ -73,6 +88,18 @@ export default function HandsFreeController({
   disabled = false,
   engineOptions,
   engine: injectedEngine,
+  className,
+  buttonClassName = 'btn btn-secondary',
+  primaryButtonClassName = 'btn btn-primary btn-sm',
+  secondarySmallButtonClassName = 'btn btn-secondary btn-sm',
+  statusClassName = 'qv-fs-sm qv-text-secondary',
+  confirmRowClassName = 'qv-row-2',
+  mutedTextClassName = 'qv-text-secondary',
+  errorClassName = 'qv-text-danger',
+  spinnerClassName = 'qv-spin',
+  style,
+  statusStyle,
+  confirmRowStyle,
 }: HandsFreeControllerProps) {
   const caps = useMemo(() => detectVoiceCapabilities(), []);
   const engineRef = useRef<HandsFreeEngine | null>(null);
@@ -156,21 +183,21 @@ export default function HandsFreeController({
 
   return (
     <div
-      className="hands-free-controller qv-row-2"
+      className={cn('hands-free-controller', className ?? 'qv-row-2')}
       role="group"
       aria-label="Hands-free study controls"
-      style={{ flexWrap: 'wrap', alignItems: 'center', marginTop: 'var(--space-3)' }}
+      style={style ?? { flexWrap: 'wrap', alignItems: 'center', marginTop: 'var(--space-3)' }}
     >
       {caps.canSpeak && (
         <button
           type="button"
-          className="btn btn-secondary"
+          className={buttonClassName}
           onClick={handleReadAloud}
           disabled={disabled || busy}
           aria-label="Read question and options aloud"
         >
           {phase.kind === 'reading' ? (
-            <Loader2 size={16} className="qv-spin" aria-hidden="true" />
+            <Loader2 size={16} className={spinnerClassName} aria-hidden="true" />
           ) : (
             <Volume2 size={16} aria-hidden="true" />
           )}
@@ -181,13 +208,13 @@ export default function HandsFreeController({
       {caps.canListen && (
         <button
           type="button"
-          className="btn btn-secondary"
+          className={buttonClassName}
           onClick={handleVoiceAnswer}
           disabled={disabled || busy}
           aria-label="Answer by voice"
         >
           {phase.kind === 'listening' ? (
-            <Loader2 size={16} className="qv-spin" aria-hidden="true" />
+            <Loader2 size={16} className={spinnerClassName} aria-hidden="true" />
           ) : (
             <Mic size={16} aria-hidden="true" />
           )}
@@ -196,34 +223,39 @@ export default function HandsFreeController({
       )}
 
       {busy && (
-        <button type="button" className="btn btn-secondary" onClick={cancel} aria-label="Cancel">
+        <button type="button" className={buttonClassName} onClick={cancel} aria-label="Cancel">
           <X size={16} aria-hidden="true" /> Cancel
         </button>
       )}
 
       {/* Live region: everything spoken/heard is announced for SR users. */}
-      <div aria-live="polite" role="status" className="qv-fs-sm qv-text-secondary" style={{ width: '100%' }}>
+      <div
+        aria-live="polite"
+        role="status"
+        className={statusClassName}
+        style={statusStyle ?? { width: '100%' }}
+      >
         {phase.kind === 'listening' && <span><Ear size={14} aria-hidden="true" /> Listening for your answer…</span>}
         {phase.kind === 'unrecognized' && (
-          <span className="qv-text-secondary">
+          <span className={mutedTextClassName}>
             Didn’t catch an option in “{phase.transcript || '…'}”. Try saying the letter, e.g. “Option A”.
           </span>
         )}
         {phase.kind === 'confirm' && (
-          <span className="qv-row-2" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          <span className={confirmRowClassName} style={confirmRowStyle ?? { flexWrap: 'wrap', alignItems: 'center' }}>
             <span>
               Heard “{phase.transcript}” → <strong>Option {phase.letter}</strong>: {phase.text}.{' '}
               Confirm to apply (timed exam — not applied automatically).
             </span>
-            <button type="button" className="btn btn-primary btn-sm" onClick={confirmHeard}>
+            <button type="button" className={primaryButtonClassName} onClick={confirmHeard}>
               Confirm Option {phase.letter}
             </button>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={cancel}>
+            <button type="button" className={secondarySmallButtonClassName} onClick={cancel}>
               Discard
             </button>
           </span>
         )}
-        {phase.kind === 'error' && <span className="qv-text-danger">{phase.message}</span>}
+        {phase.kind === 'error' && <span className={errorClassName}>{phase.message}</span>}
       </div>
     </div>
   );

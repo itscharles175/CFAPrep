@@ -29,6 +29,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, statSync, copyFileSync, chmodSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { recordSidecarProvenance } from './sidecar-provenance.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(__filename, '..', '..');
@@ -130,7 +131,14 @@ const dest = join(OUT_DIR, EXE_NAME);
 if (existsSync(dest)) rmSync(dest);
 copyFileSync(built, dest);
 if (process.platform !== 'win32') chmodSync(dest, 0o755);
+const provenance = await recordSidecarProvenance({
+  service: 'LSAT backend',
+  binaryPath: dest,
+  source: 'scripts/build-lsat-binary.mjs',
+  optional: false,
+});
 
 console.log(`\n✓ Bundled LSAT backend -> ${dest.split(sep).slice(-4).join(sep)}`);
+console.log(`  Provenance -> ${provenance.sha256.slice(0, 12)}… (${provenance.size} bytes)`);
 console.log('  StudyVault release builds will include it under bundle.resources;');
 console.log('  the Tauri supervisor launches it on 127.0.0.1:8100.');

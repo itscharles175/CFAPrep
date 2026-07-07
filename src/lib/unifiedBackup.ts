@@ -17,13 +17,14 @@
 // silent no-op, because the LSAT half genuinely needs the backend.
 
 import { exportVaultData, importVaultData } from './progressStore';
+import { decryptVaultBackup, encryptVaultBackup, isEncryptedBackupBlob } from './encryptedBackup';
 import {
   downloadEnvelope,
   validateEnvelope,
   type UnifiedExportEnvelope,
 } from './unifiedExportEnvelope';
+import { fetchLsatSidecar } from './lsatSidecarClient';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 const EXPORT_BACKUP_PATH = '/api/export/backup';
 const EXPORT_IMPORT_PATH = '/api/export/import';
 
@@ -46,6 +47,54 @@ export interface UnifiedRestoreResult {
   counts: Record<string, number>;
   /** True when the envelope carried a host half that was re-applied to Dexie. */
   hostApplied: boolean;
+  /** True when the selected artifact was a passphrase-encrypted wrapper. */
+  encrypted: boolean;
+}
+
+export interface UnifiedBackupExportOptions {
+  includeHistory?: boolean;
+  timeoutMs?: number;
+  /**
+   * Primary path: encrypt the unified envelope before it leaves the browser.
+   * Plaintext export requires allowPlaintext so call sites make that risk explicit.
+   */
+  passphrase?: string;
+  allowPlaintext?: boolean;
+}
+
+export interface UnifiedBackupImportOptions {
+  mode?: 'merge' | 'replace';
+  timeoutMs?: number;
+  /** Required when the selected artifact is a `.qvenc.json` encrypted wrapper. */
+  passphrase?: string;
+}
+
+function downloadEncryptedUnifiedBackup(
+  encryptedBlob: unknown,
+  exportId: string,
+): void {
+  if (typeof document === 'undefined' || typeof URL?.createObjectURL !== 'function') {
+    return;
+  }
+  const file = new Blob([JSON.stringify(encryptedBlob, null, 2)], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(file);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `studyvault-${exportId}.qvenc.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function parseJsonOrThrow(fileText: string, message: string): unknown {
+  try {
+    return JSON.parse(fileText);
+  } catch {
+    throw new UnifiedBackupError(message);
+  }
 }
 
 /**
@@ -55,30 +104,56 @@ export interface UnifiedRestoreResult {
  * unreachable.
  */
 export async function exportUnifiedBackup(
-  opts: { includeHistory?: boolean; timeoutMs?: number } = {},
+  opts: UnifiedBackupExportOptions = {},
 ): Promise<UnifiedExportEnvelope> {
+  if (!opts.passphrase && !opts.allowPlaintext) {
+    throw new UnifiedBackupError(
+      'Unified backups are encrypted by default. Enter a passphrase, or use the explicit plaintext export path for a local-only diagnostic copy.',
+    );
+  }
   const hostData = (await exportVaultData()) as unknown as Record<string, unknown>;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 20000);
+  let res: Response;
   try {
-    const res = await fetch(`${LSAT_API_BASE}${EXPORT_BACKUP_PATH}`, {
-      signal: controller.signal,
+    res = await fetchLsatSidecar(EXPORT_BACKUP_PATH, {
+      timeoutMs: opts.timeoutMs ?? 20000,
       method: 'POST',
       headers: { accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify({ host_data: hostData, include_history: opts.includeHistory ?? false }),
+      body: JSON.stringify({
+        host_data: hostData,
+        include_history: opts.includeHistory ?? false,
+        // The trusted local host encrypts this envelope in-browser so the
+        // passphrase never has to cross the sidecar boundary.
+        allow_plaintext: opts.allowPlaintext || Boolean(opts.passphrase),
+      }),
     });
-    if (!res.ok) {
-      throw new UnifiedBackupError(`The LSAT backend responded ${res.status} building the backup.`);
-    }
-    const envelope = (await res.json()) as UnifiedExportEnvelope;
-    downloadEnvelope(envelope);
-    return envelope;
   } catch (err) {
     if (err instanceof UnifiedBackupError) throw err;
     throw new UnifiedBackupError(SIDECAR_DOWN_HINT);
-  } finally {
-    clearTimeout(timer);
   }
+  if (!res.ok) {
+    throw new UnifiedBackupError(`The LSAT backend responded ${res.status} building the backup.`);
+  }
+
+  let envelope: UnifiedExportEnvelope;
+  try {
+    envelope = (await res.json()) as UnifiedExportEnvelope;
+  } catch {
+    throw new UnifiedBackupError('The LSAT backend returned an invalid backup response.');
+  }
+
+  if (opts.passphrase) {
+    try {
+      const encrypted = await encryptVaultBackup(JSON.stringify(envelope), opts.passphrase);
+      downloadEncryptedUnifiedBackup(encrypted, envelope.exportId);
+    } catch (err) {
+      throw new UnifiedBackupError(
+        err instanceof Error ? err.message : 'Could not encrypt the unified backup.',
+      );
+    }
+  } else {
+    downloadEnvelope(envelope);
+  }
+  return envelope;
 }
 
 /**
@@ -93,13 +168,17 @@ export async function exportUnifiedBackup(
  */
 export async function importUnifiedBackup(
   fileText: string,
-  opts: { mode?: 'merge' | 'replace'; timeoutMs?: number } = {},
+  opts: UnifiedBackupImportOptions = {},
 ): Promise<UnifiedRestoreResult> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fileText);
-  } catch {
-    throw new UnifiedBackupError('The selected file is not valid JSON.');
+  let parsed = parseJsonOrThrow(fileText, 'The selected file is not valid JSON.');
+  let encrypted = false;
+  if (isEncryptedBackupBlob(parsed)) {
+    if (!opts.passphrase) {
+      throw new UnifiedBackupError('This unified backup is encrypted. Enter its passphrase before restoring it.');
+    }
+    const plaintext = await decryptVaultBackup(parsed, opts.passphrase);
+    parsed = parseJsonOrThrow(plaintext, 'The encrypted unified backup decrypted, but its payload is not valid JSON.');
+    encrypted = true;
   }
 
   const validation = validateEnvelope(parsed);
@@ -129,13 +208,11 @@ export async function importUnifiedBackup(
     }
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 30000);
   let exportId = envelope.exportId;
   let counts: Record<string, number> = {};
   try {
-    const res = await fetch(`${LSAT_API_BASE}${EXPORT_IMPORT_PATH}`, {
-      signal: controller.signal,
+    const res = await fetchLsatSidecar(EXPORT_IMPORT_PATH, {
+      timeoutMs: opts.timeoutMs ?? 30000,
       method: 'POST',
       headers: { accept: 'application/json', 'content-type': 'application/json' },
       body: JSON.stringify({ envelope }),
@@ -157,9 +234,7 @@ export async function importUnifiedBackup(
         ? 'Your host data was restored, but the LSAT backend was unreachable, so the LSAT bank was NOT restored. Start the backend and run the restore again to finish.'
         : SIDECAR_DOWN_HINT,
     );
-  } finally {
-    clearTimeout(timer);
   }
 
-  return { exportId, counts, hostApplied };
+  return { exportId, counts, hostApplied, encrypted };
 }

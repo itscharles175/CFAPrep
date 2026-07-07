@@ -545,11 +545,21 @@ export default function Notebook() {
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <SourceStatusPill status={workbenchStatus} official={Boolean(activeCitation?.official_firewall)} />
-          <Button size="sm" variant="outline" onClick={runTransform}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={runTransform}
+            aria-label="Transform"
+          >
             <Sparkles className="h-4 w-4" aria-hidden />
             <span className="hidden sm:inline">Transform</span>
           </Button>
-          <Button size="sm" variant="outline" onClick={makePodcast}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={makePodcast}
+            aria-label="Briefing"
+          >
             <AudioLines className="h-4 w-4" aria-hidden />
             <span className="hidden sm:inline">Briefing</span>
           </Button>
@@ -568,7 +578,12 @@ export default function Notebook() {
               ))}
             </SelectContent>
           </Select>
-          <Button size="sm" variant="outline" onClick={exportNotebook}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={exportNotebook}
+            aria-label="Export"
+          >
             <Download className="h-4 w-4" aria-hidden />
             <span className="hidden sm:inline">Export</span>
           </Button>

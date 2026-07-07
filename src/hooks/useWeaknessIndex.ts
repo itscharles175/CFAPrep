@@ -24,8 +24,8 @@
  * contract — this hook is self-contained and owns its wire shapes.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 const WEAKNESS_INDEX_PATH = '/api/analytics/weakness-index';
 
 /** Read path is cheap server-side but still off the render path; modest timeout. */
@@ -186,27 +186,18 @@ export async function fetchWeaknessIndex(
   opts: UseWeaknessIndexOptions = {},
 ): Promise<FetchResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${WEAKNESS_INDEX_PATH}${buildQuery(opts)}`, {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) return { items: [], meta: null, reachable: true };
-    const data = await res.json();
-    const body = isRecord(data) ? data : {};
-    const rawItems = Array.isArray(body.items) ? body.items : [];
-    const items = rawItems
-      .map(readItem)
-      .filter((it): it is WeaknessIndexItem => it !== null);
-    return { items, meta: readMeta(body.meta), reachable: true };
-  } catch {
-    // Sidecar offline / timeout / non-JSON — degrade silently.
-    return { items: [], meta: null, reachable: false };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchLsatSidecarJson(`${WEAKNESS_INDEX_PATH}${buildQuery(opts)}`, {
+    timeoutMs,
+    headers: { accept: 'application/json' },
+  });
+  if (!res.reachable) return { items: [], meta: null, reachable: false };
+  if (!res.ok || res.data == null) return { items: [], meta: null, reachable: true };
+  const body = isRecord(res.data) ? res.data : {};
+  const rawItems = Array.isArray(body.items) ? body.items : [];
+  const items = rawItems
+    .map(readItem)
+    .filter((it): it is WeaknessIndexItem => it !== null);
+  return { items, meta: readMeta(body.meta), reachable: true };
 }
 
 /** Module-wide cache keyed by request signature so re-mounts don't re-fetch. */

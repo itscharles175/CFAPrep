@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from . import ai, backup, config, jobs, observability
+from . import ai, backup, config, jobs, llm, observability
 from .db import engine, init_db
 from .models import GenJob, GenStatus
 
@@ -20,6 +20,23 @@ def _generation_queue_counts() -> tuple[int, int]:
         sum(1 for j in jobs_ if j.status == GenStatus.queued),
         sum(1 for j in jobs_ if j.status == GenStatus.running),
     )
+
+
+def _provider_capabilities_from_health(ai_health: dict[str, Any]) -> dict[str, Any]:
+    capabilities = ai_health.get("capabilities")
+    if isinstance(capabilities, dict):
+        return capabilities
+    realtime = (
+        ai_health.get("provider")
+        or ai_health.get("realtime_provider")
+        or config.LOCAL_PROVIDER
+    )
+    offline = ai_health.get("offline_provider") or llm.offline_provider_name()
+    return {
+        "realtime": llm.provider_capabilities(realtime),
+        "offline": llm.provider_capabilities(offline),
+        "matrix": llm.provider_capability_matrix(),
+    }
 
 
 def build_report(*, include_ai: bool = True) -> dict[str, Any]:
@@ -67,6 +84,7 @@ def build_report(*, include_ai: bool = True) -> dict[str, Any]:
             or ai_health.get("realtime_provider")
             or "ollama"
         )
+        capabilities = _provider_capabilities_from_health(ai_health)
         ai_ready = (
             provider_reachable
             and explain_ready
@@ -93,6 +111,7 @@ def build_report(*, include_ai: bool = True) -> dict[str, Any]:
             "model_available": model_available,
             "provider": ai_health.get("offline_provider"),
             "realtime_provider": ai_health.get("realtime_provider"),
+            "capabilities": capabilities,
         }
     status = "ok" if readiness["ok"] and not warnings else (
         "warning" if readiness["ok"] else "error"

@@ -141,3 +141,59 @@ export const contrastMatrix = !includeLsatRoutes
   : lsatRoutesOnly
     ? lsatContrastMatrix
     : [...hostContrastMatrix, ...lsatContrastMatrix];
+
+/**
+ * A11Y-4 — focused OS accessibility-preference surfaces.
+ *
+ * These are intentionally smaller than the full route sweep: they exercise the
+ * richest primitive/chrome pages under `prefers-contrast: more` and
+ * `forced-colors: active`, then scripts/a11y-check.mjs asserts computed styles
+ * that axe cannot infer, especially outline-based focus in forced-colors mode.
+ */
+const hostPreferenceMediaMatrix = [
+  {
+    id: 'host-style-preferences',
+    path: '/style',
+    expectedText: 'Style',
+    themes: ['dark', 'light'],
+    label: 'Host primitives under OS contrast preferences',
+    surfaceSelector: '.surface, .qv-card, .qv-list-row, .panel, .metric-card',
+    focusSelector: 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  },
+  {
+    id: 'host-analytics-preferences',
+    path: '/analytics',
+    expectedText: 'Analytics',
+    themes: ['dark', 'light'],
+    label: 'Host chart surface under OS contrast preferences',
+    surfaceSelector: '.surface, .qv-card, .panel, .border',
+    chartSelector: 'svg path, svg line, svg text',
+  },
+];
+
+const lsatPreferenceMediaMatrix = [
+  {
+    id: 'lsat-bank-preferences',
+    path: '/lsat/bank',
+    expectedText: 'Question bank',
+    themes: ['dark', 'light'],
+    label: 'LSAT dense bank controls under OS contrast preferences',
+    surfaceSelector: '.border, .rounded-card.border, .bg-card.border, .bg-surface-1.border',
+    focusSelector: 'button, a[href], input, select, textarea, [role="button"], [role="radio"], [tabindex]:not([tabindex="-1"])',
+  },
+  {
+    id: 'lsat-analytics-preferences',
+    path: '/lsat/analytics',
+    expectedText: 'Analytics',
+    themes: ['dark', 'light'],
+    label: 'LSAT chart surface under OS contrast preferences',
+    surfaceSelector: '.border, .rounded-card.border, .bg-card.border, .bg-surface-1.border',
+    chartSelector: 'svg path, svg line, svg text, [data-heatmap-root] [role="img"]',
+  },
+];
+
+export const preferenceMediaMatrix = !includeLsatRoutes
+  ? hostPreferenceMediaMatrix
+  : lsatRoutesOnly
+    ? lsatPreferenceMediaMatrix
+    : [...hostPreferenceMediaMatrix, ...lsatPreferenceMediaMatrix];

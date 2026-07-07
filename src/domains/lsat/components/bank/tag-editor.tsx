@@ -111,7 +111,7 @@ export function TagEditor({
           <div className="space-y-1.5">
             <Label>Question type</Label>
             <Select value={qType} onValueChange={setQType}>
-              <SelectTrigger>
+              <SelectTrigger aria-label="Bulk question type">
                 <SelectValue placeholder="Leave unchanged" />
               </SelectTrigger>
               <SelectContent>
@@ -127,7 +127,7 @@ export function TagEditor({
           <div className="space-y-1.5">
             <Label>Difficulty</Label>
             <Select value={difficulty} onValueChange={setDifficulty}>
-              <SelectTrigger>
+              <SelectTrigger aria-label="Bulk difficulty">
                 <SelectValue placeholder="Leave unchanged" />
               </SelectTrigger>
               <SelectContent>

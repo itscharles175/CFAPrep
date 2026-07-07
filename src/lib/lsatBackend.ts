@@ -21,8 +21,8 @@
  * the typed boundary is shared.
  */
 import type { components, operations } from '@/domains/lsat/lib/api.gen';
-
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
+import { fetchLsatSidecarJson } from './lsatSidecarClient';
+import { normalizeLoopbackHttpBaseUrl } from './localUrlPolicy';
 
 /** Request body for `PUT /api/settings` (generated from the backend contract). */
 type SettingsPatch = components['schemas']['SettingsPatch'];
@@ -59,30 +59,17 @@ async function fetchJson(
   timeoutMs: number,
   init: { method?: string; body?: string } = {},
 ): Promise<{ ok: boolean; status: number; data: unknown } | { ok: false; status: 0; error: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${path}`, {
-      signal: controller.signal,
-      method: init.method || 'GET',
-      headers: {
-        accept: 'application/json',
-        ...(init.body ? { 'content-type': 'application/json' } : {}),
-      },
-      body: init.body,
-    });
-    let data: unknown = null;
-    try {
-      data = await res.json();
-    } catch {
-      /* non-JSON body */
-    }
-    return { ok: res.ok, status: res.status, data };
-  } catch (err) {
-    return { ok: false, status: 0, error: err instanceof Error ? err.message : String(err) };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchLsatSidecarJson(path, {
+    timeoutMs,
+    method: init.method || 'GET',
+    headers: {
+      accept: 'application/json',
+      ...(init.body ? { 'content-type': 'application/json' } : {}),
+    },
+    body: init.body,
+  });
+  if (res.reachable) return { ok: res.ok, status: res.status, data: res.data };
+  return { ok: false, status: 0, error: res.error ?? 'LSAT backend unreachable' };
 }
 
 /**
@@ -261,8 +248,18 @@ export async function syncProviderToLsat(
   host: { baseUrl?: string },
   timeoutMs = 4000,
 ): Promise<LsatSyncResult> {
-  const base = (host.baseUrl || '').trim();
-  if (!base) return { ok: false, detail: 'No host model server URL is configured to sync.' };
+  const rawBase = (host.baseUrl || '').trim();
+  if (!rawBase) return { ok: false, detail: 'No host model server URL is configured to sync.' };
+
+  let base: string;
+  try {
+    base = normalizeLoopbackHttpBaseUrl(rawBase, 'Host model server URL');
+  } catch (error) {
+    return {
+      ok: false,
+      detail: error instanceof Error ? error.message : 'Host model server URL must be local.',
+    };
+  }
 
   const isOllama = /11434|ollama/i.test(base);
   // Build the `PUT /api/settings` body against the generated `SettingsPatch`
@@ -348,6 +345,19 @@ export async function pushModelRoutingToLsat(
     local_provider: patch.local_provider,
     lmstudio_url: trimmed(patch.lmstudio_url) || undefined,
   };
+  if (candidate.lmstudio_url) {
+    try {
+      candidate.lmstudio_url = normalizeLoopbackHttpBaseUrl(
+        candidate.lmstudio_url,
+        'LM Studio URL',
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        detail: error instanceof Error ? error.message : 'LM Studio URL must be local.',
+      };
+    }
+  }
   const applied: LsatModelRoutingPatch = {};
   const settingsPatch: Pick<
     SettingsPatch,

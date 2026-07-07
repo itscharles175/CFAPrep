@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { checkLsatBackendHealth, syncProviderToLsat, LSAT_SETTINGS_PATH } from './lsatBackend';
+import {
+  checkLsatBackendHealth,
+  pushModelRoutingToLsat,
+  syncProviderToLsat,
+  LSAT_SETTINGS_PATH,
+} from './lsatBackend';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -18,10 +23,14 @@ function stubFetch(routes: Record<string, () => Response | Promise<Response>>) {
   );
 }
 
+function healthResponse() {
+  return new Response(JSON.stringify({ ok: true, service: 'lsat-backend', version: '0.9.0' }), { status: 200 });
+}
+
 describe('checkLsatBackendHealth', () => {
   it('reports healthy when /api/health is 2xx', async () => {
     stubFetch({
-      '/api/health': () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      '/api/health': healthResponse,
       '/api/ai/health': () => new Response(JSON.stringify({ ok: true, provider: 'ollama' }), { status: 200 }),
     });
     const h = await checkLsatBackendHealth();
@@ -33,7 +42,7 @@ describe('checkLsatBackendHealth', () => {
 
   it('still reports healthy if /api/ai/health is absent (older backend)', async () => {
     stubFetch({
-      '/api/health': () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      '/api/health': healthResponse,
       '/api/ai/health': () => new Response('not found', { status: 404 }),
     });
     const h = await checkLsatBackendHealth();
@@ -43,8 +52,9 @@ describe('checkLsatBackendHealth', () => {
 
   it('flags "up but provider down" when ai health is not ready', async () => {
     stubFetch({
-      '/api/health': () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
-      '/api/ai/health': () => new Response(JSON.stringify({ ok: false, provider: 'ollama', detail: 'no models' }), { status: 200 }),
+      '/api/health': healthResponse,
+      '/api/ai/health': () =>
+        new Response(JSON.stringify({ ok: false, provider: 'ollama', detail: 'no models' }), { status: 200 }),
     });
     const h = await checkLsatBackendHealth();
     expect(h.ok).toBe(true);
@@ -54,7 +64,7 @@ describe('checkLsatBackendHealth', () => {
 
   it('surfaces effective model routing + missing models (S5-A)', async () => {
     stubFetch({
-      '/api/health': () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      '/api/health': healthResponse,
       '/api/ai/health': () =>
         new Response(
           JSON.stringify({
@@ -75,7 +85,7 @@ describe('checkLsatBackendHealth', () => {
 
   it('omits models/missingModels when the backend reports none', async () => {
     stubFetch({
-      '/api/health': () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      '/api/health': healthResponse,
       '/api/ai/health': () => new Response(JSON.stringify({ ok: true, provider: 'ollama' }), { status: 200 }),
     });
     const h = await checkLsatBackendHealth();
@@ -134,10 +144,40 @@ describe('syncProviderToLsat (S5-B)', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('returns ok:false (no request) for remote host provider URLs', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const r = await syncProviderToLsat({ baseUrl: 'http://192.168.1.5:1234/v1' });
+
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/loopback/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('returns ok:false when the backend rejects the update', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('nope', { status: 422 }))) as unknown as typeof fetch);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response('nope', { status: 422 }))) as unknown as typeof fetch,
+    );
     const r = await syncProviderToLsat({ baseUrl: 'http://localhost:1234/v1' });
     expect(r.ok).toBe(false);
     expect(r.detail).toMatch(/422/);
+  });
+});
+
+describe('pushModelRoutingToLsat', () => {
+  it('returns ok:false (no request) for remote LM Studio URLs', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const r = await pushModelRoutingToLsat({
+      local_provider: 'lmstudio',
+      lmstudio_url: 'http://192.168.1.5:1234/v1',
+    });
+
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/loopback/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

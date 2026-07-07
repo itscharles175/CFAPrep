@@ -96,6 +96,19 @@ async function waitForMockSectionStatus(page, stateId, expectedStatus, label) {
   throw new Error(`Timed out waiting for ${label}; last mock state status was ${lastStatus}.`);
 }
 
+async function waitForServiceWorkerReady(page, timeoutMs = 10_000) {
+  return page.evaluate(async (timeout) => {
+    if (!('serviceWorker' in navigator)) return false;
+    const ready = navigator.serviceWorker.ready
+      .then(() => Boolean(navigator.serviceWorker.controller))
+      .catch(() => false);
+    const timeoutResult = new Promise((resolve) => {
+      window.setTimeout(() => resolve(false), timeout);
+    });
+    return Promise.race([ready, timeoutResult]);
+  }, timeoutMs).catch(() => false);
+}
+
 await access('dist/index.html').catch(() => {
   throw new Error('Production dist is missing. Run npm run build before browser:regression.');
 });
@@ -214,24 +227,16 @@ try {
 
   startBrowserStep('browser:offline-reload', '/', 'production offline reload');
   await page.goto(new URL('/', address).toString(), { waitUntil: 'networkidle' });
-  let serviceWorkerReady = await page.evaluate(async () => {
-    if (!('serviceWorker' in navigator)) return false;
-    await navigator.serviceWorker.ready;
-    return Boolean(navigator.serviceWorker.controller);
-  }).catch(() => false);
+  let serviceWorkerReady = await waitForServiceWorkerReady(page);
   if (!serviceWorkerReady) {
     await page.reload({ waitUntil: 'networkidle' });
-    serviceWorkerReady = await page.evaluate(async () => {
-      if (!('serviceWorker' in navigator)) return false;
-      await navigator.serviceWorker.ready;
-      return Boolean(navigator.serviceWorker.controller);
-    }).catch(() => false);
+    serviceWorkerReady = await waitForServiceWorkerReady(page);
   }
   if (serviceWorkerReady) {
     await page.waitForLoadState('networkidle').catch(() => undefined);
     await page.context().setOffline(true);
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await waitForBodyText(page, /QuantVault/, 'production offline reload');
+    await waitForBodyText(page, /StudyVault|QuantVault/, 'production offline reload');
     await page.context().setOffline(false);
     console.log('OK production offline reload');
   } else {

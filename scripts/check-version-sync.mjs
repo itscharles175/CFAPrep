@@ -24,9 +24,8 @@
  * Exit codes: 0 = every (present) source agrees with package.json; 1 = at least
  * one source disagrees, or --git-tag was requested and the tag mismatches/absent.
  *
- * NOTE: services/lsat-backend/app/config.py is owned by another slice and may
- * still read 0.1.0 transiently; this gate REPORTS the mismatch rather than
- * crashing, so it stays robust regardless of landing order.
+ * NOTE: services/lsat-backend/app/config.py is an enforced source now. A drift
+ * there fails the gate because FastAPI health reports that value at runtime.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -88,14 +87,29 @@ function configPyVersion() {
   return match ? match[1] : null;
 }
 
-/** Current git tag (vX.Y.Z), or null when HEAD is not tagged / git is absent. */
+/** Normalize vX.Y.Z-style tags to the bare package.json version string. */
+function normalizeTagVersion(tag) {
+  const clean = tag.trim().replace(/^refs\/tags\//, '');
+  return clean.replace(/^v/, '') || null;
+}
+
+/** Current release tag (vX.Y.Z), or null when HEAD/ref is not tagged. */
 function gitTagVersion() {
+  // In GitHub Actions release workflows, prefer the event ref over `git
+  // describe`; checkout can be shallow, but github.ref_name is authoritative.
+  if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME) {
+    return normalizeTagVersion(process.env.GITHUB_REF_NAME);
+  }
+  if (process.env.GITHUB_REF?.startsWith('refs/tags/')) {
+    return normalizeTagVersion(process.env.GITHUB_REF);
+  }
+
   const res = spawnSync('git', ['describe', '--tags', '--exact-match'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
   });
   if (res.status !== 0 || !res.stdout) return null;
-  return res.stdout.trim().replace(/^v/, '') || null;
+  return normalizeTagVersion(res.stdout);
 }
 
 const wantGitTag = process.argv.slice(2).includes('--git-tag');

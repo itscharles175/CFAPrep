@@ -134,4 +134,170 @@ export function stripThink(text) {
   return out.trim();
 }
 
+const LEADING_FENCE_HEADER_RE = new RegExp(
+  `^\\s*\`\`\`(?:${TAG_ALT})[^\\n]*\\n`,
+  'i',
+);
+
+function findNextReasoningTag(text) {
+  const re = new RegExp(`<(/?)(?:${TAG_ALT})\\b[^>]*>`, 'i');
+  const m = re.exec(text);
+  if (!m) return null;
+  return {
+    index: m.index,
+    end: m.index + m[0].length,
+    isClose: m[1] === '/',
+  };
+}
+
+function isPotentialReasoningTagPrefix(text, index) {
+  const tail = text.slice(index).toLowerCase();
+  if (!tail.startsWith('<') || tail.includes('>')) return false;
+
+  let rest = tail.slice(1);
+  if (rest.startsWith('/')) rest = rest.slice(1);
+  if (!rest) return true;
+
+  return REASONING_TAGS.some((tag) => {
+    if (tag.startsWith(rest)) return true;
+    if (!rest.startsWith(tag)) return false;
+    const next = rest[tag.length];
+    return next === undefined || /\s|\//.test(next);
+  });
+}
+
+function findPotentialReasoningTagPrefix(text) {
+  for (let index = text.lastIndexOf('<'); index >= 0; index = text.lastIndexOf('<', index - 1)) {
+    if (isPotentialReasoningTagPrefix(text, index)) return index;
+  }
+  return -1;
+}
+
+function splitOutsideReasoning(text) {
+  const partial = findPotentialReasoningTagPrefix(text);
+  if (partial < 0) return { emit: text, hold: '' };
+  return { emit: text.slice(0, partial), hold: text.slice(partial) };
+}
+
+function keepPossibleClosingFence(text) {
+  if (text.endsWith('``')) return '``';
+  if (text.endsWith('`')) return '`';
+  return '';
+}
+
+function isPotentialLeadingFencePrefix(text) {
+  const tail = text.replace(/^\s+/, '').toLowerCase();
+  if (!tail) return true;
+  if (!tail.startsWith('```')) return '`'.repeat(Math.min(tail.length, 3)).startsWith(tail);
+  const header = tail.slice(3);
+  if (!header) return true;
+  const lineEnd = header.indexOf('\n');
+  const headerPart = lineEnd >= 0 ? header.slice(0, lineEnd) : header;
+  if (!headerPart) return true;
+  return REASONING_TAGS.some((tag) => tag.startsWith(headerPart) || (lineEnd < 0 && headerPart.startsWith(tag)));
+}
+
+/**
+ * Create a stateful filter for streaming model deltas.
+ *
+ * `stripThink()` is intentionally a completed-text cleaner. Streamed deltas can
+ * split a tag (`<thi` + `nk>`) or a closing tag (`</thi` + `nk>`), so callers
+ * need a small parser that buffers ambiguous tails instead of forwarding raw
+ * chunks to live UI/TTS consumers.
+ */
+export function createThinkStreamFilter() {
+  let buffer = '';
+  let depth = 0;
+  let atStart = true;
+  let droppingLeadingFence = false;
+
+  function processLeadingFence() {
+    if (!atStart || depth > 0) return 'none';
+
+    if (droppingLeadingFence) {
+      const closeIndex = buffer.indexOf('```');
+      if (closeIndex < 0) {
+        buffer = keepPossibleClosingFence(buffer);
+        return 'hold';
+      }
+      buffer = buffer.slice(closeIndex + 3).replace(/^\r?\n/, '');
+      droppingLeadingFence = false;
+      atStart = false;
+      return 'handled';
+    }
+
+    const header = buffer.match(LEADING_FENCE_HEADER_RE);
+    if (header) {
+      buffer = buffer.slice(header[0].length);
+      droppingLeadingFence = true;
+      return 'handled';
+    }
+
+    if (isPotentialLeadingFencePrefix(buffer)) return 'hold';
+    atStart = false;
+    return 'none';
+  }
+
+  function feed(chunk) {
+    if (typeof chunk !== 'string' || chunk === '') return '';
+    buffer += chunk;
+    let out = '';
+
+    while (buffer) {
+      const fenceState = processLeadingFence();
+      if (fenceState === 'hold') break;
+      if (fenceState === 'handled') continue;
+
+      const tag = findNextReasoningTag(buffer);
+      if (depth > 0) {
+        if (!tag) {
+          const partial = findPotentialReasoningTagPrefix(buffer);
+          buffer = partial >= 0 ? buffer.slice(partial) : '';
+          break;
+        }
+        depth += tag.isClose ? -1 : 1;
+        if (depth < 0) depth = 0;
+        buffer = buffer.slice(tag.end);
+        continue;
+      }
+
+      if (!tag) {
+        const split = splitOutsideReasoning(buffer);
+        out += split.emit;
+        buffer = split.hold;
+        break;
+      }
+
+      out += buffer.slice(0, tag.index);
+      buffer = buffer.slice(tag.end);
+      if (!tag.isClose) depth = 1;
+    }
+
+    return out;
+  }
+
+  function flush() {
+    if (droppingLeadingFence || depth > 0) {
+      buffer = '';
+      depth = 0;
+      atStart = false;
+      droppingLeadingFence = false;
+      return '';
+    }
+
+    if (atStart && isPotentialLeadingFencePrefix(buffer)) {
+      buffer = '';
+      atStart = false;
+      return '';
+    }
+
+    const split = splitOutsideReasoning(buffer);
+    buffer = '';
+    atStart = false;
+    return split.emit;
+  }
+
+  return { feed, flush };
+}
+
 export default stripThink;

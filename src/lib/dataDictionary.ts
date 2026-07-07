@@ -29,6 +29,7 @@ import type {
   QuestionResult,
   ReviewItem,
 } from './learningTypes';
+import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
 // ---------------------------------------------------------------------------
 // §5 (declared first — referenced by the handshake helpers below)
@@ -430,7 +431,6 @@ export function createCrossDomainBridge(stores: CrossDomainSourceStores): {
 // §5 — Schema-version handshake (DATA-3)
 // ---------------------------------------------------------------------------
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 const SCHEMA_VERSIONS_PATH = '/api/observability/schema-versions';
 
 /** The backend `GET /api/observability/schema-versions` body (read defensively). */
@@ -522,19 +522,10 @@ export async function fetchDataSchemaAlignment(
   opts: { timeoutMs?: number; hostVersion?: number } = {},
 ): Promise<DataPlaneAlignment> {
   const { timeoutMs = 2500, hostVersion = CROSS_DOMAIN_SCHEMA_VERSION } = opts;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${SCHEMA_VERSIONS_PATH}`, {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) return evaluateDataPlaneAlignment(null, hostVersion);
-    const raw = (await res.json()) as RawSchemaVersionsResponse;
-    return evaluateDataPlaneAlignment(raw, hostVersion);
-  } catch {
-    return evaluateDataPlaneAlignment(null, hostVersion);
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchLsatSidecarJson<RawSchemaVersionsResponse>(SCHEMA_VERSIONS_PATH, {
+    timeoutMs,
+    headers: { accept: 'application/json' },
+  });
+  if (!res.ok || res.data == null) return evaluateDataPlaneAlignment(null, hostVersion);
+  return evaluateDataPlaneAlignment(res.data, hostVersion);
 }

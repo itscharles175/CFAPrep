@@ -9,11 +9,12 @@ import { registerRoute } from 'workbox-routing';
 import { CacheFirst, StaleWhileRevalidate, NetworkFirst } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
 import { CacheableResponsePlugin } from 'workbox-cacheable-response';
+import { isPrivateCacheUrl, purgePrivateCacheEntries } from './swPrivacy.js';
 
 const OFFLINE_CONTENT_CACHE = 'quantvault-offline-content-v1';
 
 // Precache all Vite build output (injected at build time)
-precacheAndRoute(self.__WB_MANIFEST || []);
+precacheAndRoute((self.__WB_MANIFEST || []).filter((entry) => !isPrivateCacheUrl(entry.url || entry)));
 cleanupOutdatedCaches();
 
 // Note: previous versions also registered CDN cache routes for Google Fonts
@@ -30,7 +31,10 @@ cleanupOutdatedCaches();
 // bundled/app-origin images. Cross-origin image requests fall through to the
 // network default (and the markdown renderer already blocks remote <img> src).
 registerRoute(
-  ({ request, url }) => request.destination === 'image' && url.origin === self.location.origin,
+  ({ request, url }) =>
+    request.destination === 'image' &&
+    url.origin === self.location.origin &&
+    !isPrivateCacheUrl(url),
   new CacheFirst({
     cacheName: 'images',
     plugins: [
@@ -48,7 +52,7 @@ const navigationStrategy = new NetworkFirst({
 
 // SPA navigation — network first, then explicit offline route cache, then app shell
 registerRoute(
-  ({ request }) => request.mode === 'navigate',
+  ({ request, url }) => request.mode === 'navigate' && !isPrivateCacheUrl(url),
   async ({ event, request }) => {
     try {
       return await navigationStrategy.handle({ event, request });
@@ -73,7 +77,10 @@ registerRoute(
 
 // Static assets (JS, CSS) — stale-while-revalidate
 registerRoute(
-  ({ request }) => ['script', 'style'].includes(request.destination),
+  ({ request, url }) =>
+    ['script', 'style'].includes(request.destination) &&
+    url.origin === self.location.origin &&
+    !isPrivateCacheUrl(url),
   new StaleWhileRevalidate({
     cacheName: 'static-assets',
     plugins: [
@@ -92,6 +99,9 @@ self.addEventListener('message', (event) => {
   }
 });
 
-self.addEventListener('activate', () => {
-  self.clients.claim();
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    await purgePrivateCacheEntries();
+    await self.clients.claim();
+  })());
 });

@@ -58,6 +58,21 @@ describe('openSocraticSession', () => {
     expect(speakMock).toHaveBeenCalled();
   });
 
+  it('strips reasoning traces before storing or speaking a coach turn', async () => {
+    recognizeOnceMock.mockResolvedValueOnce({ transcript: 'Coach me on convexity.', engine: 'browser-native' });
+    generateTextMock.mockResolvedValueOnce({ text: '<think>private plan</think>Convexity is curvature in the bond price-yield relationship.' });
+
+    const session = openSocraticSession();
+    const result = await session.next();
+
+    expect(result.ended).toBe(false);
+    expect(session.history[0].coach).toBe('Convexity is curvature in the bond price-yield relationship.');
+    expect(speakMock).toHaveBeenCalledWith(
+      'Convexity is curvature in the bond price-yield relationship.',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('ends on the default stop phrase "end session"', async () => {
     recognizeOnceMock.mockResolvedValueOnce({ transcript: 'OK, end session please.', engine: 'browser-native' });
 

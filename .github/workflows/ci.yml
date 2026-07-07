@@ -28,6 +28,11 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
+      # DX-2 — single version source-of-truth gate. Fails PRs when package.json,
+      # Tauri, Cargo, optional .env, or the backend APP_VERSION default drift.
+      - name: Version sync gate
+        run: npm run check:versions
+
       - name: Lint
         run: npm run lint
 
@@ -63,6 +68,13 @@ jobs:
       - name: No-egress gate
         run: node scripts/check-no-egress.mjs
 
+      # Wave 2 API contract safety - inventory direct frontend fetches to the
+      # LSAT sidecar (:8100) that bypass the approved API adapters. The committed
+      # baseline is the current debt budget; any NEW direct caller fails CI, and
+      # migrated callers can remove their baseline entries to ratchet it down.
+      - name: Direct sidecar fetch inventory gate
+        run: npm run check:sidecar-fetches
+
       # DX-1 — docs-drift gate. Verifies docs/ARCHITECTURE.md's load-bearing claims
       # still match the tree: referenced source paths exist, and it doesn't describe
       # the RETIRED split-shell boot path (host-entry.jsx / direct LsatRoot mount)
@@ -71,12 +83,37 @@ jobs:
       - name: Docs-drift gate
         run: node scripts/check-docs-drift.mjs
 
+      # TEST-10 — baseline/golden catalog governance. Ensures every committed or
+      # approved external baseline used by CI/release has a documented owner,
+      # refresh command, verification command, and generated catalog doc.
+      - name: Baseline catalog gate
+        run: npm run check:baselines
+
+      # GAP-PORT-1 — restore-onto-clean archive drill. A local-first vault backup
+      # is only trustworthy if export -> wipe -> import reproduces source-of-truth
+      # stores with matching per-store checksums. This runs fully offline against
+      # fake-indexeddb and fails the PR on restore drift.
+      - name: Vault archive restore drill
+        run: npm run vault-archive:drill
+
+      - name: Prompt regression fixture floor
+        run: node --import ./scripts/register-ts-loader.mjs scripts/prompt-regression-fixture-floor.mjs
+
       # RAG-1 (Wave 2 measurement substrate) — offline retrieval-eval floor.
       # scripts/rag-eval.mjs computes recall@k / precision@k / MRR / nDCG over
       # committed golden fixtures and FAILS if any metric drops below the
       # documented floor, so a retrieval regression can't ship green. node-only.
       - name: RAG retrieval-eval floor
-        run: node scripts/rag-eval.mjs
+        run: node --import ./scripts/register-ts-loader.mjs scripts/rag-eval.mjs
+
+      - name: Citation faithfulness floor
+        run: node --import ./scripts/register-ts-loader.mjs scripts/citation-faithfulness-eval.mjs
+
+      - name: Source-grounded answer benchmark floor
+        run: node --import ./scripts/register-ts-loader.mjs scripts/source-grounded-answer-eval.mjs
+
+      - name: Generated content gate floor
+        run: node --import ./scripts/register-ts-loader.mjs scripts/generated-content-gate-eval.mjs
 
       - name: Audit dependencies
         run: npm audit --omit=dev --audit-level=high
@@ -155,11 +192,11 @@ jobs:
   # installs the Playwright-managed Chromium, then runs scripts/visual-regression.mjs
   # (npm run visual:regression) — it screenshots a curated set of routes (incl.
   # the /style token gallery) in BOTH light and dark themes and pixel-diffs each
-  # frame against the committed baselines under tests/visual-baselines/. On the
-  # first run for any route/theme (no baseline) it writes the screenshot as the
-  # new baseline and passes (bootstrap); thereafter a diff over tolerance fails
-  # the job. Screenshots + diffs are uploaded as an artifact for review. Runs in
-  # parallel with `quality` — no host slowdown. (Plan UA7.)
+  # frame against the approved baselines under tests/visual-baselines/. Missing
+  # baselines fail before Chromium launches; intentional rebaselines require
+  # UPDATE_VISUAL_BASELINES=1 in a controlled run. Screenshots + diffs are
+  # uploaded as an artifact for review. Runs in parallel with `quality` — no
+  # host slowdown. (Plan UA7.)
   visual:
     name: Visual regression — token gallery + routes (light + dark)
     runs-on: ubuntu-latest
@@ -178,11 +215,11 @@ jobs:
 
       # audit M19 — restore Linux-generated visual baselines so the gate ENFORCES
       # (a missing/changed shot fails) rather than silently self-seeding on every
-      # run. First run misses → visual-regression.mjs bootstraps them + this cache
-      # saves them under the routes+tokens key; subsequent runs restore + enforce.
-      # A routes/token change rotates the key, so a now-stale baseline correctly
-      # diffs and prompts a deliberate rebaseline (UPDATE_VISUAL_BASELINES=1).
-      - name: Restore/seed visual baselines
+      # run. A cache miss fails closed; seed or refresh the cache only via a
+      # deliberate UPDATE_VISUAL_BASELINES=1 run after reviewing screenshots.
+      # A routes/token change rotates the key, so the new baseline set must be
+      # explicitly approved instead of silently bootstrapped.
+      - name: Restore visual baselines
         uses: actions/cache@v4
         with:
           path: tests/visual-baselines
@@ -221,6 +258,47 @@ jobs:
             dist/reports/visual-regression.json
           retention-days: 14
 
+  # TEST-7 / Wave 10: route-level runtime performance budget. Builds the
+  # production bundle, launches the same preview/Chromium stack as visual/a11y,
+  # and measures cold + warm navigations for the host home, CFA dashboard, CFA
+  # exam/practice routes, and stable /lsat routes across desktop + mobile
+  # viewports. The committed tests/performance-baseline.json is conservative at
+  # first and can be ratcheted after stable CI evidence; missing LCP/CLS/TBT/FCP
+  # metrics or large regressions fail the job. (TEST-7, Wave 10.)
+  perf:
+    name: Runtime performance — route budgets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Route performance budget
+        run: npm run perf:regression
+
+      - name: Upload performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-perf
+          path: |
+            dist/reports/perf-regression.json
+          retention-days: 14
+
   # QA-1 / K4-0: the /lsat/* routes in the visual + a11y gates. The vendored LSAT
   # domain is served by the SAME production build (src/main.jsx mounts it under a
   # `<BrowserRouter basename="/lsat">`), so this job builds once, installs the
@@ -228,9 +306,8 @@ jobs:
   # two gate scripts scoped to LSAT via INCLUDE_LSAT_ROUTES=1 + LSAT_ROUTES_ONLY=1
   # (scripts/qa-helpers.mjs `selectGateRoutes`): the visual gate screenshots each
   # LSAT route in BOTH themes × BOTH viewports (K4-0) and the a11y gate runs the
-  # WCAG 2.1 A/AA sweep + the LSAT contrast matrix. Baselines under
-  # tests/visual-baselines/ are gitignored, so the first run bootstraps them and
-  # passes; thereafter an in-run drift over tolerance fails the job. Runs in
+  # WCAG 2.1 A/AA sweep + the LSAT contrast matrix. Missing visual baselines fail
+  # closed; approved Linux baselines are restored from cache. Runs in
   # parallel with `quality` — no host slowdown. (Roadmap QA-1 + K4-0/K4-1.)
   lsat-qa-gates:
     name: LSAT routes — visual + a11y (light + dark, desktop + mobile)
@@ -251,6 +328,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+
+      - name: Restore LSAT visual baselines
+        uses: actions/cache@v4
+        with:
+          path: tests/visual-baselines
+          key: lsat-visual-baselines-${{ runner.os }}-${{ hashFiles('src/domains/lsat/lib/routeManifest.ts', 'src/routes/routeManifest.ts', 'src/styles/tokens.css', 'src/index.css') }}
+          restore-keys: |
+            lsat-visual-baselines-${{ runner.os }}-
 
       # Both gates launch headless Chromium via playwright-core; there is no
       # system browser on the runner, so install Playwright's managed Chromium
@@ -431,6 +516,33 @@ jobs:
     name: LSAT backend — full pytest suite
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
+      LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-backend-tests
+      LSATLAB_OLLAMA_URL: http://127.0.0.1:1
+      LSATLAB_LMSTUDIO_URL: http://127.0.0.1:1/v1
+      LSATLAB_LLM_RETRIES: '0'
+      LSATLAB_LOCAL_PROVIDER: ollama
+      LSATLAB_GEN_PROVIDER: ollama
+      LSATLAB_ENFORCE_OFFLINE: '0'
+      LSATLAB_CLOUD_EGRESS_ALLOWED: '0'
+      LSATLAB_CLOUD_API_KEY: ''
+      ANTHROPIC_API_KEY: ''
+      LSATLAB_ALLOW_REMOTE_LLM: '0'
+      LSATLAB_JOBS_WORKER: '0'
+      LSATLAB_ERRORLOG_AUTODIAGNOSE: '0'
+      LSATLAB_IMPORT_EMBED_ON_COMMIT: '0'
+      LSATLAB_GEN_PERMUTATION_SC: '0'
+      LSATLAB_GEN_INFORMATIVITY_CHECK: '0'
+      LSATLAB_GEN_DISTRACTOR_QUALITY_CHECK: '0'
+      LSATLAB_GEN_MULTI_MODEL_AGREEMENT: '0'
+      LSATLAB_SQLITE_FK: '0'
+      UPDATE_SCHEMA_BASELINE: '0'
+      HTTP_PROXY: ''
+      HTTPS_PROXY: ''
+      ALL_PROXY: ''
+      NO_PROXY: 127.0.0.1,localhost
 
     steps:
       - uses: actions/checkout@v4
@@ -453,15 +565,42 @@ jobs:
           .venv-lsat/bin/python -m pip install \
             "pytest>=9.0.3" "pytest-cov>=7.1.0" "hypothesis>=6.152.9"
 
-      # Run the entire suite from the backend dir so `app` + the tests/conftest
-      # fixtures resolve. conftest already points the DB/backups at per-PID temp
-      # files and aims the model probes at a closed port, so this is fully
-      # hermetic + offline (no Ollama/LM Studio on the runner). No `-k`/`--ignore`
-      # exclusion: every collected file passes with the deps above installed; the
-      # only network-dependent tests self-skip via their own `skipif` guards.
-      - name: Backend pytest (full suite)
+      # Run the entire suite from the backend dir so `app` + tests/conftest
+      # resolve. The job env pins live model endpoints to closed loopback ports,
+      # disables worker/autodiagnosis side effects, and keeps cloud egress closed.
+      # Coverage is a real ratchet now: the current measured baseline is 85.85%,
+      # so CI enforces an 85% floor and uploads machine-readable reports.
+      - name: Backend pytest (full suite + coverage floor)
         working-directory: services/lsat-backend
-        run: ../../.venv-lsat/bin/python -m pytest -q
+        run: |
+          mkdir -p ../../dist/reports
+          ../../.venv-lsat/bin/python -m pytest \
+            -q -p no:cacheprovider --strict-config --durations=25 \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml:../../dist/reports/lsat-backend-coverage.xml \
+            --cov-report=json:../../dist/reports/lsat-backend-coverage.json \
+            --cov-fail-under=85
+
+      - name: Explanation golden floor
+        working-directory: services/lsat-backend
+        env:
+          LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-explanation-gate
+        run: ../../.venv-lsat/bin/python -m app.eval --release-floor --check --seed
+
+      - name: Backend prompt regression fixture floor
+        working-directory: services/lsat-backend
+        run: ../../.venv-lsat/bin/python -m app.prompt_contracts --check
+
+      - name: Upload backend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-lsat-backend-coverage
+          path: |
+            dist/reports/lsat-backend-coverage.xml
+            dist/reports/lsat-backend-coverage.json
+          retention-days: 14
 
   # TEST-2: the Tauri Rust core (src-tauri/) — compile, test, lint, format. The
   # Rust supervisor (sidecar lifecycle, Job-Object cleanup, data relocation) had

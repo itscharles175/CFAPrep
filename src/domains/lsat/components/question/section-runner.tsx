@@ -17,6 +17,7 @@ import {
 import { Logo } from "@lsat/components/logo";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import HandsFreeController from "@/components/a11y/HandsFreeController";
 import { ChoiceList } from "@lsat/components/question/choice-list";
 import {
   LineReferenceChips,
@@ -72,6 +73,11 @@ import { RcLineRuler } from "@lsat/components/question/rc-line-ruler";
 import { getDrillTimeCapMin } from "@lsat/lib/drillPrefs";
 import { setResume } from "@lsat/lib/resume";
 import {
+  blankState,
+  type ChoiceEventRecord,
+  type QState,
+} from "@lsat/components/question/section-state";
+import {
   draftKeyForSection,
   loadSessionDraft,
   saveSessionDraft,
@@ -79,37 +85,25 @@ import {
 import { openPassagePopout } from "@lsat/lib/tauri";
 import type { SectionDetail } from "@lsat/lib/types";
 
-/**
- * 1.2 — one process-of-elimination interaction. `order_index` is the position in
- * the per-question event sequence; `time_ms` is the time since the question
- * first opened. Mirrors the backend `ChoiceEvent` wire shape.
- */
-export interface ChoiceEventRecord {
-  label: string;
-  action: "select" | "eliminate" | "restore";
-  order_index: number;
-  time_ms: number;
-}
+export { blankState };
+export type { ChoiceEventRecord, QState };
 
-export interface QState {
-  answer: string | null;
-  eliminated: Set<string>;
-  flagged: boolean;
-  timeMs: number;
-  highlights: Highlight[];
-  /** 1.2 — the user's process-of-elimination trace for this question. */
-  choiceEvents: ChoiceEventRecord[];
-}
-
-export function blankState(): QState {
-  return {
-    answer: null,
-    eliminated: new Set(),
-    flagged: false,
-    timeMs: 0,
-    highlights: [],
-    choiceEvents: [],
-  };
+export function buildSectionHandsFreeQuestion({
+  isRc,
+  passageText,
+  stem,
+  prompt,
+}: {
+  isRc: boolean;
+  passageText?: string | null;
+  stem?: string | null;
+  prompt: string;
+}): string {
+  const parts: string[] = [];
+  if (isRc && passageText) parts.push(`Passage. ${passageText}`);
+  if (!isRc && stem) parts.push(`Stimulus. ${stem}`);
+  parts.push(`Question. ${prompt}`);
+  return parts.filter((part) => part.trim()).join("\n\n");
 }
 
 /**
@@ -191,6 +185,7 @@ export function SectionRunner({
   if (clockRef.current === null) {
     clockRef.current = new ClockStore(
       initialDraft?.timeLeft != null ? initialDraft.timeLeft : limitSec,
+      { deadlineMs: initialDraft?.deadlineMs ?? null },
     );
   }
   const clock = clockRef.current;
@@ -365,6 +360,7 @@ export function SectionRunner({
       states: d.states,
       index: d.index,
       timeLeft: timed ? clock.get() : null,
+      deadlineMs: timed ? clock.getDeadlineMs() : null,
     });
   }, [draftScope, timed, clock]);
   const scheduleDraftSave = useCallback(() => {
@@ -493,6 +489,7 @@ export function SectionRunner({
   // Keyboard: bindings from Settings (defaults A–E, F, arrows); 1–9 jump.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       const qq = questions[index];
@@ -657,6 +654,26 @@ export function SectionRunner({
       : undefined;
 
   const rcls = readingClasses(reading);
+  const handsFreeQuestion = q
+    ? buildSectionHandsFreeQuestion({
+        isRc: isRC,
+        passageText: passage?.text,
+        stem: q.stem,
+        prompt: q.prompt,
+      })
+    : "";
+  const handsFreeOptions = useMemo(
+    () => (q ? q.choices.map((choice) => ({ letter: choice.label, text: choice.text })) : []),
+    [q],
+  );
+  const handleHandsFreeSelect = useCallback(
+    (choiceIndex: number) => {
+      const label = questions[index]?.choices[choiceIndex]?.label;
+      if (!label) return;
+      select(label);
+    },
+    [index, questions, select],
+  );
 
   const stimulusBlock = (
     <PassageScrollPane scrollRef={passageScrollRef}>
@@ -730,6 +747,25 @@ export function SectionRunner({
                 />
               )}
             </div>
+            <HandsFreeController
+              question={handsFreeQuestion}
+              options={handsFreeOptions}
+              onSelect={handleHandsFreeSelect}
+              testMode={timed}
+              preface={`Question ${index + 1} of ${questions.length}.`}
+              className="flex flex-wrap items-center gap-2 rounded-md border bg-surface-1 p-3"
+              buttonClassName="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+              primaryButtonClassName="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              secondarySmallButtonClassName="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              statusClassName="w-full text-xs text-muted-foreground"
+              confirmRowClassName="flex flex-wrap items-center gap-2"
+              mutedTextClassName="text-muted-foreground"
+              errorClassName="text-destructive"
+              spinnerClassName="animate-spin"
+              style={{}}
+              statusStyle={{}}
+              confirmRowStyle={{}}
+            />
             <ChoiceList
               choices={q.choices}
               selected={cur.answer}

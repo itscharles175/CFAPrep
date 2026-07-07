@@ -17,16 +17,14 @@ environment and are never persisted or returned.
 from __future__ import annotations
 
 import math
-import os
-from urllib.parse import urlparse
 
 from sqlmodel import Session, select
 
 from . import config
 from .models import Setting
 
-# Loopback hosts the LMStudio provider may point at without an explicit opt-in.
-_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+class SettingsValidationError(ValueError):
+    """Raised when a settings patch violates runtime safety policy."""
 
 
 def is_allowed_lmstudio_url(url: str) -> bool:
@@ -37,23 +35,35 @@ def is_allowed_lmstudio_url(url: str) -> bool:
     realtime AI never leaves the device (docs/00-vision.md). So by default only
     loopback hosts are accepted. Set ``LSATLAB_ALLOW_REMOTE_LLM=1`` to permit a
     non-loopback URL (e.g. another machine on your LAN) at your own risk. URLs
-    with embedded credentials are always rejected. (Addresses the audit finding
-    that ``lmstudio_url`` could route official content off-device.)
+    with embedded credentials are always rejected. When the strict offline fence
+    is on, the remote opt-out is intentionally ignored. (Addresses the audit
+    finding that ``lmstudio_url`` could route official content off-device.)
     """
     try:
-        parsed = urlparse((url or "").strip())
-    except Exception:
-        return False
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        return False
-    if parsed.username or parsed.password:
-        return False
-    allow_remote = os.environ.get("LSATLAB_ALLOW_REMOTE_LLM", "0").lower() in (
-        "1", "true", "yes", "on",
-    )
-    if allow_remote:
+        config.validate_local_model_url(url, name="LSATLAB_LMSTUDIO_URL")
         return True
-    return parsed.hostname.lower().strip("[]") in _LOOPBACK_HOSTS
+    except config.OfflineFenceError:
+        return False
+
+
+def _validate_lmstudio_url(url: str) -> bool:
+    try:
+        config.validate_local_model_url(url, name="LSATLAB_LMSTUDIO_URL")
+    except config.OfflineFenceError as exc:
+        raise SettingsValidationError(str(exc)) from exc
+    return True
+
+
+def _validate_gen_provider(value: str) -> bool:
+    if value not in ("ollama", "cloud"):
+        return False
+    if value == "cloud" and config.ENFORCE_OFFLINE:
+        raise SettingsValidationError(
+            "gen_provider=cloud is blocked while the strict offline fence is on. "
+            "Use local generation, or set LSATLAB_ENFORCE_OFFLINE=0 and "
+            "LSATLAB_CLOUD_EGRESS_ALLOWED=1 only when outbound cloud model traffic is intentional."
+        )
+    return True
 
 # public setting key -> config attribute it overrides.
 _OVERRIDABLE: dict[str, str] = {
@@ -90,9 +100,10 @@ _COERCE: dict[str, callable] = {
 # routing). An out-of-domain value keeps the current config value instead.
 _VALIDATORS: dict[str, callable] = {
     "local_provider": lambda v: v in ("ollama", "lmstudio"),
+    "gen_provider": _validate_gen_provider,
     # Keep a remote/garbage URL from ever reaching the live config (the HTTP
     # route rejects it too, but apply_saved_settings/internal callers bypass that).
-    "lmstudio_url": is_allowed_lmstudio_url,
+    "lmstudio_url": _validate_lmstudio_url,
     "desired_retention": lambda v: isinstance(v, float)
     and math.isfinite(v)
     and 0.0 < v < 1.0,
@@ -120,10 +131,17 @@ def effective_settings() -> dict:
 
 def apply_saved_settings(session: Session) -> None:
     """Apply persisted overrides onto the config module (called at startup)."""
-    for s in session.exec(select(Setting)).all():
-        attr = _OVERRIDABLE.get(s.key)
-        if attr:
-            setattr(config, attr, _coerce(s.key, s.value))
+    previous = {attr: getattr(config, attr) for attr in set(_OVERRIDABLE.values())}
+    try:
+        for s in session.exec(select(Setting)).all():
+            attr = _OVERRIDABLE.get(s.key)
+            if attr:
+                setattr(config, attr, _coerce(s.key, s.value))
+        config.validate_offline_provider_fence()
+    except Exception:
+        for attr, value in previous.items():
+            setattr(config, attr, value)
+        raise
     # 3.2 — also load any persisted optimized FSRS weights so the spaced-repetition
     # scheduler reflects the user's own optimization from the first review.
     try:
@@ -142,6 +160,23 @@ def apply_saved_settings(session: Session) -> None:
 
 def update_settings(session: Session, patch: dict) -> dict:
     """Persist + apply recognised overrides. Unknown keys are ignored."""
+    coerced: dict[str, object] = {}
+    for key, val in patch.items():
+        attr = _OVERRIDABLE.get(key)
+        if attr is None or val is None:
+            continue
+        coerced[key] = _coerce(key, str(val))
+
+    previous = {attr: getattr(config, attr) for attr in set(_OVERRIDABLE.values())}
+    for key, value in coerced.items():
+        setattr(config, _OVERRIDABLE[key], value)
+    try:
+        config.validate_offline_provider_fence()
+    except Exception:
+        for attr, value in previous.items():
+            setattr(config, attr, value)
+        raise
+
     for key, val in patch.items():
         attr = _OVERRIDABLE.get(key)
         if attr is None or val is None:
@@ -153,7 +188,6 @@ def update_settings(session: Session, patch: dict) -> dict:
         else:
             row.value = sval
         session.add(row)
-        setattr(config, attr, _coerce(key, sval))  # live
     session.commit()
     # Switching the local provider (or the explain model) invalidates the cached
     # phi4->qwen3 resolution, which is Ollama-tag specific.

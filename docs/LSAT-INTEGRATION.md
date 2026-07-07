@@ -46,9 +46,33 @@ supervisor launches it on `127.0.0.1:8100`; it binds loopback-only unless
 `LSATLAB_ALLOW_REMOTE_API=1`. Data lives in `%APPDATA%/LSATLab` (override:
 `LSATLAB_DATA_DIR`) — reused from any prior standalone LSAT Lab install.
 
-Key endpoints the host uses: `GET /api/health → {ok:true}` (liveness) and
-`GET /api/ai/health` (provider + effective model routing + missing models),
-both surfaced read-only on the host's **System Health** page.
+Local API token contract: the backend accepts optional `LSATLAB_LOCAL_API_TOKEN`.
+If unset, current calls keep working. If set, every non-health `/api/*` request
+must include `Authorization: Bearer <token>`; `X-LSATLAB-API-Token` is accepted
+as a local fallback. `GET /api/health` and CORS `OPTIONS` preflight stay
+unauthenticated for readiness. The packaged Tauri supervisor generates a
+high-entropy token per run, passes it to the sidecar via env, exposes it through
+a read-only Tauri command, and the webview keeps it in memory only.
+The shared frontend transport (`src/lib/lsatSidecarClient.ts`) bootstraps that
+native token before `UnifiedRoot` mounts, then injects it as a request header.
+`VITE_LSATLAB_LOCAL_API_TOKEN` remains reserved for local development only; the
+token is never persisted.
+
+Local SQLite field encryption: the packaged supervisor also owns a separate
+OS-keychain credential, `studyvault/lsat-db-dek`, and passes it only to the LSAT
+sidecar as `LSATLAB_DB_KEY_B64`. With that key present, selected non-FTS
+local-only text fields are AES-GCM envelopes at rest while API reads still return
+plaintext: rationale text/Blind Review notes, tutor turns, error-log
+note/diagnosis, and deterministic LLM cache responses. The key is not exposed to
+the webview keychain commands and is redacted from sidecar logs/status.
+
+Key endpoints the host uses: `GET /api/health →
+{ok:true,service:"lsat-backend",version:"..."}` for liveness and sidecar
+identity, and `GET /api/ai/health` for provider + effective model routing +
+missing models. The Tauri supervisor treats the LSAT sidecar as verified only
+when the health probe returns a 2xx response with `service:"lsat-backend"`;
+legacy `{"ok":true}` responses are still "listening" but unverified.
+Both endpoints are surfaced read-only on the host's **System Health** page.
 
 ## Cross-domain seams (host ↔ LSAT)
 

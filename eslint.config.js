@@ -17,6 +17,7 @@ export default [
       'coverage',
       'spike',
       '.claude',
+      '.gitnexus',
       'src-tauri/target',
       '.venv-onb',
       '.pyinstaller-build',

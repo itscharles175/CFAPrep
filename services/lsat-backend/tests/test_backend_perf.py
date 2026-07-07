@@ -35,48 +35,67 @@ from app.models import GenJob, GenStatus, LLMCacheEntry
 _HOST_BASE = dict(
     provider="lmstudio",
     model="gemma-4-e4b-it",
+    system="Generate LSAT-quality JSON only.",
+    format={"type": "object", "properties": {"questions": {"type": "array"}}},
     temperature=0,
+    top_p=1,
     seed=1311,
     prompt="Write 3 questions about duration.",
 )
 _HOST_BASE_PREIMAGE = (
-    "llm-cache\nv1\nprovider=lmstudio\nmodel=gemma-4-e4b-it\n"
-    "temperature=0\nseed=1311\nprompt=Write 3 questions about duration."
+    "llm-cache\nv2\nprovider=lmstudio\nmodel=gemma-4-e4b-it\n"
+    "system=\"Generate LSAT-quality JSON only.\"\n"
+    "format={\"properties\":{\"questions\":{\"type\":\"array\"}},\"type\":\"object\"}\n"
+    "temperature=0\ntop_p=1\nseed=1311\nprompt=Write 3 questions about duration."
 )
-_HOST_BASE_KEY = "c968c5eaace6a2ac9e4b076fbff1d7931175d7f79c2ab03128d42fc555c1b37b"
+_HOST_BASE_KEY = "6d11a145d16b2d0d23c88370a78dea1a9b8a3c03dc54ca0a16c7e7c1613870d9"
 
 # Additional cross-impl vectors (provider/model trim, integer-float temp, missing
 # fields). Keys produced by the SAME determinism.js helpers.
 _HOST_VECTORS = [
     (
-        dict(provider="ollama", model="qwen3:14b", temperature=0, seed=7,
+        dict(provider="ollama", model="qwen3:14b", system="Solve exactly.",
+             format="json", temperature=0, top_p=1, seed=7,
              prompt="Solve this.\n(A) x"),
-        "llm-cache\nv1\nprovider=ollama\nmodel=qwen3:14b\ntemperature=0\n"
-        "seed=7\nprompt=Solve this.\n(A) x",
-        "63cde881107e45e2a69b982451a6b3e95435835ddad4547665b7fb040b6f9a89",
+        "llm-cache\nv2\nprovider=ollama\nmodel=qwen3:14b\n"
+        "system=\"Solve exactly.\"\nformat=\"json\"\ntemperature=0\n"
+        "top_p=1\nseed=7\nprompt=Solve this.\n(A) x",
+        "39f5564cd09acfd800f616468488a1eb02a13a3528f3d9a7c8c4312014699c19",
     ),
     (
-        dict(provider="p", model="m", temperature=0.0, seed=1, prompt="x"),
-        "llm-cache\nv1\nprovider=p\nmodel=m\ntemperature=0\nseed=1\nprompt=x",
-        "9451d8f787d8964f5f36ff81a2e9e6902d7d134d3f0c255e2f8edbfb488d48e9",
+        dict(provider="p", model="m", system=None,
+             format={"b": 2, "a": {"z": 3, "y": 1}},
+             temperature=0.0, top_p=None, seed=1, prompt="x"),
+        "llm-cache\nv2\nprovider=p\nmodel=m\nsystem=\n"
+        "format={\"a\":{\"y\":1,\"z\":3},\"b\":2}\ntemperature=0\n"
+        "top_p=\nseed=1\nprompt=x",
+        "70886fb9f4999e24901c16a35f83ae4983f1fcc70ae34c1a696915aa0285a88a",
     ),
     (
-        dict(provider="  spaced  ", model="m", temperature=0.3, seed=1311,
-             prompt=" lead/trail "),
-        "llm-cache\nv1\nprovider=spaced\nmodel=m\ntemperature=0.3\nseed=1311\n"
-        "prompt= lead/trail ",
-        "aba1b8fb0fb4515613685721c68f7124ce6d1509b045813fe76f2001d95c69ea",
+        dict(provider="  spaced  ", model="m", system=" keep whitespace ",
+             format={"schema": {"required": ["a", "b"], "properties": {
+                 "b": {"type": "number"}, "a": {"type": "string"},
+             }}},
+             temperature=0.3, top_p=0.95, seed=1311, prompt=" lead/trail "),
+        "llm-cache\nv2\nprovider=spaced\nmodel=m\n"
+        "system=\" keep whitespace \"\n"
+        "format={\"schema\":{\"properties\":{\"a\":{\"type\":\"string\"},"
+        "\"b\":{\"type\":\"number\"}},\"required\":[\"a\",\"b\"]}}\n"
+        "temperature=0.3\ntop_p=0.95\nseed=1311\nprompt= lead/trail ",
+        "eb579c3a972ecd39d7505e4ceb69ddb27fe8f9e709f9b4b165a94382c5ff40fb",
     ),
     (
-        dict(provider=None, model=None, temperature=None, seed=None, prompt=None),
-        "llm-cache\nv1\nprovider=\nmodel=\ntemperature=\nseed=\nprompt=",
-        "af4580f348dcdb47cf4e6e870fe22013531b7dab80020a73a39c3a9bfebe871e",
+        dict(provider=None, model=None, system=None, format=None,
+             temperature=None, top_p=None, seed=None, prompt=None),
+        "llm-cache\nv2\nprovider=\nmodel=\nsystem=\nformat=\n"
+        "temperature=\ntop_p=\nseed=\nprompt=",
+        "a114b030cf5ad734e25818c4322f4f0615380f246fa56523803d30862279e3b8",
     ),
 ]
 
 
 def test_cache_key_preimage_matches_host_base_vector():
-    assert cache.CACHE_KEY_VERSION == 1
+    assert cache.CACHE_KEY_VERSION == 2
     assert cache.cache_key_preimage(**_HOST_BASE) == _HOST_BASE_PREIMAGE
     assert cache.cache_key(**_HOST_BASE) == _HOST_BASE_KEY
 
@@ -95,6 +114,24 @@ def test_temperature_zero_distinct_from_missing():
     k0 = cache.cache_key(provider="p", model="m", temperature=0, seed=1, prompt="x")
     kn = cache.cache_key(provider="p", model="m", temperature=None, seed=1, prompt="x")
     assert k0 != kn
+
+
+def test_cache_key_contract_distinguishes_system_format_schema_and_sampling():
+    base = dict(provider="p", model="m", temperature=0, top_p=1, seed=7, prompt="same")
+
+    k = cache.cache_key(**base, system="A", format="json")
+    assert cache.cache_key(**base, system="B", format="json") != k
+    assert cache.cache_key(**base, system="A", format={"type": "object"}) != k
+    cooler = {**base, "top_p": 0.9}
+    assert cache.cache_key(**cooler, system="A", format="json") != k
+
+    schema_a = {"type": "object", "properties": {"b": {"type": "number"},
+                                                  "a": {"type": "string"}}}
+    schema_b = {"properties": {"a": {"type": "string"}, "b": {"type": "number"}},
+                "type": "object"}
+    assert cache.cache_key(**base, system="A", format=schema_a) == cache.cache_key(
+        **base, system="A", format=schema_b,
+    )
 
 
 def test_is_deterministic_gating():
@@ -184,6 +221,34 @@ def test_offline_generate_caches_deterministic_call(monkeypatch, db_session):
     assert a == b == "resp-1"
     assert prov.calls == 1
     assert cache.stats()["hits"] == 1
+
+
+def test_offline_generate_cache_separates_system_and_format(monkeypatch, db_session):
+    from app import llm
+
+    cache.reset_stats()
+    prov = _CountingProvider()
+    monkeypatch.setattr(llm, "local_provider", lambda: prov)
+    monkeypatch.setattr(config, "LLM_CACHE_ENABLED", True)
+
+    a = llm.offline_generate("p", system="sys-a", model="m", temperature=0, seed=7)
+    b = llm.offline_generate("p", system="sys-b", model="m", temperature=0, seed=7)
+    c = llm.offline_generate("p", system="sys-a", model="m", temperature=0, seed=7)
+    assert (a, b, c) == ("resp-1", "resp-2", "resp-1")
+    assert prov.calls == 2
+
+    schema_a = {"type": "object", "properties": {"b": {"type": "number"},
+                                                  "a": {"type": "string"}}}
+    schema_b = {"properties": {"a": {"type": "string"}, "b": {"type": "number"}},
+                "type": "object"}
+    d = llm.offline_generate("p", system="sys-a", model="m", temperature=0,
+                             seed=7, format="json")
+    e = llm.offline_generate("p", system="sys-a", model="m", temperature=0,
+                             seed=7, format=schema_a)
+    f = llm.offline_generate("p", system="sys-a", model="m", temperature=0,
+                             seed=7, format=schema_b)
+    assert (d, e, f) == ("resp-3", "resp-4", "resp-4")
+    assert prov.calls == 4
 
 
 def test_offline_generate_does_not_cache_warm_call(monkeypatch, db_session):

@@ -37,6 +37,7 @@
 import { retrieveChunks } from './localRag';
 import { searchNotebookSources, getOpenNotebookSettings, notebookSourcesAvailable } from './openNotebook';
 import type { NotebookSourceHit } from './openNotebook';
+import { fetchLsatSidecar } from './lsatSidecarClient';
 import type { ChunkSearchResult } from './storage/types';
 
 /** The study domain a content hit belongs to (mirrors the palette's UB6 set). */
@@ -49,9 +50,6 @@ export type ContentSource = 'host' | 'lsat-question' | 'notebook';
 export const LSAT_QUESTION_BROWSER_PATH = '/lsat/bank';
 /** Deep-link target into the LSAT SRS review flow (alternative LSAT target). */
 export const LSAT_SRS_PATH = '/lsat/srs';
-
-/** LSAT sidecar base — same origin the review/health bridges use. */
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 
 /** A single unified content-search result row. */
 export interface ContentHit {
@@ -174,17 +172,11 @@ export async function searchLsatQuestions(
 ): Promise<LsatQuestionHit[]> {
   const query = (input.query || '').trim();
   if (!query) return [];
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 2500);
-  const onAbort = () => controller.abort();
-  if (input.signal) {
-    if (input.signal.aborted) controller.abort();
-    else input.signal.addEventListener('abort', onAbort, { once: true });
-  }
   try {
     const params = new URLSearchParams({ q: query, limit: String(Math.max(1, Math.min(100, input.limit))) });
-    const res = await fetch(`${LSAT_API_BASE}/api/search/questions?${params.toString()}`, {
-      signal: controller.signal,
+    const res = await fetchLsatSidecar(`/api/search/questions?${params.toString()}`, {
+      timeoutMs: input.timeoutMs ?? 2500,
+      signal: input.signal,
       headers: { accept: 'application/json' },
     });
     if (!res.ok) return [];
@@ -208,9 +200,6 @@ export async function searchLsatQuestions(
     return hits;
   } catch {
     return [];
-  } finally {
-    clearTimeout(timer);
-    if (input.signal) input.signal.removeEventListener('abort', onAbort);
   }
 }
 

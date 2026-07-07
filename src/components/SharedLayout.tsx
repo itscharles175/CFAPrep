@@ -20,7 +20,7 @@
  * Mode hides the LSAT `hideInTest` rows consistently.
  */
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Layout/Sidebar';
 import TopBar, { type LsatShellMode } from './Layout/TopBar';
@@ -34,10 +34,27 @@ interface SharedLayoutProps {
   children?: ReactNode;
 }
 
+function focusFirstVisibleSidebarTarget() {
+  const targets = Array.from(
+    document.querySelectorAll<HTMLElement>('#main-sidebar a[href], #main-sidebar button:not([disabled])'),
+  );
+  const visibleTarget = targets.find((element) => {
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+  });
+  const target = visibleTarget ?? targets[0];
+  try {
+    target?.focus?.({ preventScroll: true });
+  } catch {
+    target?.focus?.();
+  }
+}
+
 export default function SharedLayout({ children }: SharedLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mobileViewport, setMobileViewport] = useState(false);
+  const mobileNavWasOpen = useRef(false);
   // K4-6: the unified shell owns LSAT study/test mode (legacy AppShell parity).
   // Both the Sidebar's LSAT section and the TopBar mode toggle read/write it.
   const [lsatMode, setLsatMode] = useState<LsatShellMode>('study');
@@ -52,6 +69,32 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
     query.addEventListener?.('change', update);
     return () => query.removeEventListener?.('change', update);
   }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return undefined;
+    if (!mobileNavOpen) {
+      if (mobileNavWasOpen.current) {
+        (document.querySelector('.mobile-menu-button') as HTMLElement | null)?.focus?.();
+      }
+      mobileNavWasOpen.current = false;
+      return undefined;
+    }
+
+    mobileNavWasOpen.current = true;
+    const focusTimer = window.setTimeout(() => {
+      focusFirstVisibleSidebarTarget();
+    }, 0);
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [mobileNavOpen]);
 
   // Per-domain accent: mirror App.jsx — drive a `data-domain` body attribute from
   // the URL so tokens.css re-tints chips/buttons. The unified shell adds `lsat`.
@@ -106,7 +149,12 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
         lsatMode={lsatMode}
         onLsatModeChange={setLsatMode}
       />
-      <main id="main" className={`main-content ${sidebarCollapsed ? 'collapsed' : ''}`} role="main">
+      <main
+        id="main"
+        className={`main-content ${sidebarCollapsed ? 'collapsed' : ''}`}
+        role="main"
+        tabIndex={-1}
+      >
         {children ?? <Outlet />}
       </main>
     </div>

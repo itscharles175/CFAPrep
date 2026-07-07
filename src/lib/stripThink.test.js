@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stripThink } from './stripThink';
+import { createThinkStreamFilter, stripThink } from './stripThink';
 
 describe('stripThink', () => {
   it('removes a simple <think>...</think> block', () => {
@@ -127,5 +127,39 @@ describe('stripThink', () => {
     expect(stripThink(input)).toBe(
       "Macaulay duration is the weighted-average time to receive a bond's cash flows.",
     );
+  });
+});
+
+describe('createThinkStreamFilter', () => {
+  function filterChunks(chunks) {
+    const filter = createThinkStreamFilter();
+    return chunks.map((chunk) => filter.feed(chunk)).join('') + filter.flush();
+  }
+
+  it('buffers split reasoning tags so partial markup never reaches the stream', () => {
+    expect(filterChunks(['Visible', '<thi', 'nk>private', '</thi', 'nk>', ' answer'])).toBe(
+      'Visible answer',
+    );
+  });
+
+  it('drops unclosed streamed reasoning to the end of the stream', () => {
+    expect(filterChunks(['Intro ', '<reason', 'ing>private chain'])).toBe('Intro ');
+  });
+
+  it('handles nested streamed reasoning blocks', () => {
+    expect(filterChunks(['A', '<think>outer ', '<think>inner</think>', ' outer</think>', 'B'])).toBe(
+      'AB',
+    );
+  });
+
+  it('strips a leading streamed reasoning fence', () => {
+    expect(filterChunks(['```thi', 'nking\nprivate', '\n``', '`\nAnswer'])).toBe('Answer');
+  });
+
+  it('passes ordinary chunks through without waiting for completion', () => {
+    const filter = createThinkStreamFilter();
+    expect(filter.feed('Duration ')).toBe('Duration ');
+    expect(filter.feed('measures price sensitivity.')).toBe('measures price sensitivity.');
+    expect(filter.flush()).toBe('');
   });
 });

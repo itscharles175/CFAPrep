@@ -471,6 +471,21 @@ export interface FlashcardAttempt {
   createdAt: string;
 }
 
+export interface VaultSecureCipher {
+  v: 1;
+  iv: string;
+  ct: string;
+}
+
+export interface ResultArtifactSecurePayload {
+  v: 1;
+  scheme: 'secure-vault-result-artifact.v1';
+  title: VaultSecureCipher;
+  summary: VaultSecureCipher;
+  assumptions: VaultSecureCipher;
+  metrics: VaultSecureCipher;
+}
+
 export interface ResultArtifact {
   id: string;
   type: 'calculator' | 'quant-lab' | 'excel-grid' | 'mock-report';
@@ -485,6 +500,7 @@ export interface ResultArtifact {
   noteId?: string;
   objectiveIds?: string[];
   createdAt: string;
+  secureVault?: ResultArtifactSecurePayload;
 }
 
 export interface MockSectionState {
@@ -539,6 +555,24 @@ export interface VaultHealthReport extends VaultHealthSnapshot {
   schemaVersion: number;
   schemaHash: string;
   contentVersion: string;
+  secureVault?: {
+    enabled: boolean;
+    unlocked: boolean;
+    available: boolean;
+    status: 'disabled' | 'locked' | 'encrypted' | 'partial';
+    encryptedRows: number;
+    targetRows: number;
+    coveragePct: number;
+    rows: {
+      notes: { encrypted: number; total: number };
+      resultArtifacts: { encrypted: number; total: number };
+      openNotebookSettings: { encrypted: number; total: number };
+      sourceChunks: { encrypted: number; total: number };
+    };
+    outsideScopeRows: {
+      sourceVault: number;
+    };
+  };
   importHistory: VaultImportHistoryEntry[];
   rollbackSnapshots?: RollbackSnapshot[];
   importJobs?: ImportJob[];
@@ -754,6 +788,16 @@ export interface VaultNote {
   artifactId?: string;
   createdAt: string;
   updatedAt: string;
+  secureVault?: VaultNoteSecurePayload;
+}
+
+export type VaultNoteSecureCipher = VaultSecureCipher;
+
+export interface VaultNoteSecurePayload {
+  v: 1;
+  scheme: 'secure-vault-note.v1';
+  title: VaultNoteSecureCipher;
+  body: VaultNoteSecureCipher;
 }
 
 export interface VaultBookmark {

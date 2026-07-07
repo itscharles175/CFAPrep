@@ -109,17 +109,35 @@ def test_export_excludes_history_when_flag_off(client):
 
 def test_import_endpoint_round_trip(client):
     exported = client.get("/api/bank/export").json()
-    r = client.post("/api/bank/import-backup", json={"payload": exported})
+    r = client.post(
+        "/api/bank/import-backup",
+        json={"payload": exported, "force_commit": True},
+    )
     assert r.status_code == 200
     body = r.json()
     assert "preptests" in body
     assert body["preptests"] >= 1
+    assert body["import_run_id"]
+    run = client.get(f"/api/import/runs/{body['import_run_id']}").json()
+    assert run["dedup"]["force_commit"] is True
+    assert run["dedup"]["provenance"]["payload_hash"] == run["file_hash"]
+    assert run["dedup"]["provenance"]["schema_version"] == exported["schema_version"]
 
 
 def test_import_endpoint_rejects_unknown_schema(client):
     bad = {"schema_version": bank_export.SCHEMA_VERSION + 5, "preptests": []}
-    r = client.post("/api/bank/import-backup", json={"payload": bad})
+    r = client.post(
+        "/api/bank/import-backup",
+        json={"payload": bad, "force_commit": True},
+    )
     assert r.status_code == 400
+
+
+def test_import_endpoint_requires_force_commit(client):
+    exported = client.get("/api/bank/export").json()
+    r = client.post("/api/bank/import-backup", json={"payload": exported})
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"] == "force_commit_required"
 
 
 def test_orphan_ai_generated_questions_export_via_unsectioned(db_session):

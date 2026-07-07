@@ -7,8 +7,8 @@
  * section (built from `lsatAppRoutes`, grouped by navGroup) AND the TopBar
  * study/test mode toggle, and renders its children.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import SharedLayout from './SharedLayout';
@@ -23,6 +23,23 @@ function renderWithShell(node: React.ReactNode, path = '/') {
   );
 }
 
+function installMatchMedia(matches: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
 beforeEach(() => {
   localStorage.clear();
   clearHistory();
@@ -31,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   localStorage.clear();
   clearHistory();
+  vi.restoreAllMocks();
 });
 
 describe('SharedLayout (K4-6) — unified shell', () => {
@@ -82,5 +100,26 @@ describe('SharedLayout (K4-6) — unified shell', () => {
     // 'Practice' (not hideInTest) survives; 'SRS' (hideInTest) is hidden.
     expect(await screen.findByRole('link', { name: 'Practice' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'SRS' })).toBeNull();
+  });
+
+  it('moves focus into the mobile nav, closes on Escape, and returns focus to the menu button', async () => {
+    installMatchMedia(true);
+    renderWithShell(<SharedLayout />, '/lsat/srs');
+    const user = userEvent.setup();
+    const menuButton = screen.getByTitle('Open navigation');
+    const hiddenSidebar = document.querySelector('#main-sidebar');
+
+    expect(hiddenSidebar).toHaveAttribute('hidden');
+    await user.click(menuButton);
+
+    const openSidebar = screen.getByRole('complementary', { name: /main navigation sidebar/i });
+    expect(openSidebar).not.toHaveAttribute('hidden');
+    await waitFor(() => expect(openSidebar.contains(document.activeElement)).toBe(true));
+
+    await user.keyboard('{Escape}');
+
+    expect(menuButton).toHaveAttribute('aria-expanded', 'false');
+    expect(document.querySelector('#main-sidebar')).toHaveAttribute('hidden');
+    expect(menuButton).toHaveFocus();
   });
 });

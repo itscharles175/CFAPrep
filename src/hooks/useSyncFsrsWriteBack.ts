@@ -23,9 +23,9 @@
  */
 import { useCallback, useEffect, useRef } from 'react';
 import type { CrossDomainReviewCard } from '../lib/dataDictionary';
+import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 import { getStorage } from '../lib/storage';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 const FSRS_WRITE_BACK_PATH = '/api/sync/fsrs-write-back';
 
 /** ~5 minutes between background write-back pushes (matches the DATA-4a feed). */
@@ -148,43 +148,37 @@ export async function pushFsrsWriteBack(timeoutMs = DEFAULT_TIMEOUT_MS): Promise
     return { ok: true, reachable: true, sent: 0, applied: 0, detail: 'No FSRS write-backs to sync.' };
   }
   const body: FsrsWriteBackBody = { writes };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${FSRS_WRITE_BACK_PATH}`, {
-      signal: controller.signal,
-      method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      return {
-        ok: false,
-        reachable: true,
-        sent: writes.length,
-        detail: `LSAT backend responded ${res.status}.`,
-      };
-    }
-    let data: RawFsrsWriteBackResponse = {};
-    try {
-      data = (await res.json()) as RawFsrsWriteBackResponse;
-    } catch {
-      /* non-JSON body — still a 2xx, treat as accepted */
-    }
+  const res = await fetchLsatSidecarJson<RawFsrsWriteBackResponse>(FSRS_WRITE_BACK_PATH, {
+    timeoutMs,
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.reachable) {
     return {
-      ok: true,
+      ok: false,
+      reachable: false,
+      sent: writes.length,
+      detail: `Sidecar offline — ${res.error ?? 'unreachable'}.`,
+    };
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
       reachable: true,
       sent: writes.length,
-      applied: typeof data.applied === 'number' ? data.applied : undefined,
-      reconciled: Array.isArray(data.reconciled) ? data.reconciled : undefined,
-      detail: 'FSRS write-backs synced.',
+      detail: `LSAT backend responded ${res.status}.`,
     };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, reachable: false, sent: writes.length, detail: `Sidecar offline — ${msg}.` };
-  } finally {
-    clearTimeout(timer);
   }
+  const data = res.data ?? {};
+  return {
+    ok: true,
+    reachable: true,
+    sent: writes.length,
+    applied: typeof data.applied === 'number' ? data.applied : undefined,
+    reconciled: Array.isArray(data.reconciled) ? data.reconciled : undefined,
+    detail: 'FSRS write-backs synced.',
+  };
 }
 
 /** Options for {@link useSyncFsrsWriteBack}. */

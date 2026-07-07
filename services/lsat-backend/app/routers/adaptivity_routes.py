@@ -15,6 +15,7 @@ from ..models import (
     QuestionConversation,
     SectionType,
 )
+from ..schemas import AdaptiveNextResponse
 
 router = APIRouter()
 
@@ -148,8 +149,12 @@ def ability(
     return adaptivity.ability_matrix(session, days=days, persist=persist)
 
 
-@router.post("/adaptivity/next")
-def next_questions(body: NextBody, session: Session = Depends(get_session)):
+@router.post(
+    "/adaptivity/next",
+    response_model=AdaptiveNextResponse,
+    response_model_exclude_unset=True,
+)
+def next_questions(body: NextBody, session: Session = Depends(get_session)) -> AdaptiveNextResponse:
     return adaptivity.next_questions(
         session,
         count=body.count,

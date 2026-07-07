@@ -115,71 +115,204 @@ def reset_resolved_models() -> None:
     global _EXPLAIN_MODEL_RESOLVED
     _EXPLAIN_MODEL_RESOLVED = None
 
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-# For streaming: drop everything up to and including a closing </think>.
-_OPEN_THINK_RE = re.compile(r"<think>", re.IGNORECASE)
-_CLOSE_THINK_RE = re.compile(r"</think>", re.IGNORECASE)
+_REASONING_TAGS = ("thinking", "reasoning", "thought", "think")
+_TAG_ALT = "|".join(_REASONING_TAGS)
+_ANY_REASONING_TAG_RE = re.compile(rf"<(/?)(?:{_TAG_ALT})\b[^>]*>", re.IGNORECASE)
+_OPEN_TO_END_RE = re.compile(rf"<(?:{_TAG_ALT})\b[^>]*>[\s\S]*$", re.IGNORECASE)
+_STRAY_TAG_RE = re.compile(rf"</?(?:{_TAG_ALT})\b[^>]*>", re.IGNORECASE)
+_LEADING_FENCE_RE = re.compile(
+    rf"^\s*```(?:{_TAG_ALT})[^\n]*\n[\s\S]*?(?:```|$)",
+    re.IGNORECASE,
+)
+_LEADING_FENCE_HEADER_RE = re.compile(rf"^\s*```(?:{_TAG_ALT})[^\n]*\n", re.IGNORECASE)
 
 
 def strip_think(text: str) -> str:
-    """Remove complete <think>...</think> blocks, then any dangling tags."""
-    text = _THINK_RE.sub("", text)
-    text = _OPEN_THINK_RE.sub("", text)
-    text = _CLOSE_THINK_RE.sub("", text)
-    return text.strip()
+    """Remove reasoning traces from completed model text."""
+    if not isinstance(text, str) or not text:
+        return ""
+    out = _LEADING_FENCE_RE.sub("", text)
+    out = _remove_balanced_reasoning(out)
+    out = _OPEN_TO_END_RE.sub("", out)
+    out = _STRAY_TAG_RE.sub("", out)
+    return out.strip()
+
+
+def _remove_balanced_reasoning(text: str) -> str:
+    result: list[str] = []
+    cursor = 0
+    depth = 0
+    region_start = -1
+    for match in _ANY_REASONING_TAG_RE.finditer(text):
+        is_close = match.group(1) == "/"
+        if not is_close:
+            if depth == 0:
+                result.append(text[cursor:match.start()])
+                region_start = match.start()
+            depth += 1
+        elif depth > 0:
+            depth -= 1
+            if depth == 0:
+                cursor = match.end()
+                region_start = -1
+    if depth > 0 and region_start >= 0:
+        result.append(text[region_start:])
+    else:
+        result.append(text[cursor:])
+    return "".join(result)
+
+
+def _find_next_reasoning_tag(text: str) -> re.Match[str] | None:
+    return _ANY_REASONING_TAG_RE.search(text)
+
+
+def _potential_reasoning_tag_prefix(text: str, index: int) -> bool:
+    tail = text[index:].lower()
+    if not tail.startswith("<") or ">" in tail:
+        return False
+    rest = tail[1:]
+    if rest.startswith("/"):
+        rest = rest[1:]
+    if not rest:
+        return True
+    for tag in _REASONING_TAGS:
+        if tag.startswith(rest):
+            return True
+        if rest.startswith(tag):
+            next_char = rest[len(tag):len(tag) + 1]
+            if not next_char or next_char.isspace() or next_char == "/":
+                return True
+    return False
+
+
+def _find_potential_reasoning_tag_prefix(text: str) -> int:
+    index = text.rfind("<")
+    while index >= 0:
+        if _potential_reasoning_tag_prefix(text, index):
+            return index
+        index = text.rfind("<", 0, index)
+    return -1
+
+
+def _split_outside_reasoning(text: str) -> tuple[str, str]:
+    partial = _find_potential_reasoning_tag_prefix(text)
+    if partial < 0:
+        return text, ""
+    return text[:partial], text[partial:]
+
+
+def _keep_possible_closing_fence(text: str) -> str:
+    if text.endswith("``"):
+        return "``"
+    if text.endswith("`"):
+        return "`"
+    return ""
+
+
+def _potential_leading_fence_prefix(text: str) -> bool:
+    tail = re.sub(r"^\s+", "", text).lower()
+    if not tail:
+        return True
+    if not tail.startswith("```"):
+        return ("`" * min(len(tail), 3)).startswith(tail)
+    header = tail[3:]
+    if not header:
+        return True
+    line_end = header.find("\n")
+    header_part = header[:line_end] if line_end >= 0 else header
+    if not header_part:
+        return True
+    return any(
+        tag.startswith(header_part) or (line_end < 0 and header_part.startswith(tag))
+        for tag in _REASONING_TAGS
+    )
 
 
 class _ThinkFilter:
-    """Streaming filter that suppresses tokens inside <think>...</think>."""
+    """Streaming filter that suppresses reasoning tags split across chunks."""
 
     def __init__(self) -> None:
         self._buf = ""
-        self._in_think = False
+        self._depth = 0
+        self._at_start = True
+        self._dropping_leading_fence = False
+
+    def _process_leading_fence(self) -> str:
+        if not self._at_start or self._depth > 0:
+            return "none"
+        if self._dropping_leading_fence:
+            close_index = self._buf.find("```")
+            if close_index < 0:
+                self._buf = _keep_possible_closing_fence(self._buf)
+                return "hold"
+            self._buf = re.sub(r"^\r?\n", "", self._buf[close_index + 3:])
+            self._dropping_leading_fence = False
+            self._at_start = False
+            return "handled"
+        header = _LEADING_FENCE_HEADER_RE.match(self._buf)
+        if header:
+            self._buf = self._buf[header.end():]
+            self._dropping_leading_fence = True
+            return "handled"
+        if _potential_leading_fence_prefix(self._buf):
+            return "hold"
+        self._at_start = False
+        return "none"
 
     def feed(self, chunk: str) -> str:
+        if not isinstance(chunk, str) or not chunk:
+            return ""
         self._buf += chunk
-        out = []
+        out: list[str] = []
         while self._buf:
-            if not self._in_think:
-                m = _OPEN_THINK_RE.search(self._buf)
-                if m:
-                    out.append(self._buf[: m.start()])
-                    self._buf = self._buf[m.end():]
-                    self._in_think = True
-                    continue
-                # Hold back a tail that might be a partial "<think>" tag.
-                safe = self._buf
-                tail = ""
-                for n in range(min(len(safe), 7), 0, -1):
-                    if "<think>".startswith(safe[-n:].lower()):
-                        tail = safe[-n:]
-                        safe = safe[:-n]
-                        break
+            fence_state = self._process_leading_fence()
+            if fence_state == "hold":
+                break
+            if fence_state == "handled":
+                continue
+
+            tag = _find_next_reasoning_tag(self._buf)
+            if self._depth > 0:
+                if not tag:
+                    partial = _find_potential_reasoning_tag_prefix(self._buf)
+                    self._buf = self._buf[partial:] if partial >= 0 else ""
+                    break
+                self._depth += -1 if tag.group(1) == "/" else 1
+                if self._depth < 0:
+                    self._depth = 0
+                self._buf = self._buf[tag.end():]
+                continue
+
+            if not tag:
+                safe, hold = _split_outside_reasoning(self._buf)
                 out.append(safe)
-                self._buf = tail
+                self._buf = hold
                 break
+
+            out.append(self._buf[:tag.start()])
+            self._buf = self._buf[tag.end():]
+            if tag.group(1) != "/":
+                self._depth = 1
             else:
-                m = _CLOSE_THINK_RE.search(self._buf)
-                if m:
-                    self._buf = self._buf[m.end():]
-                    self._in_think = False
-                    continue
-                # Discard reasoning, but keep a tail that may be a partial
-                # "</think>" closing tag so it isn't lost across chunks.
-                tail = ""
-                for n in range(min(len(self._buf), 8), 0, -1):
-                    if "</think>".startswith(self._buf[-n:].lower()):
-                        tail = self._buf[-n:]
-                        break
-                self._buf = tail
-                break
+                # Stray close tags are markup, not user-facing content.
+                continue
         return "".join(out)
 
     def flush(self) -> str:
-        if self._in_think:
+        if self._dropping_leading_fence or self._depth > 0:
+            self._buf = ""
+            self._depth = 0
+            self._at_start = False
+            self._dropping_leading_fence = False
             return ""
-        out, self._buf = self._buf, ""
-        return out
+        if self._at_start and _potential_leading_fence_prefix(self._buf):
+            self._buf = ""
+            self._at_start = False
+            return ""
+        safe, _hold = _split_outside_reasoning(self._buf)
+        self._buf = ""
+        self._at_start = False
+        return safe
 
 
 async def _chat_stream(model: str, messages: list[dict], timeout: float) -> AsyncIterator[str]:
@@ -486,9 +619,11 @@ _COACH_CHAT_SYS = (
 )
 
 
-async def coach_chat(summary: str, user_message: str,
-                     history: list[dict] | None = None) -> str:
-    """A grounded coach Q&A turn (X3). ``history`` is recent [{role, content}]."""
+def _coach_chat_messages(
+    summary: str,
+    user_message: str,
+    history: list[dict] | None = None,
+) -> list[dict]:
     messages = [
         {"role": "system", "content": _COACH_CHAT_SYS},
         {"role": "user", "content": f"My recent performance:\n{summary}"},
@@ -499,11 +634,18 @@ async def coach_chat(summary: str, user_message: str,
         if role in ("user", "assistant") and content:
             messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": user_message})
+    return messages
+
+
+async def coach_chat(summary: str, user_message: str,
+                     history: list[dict] | None = None) -> str:
+    """A grounded coach Q&A turn (X3). ``history`` is recent [{role, content}]."""
+    messages = _coach_chat_messages(summary, user_message, history)
     return await _chat(config.DIAGNOSE_MODEL, messages,
                        config.EXPLAIN_REQUEST_TIMEOUT_S)
 
 
-async def hint(stem: str, prompt: str, choices: list[dict]) -> str:
+def _hint_prompt(stem: str, prompt: str, choices: list[dict]) -> list[dict]:
     """A short Socratic nudge that does NOT reveal or eliminate any choice (A10)."""
     ch = "\n".join(f"({c['label']}) {c['text']}" for c in choices)
     sys = "You are an LSAT tutor giving a gentle hint, never the answer."
@@ -512,9 +654,14 @@ async def hint(stem: str, prompt: str, choices: list[dict]) -> str:
         "Give ONE hint (1-2 sentences) nudging the student toward the right "
         "approach. Do NOT reveal the answer or say which choices are wrong."
     )
+    return [{"role": "system", "content": sys}, {"role": "user", "content": user}]
+
+
+async def hint(stem: str, prompt: str, choices: list[dict]) -> str:
+    """A short Socratic nudge that does NOT reveal or eliminate any choice (A10)."""
     return await _chat(
         resolve_explain_model(),
-        [{"role": "system", "content": sys}, {"role": "user", "content": user}],
+        _hint_prompt(stem, prompt, choices),
         config.EXPLAIN_REQUEST_TIMEOUT_S,
     )
 

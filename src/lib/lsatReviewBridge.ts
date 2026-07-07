@@ -29,8 +29,8 @@ import {
   type CrossDomainReviewCard,
   type RawLsatSrsCard,
 } from './dataDictionary';
+import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 /** The contract path the bridge consumes — kept honest against `api.gen.ts`. */
 const LSAT_DUE_PATH: keyof paths = '/api/srs/due';
 // LEARN-2 — the unified, ability-ranked cross-domain due queue. NOT yet bound to
@@ -102,39 +102,32 @@ function titleFor(card: RawDueCard, index: number): string {
  */
 export async function fetchLsatDue(opts: { limit?: number; timeoutMs?: number } = {}): Promise<LsatDueResult> {
   const { limit = 5, timeoutMs = 2500 } = opts;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${LSAT_DUE_PATH}`, {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) {
-      return { ok: false, dueCount: 0, items: [], error: `LSAT backend responded ${res.status}.` };
-    }
-    const data = (await res.json()) as RawDueResponse;
-    const cards = Array.isArray(data.cards) ? data.cards : [];
-    const items: UnifiedReviewItem[] = cards.slice(0, limit).map((card, i) => ({
-      domain: 'lsat',
-      id: String(card.card_id ?? card.question_id ?? i),
-      title: titleFor(card, i),
-      deepLinkPath: LSAT_SRS_PATH,
-      qType: card.q_type,
-      // DATA-2: project the same raw row onto the canonical cross-domain shape so
-      // consumers can merge/rank it against host cards with one vocabulary.
-      canonical: lsatSrsCardToCanonical(card),
-    }));
-    return {
-      ok: true,
-      dueCount: typeof data.due_count === 'number' ? data.due_count : cards.length,
-      items,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, dueCount: 0, items: [], error: msg };
-  } finally {
-    clearTimeout(timer);
+  const res = await fetchLsatSidecarJson<RawDueResponse>(LSAT_DUE_PATH, {
+    timeoutMs,
+    headers: { accept: 'application/json' },
+  });
+  if (!res.reachable) return { ok: false, dueCount: 0, items: [], error: res.error };
+  if (!res.ok) {
+    return { ok: false, dueCount: 0, items: [], error: `LSAT backend responded ${res.status}.` };
   }
+  if (res.data == null) return { ok: false, dueCount: 0, items: [], error: 'Unparseable LSAT due body.' };
+  const data = res.data ?? {};
+  const cards = Array.isArray(data.cards) ? data.cards : [];
+  const items: UnifiedReviewItem[] = cards.slice(0, limit).map((card, i) => ({
+    domain: 'lsat',
+    id: String(card.card_id ?? card.question_id ?? i),
+    title: titleFor(card, i),
+    deepLinkPath: LSAT_SRS_PATH,
+    qType: card.q_type,
+    // DATA-2: project the same raw row onto the canonical cross-domain shape so
+    // consumers can merge/rank it against host cards with one vocabulary.
+    canonical: lsatSrsCardToCanonical(card),
+  }));
+  return {
+    ok: true,
+    dueCount: typeof data.due_count === 'number' ? data.due_count : cards.length,
+    items,
+  };
 }
 
 /**
@@ -181,32 +174,25 @@ export async function fetchUnifiedDue(
   opts: { limit?: number; timeoutMs?: number } = {},
 ): Promise<LsatDueResult> {
   const { limit = 5, timeoutMs = 2500 } = opts;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${LSAT_UNIFIED_DUE_PATH}`, {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) {
-      return { ok: false, dueCount: 0, items: [], error: `LSAT backend responded ${res.status}.` };
-    }
-    const data = (await res.json()) as RawUnifiedDueResponse;
-    const cards = Array.isArray(data.items) ? data.items : [];
-    const items: UnifiedReviewItem[] = cards.slice(0, limit).map((card, i) =>
-      unifiedItemFromCanonical(card, i),
-    );
-    return {
-      ok: true,
-      dueCount: typeof data.due_count === 'number' ? data.due_count : cards.length,
-      items,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, dueCount: 0, items: [], error: msg };
-  } finally {
-    clearTimeout(timer);
+  const res = await fetchLsatSidecarJson<RawUnifiedDueResponse>(LSAT_UNIFIED_DUE_PATH, {
+    timeoutMs,
+    headers: { accept: 'application/json' },
+  });
+  if (!res.reachable) return { ok: false, dueCount: 0, items: [], error: res.error };
+  if (!res.ok) {
+    return { ok: false, dueCount: 0, items: [], error: `LSAT backend responded ${res.status}.` };
   }
+  if (res.data == null) return { ok: false, dueCount: 0, items: [], error: 'Unparseable unified due body.' };
+  const data = res.data ?? {};
+  const cards = Array.isArray(data.items) ? data.items : [];
+  const items: UnifiedReviewItem[] = cards.slice(0, limit).map((card, i) =>
+    unifiedItemFromCanonical(card, i),
+  );
+  return {
+    ok: true,
+    dueCount: typeof data.due_count === 'number' ? data.due_count : cards.length,
+    items,
+  };
 }
 
 /** Project a canonical due card (from `/api/study/due-unified`) onto the inbox's

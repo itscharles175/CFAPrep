@@ -116,6 +116,7 @@ export function ContributionHeatmap({
               {col.map((cell) => (
                 <div
                   key={cell.key}
+                  role="img"
                   className="rounded-[2px]"
                   style={{
                     width: cellSize,

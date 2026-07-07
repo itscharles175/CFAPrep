@@ -5,6 +5,7 @@ import { exportVaultData, getVaultHealthReport, importVaultData, previewVaultRep
 // AUDIT-2 — unified {host, lsat} backup/restore (DATA-5 wired into the UI).
 import { exportUnifiedBackup, importUnifiedBackup, UnifiedBackupError } from '../lib/unifiedBackup';
 import { decryptVaultBackup, encryptVaultBackup } from '../lib/encryptedBackup';
+import { parseJsonFile } from '../lib/jsonFilePreflight';
 import { cacheCriticalOfflineRoutes, getOfflineReadinessReport } from '../lib/offlineContentCache';
 import { checkLlmConnection, getLlmSettings, LLM_PRESETS, saveLlmSettings } from '../lib/localLlm';
 import {
@@ -52,6 +53,8 @@ import {
 import FigureExplainer from '../components/FigureExplainer/FigureExplainer';
 import { useWebVitals, formatWebVital, getWebVitalThresholds } from '../lib/webVitals';
 
+const JSON_IMPORT_MAX_BYTES = 100 * 1024 * 1024;
+
 // Cache-management constants — used by refreshCacheBuckets / handleClearBucket.
 const CACHE_PREFIXES = {
   'ai-questions': 'ai-questions:',
@@ -59,7 +62,12 @@ const CACHE_PREFIXES = {
   'open-notebook:answer': 'open-notebook:answer:',
   'open-notebook:topic-notebooks': 'open-notebook:topic-notebooks',
 };
+const OPEN_NOTEBOOK_ANSWER_PREFIXES = ['open-notebook:answer:', 'open-notebook:answer-history:'];
 const SKIP_KEYS = new Set(['local-llm', 'open-notebook', 'onboarding-dismissed']);
+
+function isOpenNotebookAnswerCacheKey(key) {
+  return OPEN_NOTEBOOK_ANSWER_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
 
 function downloadJson(payload, filename) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -119,6 +127,9 @@ export default function SystemHealth() {
   // AUDIT-2 — unified backup (host + LSAT) state.
   const [unifiedBusy, setUnifiedBusy] = useState(false);
   const [pendingUnifiedFile, setPendingUnifiedFile] = useState(null);
+  const [unifiedPassphrase, setUnifiedPassphrase] = useState('');
+  const [unifiedPassphraseConfirm, setUnifiedPassphraseConfirm] = useState('');
+  const [unifiedImportPassphrase, setUnifiedImportPassphrase] = useState('');
   const [vaultHealth, setVaultHealth] = useState(null);
   const [offlineReadiness, setOfflineReadiness] = useState(null);
   const [persisted, setPersisted] = useState(null);
@@ -658,8 +669,7 @@ export default function SystemHealth() {
     if (!file) return;
     setSourceDocsBusy(true);
     try {
-      const text = await file.text();
-      const payload = JSON.parse(text);
+      const { payload } = await parseJsonFile(file, { maxBytes: JSON_IMPORT_MAX_BYTES });
       const result = await importCfaSourceBundle(payload, { mode: 'merge' });
       await refreshSourceDocs();
       const summary = `Imported ${result.documents ?? 0} document(s) and ${result.chunks ?? 0} chunk(s) from ${file.name}.`;
@@ -781,7 +791,7 @@ export default function SystemHealth() {
         counts['ai-questions'] += 1;
       } else if (key.startsWith(CACHE_PREFIXES['generated-mock'])) {
         counts['generated-mock'] += 1;
-      } else if (key.startsWith(CACHE_PREFIXES['open-notebook:answer'])) {
+      } else if (isOpenNotebookAnswerCacheKey(key)) {
         counts['open-notebook:answer'] += 1;
       } else if (key === CACHE_PREFIXES['open-notebook:topic-notebooks']) {
         counts['open-notebook:topic-notebooks'] += 1;
@@ -801,12 +811,14 @@ export default function SystemHealth() {
         const { key } = row;
         if (SKIP_KEYS.has(key)) continue;
         if (bucket === 'other') {
-          const isCacheBucket = Object.values(CACHE_PREFIXES).some((prefix) =>
-            key === prefix || key.startsWith(prefix),
-          );
+          const isCacheBucket =
+            Object.values(CACHE_PREFIXES).some((prefix) => key === prefix || key.startsWith(prefix)) ||
+            isOpenNotebookAnswerCacheKey(key);
           if (!isCacheBucket) keysToDelete.push(key);
         } else if (bucket === 'open-notebook:topic-notebooks') {
           if (key === CACHE_PREFIXES['open-notebook:topic-notebooks']) keysToDelete.push(key);
+        } else if (bucket === 'open-notebook:answer') {
+          if (isOpenNotebookAnswerCacheKey(key)) keysToDelete.push(key);
         } else {
           const prefix = CACHE_PREFIXES[bucket];
           if (prefix && key.startsWith(prefix)) keysToDelete.push(key);
@@ -1021,12 +1033,43 @@ export default function SystemHealth() {
   // LSAT bank into one checksummed envelope (official content firewalled out).
   // Needs the LSAT backend; surfaces a clear message when it's offline.
   async function handleUnifiedExport() {
+    if (unifiedPassphrase.length < 8) {
+      setMessage('Unified backup encryption needs a passphrase of at least 8 characters.');
+      toast.warning('Passphrase too short', 'Use 8 characters or more.');
+      return;
+    }
+    if (unifiedPassphrase !== unifiedPassphraseConfirm) {
+      setMessage('Unified backup passphrases do not match.');
+      toast.warning('Passphrase mismatch', 'Re-type the same passphrase in both fields.');
+      return;
+    }
     setUnifiedBusy(true);
     try {
-      const envelope = await exportUnifiedBackup();
+      const envelope = await exportUnifiedBackup({ passphrase: unifiedPassphrase });
       const counts = envelope.rowCounts || {};
-      setMessage(`Unified backup downloaded (host + LSAT): ${counts.questions ?? 0} questions, ${counts.preptests ?? 0} preptests.`);
-      toast.success('Unified backup ready', 'One file holds both your host vault and the LSAT bank.');
+      setUnifiedPassphrase('');
+      setUnifiedPassphraseConfirm('');
+      setMessage(`Encrypted unified backup downloaded (host + LSAT): ${counts.questions ?? 0} questions, ${counts.preptests ?? 0} preptests.`);
+      toast.success('Encrypted unified backup ready', 'One passphrase-protected file holds both your host vault and the LSAT bank.');
+    } catch (err) {
+      const detail = err instanceof UnifiedBackupError ? err.message : 'Could not build the unified backup.';
+      setMessage(detail);
+      toast.warning('Unified backup unavailable', detail);
+    } finally {
+      setUnifiedBusy(false);
+    }
+  }
+
+  async function handlePlaintextUnifiedExport() {
+    if (!window.confirm('Create a plaintext unified backup? This local-only diagnostic copy can contain host vault data and should not be synced or shared.')) {
+      return;
+    }
+    setUnifiedBusy(true);
+    try {
+      const envelope = await exportUnifiedBackup({ allowPlaintext: true });
+      const counts = envelope.rowCounts || {};
+      setMessage(`Plaintext unified backup downloaded from the advanced path: ${counts.questions ?? 0} questions, ${counts.preptests ?? 0} preptests.`);
+      toast.warning('Plaintext unified backup created', 'Keep this diagnostic copy local and prefer encrypted unified backups.');
     } catch (err) {
       const detail = err instanceof UnifiedBackupError ? err.message : 'Could not build the unified backup.';
       setMessage(detail);
@@ -1040,11 +1083,15 @@ export default function SystemHealth() {
     if (!pendingUnifiedFile) return;
     setUnifiedBusy(true);
     try {
-      const text = await pendingUnifiedFile.text();
-      const result = await importUnifiedBackup(text);
+      const { payload } = await parseJsonFile(pendingUnifiedFile, { maxBytes: JSON_IMPORT_MAX_BYTES });
+      const result = await importUnifiedBackup(JSON.stringify(payload), {
+        passphrase: unifiedImportPassphrase || undefined,
+      });
       setPendingUnifiedFile(null);
+      setUnifiedImportPassphrase('');
       const hostNote = result.hostApplied ? ' Host vault merged.' : '';
-      setMessage(`Unified backup restored (LSAT bank).${hostNote} A reload is recommended.`);
+      const encryptedNote = result.encrypted ? ' Encrypted wrapper verified.' : '';
+      setMessage(`Unified backup restored (LSAT bank).${hostNote}${encryptedNote} A reload is recommended.`);
       toast.success('Unified backup restored', `Applied from ${result.exportId}.`);
     } catch (err) {
       const detail = err instanceof UnifiedBackupError ? err.message : 'Could not restore the unified backup.';
@@ -1110,8 +1157,7 @@ export default function SystemHealth() {
     }
     setEncryptedBusy(true);
     try {
-      const text = await pendingEncryptedFile.text();
-      const envelope = JSON.parse(text);
+      const { payload: envelope } = await parseJsonFile(pendingEncryptedFile, { maxBytes: JSON_IMPORT_MAX_BYTES });
       const plaintext = await decryptVaultBackup(envelope, encryptedImportPassphrase);
       const payload = JSON.parse(plaintext);
       await importVaultData(payload, 'merge');
@@ -1928,7 +1974,32 @@ export default function SystemHealth() {
           <div><strong>{vaultHealth?.importJobs?.length ?? 0}</strong><small>Recent import jobs</small></div>
           <div><strong>{vaultHealth?.sourceBundleManifests?.length ?? 0}</strong><small>Source bundle manifests</small></div>
           <div><strong>{vaultHealth?.calculatorScenarios?.length ?? 0}</strong><small>Calculator scenarios</small></div>
+          <div>
+            <strong>
+              {vaultHealth?.secureVault?.status
+                ? vaultHealth.secureVault.status.charAt(0).toUpperCase() + vaultHealth.secureVault.status.slice(1)
+                : 'Checking'}
+            </strong>
+            <small>Secure Vault live</small>
+          </div>
+          <div>
+            <strong>{vaultHealth?.secureVault ? `${vaultHealth.secureVault.coveragePct}%` : '-'}</strong>
+            <small>
+              {vaultHealth?.secureVault
+                ? `${vaultHealth.secureVault.encryptedRows}/${vaultHealth.secureVault.targetRows} protected rows`
+                : 'Protected rows'}
+            </small>
+          </div>
         </div>
+        {vaultHealth?.secureVault && (
+          <p className="qv-text-secondary qv-fs-sm" style={{ marginTop: 'var(--space-3)' }}>
+            Notes {vaultHealth.secureVault.rows.notes.encrypted}/{vaultHealth.secureVault.rows.notes.total} ·
+            artifacts {vaultHealth.secureVault.rows.resultArtifacts.encrypted}/{vaultHealth.secureVault.rows.resultArtifacts.total} ·
+            open-notebook settings {vaultHealth.secureVault.rows.openNotebookSettings.encrypted}/{vaultHealth.secureVault.rows.openNotebookSettings.total} ·
+            source chunks {vaultHealth.secureVault.rows.sourceChunks.encrypted}/{vaultHealth.secureVault.rows.sourceChunks.total}.{' '}
+            Source-vault rows outside live Secure Vault scope: {vaultHealth.secureVault.outsideScopeRows.sourceVault}.
+          </p>
+        )}
         {vaultHealth?.repairActions?.length > 0 && (
           <ul className="qv-text-secondary" style={{ marginTop: 'var(--space-4)' }}>
             {vaultHealth.repairActions.map((action) => <li key={action}>{action}</li>)}
@@ -2047,25 +2118,63 @@ export default function SystemHealth() {
           <h3 style={{ margin: 'var(--space-2) 0 0' }}>One file for the whole vault (host + LSAT)</h3>
           <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
             Bundles your host study vault (CFA / Quant / Excel) and the LSAT question bank into a single
-            checksummed <code className="qv-mono">.json</code> envelope. Copyrighted official LSAT content is never
-            included (provenance firewall). Requires the LSAT backend to be running — the host-only backups above
-            keep working offline.
+            checksummed envelope, encrypted by default as <code className="qv-mono">.qvenc.json</code>. Copyrighted
+            official LSAT content is never included (provenance firewall). Requires the LSAT backend to be running —
+            the host-only backups above keep working offline.
           </p>
         </div>
-        <div className="qv-row-2" style={{ flexWrap: 'wrap', gap: 'var(--space-3)' }}>
-          <button className="btn btn-primary" onClick={handleUnifiedExport} disabled={unifiedBusy}>
-            <Download size={16} /> {unifiedBusy ? 'Working…' : 'Unified Backup'}
-          </button>
+        <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+          <label className="qv-stack-1">
+            <span className="qv-fs-xs qv-text-muted">Passphrase (min 8 chars)</span>
+            <input
+              className="input"
+              type="password"
+              minLength={8}
+              value={unifiedPassphrase}
+              onChange={(event) => setUnifiedPassphrase(event.target.value)}
+              placeholder="passphrase"
+              aria-label="Unified backup passphrase"
+              autoComplete="new-password"
+            />
+          </label>
+          <label className="qv-stack-1">
+            <span className="qv-fs-xs qv-text-muted">Confirm passphrase</span>
+            <input
+              className="input"
+              type="password"
+              minLength={8}
+              value={unifiedPassphraseConfirm}
+              onChange={(event) => setUnifiedPassphraseConfirm(event.target.value)}
+              placeholder="passphrase (again)"
+              aria-label="Confirm unified backup passphrase"
+              autoComplete="new-password"
+            />
+          </label>
+          <div className="qv-stack-1" style={{ justifyContent: 'flex-end' }}>
+            <button
+              className="btn btn-primary"
+              onClick={handleUnifiedExport}
+              disabled={
+                unifiedBusy ||
+                unifiedPassphrase.length < 8 ||
+                unifiedPassphrase !== unifiedPassphraseConfirm
+              }
+            >
+              <KeyRound size={16} /> {unifiedBusy ? 'Working…' : 'Encrypted Unified Backup'}
+            </button>
+          </div>
+        </div>
+        <div className="grid-3" style={{ gap: 'var(--space-3)' }}>
           <label
             className="btn btn-secondary"
             style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
             aria-disabled={unifiedBusy}
           >
             <Upload size={14} style={{ marginRight: 'var(--space-1)' }} />
-            {pendingUnifiedFile ? pendingUnifiedFile.name : 'Pick backup .json'}
+            {pendingUnifiedFile ? pendingUnifiedFile.name : 'Pick .qvenc.json or .json'}
             <input
               type="file"
-              accept=".json,application/json"
+              accept=".qvenc.json,.json,application/json"
               style={{ display: 'none' }}
               onChange={(event) => {
                 setPendingUnifiedFile(event.target.files?.[0] || null);
@@ -2074,12 +2183,29 @@ export default function SystemHealth() {
               disabled={unifiedBusy}
             />
           </label>
+          <label className="qv-stack-1">
+            <span className="qv-fs-xs qv-text-muted">Restore passphrase</span>
+            <input
+              className="input"
+              type="password"
+              value={unifiedImportPassphrase}
+              onChange={(event) => setUnifiedImportPassphrase(event.target.value)}
+              placeholder="required for .qvenc.json"
+              aria-label="Unified backup restore passphrase"
+              autoComplete="current-password"
+            />
+          </label>
           <button
             className="btn btn-secondary"
             onClick={handleUnifiedRestore}
             disabled={unifiedBusy || !pendingUnifiedFile}
           >
             <Download size={16} /> {unifiedBusy ? 'Working…' : 'Restore Unified Backup'}
+          </button>
+        </div>
+        <div className="qv-mt-3">
+          <button className="btn btn-secondary btn-sm" onClick={handlePlaintextUnifiedExport} disabled={unifiedBusy}>
+            <Download size={14} /> Plaintext Unified Export
           </button>
         </div>
       </Surface>

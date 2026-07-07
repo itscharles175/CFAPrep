@@ -109,7 +109,7 @@ Effort: ⚡ quick · ◐ medium · ⬣ large.
   - ✅ **G6** — /style token gallery names are click-to-copy.
   - ⊘ Already-handled / intentional: E2 (LSAT tabs use a deliberate forceMount keep-alive — instant by design, a fade would undo it); G2 (StatNumber count-up already exists where it fits; KPI band uses unit-strings); E3/E4/F1/F3/G3 (Wave-2 micro-interactions + UB4 responsive + UC5 charts + LSAT PageTransition); F4 (reviewDeepLinkFlash keyframe exists); F5 (Playwright a11y-check.mjs IS the contrast gate); G1/G4/G5 (larger bespoke features — left as solid-as-is).
 - **Wave 5 — guardrails:**
-  - ✅ **H1** — VERIFIED ALREADY BUILT: `scripts/visual-regression.mjs` (UA7) pixel-diffs curated routes × light/dark × desktop/mobile against committed baselines (host + LSAT). NOTE: the A3/A4/D4 visual changes intentionally shift those baselines — `tests/visual-baselines/` must be regenerated (run the script with the Playwright suite in CI) as the deliberate re-baseline step.
+  - ✅ **H1** — VERIFIED ALREADY BUILT: `scripts/visual-regression.mjs` (UA7) pixel-diffs curated routes × light/dark × desktop/mobile against approved baselines restored under `tests/visual-baselines/`. Missing baselines fail closed; deliberate rebaselines require `UPDATE_VISUAL_BASELINES=1` after review.
   - ⚠️ **H2** — DEFERRED. A lint rule banning raw hex / inline px in `style=` props would error on existing inline styles (the D1 cleanup it depends on was deferred as low-value), so a blanket rule breaks `eslint .`. Land it as a dedicated pass AFTER the D1 cleanup.
 
 Each item: GitNexus impact before edits → change → frontend gate (`tsc` host+lsat,

@@ -1,102 +1,61 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { ClockStore } from "./section-clock";
 
-/**
- * A2.1 — the 1-second exam clock was lifted out of SectionRunner's render body
- * into this external store so a tick no longer re-renders the question tree.
- * These tests pin the behaviour that MUST stay identical to the old in-body
- * interval: one tick per second, a once-only expiry callback (the timed
- * auto-submit `onFinish(true)`), and a synchronously-readable latest value for
- * the crash-safe draft flush.
- */
-describe("ClockStore", () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+describe("ClockStore (GAP-CLOCK-1)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
 
-  it("counts down one second per tick and notifies subscribers", () => {
-    const store = new ClockStore(5);
-    const seen: number[] = [];
-    store.subscribe(() => seen.push(store.get()));
-    store.start(() => {});
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-    expect(store.get()).toBe(5);
+  it("computes remaining from the wall-clock deadline, not elapsed ticks", () => {
+    let now = 1_000_000;
+    const clock = new ClockStore(60, { now: () => now });
+
+    expect(clock.get()).toBe(60);
+    now += 50_000;
+    expect(clock.get()).toBe(10);
+  });
+
+  it("is throttle/sleep-resistant on the next render heartbeat", () => {
+    let now = 0;
+    const ticks: number[] = [];
+    const clock = new ClockStore(30, { now: () => now });
+    clock.subscribe(() => ticks.push(clock.get()));
+
+    clock.start(() => {});
+    now += 29_000;
     vi.advanceTimersByTime(1000);
-    expect(store.get()).toBe(4);
-    vi.advanceTimersByTime(2000);
-    expect(store.get()).toBe(2);
-    expect(seen).toEqual([4, 3, 2]);
+
+    expect(ticks.at(-1)).toBe(1);
+    clock.stop();
   });
 
-  it("fires the expiry callback exactly once on reaching zero, then stops", () => {
-    const store = new ClockStore(2);
-    const onExpire = vi.fn();
-    store.start(onExpire);
+  it("fires expiry exactly once when the deadline has passed", () => {
+    let now = 0;
+    const expired = vi.fn();
+    const clock = new ClockStore(5, { now: () => now });
 
-    vi.advanceTimersByTime(1000); // 2 -> 1
-    expect(onExpire).not.toHaveBeenCalled();
-    expect(store.hasFinished()).toBe(false);
-
-    vi.advanceTimersByTime(1000); // 1 -> 0, expire
-    expect(store.get()).toBe(0);
-    expect(onExpire).toHaveBeenCalledTimes(1);
-    expect(store.hasFinished()).toBe(true);
-
-    // No further ticks or extra expiry fires after it has finished.
-    vi.advanceTimersByTime(5000);
-    expect(onExpire).toHaveBeenCalledTimes(1);
-    expect(store.get()).toBe(0);
-  });
-
-  it("exposes the latest value synchronously for the crash-safe draft", () => {
-    const store = new ClockStore(10);
-    store.start(() => {});
-    vi.advanceTimersByTime(3000);
-    // The draft flush reads clock.get() directly (no React state) — must be fresh.
-    expect(store.get()).toBe(7);
-  });
-
-  it("stop() is idempotent and halts ticking without firing expiry", () => {
-    const store = new ClockStore(10);
-    const onExpire = vi.fn();
-    store.start(onExpire);
+    clock.start(expired);
+    now += 6_000;
     vi.advanceTimersByTime(1000);
-    store.stop();
-    store.stop(); // idempotent
-    vi.advanceTimersByTime(5000);
-    expect(store.get()).toBe(9);
-    expect(onExpire).not.toHaveBeenCalled();
-  });
-
-  it("setOnExpire swaps the callback without restarting the interval", () => {
-    const store = new ClockStore(2);
-    const first = vi.fn();
-    const second = vi.fn();
-    store.start(first);
-    vi.advanceTimersByTime(1000); // 2 -> 1, interval keeps running
-    store.setOnExpire(second);
-    vi.advanceTimersByTime(1000); // 1 -> 0, expire fires the LATEST callback
-    expect(first).not.toHaveBeenCalled();
-    expect(second).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not start a second interval if start is called twice", () => {
-    const store = new ClockStore(10);
-    store.start(() => {});
-    store.start(() => {}); // ignored — interval already running
     vi.advanceTimersByTime(1000);
-    // A single interval means a single decrement per second.
-    expect(store.get()).toBe(9);
+
+    expect(clock.get()).toBe(0);
+    expect(clock.hasFinished()).toBe(true);
+    expect(expired).toHaveBeenCalledTimes(1);
   });
 
-  it("unsubscribe stops further notifications", () => {
-    const store = new ClockStore(10);
-    const listener = vi.fn();
-    const unsubscribe = store.subscribe(listener);
-    store.start(() => {});
-    vi.advanceTimersByTime(1000);
-    expect(listener).toHaveBeenCalledTimes(1);
-    unsubscribe();
-    vi.advanceTimersByTime(3000);
-    expect(listener).toHaveBeenCalledTimes(1);
+  it("resumes from a persisted deadline", () => {
+    let now = 120_000;
+    const clock = new ClockStore(60, { now: () => now, deadlineMs: 160_000 });
+
+    expect(clock.getDeadlineMs()).toBe(160_000);
+    expect(clock.get()).toBe(40);
+    now += 20_000;
+    expect(clock.get()).toBe(20);
   });
 });

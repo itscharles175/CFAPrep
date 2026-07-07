@@ -35,6 +35,7 @@ Either tier failing is a no-op: a cache miss/insert that raises degrades to
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import threading
 from collections import OrderedDict
@@ -43,9 +44,10 @@ from typing import Optional
 
 _log = logging.getLogger("lsatlab.llm.cache")
 
-# Mirror src/lib/llm/determinism.js CACHE_KEY_VERSION. Bump in BOTH places (and
-# invalidate stale rows) if the pre-image serialization below ever changes.
-CACHE_KEY_VERSION = 1
+# Mirror src/lib/llm/determinism.js CACHE_KEY_VERSION. Bump in BOTH places if the
+# pre-image serialization below ever changes. Stale rows remain inert because
+# the version tag is inside the hashed pre-image and new keys cannot match them.
+CACHE_KEY_VERSION = 2
 
 # In-memory LRU cap. Small: the durable SQLite tier is the real store; this is
 # only the hot tier in front of it. Env-free (config.py is owned by another
@@ -97,11 +99,39 @@ def _str(value: object) -> str:
     return str(value).strip()
 
 
+def _contract_value(value: object) -> str:
+    """Canonical rendering for output-affecting model contracts.
+
+    ``system`` and ``format`` may contain newlines, equals signs, or JSON-schema
+    dictionaries. Render them as compact JSON so the pre-image remains
+    unambiguous and schema key ordering does not change the cache key.
+    """
+    if value is None:
+        return ""
+    try:
+        if isinstance(value, str):
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        if isinstance(value, (dict, list, tuple, bool, int, float)):
+            return json.dumps(
+                value,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+    except (TypeError, ValueError):
+        pass
+    return json.dumps(str(value), ensure_ascii=False, separators=(",", ":"))
+
+
 def cache_key_preimage(
     *,
     provider: object = None,
     model: object = None,
+    system: object = None,
+    format: object = None,
     temperature: object = None,
+    top_p: object = None,
     seed: object = None,
     prompt: object = None,
 ) -> str:
@@ -115,15 +145,22 @@ def cache_key_preimage(
         v<CACHE_KEY_VERSION>
         provider=<provider>
         model=<model>
+        system=<canonical system>
+        format=<canonical response format/schema>
         temperature=<temperatureCanonical>
+        top_p=<topPCanonical>
         seed=<seed>
         prompt=<prompt>
 
     Field rules (so host + backend agree byte-for-byte):
       - provider / model : trimmed string; missing -> "".
+      - system / format  : JSON-canonical contract fields; missing -> "".
+                           Dict/list schema values sort object keys recursively,
+                           so semantically identical schemas share the same key.
       - temperature      : :func:`_canonical_number` (0 -> "0", 0.3 -> "0.3");
                            missing/non-finite -> "" so "no temperature" and
                            "temperature 0" are DISTINCT keys.
+      - top_p            : :func:`_canonical_number`; missing -> "".
       - seed             : :func:`_canonical_number`; missing -> "".
       - prompt           : the full prompt VERBATIM (NOT trimmed — whitespace is
                            significant to the model and so to the key). Non-string
@@ -135,7 +172,10 @@ def cache_key_preimage(
         f"v{CACHE_KEY_VERSION}",
         f"provider={_str(provider)}",
         f"model={_str(model)}",
+        f"system={_contract_value(system)}",
+        f"format={_contract_value(format)}",
         f"temperature={_canonical_number(temperature)}",
+        f"top_p={_canonical_number(top_p)}",
         f"seed={_canonical_number(seed)}",
         f"prompt={prompt if isinstance(prompt, str) else ''}",
     ]
@@ -146,7 +186,10 @@ def cache_key(
     *,
     provider: object = None,
     model: object = None,
+    system: object = None,
+    format: object = None,
     temperature: object = None,
+    top_p: object = None,
     seed: object = None,
     prompt: object = None,
 ) -> str:
@@ -156,8 +199,8 @@ def cache_key(
     and backend produce the SAME 64-char key for the same logical call.
     """
     pre = cache_key_preimage(
-        provider=provider, model=model, temperature=temperature,
-        seed=seed, prompt=prompt,
+        provider=provider, model=model, system=system, format=format,
+        temperature=temperature, top_p=top_p, seed=seed, prompt=prompt,
     )
     return hashlib.sha256(pre.encode("utf-8")).hexdigest()
 
@@ -326,6 +369,9 @@ def get(
     temperature: object,
     seed: object,
     prompt: str,
+    system: object = None,
+    format: object = None,
+    top_p: object = None,
 ) -> Optional[str]:
     """Return the cached response for a DETERMINISTIC call, or None.
 
@@ -336,8 +382,8 @@ def get(
     if not is_deterministic(temperature, seed):
         return None
     key = cache_key(
-        provider=provider, model=model, temperature=temperature,
-        seed=seed, prompt=prompt,
+        provider=provider, model=model, system=system, format=format,
+        temperature=temperature, top_p=top_p, seed=seed, prompt=prompt,
     )
     hit = _lru_get(key)
     if hit is not None:
@@ -360,6 +406,9 @@ def put(
     seed: object,
     prompt: str,
     response: str,
+    system: object = None,
+    format: object = None,
+    top_p: object = None,
 ) -> None:
     """Store a DETERMINISTIC call's response in both tiers (no-op otherwise).
 
@@ -371,8 +420,8 @@ def put(
     if not isinstance(response, str) or response == "":
         return
     key = cache_key(
-        provider=provider, model=model, temperature=temperature,
-        seed=seed, prompt=prompt,
+        provider=provider, model=model, system=system, format=format,
+        temperature=temperature, top_p=top_p, seed=seed, prompt=prompt,
     )
     _lru_put(key, response)
     _durable_put(key, provider=provider, model=model, response=response)

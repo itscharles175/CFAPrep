@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   GraduationCap, BrainCircuit, Table2, Calculator,
   Target, BookOpen, ChevronRight,
-  Download, Upload, Trash2, CalendarClock,
+  Upload, Trash2, CalendarClock,
   Bookmark, StickyNote, ShieldAlert, Inbox, BadgeCheck, ClipboardList, BarChart3, Lock,
 } from 'lucide-react';
 import { domains } from '../data/catalog';
@@ -140,12 +140,16 @@ function formatStudyTime(seconds: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-function downloadJson(payload: unknown): void {
+function backupFilename(prefix = 'studyvault-export'): string {
+  return `${prefix}-${new Date().toISOString().slice(0, 10)}.json`;
+}
+
+function downloadJson(payload: unknown, filename = backupFilename()): void {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `studyvault-export-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -299,10 +303,8 @@ export default function Dashboard() {
     setOnboardingOpen(false);
   }
 
-  async function handleExport() {
-    const payload = await exportVaultData();
-    downloadJson(payload);
-    setVaultMessage('Local vault exported as JSON.');
+  function handleExport() {
+    setExportDialogOpen(true);
   }
 
   async function handleEncryptedExport() {
@@ -320,7 +322,7 @@ export default function Dashboard() {
         encryption: { passphrase: exportPassphrase },
         ...(includeSourceExport ? { includeSourceVault: true } : {}),
       });
-      downloadJson(payload);
+      downloadJson(payload, backupFilename('studyvault-encrypted'));
       setVaultMessage(
         includeSourceExport
           ? 'Encrypted local vault export created with explicitly included private source vault data.'
@@ -435,8 +437,7 @@ export default function Dashboard() {
         }
         actions={
           <>
-            <button className="btn btn-secondary" onClick={handleExport}><Download size={16} /> Export</button>
-            <button className="btn btn-secondary" onClick={() => setExportDialogOpen(true)}><Lock size={16} /> Encrypted Export</button>
+            <button className="btn btn-secondary" onClick={handleExport}><Lock size={16} /> Export</button>
             <button className="btn btn-primary" onClick={() => importRef.current?.click()}><Upload size={16} /> Import</button>
             <input ref={importRef} type="file" accept="application/json,.json" onChange={handleImport} style={{ display: 'none' }} />
           </>

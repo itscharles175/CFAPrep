@@ -32,6 +32,11 @@ class BackupBody(BaseModel):
     host_data: Optional[dict[str, Any]] = None
     include_history: bool = True
     notes: Optional[str] = None
+    # Primary backend-native path: return a passphrase-encrypted .qvenc-compatible
+    # wrapper. Trusted local callers that encrypt client-side must opt into the
+    # plaintext envelope explicitly.
+    passphrase: Optional[str] = None
+    allow_plaintext: bool = False
 
 
 @router.post("/backup", response_model=dict[str, Any])
@@ -45,16 +50,57 @@ def create_backup(
     ``include_official=False`` firewall in ``bank_export``); there is deliberately
     no parameter to include it over the wire."""
     body = body or BackupBody()
-    return export_backup.build_unified_export(
+    envelope = export_backup.build_unified_export(
         session,
         host_data=body.host_data,
         include_history=body.include_history,
         notes=body.notes,
     )
+    if body.passphrase:
+        try:
+            return export_backup.encrypt_backup_payload(envelope, body.passphrase)
+        except ValueError as exc:
+            raise HTTPException(
+                400, {"error": "backup_encryption_failed", "message": str(exc)}
+            )
+    if body.allow_plaintext:
+        return envelope
+    raise HTTPException(
+        400,
+        {
+            "error": "backup_passphrase_required",
+            "message": (
+                "Unified backups are encrypted by default. Send a passphrase, "
+                "or set allow_plaintext=true only when another local layer will "
+                "encrypt the envelope before download."
+            ),
+        },
+    )
 
 
 class EnvelopeBody(BaseModel):
     envelope: dict[str, Any]
+    passphrase: Optional[str] = None
+
+
+def _resolve_envelope(body: EnvelopeBody) -> tuple[dict[str, Any], bool]:
+    envelope = body.envelope
+    if not export_backup.is_encrypted_backup_blob(envelope):
+        return envelope, False
+    if not body.passphrase:
+        raise HTTPException(
+            400,
+            {
+                "error": "encrypted_backup_passphrase_required",
+                "message": "This unified backup is encrypted. Provide passphrase to validate or import it.",
+            },
+        )
+    try:
+        return export_backup.decrypt_backup_payload(envelope, body.passphrase), True
+    except ValueError as exc:
+        raise HTTPException(
+            400, {"error": "invalid_encrypted_backup", "message": str(exc)}
+        )
 
 
 @router.post("/validate", response_model=dict[str, Any])
@@ -63,7 +109,10 @@ def validate(body: EnvelopeBody) -> dict[str, Any]:
 
     Side-effect-free. Returns ``{"ok": bool, "errors": [...]}`` so the UI can gate
     the import button and surface a precise reason on a mismatch."""
-    return export_backup.validate_envelope(body.envelope)
+    envelope, encrypted = _resolve_envelope(body)
+    result = export_backup.validate_envelope(envelope)
+    result["encrypted"] = encrypted
+    return result
 
 
 @router.post("/import", response_model=dict[str, Any])
@@ -78,7 +127,10 @@ def import_backup(
     client error (400). The host half (``hostData``) is NOT applied here — the
     host re-imports it client-side; the backend never writes the host's store."""
     try:
-        return export_backup.import_unified_export(session, body.envelope)
+        envelope, encrypted = _resolve_envelope(body)
+        result = export_backup.import_unified_export(session, envelope)
+        result["encrypted"] = encrypted
+        return result
     except ValueError as exc:
         raise HTTPException(
             400, {"error": "invalid_export_envelope", "message": str(exc)}

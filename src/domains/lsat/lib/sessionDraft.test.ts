@@ -22,18 +22,19 @@ describe("sessionDraft", () => {
     expect(draftKeyForSection(7)).not.toBe(draftKeyForExamSection(7));
   });
 
-  it("round-trips states (including the eliminated Set), index and timeLeft", () => {
+  it("round-trips states (including the eliminated Set), index, timeLeft and deadline", () => {
     const scope = draftKeyForSection(42);
     const states: Record<number, QState> = {
       0: st({ answer: "B", flagged: true, timeMs: 1234, eliminated: new Set(["A", "C"]) }),
       1: st({ highlights: [{ start: 0, end: 4, color: "yellow" }] }),
     };
-    saveSessionDraft(scope, { states, index: 1, timeLeft: 600 });
+    saveSessionDraft(scope, { states, index: 1, timeLeft: 600, deadlineMs: 1_700_000 });
 
     const back = loadSessionDraft(scope);
     expect(back).not.toBeNull();
     expect(back!.index).toBe(1);
     expect(back!.timeLeft).toBe(600);
+    expect(back!.deadlineMs).toBe(1_700_000);
     expect(back!.states[0].answer).toBe("B");
     expect(back!.states[0].flagged).toBe(true);
     expect(back!.states[0].timeMs).toBe(1234);
@@ -46,6 +47,7 @@ describe("sessionDraft", () => {
     const scope = draftKeyForSection(1);
     saveSessionDraft(scope, { states: {}, index: 0, timeLeft: null });
     expect(loadSessionDraft(scope)!.timeLeft).toBeNull();
+    expect(loadSessionDraft(scope)!.deadlineMs).toBeNull();
   });
 
   it("returns null after clearing", () => {

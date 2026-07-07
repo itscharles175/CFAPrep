@@ -1,4 +1,4 @@
-import Dexie, { liveQuery, type Table } from 'dexie';
+import { liveQuery } from 'dexie';
 import {
   isDue,
   masteryScoreForResults,
@@ -54,6 +54,7 @@ import type {
   VaultImportHistoryEntry,
   VaultNote,
 } from './learningTypes';
+import { secureVault, type SecureVault } from './secureVault';
 import type {
   CfaSourceChunk,
   CfaSourceDocument,
@@ -79,18 +80,33 @@ import { fetchUnifiedDue, type UnifiedReviewItem } from './lsatReviewBridge';
 // by default), and `dexieDriver.table(name)` is a 1:1 pass-through over
 // `db.table(name)`, so each rerouted `getStorage().table('<store>').<op>(...)`
 // is behaviourally identical to the `db.<store>.<op>(...)` it replaces today.
-// The import is type-and-runtime safe despite the storage→progressStore cycle:
-// `getStorage` is only ever *called* from inside async functions, never at
-// module-evaluation time, so the `db` Dexie instance is already constructed by
-// the time any rerouted op runs.
+// The Dexie schema singleton lives in `progressDb.ts`, keeping this store and
+// the Dexie driver pointed at a neutral lower-level module instead of each other.
 import { getStorage } from './storage';
 import type { KeyedTable, StorageTransactionScope } from './storage/types';
-// DATA-1 Phase 3 — register the two previously-deferred stores in the Dexie
-// schema so PSY-11 ability snapshots + NAV-1 study trail actually persist. We
-// import ONLY the row-shape types from those slices (this module owns the Dexie
-// schema; the slices keep writing via getStorage().table(name)).
-import type { AbilitySnapshot } from './psychometrics/abilitySnapshots';
-import type { StudyTrailEntry } from './studyTrail';
+import { db, VAULT_CONTENT_VERSION, VAULT_SCHEMA_HASH, VAULT_SCHEMA_VERSION } from './progressDb';
+import type { QuestionResultRow, QuizAttemptRow, SettingRow } from './progressDb';
+import {
+  decryptSourceChunkForRead,
+  decryptSourceChunksForRead,
+  encryptSourceChunkForStorage,
+  encryptSourceChunksForStorage,
+  isSecureSourceChunk,
+  setSourceChunkSecureVaultForTesting,
+} from './sourceChunkSecureVault';
+
+export { db, VAULT_CONTENT_VERSION, VAULT_SCHEMA_HASH, VAULT_SCHEMA_VERSION } from './progressDb';
+
+const ENCRYPTED_NOTE_TITLE = '[Secure Vault encrypted]';
+const ENCRYPTED_NOTE_BODY = 'This note is encrypted at rest. Unlock Secure Vault to read it.';
+const ENCRYPTED_ARTIFACT_TITLE = '[Secure Vault encrypted artifact]';
+const ENCRYPTED_ARTIFACT_SUMMARY = 'This artifact is encrypted at rest. Unlock Secure Vault to read it.';
+let noteSecureVault: SecureVault = secureVault;
+
+export function setNoteSecureVaultForTesting(vault: SecureVault | null) {
+  noteSecureVault = vault ?? secureVault;
+  setSourceChunkSecureVaultForTesting(vault);
+}
 
 /**
  * DATA-1 Phase 2 — resolve the active driver's generic keyed-table primitive for
@@ -130,31 +146,6 @@ function vaultTransaction<T>(
 
 export const PROGRESS_EVENT = 'quantvault:progress';
 const PROGRESS_CHANNEL = 'quantvault:progress-channel';
-export const VAULT_SCHEMA_VERSION = 12;
-export const VAULT_SCHEMA_HASH = 'qv-v12-ability-snapshots-study-trail';
-export const VAULT_CONTENT_VERSION = 'cfa-2026-local-pack-v1';
-
-type SettingRow = { key: string; value: unknown; updatedAt: string };
-type QuestionResultRow = QuestionResult & {
-  id?: number;
-  selected?: number;
-  correctIndex?: number;
-  formula?: string;
-  title?: string;
-  objectiveTitle?: string;
-  path?: string;
-  level?: string;
-  itemType?: string;
-  createdAt: string;
-  // ANL-3 — blind-review capture (append-only, optional; see `QuestionResult`).
-  brAnswer?: number;
-  brConfidence?: Confidence;
-  brCorrect?: boolean;
-};
-
-type QuizAttemptRow = Omit<QuizAttempt, 'answers'> & {
-  answers: QuestionResultRow[];
-};
 
 type Level3PathwayQuery = {
   level3Pathway?: string;
@@ -235,55 +226,6 @@ export type VaultImportOptions = {
   passphrase?: string;
   conflictPolicy?: 'keep-existing' | 'prefer-import' | 'replace';
   includeSourceVault?: boolean;
-};
-
-type VaultDatabase = Dexie & {
-  lessonProgress: Table<LessonProgress, string>;
-  quizAttempts: Table<QuizAttemptRow, number>;
-  questionResults: Table<QuestionResultRow, number>;
-  reviewItems: Table<ReviewItem, string>;
-  masterySnapshots: Table<MasterySnapshot, string>;
-  mockAttempts: Table<MockAttempt, number>;
-  vignetteAttempts: Table<VignetteAttempt, number>;
-  constructedResponseAttempts: Table<ConstructedResponseAttempt, number>;
-  formulaDrillAttempts: Table<FormulaDrillAttempt, number>;
-  skillLabAttempts: Table<SkillLabAttempt, number>;
-  studySessions: Table<StudySession, number>;
-  studyPlanSettings: Table<StudyPlanSettings, string>;
-  contentVersions: Table<ContentVersion, string>;
-  reviewEvents: Table<ReviewEvent, number>;
-  confidenceCalibration: Table<ConfidenceCalibration, number>;
-  flashcardAttempts: Table<FlashcardAttempt, number>;
-  resultArtifacts: Table<ResultArtifact, string>;
-  mockSectionState: Table<MockSectionState, string>;
-  learningEvents: Table<LearningEventEnvelope, string>;
-  vaultHealthSnapshots: Table<VaultHealthSnapshot, string>;
-  rollbackSnapshots: Table<RollbackSnapshot, string>;
-  calculatorScenarios: Table<CalculatorScenario, string>;
-  releaseRunHistory: Table<ReleaseRunHistory, string>;
-  importJobs: Table<ImportJob, string>;
-  sourceBundleManifests: Table<SourceBundleManifest, string>;
-  psychometricStats: Table<PsychometricStats, string>;
-  mockBlueprints: Table<MockBlueprint, string>;
-  notes: Table<VaultNote, string>;
-  bookmarks: Table<VaultBookmark, string>;
-  settings: Table<SettingRow, string>;
-  // DATA-1 Phase 3 — PSY-11 ability snapshots (psychometrics/abilitySnapshots.ts)
-  // + NAV-1 study trail (studyTrail.ts). Registered here so their
-  // getStorage().table(name) writes persist on Dexie; intentionally NOT in
-  // STORE_NAMES / VaultDataStores — they are derived telemetry (ability snapshots
-  // are recomputable from attempts; the trail is ephemeral navigation history),
-  // so they are excluded from the canonical vault export the way the unexported
-  // source* stores are. resetVaultData('full') still clears them via SOURCE-style
-  // handling below.
-  abilitySnapshots: Table<AbilitySnapshot, string>;
-  studyTrail: Table<StudyTrailEntry, string>;
-  sourceDocuments: Table<CfaSourceDocument, string>;
-  sourceChunks: Table<CfaSourceChunk, string>;
-  sourceIndexes: Table<CfaSourceIndex, string>;
-  sourceIngestionRuns: Table<CfaSourceIngestionRun, string>;
-  sourceLinks: Table<CfaSourceLink, string>;
-  sourceLinkOverrides: Table<CfaSourceLinkOverride, string>;
 };
 
 const STORE_NAMES = [
@@ -384,146 +326,6 @@ const ERROR_CATEGORIES: ErrorCategory[] = [
   'time-pressure',
   'none',
 ];
-
-export const db = new Dexie('quantvault') as VaultDatabase;
-
-db.version(1).stores({
-  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
-  quizAttempts: '++id, domain, topic, pct, createdAt',
-  bookmarks: 'id, type, domain, moduleId, createdAt',
-  settings: 'key',
-});
-
-/* D1: Intermediate migration v2 — adds question results and review system */
-db.version(2).stores({
-  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
-  quizAttempts: '++id, domain, topic, pct, createdAt',
-  questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
-  reviewItems: 'id, domain, topic, learningObjective, dueAt, ease, attempts',
-  masterySnapshots: 'id, domain, topic, learningObjective, score, lastAttemptAt, nextReviewAt',
-  bookmarks: 'id, type, domain, moduleId, createdAt',
-  settings: 'key',
-});
-
-/* D1: Intermediate migration v3 — adds mock exams and assessment types */
-db.version(3).stores({
-  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
-  quizAttempts: '++id, domain, topic, pct, createdAt, mode',
-  questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
-  reviewItems: 'id, domain, topic, learningObjective, dueAt, ease, attempts',
-  masterySnapshots: 'id, domain, topic, learningObjective, score, lastAttemptAt, nextReviewAt',
-  mockAttempts: '++id, domain, level, pct, createdAt, mode',
-  vignetteAttempts: '++id, domain, level, topic, vignetteId, pct, createdAt',
-  constructedResponseAttempts: '++id, domain, level, topic, itemId, pct, createdAt',
-  formulaDrillAttempts: '++id, domain, level, topic, formulaName, correct, createdAt',
-  bookmarks: 'id, type, domain, moduleId, createdAt',
-  settings: 'key',
-});
-
-/* D1: Intermediate migration v4 — adds study sessions, drills, and notes */
-db.version(4).stores({
-  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
-  quizAttempts: '++id, domain, topic, pct, createdAt, mode',
-  questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
-  reviewItems: 'id, domain, topic, learningObjective, dueAt, ease, attempts',
-  masterySnapshots: 'id, domain, topic, learningObjective, score, lastAttemptAt, nextReviewAt',
-  mockAttempts: '++id, domain, level, pct, createdAt, mode',
-  vignetteAttempts: '++id, domain, level, topic, vignetteId, pct, createdAt',
-  constructedResponseAttempts: '++id, domain, level, topic, itemId, pct, createdAt',
-  formulaDrillAttempts: '++id, domain, level, topic, formulaName, correct, createdAt',
-  skillLabAttempts: '++id, domain, level, topic, labId, labType, createdAt',
-  studySessions: '++id, domain, topic, mode, startedAt',
-  studyPlanSettings: 'id, updatedAt, examDate',
-  contentVersions: 'id, version, updatedAt',
-  reviewEvents: '++id, domain, topic, learningObjective, eventType, createdAt',
-  confidenceCalibration: '++id, domain, topic, learningObjective, confidence, correct, createdAt',
-  flashcardAttempts: '++id, domain, topic, cardId, outcome, createdAt',
-  resultArtifacts: 'id, type, domain, topic, createdAt',
-  mockSectionState: 'id, status, updatedAt, expiresAt',
-  notes: 'id, type, domain, moduleId, questionId, formulaName, updatedAt',
-  bookmarks: 'id, type, domain, moduleId, questionId, formulaName, createdAt',
-  settings: 'key',
-});
-
-/* D1: Schema v5 — full 21-store architecture */
-db.version(5).stores({
-  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
-  quizAttempts: '++id, domain, topic, pct, createdAt, mode',
-  questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
-  reviewItems: 'id, domain, topic, learningObjective, dueAt, ease, attempts',
-  masterySnapshots: 'id, domain, topic, learningObjective, score, lastAttemptAt, nextReviewAt',
-  mockAttempts: '++id, domain, level, pct, createdAt, mode',
-  vignetteAttempts: '++id, domain, level, topic, vignetteId, pct, createdAt',
-  constructedResponseAttempts: '++id, domain, level, topic, itemId, pct, createdAt',
-  formulaDrillAttempts: '++id, domain, level, topic, formulaName, correct, createdAt',
-  skillLabAttempts: '++id, domain, level, topic, labId, labType, createdAt',
-  studySessions: '++id, domain, topic, mode, startedAt',
-  studyPlanSettings: 'id, updatedAt, examDate',
-  contentVersions: 'id, version, updatedAt',
-  reviewEvents: '++id, domain, topic, learningObjective, eventType, createdAt',
-  confidenceCalibration: '++id, domain, topic, learningObjective, confidence, correct, createdAt',
-  flashcardAttempts: '++id, domain, topic, cardId, outcome, createdAt',
-  resultArtifacts: 'id, type, domain, topic, createdAt',
-  mockSectionState: 'id, status, updatedAt, expiresAt',
-  notes: 'id, type, domain, moduleId, questionId, formulaName, updatedAt',
-  bookmarks: 'id, type, domain, moduleId, questionId, formulaName, createdAt',
-  settings: 'key',
-});
-
-/* D1: Schema v11 — resilience control plane, rollback snapshots, and private source bundles */
-db.version(11).stores({
-  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
-  quizAttempts: '++id, domain, topic, pct, createdAt, mode',
-  questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
-  reviewItems: 'id, domain, topic, learningObjective, dueAt, ease, fsrsDifficulty, attempts',
-  masterySnapshots: 'id, domain, topic, learningObjective, score, lastAttemptAt, nextReviewAt',
-  mockAttempts: '++id, domain, level, pct, createdAt, mode',
-  vignetteAttempts: '++id, domain, level, topic, vignetteId, pct, createdAt',
-  constructedResponseAttempts: '++id, domain, level, topic, itemId, pct, createdAt',
-  formulaDrillAttempts: '++id, domain, level, topic, formulaName, correct, createdAt',
-  skillLabAttempts: '++id, domain, level, topic, labId, labType, createdAt',
-  studySessions: '++id, domain, topic, mode, startedAt',
-  studyPlanSettings: 'id, updatedAt, examDate',
-  contentVersions: 'id, version, updatedAt',
-  reviewEvents: '++id, domain, topic, learningObjective, eventType, createdAt',
-  confidenceCalibration: '++id, domain, topic, learningObjective, confidence, correct, createdAt',
-  flashcardAttempts: '++id, domain, topic, cardId, outcome, createdAt',
-  resultArtifacts: 'id, type, domain, topic, createdAt',
-  mockSectionState: 'id, status, updatedAt, expiresAt',
-  learningEvents: 'id, recordedAt',
-  vaultHealthSnapshots: 'id, generatedAt, status',
-  rollbackSnapshots: 'id, createdAt, reason',
-  calculatorScenarios: 'id, calculatorId, updatedAt',
-  releaseRunHistory: 'id, runId, generatedAt, status',
-  importJobs: 'id, startedAt, status',
-  sourceBundleManifests: 'id, bundleId, createdAt, encrypted',
-  psychometricStats: 'id, level, topic, itemId',
-  mockBlueprints: 'id, level, updatedAt',
-  notes: 'id, type, domain, moduleId, questionId, formulaName, updatedAt',
-  bookmarks: 'id, type, domain, moduleId, questionId, formulaName, createdAt',
-  settings: 'key',
-  sourceDocuments: 'id, level, year, publisher, sourceKind, format, sha256, canonical, importedAt',
-  sourceChunks: 'id, documentId, chunkIndex, sourceHash, importedAt',
-  sourceIndexes: 'id, token, updatedAt',
-  sourceIngestionRuns: 'id, rootPath, startedAt, status',
-  sourceLinks: 'id, targetId, targetKind, documentId, chunkId, score, rank, sourcePriority, createdAt',
-  sourceLinkOverrides: 'id, targetId, chunkId, action, updatedAt',
-});
-
-/* D1: Current schema v12 — DATA-1 Phase 3 registers the two previously-deferred
- * stores so PSY-11 ability snapshots + NAV-1 study trail persist on Dexie. Dexie
- * carries forward every store from v11, so this incremental version only declares
- * the two NEW stores. Index strings match the queries each slice issues:
- *   - abilitySnapshots (abilitySnapshots.ts): keyed by `id`; reads via toArray()
- *     then JS-filters on `domain` and sorts on `at`. `modelVersion` is indexed per
- *     the slice's wiring note. (`difficultyMapping`/`calibrationResiduals` are
- *     nested payload — stored verbatim, not indexed.)
- *   - studyTrail (studyTrail.ts): keyed by `id`; reads via toArray() then
- *     JS-filters on `domain`, sorts on `recordedAt`, and bulkDeletes by `id`. */
-db.version(VAULT_SCHEMA_VERSION).stores({
-  abilitySnapshots: 'id, domain, at, modelVersion',
-  studyTrail: 'id, domain, recordedAt',
-});
 
 function nowIso() {
   return new Date().toISOString();
@@ -1325,8 +1127,108 @@ function noteIdFor({
   return [type, domain || 'vault', artifactId || moduleId || questionId || formulaName || 'general'].join(':');
 }
 
+function isSecureNote(note: VaultNote | undefined): note is VaultNote & { secureVault: NonNullable<VaultNote['secureVault']> } {
+  return note?.secureVault?.v === 1 && note.secureVault.scheme === 'secure-vault-note.v1';
+}
+
+function assertSecureVaultUnlocked(vault: SecureVault, resource: string) {
+  if (!vault.isUnlocked()) {
+    throw new Error(`Secure Vault is enabled but locked. Unlock it before reading or writing ${resource}.`);
+  }
+}
+
+function assertNoteVaultUnlocked(vault: SecureVault) {
+  assertSecureVaultUnlocked(vault, 'encrypted notes');
+}
+
+async function encryptNoteForStorage(note: VaultNote, vault: SecureVault = noteSecureVault): Promise<VaultNote> {
+  if (!vault.isEnabled()) {
+    const { secureVault: _secureVault, ...plain } = note;
+    return plain;
+  }
+  assertNoteVaultUnlocked(vault);
+  return {
+    ...note,
+    title: ENCRYPTED_NOTE_TITLE,
+    body: ENCRYPTED_NOTE_BODY,
+    secureVault: {
+      v: 1,
+      scheme: 'secure-vault-note.v1',
+      title: await vault.encrypt(note.title),
+      body: await vault.encrypt(note.body),
+    },
+  };
+}
+
+async function decryptNoteForRead(note: VaultNote | undefined, vault: SecureVault = noteSecureVault): Promise<VaultNote | undefined> {
+  if (!note || !isSecureNote(note)) return note;
+  assertNoteVaultUnlocked(vault);
+  const { secureVault: _secureVault, ...plain } = note;
+  return {
+    ...plain,
+    title: await vault.decrypt(note.secureVault.title),
+    body: await vault.decrypt(note.secureVault.body),
+  };
+}
+
+function isSecureResultArtifact(
+  artifact: ResultArtifact | undefined,
+): artifact is ResultArtifact & { secureVault: NonNullable<ResultArtifact['secureVault']> } {
+  return artifact?.secureVault?.v === 1 && artifact.secureVault.scheme === 'secure-vault-result-artifact.v1';
+}
+
+function parseSecureArtifactRecord(value: string, field: 'assumptions' | 'metrics'): ResultArtifact['assumptions'] {
+  const parsed = JSON.parse(value);
+  if (!isObject(parsed)) {
+    throw new Error(`Secure Vault artifact ${field} payload is invalid.`);
+  }
+  return parsed as ResultArtifact['assumptions'];
+}
+
+async function encryptResultArtifactForStorage(
+  artifact: ResultArtifact,
+  vault: SecureVault = noteSecureVault,
+): Promise<ResultArtifact> {
+  if (!vault.isEnabled()) {
+    const { secureVault: _secureVault, ...plain } = artifact;
+    return plain;
+  }
+  assertSecureVaultUnlocked(vault, 'encrypted result artifacts');
+  return {
+    ...artifact,
+    title: ENCRYPTED_ARTIFACT_TITLE,
+    summary: ENCRYPTED_ARTIFACT_SUMMARY,
+    assumptions: {},
+    metrics: {},
+    secureVault: {
+      v: 1,
+      scheme: 'secure-vault-result-artifact.v1',
+      title: await vault.encrypt(artifact.title),
+      summary: await vault.encrypt(artifact.summary),
+      assumptions: await vault.encrypt(stableStringify(artifact.assumptions)),
+      metrics: await vault.encrypt(stableStringify(artifact.metrics)),
+    },
+  };
+}
+
+async function decryptResultArtifactForRead(
+  artifact: ResultArtifact | undefined,
+  vault: SecureVault = noteSecureVault,
+): Promise<ResultArtifact | undefined> {
+  if (!artifact || !isSecureResultArtifact(artifact)) return artifact;
+  assertSecureVaultUnlocked(vault, 'encrypted result artifacts');
+  const { secureVault: _secureVault, ...plain } = artifact;
+  return {
+    ...plain,
+    title: await vault.decrypt(artifact.secureVault.title),
+    summary: await vault.decrypt(artifact.secureVault.summary),
+    assumptions: parseSecureArtifactRecord(await vault.decrypt(artifact.secureVault.assumptions), 'assumptions'),
+    metrics: parseSecureArtifactRecord(await vault.decrypt(artifact.secureVault.metrics), 'metrics'),
+  };
+}
+
 export async function getNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName' | 'artifactId'>) {
-  return vaultTable<VaultNote>('notes').get(noteIdFor(target));
+  return decryptNoteForRead(await vaultTable<VaultNote>('notes').get(noteIdFor(target)));
 }
 
 export async function saveNote({
@@ -1344,7 +1246,7 @@ export async function saveNote({
   const notesTable = vaultTable<VaultNote>('notes');
   const existing = await notesTable.get(id);
   const timestamp = nowIso();
-  const note: VaultNote = {
+  const note: VaultNote = await encryptNoteForStorage({
     id,
     type,
     domain,
@@ -1357,12 +1259,115 @@ export async function saveNote({
     path,
     createdAt: existing?.createdAt || timestamp,
     updatedAt: timestamp,
-  };
+  });
 
   await notesTable.put(note);
   if (artifactId) await attachArtifactToNote(artifactId, id);
   emitProgressChange();
-  return note;
+  return (await decryptNoteForRead(note)) as VaultNote;
+}
+
+export async function encryptExistingNotesForSecureVault(vault: SecureVault = noteSecureVault) {
+  if (!vault.isEnabled()) return { encrypted: 0, alreadyEncrypted: 0 };
+  assertNoteVaultUnlocked(vault);
+  const notesTable = vaultTable<VaultNote>('notes');
+  const notes = await notesTable.toArray();
+  let encrypted = 0;
+  let alreadyEncrypted = 0;
+  for (const note of notes) {
+    if (isSecureNote(note)) {
+      alreadyEncrypted += 1;
+      continue;
+    }
+    await notesTable.put(await encryptNoteForStorage(note, vault));
+    encrypted += 1;
+  }
+  if (encrypted) emitProgressChange();
+  return { encrypted, alreadyEncrypted };
+}
+
+export async function decryptEncryptedNotesForSecureVault(vault: SecureVault = noteSecureVault) {
+  assertNoteVaultUnlocked(vault);
+  const notesTable = vaultTable<VaultNote>('notes');
+  const notes = await notesTable.toArray();
+  let decrypted = 0;
+  for (const note of notes) {
+    const plain = await decryptNoteForRead(note, vault);
+    if (plain && isSecureNote(note)) {
+      await notesTable.put(plain);
+      decrypted += 1;
+    }
+  }
+  if (decrypted) emitProgressChange();
+  return { decrypted };
+}
+
+export async function encryptExistingResultArtifactsForSecureVault(vault: SecureVault = noteSecureVault) {
+  if (!vault.isEnabled()) return { encrypted: 0, alreadyEncrypted: 0 };
+  assertSecureVaultUnlocked(vault, 'encrypted result artifacts');
+  const artifactsTable = vaultTable<ResultArtifact>('resultArtifacts');
+  const artifacts = await artifactsTable.toArray();
+  let encrypted = 0;
+  let alreadyEncrypted = 0;
+  for (const artifact of artifacts) {
+    if (isSecureResultArtifact(artifact)) {
+      alreadyEncrypted += 1;
+      continue;
+    }
+    await artifactsTable.put(await encryptResultArtifactForStorage(artifact, vault));
+    encrypted += 1;
+  }
+  if (encrypted) emitProgressChange();
+  return { encrypted, alreadyEncrypted };
+}
+
+export async function decryptEncryptedResultArtifactsForSecureVault(vault: SecureVault = noteSecureVault) {
+  assertSecureVaultUnlocked(vault, 'encrypted result artifacts');
+  const artifactsTable = vaultTable<ResultArtifact>('resultArtifacts');
+  const artifacts = await artifactsTable.toArray();
+  let decrypted = 0;
+  for (const artifact of artifacts) {
+    const plain = await decryptResultArtifactForRead(artifact, vault);
+    if (plain && isSecureResultArtifact(artifact)) {
+      await artifactsTable.put(plain);
+      decrypted += 1;
+    }
+  }
+  if (decrypted) emitProgressChange();
+  return { decrypted };
+}
+
+export async function encryptExistingSourceChunksForSecureVault(vault: SecureVault = noteSecureVault) {
+  if (!vault.isEnabled()) return { encrypted: 0, alreadyEncrypted: 0 };
+  assertSecureVaultUnlocked(vault, 'encrypted source chunks');
+  const chunks = await db.sourceChunks.toArray();
+  let encrypted = 0;
+  let alreadyEncrypted = 0;
+  for (const chunk of chunks) {
+    if (isSecureSourceChunk(chunk)) {
+      alreadyEncrypted += 1;
+      continue;
+    }
+    await db.sourceChunks.put(await encryptSourceChunkForStorage(chunk, vault));
+    encrypted += 1;
+  }
+  if (encrypted) emitProgressChange();
+  return { encrypted, alreadyEncrypted };
+}
+
+export async function decryptEncryptedSourceChunksForSecureVault(vault: SecureVault = noteSecureVault) {
+  assertSecureVaultUnlocked(vault, 'encrypted source chunks');
+  const chunks = await db.sourceChunks.toArray();
+  let decrypted = 0;
+  for (const chunk of chunks) {
+    const plain = await decryptSourceChunkForRead(chunk, vault);
+    if (plain && isSecureSourceChunk(chunk)) {
+      await db.sourceChunks.put(plain);
+      decrypted += 1;
+    }
+  }
+  if (decrypted) emitProgressChange();
+  return { decrypted };
 }
 
 export async function deleteNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName' | 'artifactId'>) {
@@ -1715,7 +1720,7 @@ export async function exportVaultData(options: VaultExportOptions = {}): Promise
   const sourceVault: CfaSourceVaultStores | undefined = options.includeSourceVault
     ? {
         sourceDocuments: await vaultTable<CfaSourceDocument>('sourceDocuments').toArray(),
-        sourceChunks: await vaultTable<CfaSourceChunk>('sourceChunks').toArray(),
+        sourceChunks: await decryptSourceChunksForRead(await vaultTable<CfaSourceChunk>('sourceChunks').toArray()),
         sourceIndexes: await vaultTable<CfaSourceIndex>('sourceIndexes').toArray(),
         sourceIngestionRuns: await vaultTable<CfaSourceIngestionRun>('sourceIngestionRuns').toArray(),
         sourceLinks: await vaultTable<CfaSourceLink>('sourceLinks').toArray(),
@@ -2323,6 +2328,10 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
     });
     throw new Error(validation.errors.join(' '));
   }
+  const sourceChunksToWrite =
+    importOptions.includeSourceVault && exportPayload.sourceVault
+      ? await encryptSourceChunksForStorage(exportPayload.sourceVault.sourceChunks, noteSecureVault)
+      : [];
   // Data-safety: snapshot for BOTH modes. A merge bulkPut still overwrites local
   // rows whose primary key collides with the imported file (settings, notes,
   // bookmarks, reviewItems, masterySnapshots are keyed), so merging a stale/foreign
@@ -2389,7 +2398,7 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
         ...(importOptions.includeSourceVault && exportPayload.sourceVault
           ? [
               tx.table<CfaSourceDocument>('sourceDocuments').bulkPut(exportPayload.sourceVault.sourceDocuments),
-              tx.table<CfaSourceChunk>('sourceChunks').bulkPut(exportPayload.sourceVault.sourceChunks),
+              tx.table<CfaSourceChunk>('sourceChunks').bulkPut(sourceChunksToWrite),
               tx.table<CfaSourceIndex>('sourceIndexes').bulkPut(exportPayload.sourceVault.sourceIndexes),
               tx.table<CfaSourceIngestionRun>('sourceIngestionRuns').bulkPut(exportPayload.sourceVault.sourceIngestionRuns),
               tx.table<CfaSourceLink>('sourceLinks').bulkPut(exportPayload.sourceVault.sourceLinks || []),
@@ -2510,7 +2519,7 @@ export async function saveResultArtifact({
   noteId,
   objectiveIds,
 }: Omit<ResultArtifact, 'id' | 'createdAt'>) {
-  const artifact: ResultArtifact = {
+  const artifact: ResultArtifact = await encryptResultArtifactForStorage({
     id: artifactIdFor(type, title),
     type,
     domain,
@@ -2524,16 +2533,17 @@ export async function saveResultArtifact({
     noteId,
     objectiveIds,
     createdAt: nowIso(),
-  };
+  });
   await vaultTable<ResultArtifact>('resultArtifacts').put(artifact);
   emitProgressChange();
-  return artifact;
+  return (await decryptResultArtifactForRead(artifact)) as ResultArtifact;
 }
 
 export async function getResultArtifacts(type?: ResultArtifact['type']) {
   // `createdAt` is a declared index on resultArtifacts.
   const artifacts = await vaultTable<ResultArtifact>('resultArtifacts').orderedBy('createdAt', { desc: true });
-  return type ? artifacts.filter((artifact) => artifact.type === type) : artifacts;
+  const filtered = type ? artifacts.filter((artifact) => artifact.type === type) : artifacts;
+  return Promise.all(filtered.map((artifact) => decryptResultArtifactForRead(artifact))) as Promise<ResultArtifact[]>;
 }
 
 export async function deleteResultArtifact(id: string) {
@@ -3889,7 +3899,7 @@ export async function attachArtifactToNote(artifactId: string, noteId: string) {
   const updated = { ...artifact, noteId };
   await resultArtifactsTable.put(updated);
   emitProgressChange();
-  return updated;
+  return (await decryptResultArtifactForRead(updated)) as ResultArtifact;
 }
 
 export async function exportArtifactCsv(type?: ResultArtifact['type']) {
@@ -4078,7 +4088,8 @@ export function getExamPlan() {
 
 export async function getNotes() {
   // `updatedAt` is a declared index on notes.
-  return vaultTable<VaultNote>('notes').orderedBy('updatedAt', { desc: true });
+  const rows = await vaultTable<VaultNote>('notes').orderedBy('updatedAt', { desc: true });
+  return Promise.all(rows.map((note) => decryptNoteForRead(note))) as Promise<VaultNote[]>;
 }
 
 export async function getBookmarks() {
@@ -4184,6 +4195,80 @@ async function storageEstimate() {
   };
 }
 
+const SECURE_OPEN_NOTEBOOK_SETTINGS_SCHEME = 'secure-vault-open-notebook-cache.v1';
+
+function isSensitiveOpenNotebookSettingKey(key: string): boolean {
+  return (
+    key === 'open-notebook:topic-notebooks' ||
+    key.startsWith('open-notebook:answer:') ||
+    key.startsWith('open-notebook:answer-history:')
+  );
+}
+
+function isSecureOpenNotebookSettingsRow(row: SettingRow): boolean {
+  const value = row.value as { v?: unknown; scheme?: unknown; payload?: { iv?: unknown; ct?: unknown } } | undefined;
+  return (
+    isSensitiveOpenNotebookSettingKey(row.key) &&
+    value?.v === 1 &&
+    value.scheme === SECURE_OPEN_NOTEBOOK_SETTINGS_SCHEME &&
+    typeof value.payload?.iv === 'string' &&
+    typeof value.payload?.ct === 'string'
+  );
+}
+
+async function countSourceVaultRowsOutsideSecureScope(): Promise<number> {
+  const counts = await Promise.all(
+    SOURCE_STORE_NAMES.filter((storeName) => storeName !== 'sourceChunks').map((storeName) =>
+      vaultTable(storeName).count().catch(() => 0),
+    ),
+  );
+  return counts.reduce((sum, count) => sum + count, 0);
+}
+
+async function buildSecureVaultHealth(
+  exported: VaultExport,
+  outsideScopeRows: { sourceVault: number },
+): Promise<NonNullable<VaultHealthReport['secureVault']>> {
+  const noteTotal = exported.stores.notes.length;
+  const artifactTotal = exported.stores.resultArtifacts.length;
+  const openNotebookSettings = exported.stores.settings.filter((row) => isSensitiveOpenNotebookSettingKey(row.key));
+  const sourceChunks = await db.sourceChunks.toArray().catch(() => []);
+  const noteEncrypted = exported.stores.notes.filter((note) => isSecureNote(note)).length;
+  const artifactEncrypted = exported.stores.resultArtifacts.filter((artifact) => isSecureResultArtifact(artifact)).length;
+  const openNotebookSettingsEncrypted = openNotebookSettings.filter((row) => isSecureOpenNotebookSettingsRow(row)).length;
+  const sourceChunkEncrypted = sourceChunks.filter((chunk) => isSecureSourceChunk(chunk)).length;
+  const encryptedRows = noteEncrypted + artifactEncrypted + openNotebookSettingsEncrypted + sourceChunkEncrypted;
+  const targetRows = noteTotal + artifactTotal + openNotebookSettings.length + sourceChunks.length;
+  const coveragePct = targetRows ? Math.round((encryptedRows / targetRows) * 100) : 100;
+  const enabled = noteSecureVault.isEnabled();
+  const unlocked = noteSecureVault.isUnlocked();
+  const available = await noteSecureVault.isAvailable().catch(() => false);
+  const status = !enabled
+    ? 'disabled'
+    : !unlocked
+      ? 'locked'
+      : encryptedRows === targetRows
+        ? 'encrypted'
+        : 'partial';
+
+  return {
+    enabled,
+    unlocked,
+    available,
+    status,
+    encryptedRows,
+    targetRows,
+    coveragePct,
+    rows: {
+      notes: { encrypted: noteEncrypted, total: noteTotal },
+      resultArtifacts: { encrypted: artifactEncrypted, total: artifactTotal },
+      openNotebookSettings: { encrypted: openNotebookSettingsEncrypted, total: openNotebookSettings.length },
+      sourceChunks: { encrypted: sourceChunkEncrypted, total: sourceChunks.length },
+    },
+    outsideScopeRows,
+  };
+}
+
 function buildVaultHealthSnapshot(exported: VaultExport, validationErrors: string[]): VaultHealthSnapshot {
   const totalRows = STORE_NAMES.reduce((sum, storeName) => sum + exported.stores[storeName].length, 0);
   const malformedQuestionRows = exported.stores.questionResults.filter(
@@ -4233,11 +4318,13 @@ export async function getVaultHealthReport(): Promise<VaultHealthReport> {
     vaultTable<CalculatorScenario>('calculatorScenarios').orderedBy('updatedAt', { desc: true, limit: 10 }),
     vaultTable<ReleaseRunHistory>('releaseRunHistory').orderedBy('generatedAt', { desc: true, limit: 10 }),
   ]);
+  const sourceVaultOutsideScopeRows = await countSourceVaultRowsOutsideSecureScope();
   const report: VaultHealthReport = {
     ...snapshot,
     schemaVersion: VAULT_SCHEMA_VERSION,
     schemaHash: VAULT_SCHEMA_HASH,
     contentVersion: VAULT_CONTENT_VERSION,
+    secureVault: await buildSecureVaultHealth(exported, { sourceVault: sourceVaultOutsideScopeRows }),
     importHistory: await getVaultImportHistory(),
     rollbackSnapshots,
     importJobs,

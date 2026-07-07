@@ -5,6 +5,8 @@
  * Voice output uses SpeechSynthesis which is genuinely local on every platform.
  */
 
+import { stripThink } from './stripThink';
+
 /** Detect whether the browser supports SpeechRecognition (Chrome/Edge/Safari/Tauri webview). */
 export function hasSpeechRecognition() {
   return typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -135,8 +137,8 @@ export function stopSpeaking() {
  */
 export function sanitizeForSpeech(text) {
   if (!text) return '';
-  // Remove [source:...] citation markers (standalone or grouped like [source:a, source:b])
-  return text
+  // Remove reasoning traces and [source:...] citation markers before TTS.
+  return stripThink(String(text))
     .replace(/\[\s*source:[^\]]+\]/g, '')
     .replace(/\s+/g, ' ')
     .trim();

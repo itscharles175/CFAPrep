@@ -171,11 +171,11 @@ export interface TypeFamilyMeta {
 
 export const TYPE_FAMILIES: Record<TypeFamily, TypeFamilyMeta> = {
   Assumption: { family: "Assumption", label: "Assumption", hex: "#0072B2", darkText: false },
-  StrengthenWeaken: { family: "StrengthenWeaken", label: "Strengthen / Weaken", hex: "#009E73", darkText: false },
-  FlawStructure: { family: "FlawStructure", label: "Flaw / Structure", hex: "#D55E00", darkText: false },
+  StrengthenWeaken: { family: "StrengthenWeaken", label: "Strengthen / Weaken", hex: "#009E73", darkText: true },
+  FlawStructure: { family: "FlawStructure", label: "Flaw / Structure", hex: "#D55E00", darkText: true },
   Inference: { family: "Inference", label: "Inference", hex: "#56B4E9", darkText: true },
   Principle: { family: "Principle", label: "Principle", hex: "#E69F00", darkText: true },
-  Parallel: { family: "Parallel", label: "Parallel", hex: "#CC79A7", darkText: false },
+  Parallel: { family: "Parallel", label: "Parallel", hex: "#CC79A7", darkText: true },
   Paradox: { family: "Paradox", label: "Paradox", hex: "#F0E442", darkText: true },
   RC: { family: "RC", label: "Reading Comprehension", hex: "#374151", darkText: false },
 };

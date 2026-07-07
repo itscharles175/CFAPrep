@@ -855,13 +855,19 @@ def _import_user_data(session: Session, payload: dict[str, Any],
         if local_aid is None:
             continue
         reason = _enum_value(ErrorReason, err.get("reason", "trap"), ErrorReason.trap)
-        existing = session.exec(
+        candidates = session.exec(
             select(ErrorLogEntry)
             .where(ErrorLogEntry.attempt_id == local_aid)
             .where(ErrorLogEntry.reason == reason)
-            .where(ErrorLogEntry.user_note == err.get("user_note"))
-            .where(ErrorLogEntry.ai_diagnosis == err.get("ai_diagnosis"))
-        ).first()
+        ).all()
+        existing = next(
+            (
+                row for row in candidates
+                if row.user_note == err.get("user_note")
+                and row.ai_diagnosis == err.get("ai_diagnosis")
+            ),
+            None,
+        )
         if existing is None:
             existing = ErrorLogEntry(
                 attempt_id=local_aid,

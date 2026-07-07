@@ -26,13 +26,15 @@
  *     BEFORE first paint, so the app's synchronous bootstrap applies the matching
  *     `data-theme` with no flash. A fresh context per theme isolates the seed.
  *
- * BASELINES (committed): tests/visual-baselines/<route>-<theme>-<viewport>.png.
+ * BASELINES: tests/visual-baselines/<route>-<theme>-<viewport>.png, supplied
+ * by a committed/approved artifact set or by CI cache.
  *   - When a baseline EXISTS, the new frame is compared with pixelmatch at a small
  *     per-pixel tolerance; the run fails if the changed-pixel RATIO exceeds
  *     DIFF_RATIO_TOLERANCE (a tiny anti-aliasing/subpixel budget). A `*-diff.png`
  *     highlighting the changed pixels is written next to the screenshot for review.
- *   - When NO baseline exists, the frame is WRITTEN as the new baseline and the
- *     check passes (bootstrap). Commit tests/visual-baselines/ to lock it in.
+ *   - When a required baseline is missing, the run fails before launching the
+ *     browser. Use UPDATE_VISUAL_BASELINES=1 after reviewing an intentional
+ *     route/theme/viewport change to write the new baseline deliberately.
  *   - When dimensions differ from the baseline, that is treated as a failure
  *     (a layout/viewport change must be reviewed + re-baselined deliberately).
  *
@@ -45,8 +47,8 @@
  *      TS loader so the `.ts` route manifest import resolves:
  *        node --import ./scripts/register-ts-loader.mjs scripts/visual-regression.mjs
  *      (this is exactly what `npm run visual:regression` wraps).
- *   To intentionally re-baseline after an approved visual change, delete the stale
- *   PNGs under tests/visual-baselines/ (or pass UPDATE_VISUAL_BASELINES=1) and rerun.
+ *   To intentionally re-baseline after an approved visual change, pass
+ *   UPDATE_VISUAL_BASELINES=1 and rerun.
  *
  * Uses pixelmatch + pngjs, both already devDependencies (shared with the existing
  * QA tooling) — no new package is added.
@@ -61,6 +63,7 @@ import pixelmatch from 'pixelmatch';
 import { lsatScreenshotRoutes, screenshotRoutes } from '../src/routes/routeManifest.ts';
 import { resolveBrowserExecutable, seedThemeInitScript } from './a11y-helpers.mjs';
 import { includeLsatRoutes, lsatRoutesOnly, selectGateRoutes, viewports } from './qa-helpers.mjs';
+import { evaluateVisualBaselinePolicy, expectedVisualBaselineNames } from './visual-baseline-policy.mjs';
 
 /* global document */
 
@@ -133,7 +136,7 @@ async function fileExists(path) {
  * Compare a freshly captured PNG buffer against a committed baseline.
  *
  * Returns one of:
- *   { outcome: 'bootstrapped' }     — no baseline existed; it was written.
+ *   { outcome: 'bootstrapped' }     — update mode wrote a previously missing baseline.
  *   { outcome: 'updated' }          — UPDATE_VISUAL_BASELINES rewrote it.
  *   { outcome: 'match', ratio }     — within tolerance.
  *   { outcome: 'diff', ratio, ... } — over tolerance (or size mismatch); fails.
@@ -150,25 +153,16 @@ async function compareToBaseline({ id, theme, viewport, screenshot }) {
     return { outcome: hasBaseline ? 'updated' : 'bootstrapped', name, baselinePath, screenshotPath };
   }
   if (!hasBaseline) {
-    // audit M19 — once baselines are committed (the gate is "live"), a MISSING
-    // baseline in CI is a FAILURE, not a silent self-seed. Previously every fresh
-    // CI checkout (baselines gitignored) bootstrapped and passed, so visual
-    // regressions were structurally false-green. Locally — or before any baseline
-    // is committed — keep bootstrapping so a dev can seed them.
-    if (isCI && baselinesCommitted) {
-      return {
-        outcome: 'diff',
-        name,
-        baselinePath,
-        screenshotPath,
-        reason:
-          'baseline missing in CI — a new/renamed shot must be reviewed and committed ' +
-          '(re-baseline locally with the update flag, then commit tests/visual-baselines/)',
-        ratio: 1,
-      };
-    }
-    await writeFile(baselinePath, screenshot);
-    return { outcome: 'bootstrapped', name, baselinePath, screenshotPath };
+    return {
+      outcome: 'diff',
+      name,
+      baselinePath,
+      screenshotPath,
+      reason:
+        'required visual baseline is missing — run with UPDATE_VISUAL_BASELINES=1 ' +
+        'after reviewing the new frame',
+      ratio: 1,
+    };
   }
 
   const baselineBuffer = await readFile(baselinePath);
@@ -208,16 +202,43 @@ await access('dist/index.html').catch(() => {
 await mkdir(BASELINE_DIR, { recursive: true });
 await mkdir(REPORT_DIR, { recursive: true });
 
-// audit M19 — gate state. `baselinesCommitted` is true when the baseline dir
-// already holds PNGs at startup (i.e. they're committed to the repo), which makes
-// the gate "live": a missing baseline in CI then fails instead of self-seeding.
-const isCI = !!process.env.CI && process.env.CI !== 'false';
-const baselinesCommitted = (await readdir(BASELINE_DIR).catch(() => [])).some((f) => f.endsWith('.png'));
-if (isCI && !baselinesCommitted && !UPDATE_BASELINES) {
-  console.warn(
-    'WARNING: no committed visual baselines found — the visual-regression gate is INACTIVE ' +
-      '(bootstrapping, not comparing). Commit tests/visual-baselines/ to make it enforce.',
+const existingBaselineNames = (await readdir(BASELINE_DIR).catch(() => []))
+  .filter((name) => name.endsWith('.png'))
+  .sort();
+const expectedBaselineNames = expectedVisualBaselineNames({
+  routes: TARGET_ROUTES,
+  themes: THEMES,
+  viewports: VIEWPORT_NAMES,
+});
+const baselinePolicy = evaluateVisualBaselinePolicy({
+  expectedNames: expectedBaselineNames,
+  existingNames: existingBaselineNames,
+  updateBaselines: UPDATE_BASELINES,
+});
+
+if (!baselinePolicy.ok) {
+  await writeFile(
+    'dist/reports/visual-regression.json',
+    `${JSON.stringify(
+      {
+        generatedAt: new Date().toISOString(),
+        themes: THEMES,
+        viewports: VIEWPORT_NAMES,
+        includeLsatRoutes,
+        lsatRoutesOnly,
+        routeCount: TARGET_ROUTES.length,
+        baselineDir: BASELINE_DIR,
+        reportDir: REPORT_DIR,
+        updateBaselines: UPDATE_BASELINES,
+        baselinePolicy,
+        results: [],
+        failures: [{ scope: 'baseline-policy', reason: baselinePolicy.reason, missing: baselinePolicy.missing }],
+      },
+      null,
+      2,
+    )}\n`,
   );
+  throw new Error(`visual-regression baseline policy failed: ${baselinePolicy.reason}`);
 }
 
 const server = await preview({
@@ -285,7 +306,7 @@ try {
               });
               console.error(`DIFF visual ${scope} — ${result.reason || `${(result.ratio * 100).toFixed(3)}% changed`}`);
             } else if (result.outcome === 'bootstrapped') {
-              console.log(`NEW baseline visual ${scope} (bootstrapped)`);
+              console.log(`NEW baseline visual ${scope} (update mode)`);
             } else if (result.outcome === 'updated') {
               console.log(`UPDATED baseline visual ${scope}`);
             } else {
@@ -317,6 +338,7 @@ try {
         diffRatioTolerance: DIFF_RATIO_TOLERANCE,
         pixelThreshold: PIXEL_THRESHOLD,
         updateBaselines: UPDATE_BASELINES,
+        baselinePolicy,
         results,
         failures,
       },
@@ -332,7 +354,6 @@ if (failures.length) {
   console.error(JSON.stringify(failures, null, 2));
   throw new Error(
     `${failures.length} visual-regression check(s) failed. Review dist/reports/visual/*-diff.png; ` +
-      'if the change is intentional, delete the stale tests/visual-baselines/*.png (or set ' +
-      'UPDATE_VISUAL_BASELINES=1) and rerun to re-baseline.',
+      'if the change is intentional, rerun with UPDATE_VISUAL_BASELINES=1 to re-baseline.',
   );
 }

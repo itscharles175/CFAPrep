@@ -13,6 +13,18 @@ import {
   secureVault,
   type SecureVaultStatus,
 } from '../lib/secureVault';
+import {
+  decryptEncryptedNotesForSecureVault,
+  decryptEncryptedResultArtifactsForSecureVault,
+  decryptEncryptedSourceChunksForSecureVault,
+  encryptExistingNotesForSecureVault,
+  encryptExistingResultArtifactsForSecureVault,
+  encryptExistingSourceChunksForSecureVault,
+} from '../lib/progressStore';
+import {
+  decryptEncryptedOpenNotebookAnswerCacheForSecureVault,
+  encryptExistingOpenNotebookAnswerCacheForSecureVault,
+} from '../lib/openNotebook';
 
 export default function SecureVaultPanel() {
   const [status, setStatus] = useState<SecureVaultStatus | null>(null);
@@ -54,6 +66,24 @@ export default function SecureVaultPanel() {
     [refresh],
   );
 
+  const enableVault = useCallback(async () => {
+    const result = await secureVault.enable();
+    if (!result.ok) return result;
+    await encryptExistingNotesForSecureVault();
+    await encryptExistingResultArtifactsForSecureVault();
+    await encryptExistingOpenNotebookAnswerCacheForSecureVault();
+    await encryptExistingSourceChunksForSecureVault();
+    return result;
+  }, []);
+
+  const disableVault = useCallback(async () => {
+    await decryptEncryptedNotesForSecureVault();
+    await decryptEncryptedResultArtifactsForSecureVault();
+    await decryptEncryptedOpenNotebookAnswerCacheForSecureVault();
+    await decryptEncryptedSourceChunksForSecureVault();
+    return secureVault.disable();
+  }, []);
+
   return (
     <section className="qv-card qv-mt-4" aria-labelledby="secure-vault-heading">
       <h3 id="secure-vault-heading" className="qv-m-0">
@@ -62,8 +92,9 @@ export default function SecureVaultPanel() {
       <p className="qv-text-secondary qv-mt-1 qv-mb-0">
         Provisions a local encryption key for at-rest protection of your study data. The key is
         generated on this device and held in your operating system’s keychain — never uploaded or
-        escrowed. Enabling now sets up and unlocks the key; per-record encryption of your stores is
-        being rolled out incrementally. Desktop app only.
+        escrowed. Enabling encrypts saved Vault notes, result artifacts, cached grounded Q&A, and
+        private source chunks now; broader store encryption is being rolled out incrementally.
+        Desktop app only.
       </p>
 
       {status && (
@@ -91,7 +122,7 @@ export default function SecureVaultPanel() {
           <button
             className="btn btn-primary btn-sm"
             disabled={busy}
-            onClick={() => run(() => secureVault.enable(), 'Secure vault enabled and unlocked.')}
+            onClick={() => run(enableVault, 'Secure vault enabled and sensitive rows encrypted.')}
           >
             {busy ? 'Working…' : 'Enable secure vault'}
           </button>
@@ -123,7 +154,7 @@ export default function SecureVaultPanel() {
           <button
             className="btn btn-secondary btn-sm"
             disabled={busy}
-            onClick={() => run(() => secureVault.disable(), 'Secure vault disabled.')}
+            onClick={() => run(disableVault, 'Secure vault disabled and encrypted rows restored to plaintext.')}
           >
             {busy ? 'Working…' : 'Disable secure vault'}
           </button>

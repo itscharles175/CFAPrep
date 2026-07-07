@@ -8,18 +8,23 @@ import {
   deleteNotebook,
   ensureSourceInsights,
   ensureTopicNotebook,
+  decryptEncryptedOpenNotebookAnswerCacheForSecureVault,
+  encryptExistingOpenNotebookAnswerCacheForSecureVault,
   getCachedGroundedAnswer,
   getOpenNotebookSettings,
   listSourceInsights,
   listTransformations,
   notebookSourcesAvailable,
   parseSourceChatStream,
+  getCachedGroundedAnswerHistory,
   saveCachedGroundedAnswer,
   saveOpenNotebookSettings,
   searchNotebookSources,
+  setOpenNotebookSecureVaultForTesting,
   triggerSourceInsight,
 } from './openNotebook';
 import { db } from './progressStore';
+import { createMemoryKeyStore, SecureVault, type SecureVaultFlagStore } from './secureVault';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -28,12 +33,32 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function secureVaultFlag(initial = false): SecureVaultFlagStore {
+  let enabled = initial;
+  return {
+    get: () => enabled,
+    set: (value) => {
+      enabled = value;
+    },
+  };
+}
+
+async function enableTestSecureVault() {
+  const vault = new SecureVault(createMemoryKeyStore(), secureVaultFlag());
+  const result = await vault.enable();
+  expect(result.ok).toBe(true);
+  setOpenNotebookSecureVaultForTesting(vault);
+  return vault;
+}
+
 describe('open-notebook client', () => {
   beforeEach(async () => {
     await db.settings.clear();
+    setOpenNotebookSecureVaultForTesting(null);
   });
 
   afterEach(() => {
+    setOpenNotebookSecureVaultForTesting(null);
     vi.restoreAllMocks();
   });
 
@@ -49,6 +74,13 @@ describe('open-notebook client', () => {
     expect(saved.enabled).toBe(true);
     expect(saved.baseUrl).toBe(DEFAULT_OPEN_NOTEBOOK_SETTINGS.baseUrl);
     expect((await getOpenNotebookSettings()).enabled).toBe(true);
+  });
+
+  it('rejects remote open-notebook bases before saving settings', async () => {
+    await expect(
+      saveOpenNotebookSettings({ enabled: true, baseUrl: 'http://192.168.1.5:5055' }),
+    ).rejects.toThrow(/loopback/i);
+    expect(await getOpenNotebookSettings()).toEqual(DEFAULT_OPEN_NOTEBOOK_SETTINGS);
   });
 
   it('parses /api/models into language and embedding defaults', async () => {
@@ -73,6 +105,17 @@ describe('open-notebook client', () => {
     const conn = await checkOpenNotebookConnection({ baseUrl: 'http://localhost:5055/' });
     expect(conn.ok).toBe(false);
     expect(conn.error).toContain('ECONNREFUSED');
+  });
+
+  it('rejects remote open-notebook bases before fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const conn = await checkOpenNotebookConnection({ baseUrl: 'http://192.168.1.5:5055' });
+
+    expect(conn.ok).toBe(false);
+    expect(conn.error).toMatch(/loopback/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('sends the proven ask/simple payload with one model for all three stages', async () => {
@@ -426,5 +469,133 @@ describe('open-notebook client', () => {
     });
     // keyed per topic — a different topic is unaffected
     expect(await getCachedGroundedAnswer('level1', 'equity')).toBeNull();
+  });
+
+  it('encrypts grounded answer cache rows when Secure Vault is enabled', async () => {
+    await enableTestSecureVault();
+
+    await saveCachedGroundedAnswer('level1', 'fixed-income', {
+      question: 'private grounded question sentinel',
+      answer: 'private grounded answer sentinel',
+    });
+
+    const rawAnswer = await db.settings.get('open-notebook:answer:level1:fixed-income');
+    const rawHistory = await db.settings.get('open-notebook:answer-history:level1:fixed-income');
+    expect(rawAnswer?.value).toMatchObject({ scheme: 'secure-vault-open-notebook-cache.v1' });
+    expect(rawHistory?.value).toMatchObject({ scheme: 'secure-vault-open-notebook-cache.v1' });
+    expect(JSON.stringify(rawAnswer)).not.toContain('private grounded question sentinel');
+    expect(JSON.stringify(rawAnswer)).not.toContain('private grounded answer sentinel');
+    expect(JSON.stringify(rawHistory)).not.toContain('private grounded answer sentinel');
+
+    const loaded = await getCachedGroundedAnswer('level1', 'fixed-income');
+    const history = await getCachedGroundedAnswerHistory('level1', 'fixed-income');
+    expect(loaded?.question).toBe('private grounded question sentinel');
+    expect(loaded?.answer).toBe('private grounded answer sentinel');
+    expect(history[0]?.answer).toBe('private grounded answer sentinel');
+  });
+
+  it('does not write plaintext grounded answer cache rows while Secure Vault is locked', async () => {
+    const vault = await enableTestSecureVault();
+    vault.lock();
+
+    await expect(
+      saveCachedGroundedAnswer('level1', 'fixed-income', {
+        question: 'locked grounded question sentinel',
+        answer: 'locked grounded answer sentinel',
+      }),
+    ).rejects.toThrow(/locked/i);
+
+    const rawRows = await db.settings.toArray();
+    expect(JSON.stringify(rawRows)).not.toContain('locked grounded question sentinel');
+    expect(JSON.stringify(rawRows)).not.toContain('locked grounded answer sentinel');
+  });
+
+  it('migrates existing grounded answer cache rows when Secure Vault is enabled and disabled', async () => {
+    await db.settings.put({
+      key: 'open-notebook:answer:level1:ethics',
+      value: {
+        question: 'legacy grounded question sentinel',
+        answer: 'legacy grounded answer sentinel',
+        answeredAt: '2026-01-01T00:00:00.000Z',
+      },
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    await db.settings.put({
+      key: 'open-notebook:answer-history:level1:ethics',
+      value: [
+        {
+          question: 'legacy grounded question sentinel',
+          answer: 'legacy grounded answer sentinel',
+          answeredAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const vault = await enableTestSecureVault();
+    expect(await encryptExistingOpenNotebookAnswerCacheForSecureVault(vault)).toEqual({
+      encrypted: 2,
+      alreadyEncrypted: 0,
+    });
+
+    const encryptedRows = await db.settings.toArray();
+    expect(encryptedRows.map((row) => row.value)).toEqual([
+      expect.objectContaining({ scheme: 'secure-vault-open-notebook-cache.v1' }),
+      expect.objectContaining({ scheme: 'secure-vault-open-notebook-cache.v1' }),
+    ]);
+    expect(JSON.stringify(encryptedRows)).not.toContain('legacy grounded answer sentinel');
+    expect((await getCachedGroundedAnswer('level1', 'ethics'))?.answer).toBe('legacy grounded answer sentinel');
+
+    expect(await decryptEncryptedOpenNotebookAnswerCacheForSecureVault(vault)).toEqual({ decrypted: 2 });
+    const plainRows = await db.settings.toArray();
+    expect(JSON.stringify(plainRows)).toContain('legacy grounded answer sentinel');
+    expect(plainRows.some((row) => JSON.stringify(row.value).includes('secure-vault-open-notebook-cache.v1'))).toBe(
+      false,
+    );
+  });
+
+  it('encrypts topic-notebook maps and reuses the decrypted map while unlocked', async () => {
+    await db.settings.put({
+      key: 'open-notebook:topic-notebooks',
+      value: {
+        'l1:private-topic': {
+          notebookId: 'notebook:private',
+          sourceId: 'source:private',
+        },
+      },
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const vault = await enableTestSecureVault();
+    expect(await encryptExistingOpenNotebookAnswerCacheForSecureVault(vault)).toEqual({
+      encrypted: 1,
+      alreadyEncrypted: 0,
+    });
+
+    const encryptedRow = await db.settings.get('open-notebook:topic-notebooks');
+    expect(encryptedRow?.value).toMatchObject({ scheme: 'secure-vault-open-notebook-cache.v1' });
+    expect(JSON.stringify(encryptedRow)).not.toContain('notebook:private');
+    expect(JSON.stringify(encryptedRow)).not.toContain('source:private');
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/notebooks')) return jsonResponse([{ id: 'notebook:private', name: 'Private' }]);
+      throw new Error(`Unexpected request ${url} ${init?.method || 'GET'}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      ensureTopicNotebook({
+        baseUrl: 'http://localhost:5055',
+        topicKey: 'l1:private-topic',
+        topicTitle: 'Private Topic',
+        seedChunks: [{ text: 'should not be seeded' }],
+      }),
+    ).resolves.toEqual({ notebookId: 'notebook:private', sourceId: 'source:private' });
+    expect(fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/api/notebooks') && (call[1] as RequestInit | undefined)?.method === 'POST')).toHaveLength(0);
+
+    expect(await decryptEncryptedOpenNotebookAnswerCacheForSecureVault(vault)).toEqual({ decrypted: 1 });
+    const plainRow = await db.settings.get('open-notebook:topic-notebooks');
+    expect(JSON.stringify(plainRow)).toContain('notebook:private');
+    expect(JSON.stringify(plainRow)).not.toContain('secure-vault-open-notebook-cache.v1');
   });
 });

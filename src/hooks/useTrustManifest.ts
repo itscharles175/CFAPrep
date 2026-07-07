@@ -20,8 +20,8 @@
  * `response_model`, regenerate `api.gen.ts` and anchor the path here.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 const TRUST_PATH = '/api/observability/trust';
 
 /** Generous since this can shell out to git/rustc server-side; never on a render path. */
@@ -161,22 +161,13 @@ interface FetchResult {
  * `{ manifest: null, reachable: false }` — it NEVER throws.
  */
 async function fetchManifest(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<FetchResult> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${TRUST_PATH}`, {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
-    if (!res.ok) return { manifest: null, reachable: true };
-    const data = await res.json();
-    return { manifest: parseManifest(data), reachable: true };
-  } catch {
-    // Sidecar offline / timeout / non-JSON — degrade silently.
-    return { manifest: null, reachable: false };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchLsatSidecarJson(TRUST_PATH, {
+    timeoutMs,
+    headers: { accept: 'application/json' },
+  });
+  if (!res.reachable) return { manifest: null, reachable: false };
+  if (!res.ok || res.data == null) return { manifest: null, reachable: true };
+  return { manifest: parseManifest(res.data), reachable: true };
 }
 
 /**

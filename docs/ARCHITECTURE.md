@@ -98,11 +98,17 @@ frozen binaries.
     `build` + bundle/content checks.
   - `lsat-quality` — `tsc -p tsconfig.lsat.json` (strict typecheck of the
     vendored subtree) + the LSAT vitest project (`test:lsat:ci`).
-- **`.github/workflows/release.yml`** (on `v*` tags) — `verify` → per-OS Tauri
-  bundle, which first **builds + smoke-tests** the LSAT backend sidecar
-  (`scripts/smoke-sidecar.mjs`, `/api/health → {ok:true}`) and fails if a
-  required sidecar is missing. open-notebook is built only when the `ONB_GIT_URL`
-  repo variable points at its source (it lives in gitignored `spike/`).
+- **`.github/workflows/release.yml`** (on `v*` tags) — `verify` runs host and
+  LSAT typecheck/tests/build plus content, no-egress, sidecar-fetch inventory,
+  docs drift, RAG retrieval-eval, citation-faithfulness, generated-content gate,
+  source-grounded answer benchmark, explanation-golden, prompt-regression
+  fixture, dependency-audit, and deterministic generation-quality regression floors before
+  per-OS Tauri bundling, which first
+  **builds + smoke-tests** the LSAT backend sidecar (`scripts/smoke-sidecar.mjs`,
+  `/api/health → {ok:true}`) and fails if a required sidecar is missing.
+  open-notebook is built only when the
+  `ONB_GIT_URL` repo variable and full-SHA `ONB_GIT_REF` point at pinned source
+  (it lives in gitignored `spike/`).
 
 Local: `npm run verify` (host lint+test+build) · `npm run test:all` (both vitest
 projects) · `npm run typecheck:lsat` · `cargo test` (in `src-tauri/`).

@@ -55,7 +55,7 @@
   --excel: hsl(160.1 84.1% 39.4%);        /* #10B981 (emerald-500) */
   --success: hsl(160.1 84.1% 39.4%);      /* #10B981 (emerald-500) */
   --warning: hsl(37.7 92.1% 50.2%);       /* #F59E0B (amber-500) */
-  --danger: hsl(0 84.2% 60.2%);           /* #EF4444 (red-500) */
+  --danger: hsl(0 91% 71%);               /* #F87171 — AA on dark danger tints */
   --border: rgba(148, 163, 184, 0.1);
   --border-hover: rgba(148, 163, 184, 0.2);
   --input-bg: rgba(15, 23, 42, 0.76);
@@ -210,6 +210,7 @@
   --study: hsl(194.4 69.6% 27.1%);        /* #155E75 */
   --vault: hsl(175.3 77.4% 26.1%);        /* #0F766E */
   --ops: hsl(22.7 82.5% 31.4%);           /* #92400E */
+  --warning: hsl(22.7 82.5% 31.4%);       /* #92400E */
   --quant: hsl(263.4 70% 50.4%);          /* #6D28D9 */
   --excel: hsl(163.1 88.1% 19.8%);        /* #065F46 */
   --danger: hsl(0 73.7% 41.8%);           /* #B91C1C */
@@ -3283,6 +3284,36 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   background: rgba(56, 189, 248, 0.12);
 }
 
+:root[data-theme="light"] .search-result-domain-cfa {
+  color: var(--exam);
+  border-color: color-mix(in srgb, var(--exam) 35%, transparent);
+  background: color-mix(in srgb, var(--exam) 10%, white);
+}
+
+:root[data-theme="light"] .search-result-domain-quant {
+  color: var(--quant);
+  border-color: color-mix(in srgb, var(--quant) 35%, transparent);
+  background: color-mix(in srgb, var(--quant) 9%, white);
+}
+
+:root[data-theme="light"] .search-result-domain-excel {
+  color: var(--excel);
+  border-color: color-mix(in srgb, var(--excel) 35%, transparent);
+  background: color-mix(in srgb, var(--excel) 9%, white);
+}
+
+:root[data-theme="light"] .search-result-domain-lsat {
+  color: #5b21b6;
+  border-color: rgba(91, 33, 182, 0.35);
+  background: rgba(91, 33, 182, 0.08);
+}
+
+:root[data-theme="light"] .search-result-domain-vault {
+  color: var(--vault);
+  border-color: color-mix(in srgb, var(--vault) 35%, transparent);
+  background: color-mix(in srgb, var(--vault) 9%, white);
+}
+
 /* UB6: "Jump to domain" sub-heading inside the palette popover. */
 .search-palette-subtitle {
   border-top: 1px solid var(--border);
@@ -3900,15 +3931,21 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   }
   .qv-badge-destructive {
     background: var(--danger);
+    background: hsl(var(--destructive));
     color: #fff;
+    color: hsl(var(--destructive-foreground));
   }
   .qv-badge-success {
     background: var(--success);
+    background: hsl(var(--success));
     color: var(--navy-900);
+    color: hsl(var(--success-foreground));
   }
   .qv-badge-warning {
     background: var(--warning);
+    background: hsl(var(--warning));
     color: var(--navy-900);
+    color: hsl(var(--warning-foreground));
   }
   .qv-badge-outline {
     background: transparent;
@@ -4432,3 +4469,304 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
       grid-column: span 2;
     }
   }
+
+/* ===== A11Y-4: OS contrast preferences and Windows forced-colors ===== */
+:root {
+  --a11y-contrast-mode: no-preference;
+  --a11y-forced-colors: none;
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --a11y-contrast-mode: more;
+    --bg-primary: hsl(0 0% 0%);
+    --bg-secondary: hsl(0 0% 4%);
+    --bg-card: hsl(0 0% 6%);
+    --bg-hover: hsl(0 0% 16%);
+    --text-primary: hsl(0 0% 100%);
+    --text-secondary: hsl(0 0% 90%);
+    --text-muted: hsl(0 0% 78%);
+    --accent: hsl(210 100% 78%);
+    --accent-hover: hsl(210 100% 88%);
+    --accent-strong: hsl(210 100% 42%);
+    --border: rgba(255, 255, 255, 0.85);
+    --border-hover: rgba(255, 255, 255, 1);
+    --input-bg: hsl(0 0% 6%);
+    --focus-ring: rgba(255, 255, 255, 0.6);
+    --glass-bg: hsl(0 0% 4%);
+    --glass-border: rgba(255, 255, 255, 0.85);
+    --surface-raised: hsl(0 0% 6%);
+    --surface-panel: hsl(0 0% 4%);
+    --surface-data: rgba(255, 255, 255, 0.08);
+    --chart-grid: rgba(255, 255, 255, 0.45);
+  }
+
+  :root[data-theme="light"] {
+    --bg-primary: hsl(0 0% 100%);
+    --bg-secondary: hsl(0 0% 100%);
+    --bg-card: hsl(0 0% 100%);
+    --bg-hover: hsl(0 0% 90%);
+    --text-primary: hsl(0 0% 0%);
+    --text-secondary: hsl(0 0% 12%);
+    --text-muted: hsl(0 0% 24%);
+    --accent: hsl(224 90% 36%);
+    --accent-hover: hsl(224 90% 28%);
+    --accent-strong: hsl(224 90% 36%);
+    --border: rgba(0, 0, 0, 0.85);
+    --border-hover: rgba(0, 0, 0, 1);
+    --input-bg: hsl(0 0% 100%);
+    --focus-ring: rgba(0, 0, 0, 0.6);
+    --glass-bg: hsl(0 0% 100%);
+    --glass-border: rgba(0, 0, 0, 0.85);
+    --surface-raised: hsl(0 0% 100%);
+    --surface-panel: hsl(0 0% 100%);
+    --surface-data: rgba(0, 0, 0, 0.06);
+    --chart-grid: rgba(0, 0, 0, 0.45);
+  }
+
+  .surface,
+  .panel,
+  .stat-card,
+  .metric-card,
+  .quiz-option,
+  .qv-card,
+  .qv-list-row,
+  .qv-skeleton-card,
+  .qv-skeleton-hero-band {
+    border-color: var(--border-hover);
+  }
+
+  kbd,
+  .command-hint kbd,
+  .topbar-search kbd {
+    background: var(--surface-panel) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-hover) !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --a11y-forced-colors: active;
+    --a11y-contrast-mode: forced-colors;
+    --bg-primary: Canvas;
+    --bg-secondary: Canvas;
+    --bg-card: Canvas;
+    --bg-hover: ButtonFace;
+    --text-primary: CanvasText;
+    --text-secondary: CanvasText;
+    --text-muted: CanvasText;
+    --accent: LinkText;
+    --accent-hover: Highlight;
+    --accent-strong: Highlight;
+    --border: CanvasText;
+    --border-hover: CanvasText;
+    --input-bg: Field;
+    --focus-ring: Highlight;
+    --glass-bg: Canvas;
+    --glass-border: CanvasText;
+    --surface-raised: Canvas;
+    --surface-panel: Canvas;
+    --surface-data: Canvas;
+    --surface-soft: Canvas;
+    --chart-grid: CanvasText;
+    --exam: CanvasText;
+    --study: CanvasText;
+    --vault: CanvasText;
+    --ops: CanvasText;
+    --quant: CanvasText;
+    --excel: CanvasText;
+    --success: CanvasText;
+    --warning: CanvasText;
+    --danger: CanvasText;
+  }
+
+  html,
+  body,
+  #root,
+  .main-content,
+  .page-container {
+    background: Canvas !important;
+    color: CanvasText !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  a {
+    color: LinkText !important;
+  }
+
+  input,
+  select,
+  textarea {
+    background: Field !important;
+    color: FieldText !important;
+    border-color: ButtonBorder !important;
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  *:focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
+  }
+
+  .btn,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-success,
+  .btn-gold,
+  .qv-btn-outline,
+  .toast-action,
+  button.qv-list-row {
+    background: ButtonFace !important;
+    background-image: none !important;
+    color: ButtonText !important;
+    border: 1px solid ButtonBorder !important;
+  }
+
+  .btn-primary,
+  .skip-to-main,
+  .route-progress-fill {
+    background: Highlight !important;
+    background-image: none !important;
+    color: HighlightText !important;
+    border-color: Highlight !important;
+  }
+
+  .surface,
+  .panel,
+  .stat-card,
+  .metric-card,
+  .quiz-option,
+  .qv-card,
+  .qv-badge,
+  .qv-chip,
+  .badge,
+  .domain-indicator,
+  .search-result-domain,
+  .status-badge,
+  .icon-frame,
+  .metric-tile-icon,
+  .progress-rail-track,
+  .qv-list-row,
+  .qv-skeleton-card,
+  .qv-skeleton-hero-band,
+  .toast,
+  .topbar,
+  .topbar-search,
+  .search-popover,
+  .notifications-popover,
+  .sidebar,
+  .qv-select-content,
+  .qv-dialog-overlay,
+  .qv-dialog-content,
+  .qv-popover-content,
+  .qv-tooltip-content,
+  .mobile-scrim {
+    background: Canvas !important;
+    background-image: none !important;
+    color: CanvasText !important;
+    border-color: CanvasText !important;
+  }
+
+  .badge-blue,
+  .badge-green,
+  .badge-amber,
+  .badge-red,
+  .badge-gold,
+  .badge-purple,
+  .toast-success,
+  .toast-warning,
+  .toast-error,
+  .toast-info,
+  .status-badge-accent,
+  .status-badge-exam,
+  .status-badge-success,
+  .status-badge-warning,
+  .status-badge-ops,
+  .status-badge-danger,
+  .status-badge-vault,
+  .status-badge-quant,
+  .status-badge-excel,
+  .status-badge-default,
+  .icon-frame-exam,
+  .icon-frame-warning,
+  .icon-frame-ops,
+  .icon-frame-success,
+  .icon-frame-excel,
+  .icon-frame-danger,
+  .icon-frame-vault,
+  .icon-frame-quant,
+  .metric-tile-icon-success,
+  .metric-tile-icon-warning,
+  .metric-tile-icon-danger,
+  .metric-tile-icon-exam,
+  .metric-tile-icon-vault,
+  .metric-tile-icon-quant,
+  .metric-tile-icon-excel,
+  .metric-tile-icon-ops,
+  .surface-status-accent,
+  .surface-status-study,
+  .surface-status-active,
+  .surface-status-exam,
+  .surface-status-warning,
+  .surface-status-success,
+  .surface-status-danger,
+  .surface-status-vault,
+  .surface-status-ops,
+  .surface-status-quant,
+  .surface-status-excel {
+    border-color: CanvasText !important;
+    color: CanvasText !important;
+  }
+
+  .domain-indicator,
+  .search-result-domain,
+  [class*="search-result-domain-"] {
+    background: Canvas !important;
+    background-image: none !important;
+    color: CanvasText !important;
+    border-color: CanvasText !important;
+  }
+
+  kbd,
+  .command-hint kbd,
+  .topbar-search kbd {
+    background: ButtonFace !important;
+    background-image: none !important;
+    color: ButtonText !important;
+    border: 1px solid ButtonBorder !important;
+  }
+
+  .analytics-table strong,
+  .stat-cell strong,
+  .metric-tile-copy strong,
+  .result-card-warning .calc-result-value,
+  .qv-text-warning,
+  .qv-text-success,
+  .qv-text-danger {
+    color: CanvasText !important;
+  }
+
+  .progress-rail-fill,
+  .progress-rail-fill-exam,
+  .progress-rail-fill-success,
+  .progress-rail-fill-danger {
+    background: Highlight !important;
+  }
+
+  .route-progress {
+    border-block-end: 1px solid CanvasText;
+  }
+}

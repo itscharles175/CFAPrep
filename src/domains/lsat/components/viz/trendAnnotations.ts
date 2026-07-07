@@ -1,5 +1,5 @@
 import type { ChartAnnotationTone } from "./chart-kit";
-import type { TrendDatum } from "./TrendChart";
+import type { TrendDatum } from "./trend-types";
 
 /**
  * R9 §2 — derive a small set of milestone annotations from a score trend, all

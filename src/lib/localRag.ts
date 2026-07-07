@@ -31,6 +31,7 @@
 
 import { getStorage } from './storage';
 import { generateText } from './localLlm';
+import { stripThink } from './stripThink';
 import { packExcerpts, pickBudget, renderExcerpts } from './contextBudget';
 import {
   getOpenNotebookSettings,
@@ -508,10 +509,19 @@ export async function verifyAnswerCitations(
   const claims = splitClaims(answer).filter((c) => c.citations.length > 0);
   const results: CitationVerification[] = [];
   for (const claim of claims) {
+    const missingCitation = claim.citations.find((n) => !byNumber.has(n));
+    if (missingCitation !== undefined) {
+      results.push({ number: missingCitation, claim: claim.text, entailed: false, score: 0 });
+      continue;
+    }
     const evidence = claim.citations
       .map((n) => byNumber.get(n)?.text || '')
       .filter(Boolean)
       .join('\n\n');
+    if (!evidence.trim()) {
+      results.push({ number: claim.citations[0], claim: claim.text, entailed: false, score: 0 });
+      continue;
+    }
     const { entailed, score } = await entail(claim.text, evidence, {
       threshold: opts.threshold,
       useLlm: opts.useLlm,
@@ -575,13 +585,15 @@ export async function localGroundedAnswer(opts: LocalRagOptions): Promise<LocalR
     signal: opts.signal,
   });
 
-  const answer = (text || '').trim();
+  const answer = stripThink(text || '').trim();
 
   // Only surface citations actually referenced in the answer ([n] markers),
   // falling back to all-used if the model emitted no markers at all.
+  const citationRefs: number[] = [];
   const referenced = new Set<number>();
   for (const match of answer.matchAll(/\[(\d+)\]/g)) {
     const n = Number(match[1]);
+    if (n >= 1) citationRefs.push(n);
     if (n >= 1 && n <= numbered.length) referenced.add(n);
   }
   const citationSource = referenced.size > 0 ? numbered.filter((e) => referenced.has(e.number)) : numbered;
@@ -634,8 +646,10 @@ export async function localGroundedAnswer(opts: LocalRagOptions): Promise<LocalR
         settings: opts.settings,
         signal: opts.signal,
       });
-      // Only assert (un)groundedness when there was something cited to check.
-      grounded = verification.length === 0 ? true : verification.every((v) => v.entailed);
+      // A grounded answer must contain at least one citation marker. We still
+      // return the fallback citation list for UI context, but the answer is not
+      // considered grounded unless a cited claim was actually checked.
+      grounded = citationRefs.length === 0 ? false : verification.every((v) => v.entailed);
     } catch {
       // Verification is additive — a failure leaves the answer unverified rather
       // than blocking it. `grounded` stays undefined ("not checked").

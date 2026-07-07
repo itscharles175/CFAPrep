@@ -31,6 +31,7 @@ from ..models import (
     StudyPlan,
     utcnow,
 )
+from ..schemas import StudyTodayResponse
 
 router = APIRouter(prefix="/study")
 
@@ -92,11 +93,15 @@ def put_plan(body: PlanBody, session: Session = Depends(get_session)):
     return _plan_dict(p)
 
 
-@router.get("/today")
+@router.get(
+    "/today",
+    response_model=StudyTodayResponse,
+    response_model_exclude_unset=True,
+)
 def today(
     include_host: bool = False,
     session: Session = Depends(get_session),
-):
+) -> StudyTodayResponse:
     """Today's concrete plan: due reviews + drills on weakest types + forecast.
 
     LEARN-3 — ``include_host=true`` ALSO folds in the host's weakest-by-ability

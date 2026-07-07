@@ -562,6 +562,43 @@ mod tests {
     }
 
     #[test]
+    fn parse_lsat_backend_health_response_verifies_identity() {
+        let body = r#"{"ok":true,"service":"lsat-backend","version":"0.9.0"}"#;
+        let echoed = parse_identity_body(body);
+        let exp = ExpectedIdentity::any_version("lsat-backend");
+        assert_eq!(
+            classify_port_health(true, &exp, Some(&echoed)),
+            PortHealth::Healthy
+        );
+    }
+
+    #[test]
+    fn parse_legacy_lsat_health_without_identity_stays_unverified() {
+        let body = r#"{"ok":true}"#;
+        let echoed = parse_identity_body(body);
+        let exp = ExpectedIdentity::any_version("lsat-backend");
+        assert_eq!(
+            classify_port_health(true, &exp, Some(&echoed)),
+            PortHealth::Foreign(IdentityVerdict::MissingService)
+        );
+        assert_eq!(
+            classify_port_health(true, &exp, None),
+            PortHealth::Unverified
+        );
+    }
+
+    #[test]
+    fn parse_wrong_lsat_health_service_is_foreign() {
+        let body = r#"{"ok":true,"service":"other-service","version":"0.9.0"}"#;
+        let echoed = parse_identity_body(body);
+        let exp = ExpectedIdentity::any_version("lsat-backend");
+        assert!(matches!(
+            classify_port_health(true, &exp, Some(&echoed)),
+            PortHealth::Foreign(IdentityVerdict::ServiceMismatch { .. })
+        ));
+    }
+
+    #[test]
     fn identity_probe_seam_drives_classification() {
         let exp = ExpectedIdentity::any_version("lsat-backend");
         // Probe returns a matching echo → Healthy.

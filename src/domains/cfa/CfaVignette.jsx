@@ -3,7 +3,9 @@ import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Layers, Trophy } from 'lucide-react';
 import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
 import { useLevel3Pathway } from './useLevel3Pathway';
-import { CaseViewer, CommandHint, EmptyPanel, MetricCard, PageHeader, QuestionStage, StatusBadge } from '../../components/ui/Primitives';
+import AccessibleQuestionRunner from '../../components/a11y/AccessibleQuestionRunner';
+import HandsFreeController from '../../components/a11y/HandsFreeController';
+import { CaseViewer, CommandHint, EmptyPanel, MetricCard, PageHeader, QuestionStage } from '../../components/ui/Primitives';
 import { recordVignetteAttempt } from '../../lib/learning';
 import { SourceRail } from '../../components/SourceContext';
 
@@ -42,6 +44,7 @@ export default function CfaVignette() {
 
   useEffect(() => {
     function handleKeyboard(event) {
+      if (event.defaultPrevented) return;
       const target = event.target;
       if (target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
       if (event.ctrlKey && event.key === 'Enter' && !submitted && vignette && Object.keys(selected).length === vignette.questions.length) {
@@ -165,33 +168,33 @@ export default function CfaVignette() {
             status={submitted ? (selected[question.id] === question.correct ? 'success' : 'danger') : 'exam'}
             footer={!submitted && index === 0 ? <CommandHint keys="Ctrl+Enter" label="submit once complete" /> : null}
           >
-            <div className="quiz-options">
-              {question.options.map((option, optionIndex) => {
-                const picked = selected[question.id] === optionIndex;
-                const correct = submitted && optionIndex === question.correct;
-                const missed = submitted && picked && optionIndex !== question.correct;
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    className={`quiz-option ${picked ? 'selected' : ''} ${correct ? 'correct' : ''} ${missed ? 'incorrect' : ''}`}
-                    disabled={submitted}
-                    onClick={() => setSelected((existing) => ({ ...existing, [question.id]: optionIndex }))}
-                  >
-                    <span className="quiz-option-letter">{letters[optionIndex]}</span>
-                    <span style={{ textAlign: 'left' }}>{option}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {submitted && (
-              <div className="quiz-explanation">
-                <StatusBadge tone={selected[question.id] === question.correct ? 'success' : 'danger'}>
-                  {selected[question.id] === question.correct ? 'Correct' : 'Review'}
-                </StatusBadge>
-                <p className="qv-text-secondary qv-mt-3">{question.explanation}</p>
-              </div>
+            {!submitted && (
+              <HandsFreeController
+                question={`Case facts. ${vignette.stem}\n\nQuestion. ${question.question}`}
+                options={question.options.map((option, optionIndex) => ({
+                  letter: letters[optionIndex],
+                  text: option,
+                }))}
+                onSelect={(optionIndex) => setSelected((existing) => ({ ...existing, [question.id]: optionIndex }))}
+                testMode={false}
+                preface={`Vignette question ${index + 1} of ${vignette.questions.length}.`}
+              />
             )}
+            <AccessibleQuestionRunner
+              groupLabel={`Question ${index + 1} answer options`}
+              question={question.question}
+              hideStem
+              options={question.options.map((option, optionIndex) => ({
+                id: `${question.id}-${optionIndex}`,
+                text: option,
+              }))}
+              selectedIndex={selected[question.id] ?? null}
+              onSelect={(optionIndex) => setSelected((existing) => ({ ...existing, [question.id]: optionIndex }))}
+              confirmed={submitted}
+              correctIndex={question.correct}
+              explanation={submitted ? question.explanation : undefined}
+              letters={letters}
+            />
           </QuestionStage>
         ))}
       </div>

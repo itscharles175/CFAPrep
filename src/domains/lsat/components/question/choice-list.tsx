@@ -1,6 +1,9 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { Check, X } from "lucide-react";
 import { AnimatePresence, m, useReducedMotion } from "motion/react";
+import AccessibleChoiceGroup, {
+  type AccessibleChoiceGroupOption,
+} from "@/components/a11y/AccessibleChoiceGroup";
 import { cn } from "@lsat/lib/utils";
 import { duration, easing } from "@lsat/lib/motion";
 import type { ChoiceSize, ChoiceSpacing } from "@lsat/lib/prefs";
@@ -49,14 +52,27 @@ function ChoiceListImpl({
   choiceSpacing = "normal",
 }: ChoiceListProps) {
   const reduceMotion = useReducedMotion();
+  const choiceOptions = useMemo<AccessibleChoiceGroupOption<string>[]>(
+    () =>
+      choices.map((choice) => ({
+        id: choice.id,
+        value: choice.label,
+        shortcut: choice.label,
+      })),
+    [choices],
+  );
 
   return (
-    <ul
+    <AccessibleChoiceGroup
+      options={choiceOptions}
+      selectedValue={selected}
+      onSelect={(label) => onSelect(String(label))}
       className={CHOICE_SPACING[choiceSpacing]}
-      role="radiogroup"
-      aria-label="Answer choices"
+      groupLabel="Answer choices"
+      readOnly={reveal}
     >
-      {choices.map((c) => {
+      {({ index, radioProps }) => {
+        const c = choices[index];
         const isSelected = selected === c.label;
         const isElim = eliminated.has(c.label);
         const isCorrect = reveal && (c.is_correct || c.label === correctAnswer);
@@ -64,7 +80,7 @@ function ChoiceListImpl({
         const isSpot = spotlight === c.label;
 
         return (
-          <li key={c.id}>
+          <div key={c.id}>
             <div
               className={cn(
                 "relative flex items-stretch overflow-hidden rounded-md border transition-[border-color,background-color,box-shadow,opacity]",
@@ -79,9 +95,7 @@ function ChoiceListImpl({
               )}
             >
               <button
-                type="button"
-                role="radio"
-                aria-checked={isSelected}
+                {...radioProps}
                 // a11y #13 — name the radio by BOTH the letter and the choice
                 // text (a plain `aria-label="Choice A"` would hide the text from
                 // screen readers). The eliminated status node is appended when
@@ -91,7 +105,6 @@ function ChoiceListImpl({
                   `choice-text-${c.id}`,
                   isElim && `choice-elim-${c.id}`,
                 )}
-                onClick={() => onSelect(c.label)}
                 className={cn(
                   "flex flex-1 items-start gap-3 p-3 text-left text-sm",
                   "hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -198,10 +211,10 @@ function ChoiceListImpl({
                 </button>
               )}
             </div>
-          </li>
+          </div>
         );
-      })}
-    </ul>
+      }}
+    </AccessibleChoiceGroup>
   );
 }
 

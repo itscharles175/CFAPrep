@@ -18,16 +18,16 @@
  * recommendation candidate TYPES live here (NOT in `learningTypes.ts`) since they
  * are this route's response contract, read defensively from an untyped body.
  *
- * DATA-1: the `domain` body field ships ahead of the next `api.gen.ts`
- * regeneration, so the path is a string literal for now (same precedent as
- * `blindReviewBridge.ts` / `studyProfileBridge.ts`). Swap to the generated
- * operation once the contract is regenerated with the param.
+ * DATA-1: the route is present in the generated OpenAPI path map. The response
+ * is still read defensively because host surfaces must degrade cleanly if a user
+ * runs an older or unreachable sidecar.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DomainId } from '../lib/learningTypes';
+import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
+import type { paths } from '../domains/lsat/lib/api.gen';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
-const NEXT_PATH = '/api/adaptivity/next';
+const NEXT_PATH = '/api/adaptivity/next' satisfies keyof paths;
 
 /** Default per-request timeout — generous, this is never on a render-blocking path. */
 const DEFAULT_TIMEOUT_MS = 3500;
@@ -145,27 +145,14 @@ async function fetchJson(
   body: string,
   timeoutMs: number,
 ): Promise<{ ok: boolean; status: number; data: unknown } | { ok: false; status: 0; error: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${path}`, {
-      signal: controller.signal,
-      method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/json' },
-      body,
-    });
-    let data: unknown = null;
-    try {
-      data = await res.json();
-    } catch {
-      /* non-JSON body */
-    }
-    return { ok: res.ok, status: res.status, data };
-  } catch (err) {
-    return { ok: false, status: 0, error: err instanceof Error ? err.message : String(err) };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchLsatSidecarJson(path, {
+    timeoutMs,
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body,
+  });
+  if (res.reachable) return { ok: res.ok, status: res.status, data: res.data };
+  return { ok: false, status: 0, error: res.error ?? 'LSAT backend unreachable' };
 }
 
 /**

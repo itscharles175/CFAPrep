@@ -94,10 +94,11 @@ def test_ollama_generate_sends_options_and_format(monkeypatch):
 
     monkeypatch.setattr(ollama_mod.httpx, "Client", _FakeClient)
     prov = OllamaProvider()
-    prov.generate("qwen3:14b", "solve it", temperature=0, seed=7, format="json")
+    prov.generate("qwen3:14b", "solve it", temperature=0, top_p=0.9,
+                  seed=7, format="json")
 
     payload = captured["payload"]
-    assert payload["options"] == {"temperature": 0, "seed": 7}
+    assert payload["options"] == {"temperature": 0, "top_p": 0.9, "seed": 7}
     assert payload["format"] == "json"
     assert payload["stream"] is False
 
@@ -128,6 +129,7 @@ def test_ollama_generate_omits_options_when_not_requested(monkeypatch):
 def test_cloud_generate_forces_json_tool_use(monkeypatch):
     # AI-10: opt out of the strict-offline fence so the provider can construct.
     monkeypatch.setattr(config, "ENFORCE_OFFLINE", False)
+    monkeypatch.setattr(config, "CLOUD_EGRESS_ALLOWED", True)
     captured = {}
 
     class _Resp:
@@ -157,10 +159,13 @@ def test_cloud_generate_forces_json_tool_use(monkeypatch):
 
     monkeypatch.setattr(cloud.httpx, "Client", _FakeClient)
     prov = cloud.AnthropicProvider("sk-test", model="claude-opus-4-7")
-    out = prov.generate(None, "make a question", temperature=0, seed=7, format="json")
+    out = prov.generate(None, "make a question", temperature=0, top_p=0.9,
+                        seed=7, format="json")
 
     body = captured["json"]
     assert body["temperature"] == 0  # deterministic forwarded
+    assert body["top_p"] == 0.9
+    assert "seed" not in body  # Anthropic has no seed knob.
     assert body["tool_choice"] == {"type": "tool", "name": "respond_json"}
     assert body["tools"][0]["name"] == "respond_json"
     # output extracted from the forced tool_use block
@@ -173,17 +178,18 @@ def test_offline_generate_threads_params_to_ollama(monkeypatch):
     captured = {}
 
     def fake_generate(model, prompt, system, timeout, *, temperature=None,
-                      seed=None, format=None):
-        captured.update(temperature=temperature, seed=seed, format=format,
-                        model=model)
+                      top_p=None, seed=None, format=None):
+        captured.update(temperature=temperature, top_p=top_p, seed=seed,
+                        format=format, model=model)
         return "ok"
 
     monkeypatch.setattr(config, "GEN_PROVIDER", "ollama")
     monkeypatch.setattr(llm.ollama(), "generate", fake_generate)
-    out = llm.offline_generate("p", temperature=0, seed=7, format="json")
+    out = llm.offline_generate("p", temperature=0, top_p=0.9, seed=7,
+                               format="json")
     assert out == "ok"
-    assert captured == {"temperature": 0, "seed": 7, "format": "json",
-                        "model": config.GEN_MODEL}
+    assert captured == {"temperature": 0, "top_p": 0.9, "seed": 7,
+                        "format": "json", "model": config.GEN_MODEL}
 
 
 def test_critic_generate_routes_to_critic_model(monkeypatch):
@@ -192,9 +198,10 @@ def test_critic_generate_routes_to_critic_model(monkeypatch):
     captured = {}
 
     def fake_generate(model, prompt, system, timeout, *, temperature=None,
-                      seed=None, format=None):
+                      top_p=None, seed=None, format=None):
         captured["model"] = model
         captured["temperature"] = temperature
+        captured["top_p"] = top_p
         captured["seed"] = seed
         return "B"
 

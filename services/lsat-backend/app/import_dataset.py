@@ -26,11 +26,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import stat
 import sys
+import zipfile
 from collections import Counter
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
 import httpx
@@ -49,6 +51,26 @@ from .models import (
 )
 
 # --- registry --------------------------------------------------------------
+MAX_LOCAL_DATASET_BYTES = 50 * 1024 * 1024
+MAX_JSONL_BYTES = 50 * 1024 * 1024
+MAX_JSONL_ROWS = 25_000
+MAX_JSONL_LINE_BYTES = 1 * 1024 * 1024
+MAX_RECLOR_ZIP_BYTES = 50 * 1024 * 1024
+MAX_RECLOR_ZIP_ENTRIES = 20
+MAX_RECLOR_MEMBER_BYTES = 10 * 1024 * 1024
+MAX_RECLOR_TOTAL_UNCOMPRESSED_BYTES = 25 * 1024 * 1024
+MAX_RECLOR_COMPRESSION_RATIO = 100
+MAX_RECLOR_ROWS = 25_000
+RECLOR_JSON_MEMBERS = {
+    "train.json",
+    "val.json",
+    "valid.json",
+    "validation.json",
+    "dev.json",
+    "test.json",
+}
+
+
 @dataclass(frozen=True)
 class DatasetSpec:
     key: str                # local key (matches `dataset_normalizers.NORMALIZERS`)
@@ -127,6 +149,28 @@ DATASETS: dict[str, DatasetSpec] = {
         requires_nc_acknowledgement=True,
     ),
 }
+
+
+def safe_regular_file(
+    path: str | Path,
+    *,
+    max_bytes: int = MAX_LOCAL_DATASET_BYTES,
+    allowed_suffixes: set[str] | None = None,
+) -> Path:
+    p = Path(path)
+    try:
+        meta = p.lstat()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"Dataset file not found: {path}") from exc
+    if stat.S_ISLNK(meta.st_mode):
+        raise ValueError("dataset_path_symlink")
+    if not stat.S_ISREG(meta.st_mode):
+        raise ValueError("dataset_path_not_regular_file")
+    if allowed_suffixes is not None and p.suffix.lower() not in allowed_suffixes:
+        raise ValueError("dataset_path_unsupported_extension")
+    if meta.st_size > max_bytes:
+        raise ValueError("dataset_file_too_large")
+    return p
 
 
 def validate_rows(key: str, rows: Iterable[dict[str, Any]], *, sample: int = 5) -> dict:
@@ -209,16 +253,25 @@ def read_jsonl(path: str | Path) -> Iterator[dict[str, Any]]:
     B29: tries UTF-8 first, falls back to UTF-8-BOM (utf-8-sig) then latin-1
     for files from tools that prepend a BOM or use the Windows-1252 superset.
     """
-    p = Path(path)
-    lines: list[str] = []
+    p = safe_regular_file(path, max_bytes=MAX_JSONL_BYTES, allowed_suffixes={".jsonl"})
+    data = p.read_bytes()
+    text = ""
+    decode_error: UnicodeDecodeError | None = None
     for enc in ("utf-8", "utf-8-sig", "latin-1"):
         try:
-            with p.open("r", encoding=enc) as f:
-                lines = f.readlines()
+            text = data.decode(enc)
+            decode_error = None
             break
-        except UnicodeDecodeError:
+        except UnicodeDecodeError as exc:
+            decode_error = exc
             continue
-    for line in lines:
+    if decode_error is not None:
+        raise decode_error
+    for index, line in enumerate(text.splitlines(), start=1):
+        if index > MAX_JSONL_ROWS:
+            raise ValueError("jsonl_row_limit_exceeded")
+        if len(line.encode("utf-8")) > MAX_JSONL_LINE_BYTES:
+            raise ValueError("jsonl_line_too_large")
         line = line.strip()
         if not line:
             continue
@@ -433,6 +486,35 @@ def _default_q_type(section_type: str) -> str:
     return "Inference" if section_type == "LR" else "Detail"
 
 
+def _safe_reclor_zip_infos(infos: list[zipfile.ZipInfo]) -> list[zipfile.ZipInfo]:
+    if len(infos) > MAX_RECLOR_ZIP_ENTRIES:
+        raise ValueError("reclor_zip_too_many_entries")
+    total_uncompressed = 0
+    json_infos: list[zipfile.ZipInfo] = []
+    for info in infos:
+        if info.flag_bits & 0x1:
+            raise ValueError("reclor_zip_encrypted_entry")
+        normalized = info.filename.replace("\\", "/")
+        member_path = PurePosixPath(normalized)
+        if member_path.is_absolute() or any(part in {"", ".", ".."} for part in member_path.parts):
+            raise ValueError("reclor_zip_invalid_member_path")
+        total_uncompressed += info.file_size
+        if total_uncompressed > MAX_RECLOR_TOTAL_UNCOMPRESSED_BYTES:
+            raise ValueError("reclor_zip_uncompressed_too_large")
+        if info.compress_size == 0 and info.file_size > 0:
+            raise ValueError("reclor_zip_compression_ratio_too_high")
+        if info.compress_size > 0 and info.file_size / info.compress_size > MAX_RECLOR_COMPRESSION_RATIO:
+            raise ValueError("reclor_zip_compression_ratio_too_high")
+        if info.is_dir() or not info.filename.lower().endswith(".json"):
+            continue
+        if member_path.name.lower() not in RECLOR_JSON_MEMBERS:
+            raise ValueError("reclor_zip_unexpected_json_member")
+        if info.file_size > MAX_RECLOR_MEMBER_BYTES:
+            raise ValueError("reclor_zip_member_too_large")
+        json_infos.append(info)
+    return json_infos
+
+
 def read_reclor_zip(path: str | Path) -> Iterator[dict[str, Any]]:
     """Yield raw ReClor rows from a user-supplied local zip.
 
@@ -441,24 +523,23 @@ def read_reclor_zip(path: str | Path) -> Iterator[dict[str, Any]]:
     themselves. The zip typically contains ``train.json``, ``val.json``, and
     ``test.json``; we read whichever JSON arrays we find inside.
     """
-    import zipfile
-
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"ReClor zip not found: {path}")
+    p = safe_regular_file(path, max_bytes=MAX_RECLOR_ZIP_BYTES, allowed_suffixes={".zip"})
+    yielded = 0
     with zipfile.ZipFile(p) as zf:
-        for name in zf.namelist():
-            if not name.lower().endswith(".json"):
+        for info in _safe_reclor_zip_infos(zf.infolist()):
+            with zf.open(info) as fh:
+                raw = fh.read()
+            try:
+                rows = json.loads(raw.decode("utf-8-sig"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
                 continue
-            with zf.open(name) as fh:
-                try:
-                    rows = json.load(fh)
-                except json.JSONDecodeError:
-                    continue
             if not isinstance(rows, list):
                 continue
             for row in rows:
                 if isinstance(row, dict):
+                    yielded += 1
+                    if yielded > MAX_RECLOR_ROWS:
+                        raise ValueError("reclor_row_limit_exceeded")
                     yield row
 
 

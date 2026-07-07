@@ -15,6 +15,7 @@ Covers three things this slice adds, all of them backward-compatible:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi.routing import APIRoute
 
@@ -47,18 +48,30 @@ _TYPED_ANALYTICS_ROUTES: dict[tuple[str, str], type] = {
 _PAGINATED_ANALYTICS_ROUTES = ["/api/analytics/by-type", "/api/analytics/activity"]
 
 
-def _api_routes() -> list[APIRoute]:
-    return [r for r in app.routes if isinstance(r, APIRoute)]
+def _api_routes() -> list[Any]:
+    routes: list[Any] = []
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            routes.append(route)
+            continue
+        contexts = getattr(route, "effective_route_contexts", None)
+        if callable(contexts):
+            routes.extend(
+                ctx
+                for ctx in contexts()
+                if str(getattr(ctx, "path", "")).startswith("/api/")
+            )
+    return routes
 
 
-def _route_for(path: str, method: str) -> APIRoute:
+def _route_for(path: str, method: str) -> Any:
     for r in _api_routes():
         if r.path == path and method in r.methods:
             return r
     raise AssertionError(f"route not found: {method} {path}")
 
 
-def _query_param_names(route: APIRoute) -> set[str]:
+def _query_param_names(route: Any) -> set[str]:
     return {p.name for p in route.dependant.query_params}
 
 

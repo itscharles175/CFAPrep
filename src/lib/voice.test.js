@@ -50,6 +50,14 @@ describe('sanitizeForSpeech', () => {
   it('leaves plain text unchanged', () => {
     expect(sanitizeForSpeech('No citations here.')).toBe('No citations here.');
   });
+
+  it('strips complete reasoning traces before speech', () => {
+    expect(sanitizeForSpeech('<think>private chain</think>Visible answer [source:abc]')).toBe('Visible answer');
+  });
+
+  it('drops an unclosed reasoning trace before speech', () => {
+    expect(sanitizeForSpeech('Visible intro. <think>private chain that was cut off')).toBe('Visible intro.');
+  });
 });
 
 describe('recognizeOnce', () => {

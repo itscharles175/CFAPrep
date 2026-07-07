@@ -26,10 +26,10 @@
  * string literal for now.
  */
 import type { DomainId, UnifiedAbilityEstimate } from './learningTypes';
+import { fetchLsatSidecarJson } from './lsatSidecarClient';
 import { fetchStudyProfile } from './studyProfileBridge';
 import type { SharedStudyProfile } from './types/StudyProfile';
 
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 // Not yet bound to `keyof paths` — the `?domain=` param regenerates a batch later.
 const ABILITY_PATH = '/api/adaptivity/ability';
 
@@ -107,26 +107,13 @@ async function fetchJson(
   path: string,
   timeoutMs: number,
 ): Promise<{ ok: boolean; data: unknown } | { ok: false; error: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${LSAT_API_BASE}${path}`, {
-      signal: controller.signal,
-      method: 'GET',
-      headers: { accept: 'application/json' },
-    });
-    let data: unknown = null;
-    try {
-      data = await res.json();
-    } catch {
-      /* non-JSON body */
-    }
-    return { ok: res.ok, data };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchLsatSidecarJson(path, {
+    timeoutMs,
+    method: 'GET',
+    headers: { accept: 'application/json' },
+  });
+  if (res.reachable) return { ok: res.ok, data: res.data };
+  return { ok: false, error: res.error ?? 'LSAT backend unreachable' };
 }
 
 function num(value: unknown): number {

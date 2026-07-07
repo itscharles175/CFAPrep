@@ -26,8 +26,10 @@
  */
 
 import { pushHistory } from './navigationHistory';
+import { domainForPath, isLsatPath, type Domain } from './domainPath';
 
-export type Domain = 'host' | 'lsat';
+export { domainForPath, isLsatPath };
+export type { Domain };
 export const DOMAIN_NAV_EVENT = 'studyvault:navigate';
 const SHEET_ATTR = 'data-sv-domain';
 
@@ -58,14 +60,6 @@ export const ROUTE_DEEP_LINK_PARAMS: Record<string, readonly string[]> = {
 /** The deep-link search-param names a host route understands (empty if none). */
 export function deepLinkParamsFor(pathname: string): readonly string[] {
   return ROUTE_DEEP_LINK_PARAMS[pathname] ?? [];
-}
-
-export function isLsatPath(pathname: string): boolean {
-  return pathname === '/lsat' || pathname.startsWith('/lsat/');
-}
-
-export function domainForPath(pathname: string): Domain {
-  return isLsatPath(pathname) ? 'lsat' : 'host';
 }
 
 /** Make `domain` the only live design system: enable its sheets, disable the

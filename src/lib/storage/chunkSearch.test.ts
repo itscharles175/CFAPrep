@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../progressStore';
+import { createMemoryKeyStore, SecureVault, type SecureVaultFlagStore } from '../secureVault';
+import { setSourceChunkSecureVaultForTesting } from '../sourceChunkSecureVault';
 import { dexieDriver } from './dexieDriver';
 import type { SourceChunkInput } from './types';
 
@@ -108,12 +110,34 @@ function makeChunks(): SourceChunkInput[] {
   ];
 }
 
+function secureVaultFlag(initial = false): SecureVaultFlagStore {
+  let enabled = initial;
+  return {
+    get: () => enabled,
+    set: (value) => {
+      enabled = value;
+    },
+  };
+}
+
+async function enableSourceChunkVault() {
+  const vault = new SecureVault(createMemoryKeyStore(), secureVaultFlag());
+  const result = await vault.enable();
+  expect(result.ok).toBe(true);
+  setSourceChunkSecureVaultForTesting(vault);
+  return vault;
+}
+
 // ---------------------------------------------------------------------------
 // Dexie driver — chunk search
 // ---------------------------------------------------------------------------
 describe('dexieDriver.chunks', () => {
   beforeEach(async () => {
     await db.sourceChunks.clear();
+  });
+
+  afterEach(() => {
+    setSourceChunkSecureVaultForTesting(null);
   });
 
   it('bulkUpsert inserts every chunk and search returns the duration hit', async () => {
@@ -202,6 +226,32 @@ describe('dexieDriver.chunks', () => {
     // Other docs untouched.
     expect(await db.sourceChunks.where('documentId').equals('doc-b').count()).toBe(2);
   });
+
+  it('encrypts chunk payloads at rest and decrypts search results when Secure Vault is unlocked', async () => {
+    const vault = await enableSourceChunkVault();
+    await dexieDriver.chunks!.bulkUpsert([
+      {
+        id: 'secure-c1',
+        documentId: 'secure-doc',
+        domain: 'cfa',
+        level: 'level1',
+        topic: 'ethics',
+        text: 'Private standards sentinel text for secure chunk search.',
+        locator: 'reading-1',
+      },
+    ]);
+
+    const raw = await db.sourceChunks.get('secure-c1');
+    expect(raw?.secureVault?.scheme).toBe('secure-vault-source-chunk.v1');
+    expect(raw?.text).not.toContain('Private standards sentinel');
+    expect(JSON.stringify(raw)).not.toContain('Private standards sentinel');
+
+    const hits = await dexieDriver.chunks!.search({ query: 'standards sentinel', domain: 'cfa' });
+    expect(hits[0].text).toContain('Private standards sentinel');
+
+    vault.lock();
+    await expect(dexieDriver.chunks!.search({ query: 'standards sentinel', domain: 'cfa' })).rejects.toThrow(/locked/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -217,6 +267,7 @@ const surrealState = vi.hoisted(() => {
     queryCalls: [] as Array<{ sql: string; binds: Record<string, unknown> | undefined }>,
     upsertCalls: [] as Array<{ id: string; payload: unknown }>,
     nextQueryResult: null as unknown,
+    nextSelectResult: null as unknown,
   };
 });
 
@@ -253,6 +304,11 @@ vi.mock('surrealdb', () => {
       });
     }
     async select(): Promise<unknown> {
+      if (surrealState.nextSelectResult != null) {
+        const out = surrealState.nextSelectResult;
+        surrealState.nextSelectResult = null;
+        return out;
+      }
       return [];
     }
     async delete(): Promise<void> {}
@@ -266,6 +322,7 @@ describe('surrealDriver.chunks (mocked client)', () => {
     surrealState.queryCalls = [];
     surrealState.upsertCalls = [];
     surrealState.nextQueryResult = null;
+    surrealState.nextSelectResult = null;
     const mod = await import('./surrealDriver');
     mod.resetSurrealClient();
   });
@@ -287,12 +344,33 @@ describe('surrealDriver.chunks (mocked client)', () => {
     expect(binds.chunks.map((c) => c._id)).toEqual(['a', 'b', 'c']);
   });
 
+  it('bulkUpsert percent-escapes adversarial chunk ids without collisions', async () => {
+    const { surrealDriver } = await import('./surrealDriver');
+    await surrealDriver.chunks!.bulkUpsert([
+      { id: 'domain::topic::lo', documentId: 'd', domain: 'cfa', text: 'one', locator: 'x' },
+      { id: 'domain:topic:lo', documentId: 'd', domain: 'cfa', text: 'two', locator: 'y' },
+      { id: 'weird id*x', documentId: 'd', domain: 'cfa', text: 'three', locator: 'z' },
+      { id: 'weird_id_x', documentId: 'd', domain: 'cfa', text: 'four', locator: 'w' },
+    ]);
+
+    const upsertQuery = surrealState.queryCalls.find((q) => q.sql.includes('UPSERT'));
+    expect(upsertQuery).toBeDefined();
+    const binds = upsertQuery!.binds as { chunks: Array<{ _id: string }> };
+    expect(binds.chunks.map((c) => c._id)).toEqual([
+      'domain%3A%3Atopic%3A%3Alo',
+      'domain%3Atopic%3Alo',
+      'weird%20id%2Ax',
+      'weird_id_x',
+    ]);
+    expect(new Set(binds.chunks.map((c) => c._id)).size).toBe(4);
+  });
+
   it('search emits SurrealQL with hybrid filters, KNN, and bm25 binds', async () => {
     const { surrealDriver } = await import('./surrealDriver');
     surrealState.nextQueryResult = [
       [
         {
-          id: 'chunks:foo',
+          id: 'chunks:domain%3A%3Atopic%3A%3Alo',
           documentId: 'doc-1',
           domain: 'cfa',
           level: 'level2',
@@ -334,7 +412,7 @@ describe('surrealDriver.chunks (mocked client)', () => {
 
     expect(hits).toHaveLength(1);
     expect(hits[0]).toMatchObject({
-      id: 'chunks:foo',
+      id: 'domain::topic::lo',
       documentId: 'doc-1',
       domain: 'cfa',
       level: 'level2',
@@ -346,6 +424,50 @@ describe('surrealDriver.chunks (mocked client)', () => {
     expect(hits[0].score).toBeGreaterThan(0);
     expect(typeof hits[0].vectorScore).toBe('number');
     expect(typeof hits[0].bm25Score).toBe('number');
+  });
+
+  it('search decodes object-shaped Surreal record ids into host chunk ids', async () => {
+    const { surrealDriver } = await import('./surrealDriver');
+    surrealState.nextQueryResult = [
+      [
+        {
+          id: { tb: 'chunks', id: 'source%3Adoc%3Achunk%3A0001' },
+          documentId: 'doc-1',
+          domain: 'cfa',
+          text: 'duration is sensitivity',
+          locator: 'r §1',
+          bm25: 1,
+        },
+      ],
+    ];
+
+    const hits = await surrealDriver.chunks!.search({ query: 'duration' });
+    expect(hits[0].id).toBe('source:doc:chunk:0001');
+  });
+
+  it('exportAll decodes chunk record refs but leaves raw payload ids intact', async () => {
+    const { surrealDriver } = await import('./surrealDriver');
+    surrealState.nextSelectResult = [
+      {
+        id: 'chunks:source%3Adoc%3Achunk%3A0001',
+        documentId: 'doc-1',
+        domain: 'cfa',
+        text: 'duration is sensitivity',
+        locator: 'r §1',
+        embedding: [0.1, 0.2],
+      },
+      {
+        id: 'source:raw:chunk:0002',
+        documentId: 'doc-2',
+        domain: 'cfa',
+        text: 'convexity is curvature',
+        locator: 'r §2',
+      },
+    ];
+
+    const rows = await surrealDriver.chunks!.exportAll!();
+    expect(rows.map((row) => row.id)).toEqual(['source:doc:chunk:0001', 'source:raw:chunk:0002']);
+    expect(rows[0].embedding).toEqual([0.1, 0.2]);
   });
 
   it('schema-creation runs exactly once across multiple driver calls', async () => {

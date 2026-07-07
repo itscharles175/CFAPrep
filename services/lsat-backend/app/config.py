@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging as _logging
+import ipaddress
 import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Project root = backend/
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -13,6 +15,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
+
+
+def _truthy(value: str | None) -> bool:
+    return str(value or "").lower() in ("1", "true", "yes", "on")
 
 
 # Single source of truth for the backend version; kept in sync with the frontend
@@ -317,6 +323,18 @@ CORS_ORIGINS = _parse_cors_origins(
     _env("LSATLAB_CORS_ORIGINS", "http://localhost:5173,tauri://localhost")
 )
 
+# --- Local API token --------------------------------------------------------
+# Optional Wave-3 scaffold: when the Tauri supervisor eventually generates a
+# per-run token and passes it here, every non-health /api route must include it
+# on the request. Empty default keeps existing local/browser/dev calls working
+# until the host-side propagation is wired.
+LOCAL_API_TOKEN = _env("LSATLAB_LOCAL_API_TOKEN", "")
+
+# --- Local SQLite field encryption key --------------------------------------
+# Base64-encoded 32-byte AES-GCM key generated and held by the desktop host. When
+# unset, selected local-only text fields remain plaintext for dev/test databases.
+DB_KEY_B64 = _env("LSATLAB_DB_KEY_B64", "")
+
 # --- Logging ----------------------------------------------------------------
 # Logs are written locally only (rotating file + console). We never ship them to
 # a remote service: this is a private, offline app. Defaults to a logs/ dir next
@@ -407,6 +425,10 @@ def _default_enforce_offline() -> bool:
 # under pytest so the suite can still cover the cloud code with faked HTTP.
 ENFORCE_OFFLINE = _default_enforce_offline()
 CLOUD_API_KEY = _env("LSATLAB_CLOUD_API_KEY", "") or _env("ANTHROPIC_API_KEY", "")
+# Second explicit opt-in for outbound model-provider egress. A key plus
+# GEN_PROVIDER=cloud only configures the route; this flag actually admits
+# network egress after the strict-offline fence has also been opted out.
+CLOUD_EGRESS_ALLOWED = _truthy(_env("LSATLAB_CLOUD_EGRESS_ALLOWED", "0"))
 # B20: Updated default from "claude-opus-4-7" (invalid slug) to a known-good
 # Anthropic model ID. Override via LSATLAB_CLOUD_GEN_MODEL.
 CLOUD_GEN_MODEL = _env("LSATLAB_CLOUD_GEN_MODEL", "claude-3-5-sonnet-20241022")
@@ -442,6 +464,88 @@ CLOUD_DRY_RUN_INPUT_TOKENS = int(
 CLOUD_DRY_RUN_OUTPUT_TOKENS = int(
     _env("LSATLAB_CLOUD_DRY_RUN_OUTPUT_TOKENS", "800") or "800"
 )
+
+
+class OfflineFenceError(RuntimeError):
+    """Raised when strict-offline config would allow off-device model traffic."""
+
+
+def allow_remote_llm() -> bool:
+    """Explicit opt-out for non-loopback local-model endpoints.
+
+    Remote LAN/public model URLs are still rejected while the strict offline
+    fence is on. Opting out requires both ``LSATLAB_ENFORCE_OFFLINE=0`` and
+    ``LSATLAB_ALLOW_REMOTE_LLM=1`` so a single broad remote flag cannot silently
+    override the packaged local-only profile.
+    """
+    return not ENFORCE_OFFLINE and _truthy(os.environ.get("LSATLAB_ALLOW_REMOTE_LLM"))
+
+
+def is_loopback_host(hostname: str | None) -> bool:
+    host = (hostname or "").strip().strip("[]").lower()
+    if not host:
+        return False
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def validate_local_model_url(url: str, *, name: str) -> str:
+    """Validate a local model/provider base URL and return it without trailing slash."""
+    raw = (url or "").strip().rstrip("/")
+    try:
+        parsed = urlparse(raw)
+    except Exception as exc:
+        raise OfflineFenceError(f"{name} must be a valid http(s) URL.") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise OfflineFenceError(f"{name} must be a valid http(s) URL.")
+    if parsed.username or parsed.password:
+        raise OfflineFenceError(f"{name} must not contain embedded credentials.")
+    if is_loopback_host(parsed.hostname):
+        return raw
+    if allow_remote_llm():
+        return raw
+    reason = (
+        "while strict offline mode is enabled"
+        if ENFORCE_OFFLINE
+        else "unless remote local-model traffic is explicitly allowed"
+    )
+    raise OfflineFenceError(
+        f"{name} must point at a loopback host (localhost, 127.0.0.1, or [::1]) "
+        f"{reason}. Set LSATLAB_ENFORCE_OFFLINE=0 and "
+        "LSATLAB_ALLOW_REMOTE_LLM=1 only when off-device local-model traffic is intentional."
+    )
+
+
+def validate_offline_provider_fence() -> None:
+    """Validate the strict offline LLM/egress policy for current config values."""
+    validate_local_model_url(OLLAMA_URL, name="LSATLAB_OLLAMA_URL")
+    validate_local_model_url(LMSTUDIO_URL, name="LSATLAB_LMSTUDIO_URL")
+    if not ENFORCE_OFFLINE:
+        return
+    if GEN_PROVIDER == "cloud":
+        raise OfflineFenceError(
+            "Strict offline fence is ON: LSATLAB_GEN_PROVIDER='cloud' is blocked. "
+            "Use a local provider, or set LSATLAB_ENFORCE_OFFLINE=0 and "
+            "LSATLAB_CLOUD_EGRESS_ALLOWED=1 only when outbound cloud model traffic is intentional."
+        )
+    if CLOUD_API_KEY:
+        raise OfflineFenceError(
+            "Strict offline fence is ON: LSATLAB_CLOUD_API_KEY/ANTHROPIC_API_KEY is configured. "
+            "Clear the cloud key for StudyVault's local-only profile, or set "
+            "LSATLAB_ENFORCE_OFFLINE=0 and LSATLAB_CLOUD_EGRESS_ALLOWED=1 to opt out."
+        )
+    if CLOUD_EGRESS_ALLOWED:
+        raise OfflineFenceError(
+            "Strict offline fence is ON: LSATLAB_CLOUD_EGRESS_ALLOWED=1 is not allowed. "
+            "Set LSATLAB_ENFORCE_OFFLINE=0 first if cloud egress is intentional."
+        )
+
+
+validate_offline_provider_fence()
 
 # --- BB4: local Whisper / voice model cache visibility -----------------------
 # Voice input (offline STT) runs the Whisper-tiny ONNX model in the BROWSER via

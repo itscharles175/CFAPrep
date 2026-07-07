@@ -7,7 +7,7 @@ import { Command } from "cmdk";
 import { CornerDownLeft } from "lucide-react";
 import { Kbd } from "@lsat/components/keyboard-help";
 import { cn } from "@lsat/lib/utils";
-import type { CommandAction } from "./command-palette";
+import type { CommandAction } from "./command-palette-types";
 
 interface CommandPaletteDialogProps {
   open: boolean;

@@ -7,7 +7,7 @@ import { level3TopicBelongsToPathway } from '../../domains/cfa/cfaLevel3Pathways
 import { useLevel3Pathway } from '../../domains/cfa/useLevel3Pathway';
 import { useTheme } from '../../context/ThemeContext';
 import { useProgressSummary } from '../../hooks/useProgress';
-import { exportVaultData, repairVaultData } from '../../lib/learning';
+import { repairVaultData } from '../../lib/learning';
 import { searchCfaSourceVault } from '../../lib/cfaSourceVault';
 import { searchAllContent, type ContentHit } from '../../lib/contentSearch';
 import { commandRoutes } from '../../routes/routeManifest';
@@ -125,16 +125,6 @@ function contentHitToResult(hit: ContentHit): SearchResultItem {
     keywords: [],
     external: hit.external,
   };
-}
-
-function downloadJson(payload: unknown): void {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `quantvault-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  anchor.click();
-  URL.revokeObjectURL(url);
 }
 
 interface TopBarProps {
@@ -390,8 +380,8 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   async function goToResult(item: SearchResultItem) {
     if (item.disabled) return;
     if (item.action === 'backup') {
-      downloadJson(await exportVaultData());
-      setCommandMessage('Vault backup exported.');
+      navigate('/system');
+      setCommandMessage('Encrypted backup exports require a passphrase. Opening System Health.');
     } else if (item.action === 'repair') {
       const preview = await repairVaultData();
       const rows = Object.values(preview.counts).reduce((sum, count) => sum + count, 0);

@@ -1,6 +1,7 @@
 import { getStorage } from './storage';
 import { generateQuestionsFromCurriculum } from './localLlm';
 import { getCfaSourceReadingForTopic } from './cfaSourceVault';
+import { fetchLsatSidecar } from './lsatSidecarClient';
 
 // INT-1 — shared generation-quality gate. The LSAT FastAPI sidecar (:8100)
 // exposes POST /api/gen/generation-quality wrapping the same validate_candidate
@@ -9,7 +10,6 @@ import { getCfaSourceReadingForTopic } from './cfaSourceVault';
 // it means generated/imported questions are gated against ONE quality bar across
 // domains. Kept inside this module (a NEW seam this item owns) so DATA-1's
 // lsatBackend.ts is untouched; the degrading-fetch shape mirrors that client.
-const LSAT_API_BASE = 'http://127.0.0.1:8100';
 const LSAT_GEN_QUALITY_PATH = '/api/gen/generation-quality';
 
 const CHOICE_LABELS = ['A', 'B', 'C', 'D', 'E'] as const;
@@ -114,15 +114,11 @@ export async function gateGeneratedQuestion(
   // than dropping it here on a transport concern.
   if (!candidate) return { keep: true, reachable: false };
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 8000);
-  // Abort the gate call if the caller aborts the whole generation run.
-  const onAbort = () => controller.abort();
-  opts.signal?.addEventListener('abort', onAbort);
   try {
-    const res = await fetch(`${LSAT_API_BASE}${LSAT_GEN_QUALITY_PATH}`, {
+    const res = await fetchLsatSidecar(LSAT_GEN_QUALITY_PATH, {
       method: 'POST',
-      signal: controller.signal,
+      signal: opts.signal,
+      timeoutMs: opts.timeoutMs ?? 8000,
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       // Disable the LSAT-specific model-heavy gates (permutation/informativity):
       // CFA items aren't LSAT 5-choice A-E, so those probes would false-fire. The
@@ -144,9 +140,6 @@ export async function gateGeneratedQuestion(
   } catch {
     // Sidecar offline / timeout / aborted: degrade gracefully (keep content).
     return { keep: true, reachable: false };
-  } finally {
-    clearTimeout(timer);
-    opts.signal?.removeEventListener('abort', onAbort);
   }
 }
 

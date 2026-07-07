@@ -9,6 +9,8 @@ via ``_validate_public_url`` BEFORE issuing the next request.
 These tests pin a fake httpx transport so no real network call happens, and pin
 ``socket.getaddrinfo`` so the real ``_validate_public_url`` logic stays exercised
 (public host resolves public, the redirect target resolves to loopback/private).
+The DNS-rebinding test also verifies that the public address validated for a hop
+is pinned through the actual request window.
 """
 from __future__ import annotations
 
@@ -128,6 +130,50 @@ def test_normal_public_redirect_chain_still_fetches_final_page(monkeypatch):
     ]
 
 
+def test_validated_dns_is_pinned_during_request(monkeypatch):
+    resolver_calls = 0
+    connect_resolutions: list[str] = []
+
+    def fake_getaddrinfo(host, port=None, *args, **kwargs):  # noqa: ANN001, ANN002
+        nonlocal resolver_calls
+        if host != PUBLIC_HOST:
+            raise socket.gaierror(f"unexpected host {host!r}")
+        resolver_calls += 1
+        ip = "93.184.216.34" if resolver_calls == 1 else "127.0.0.1"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 0))]
+
+    def fake_create_connection(address, timeout=None, source_address=None):  # noqa: ANN001
+        host, port = address
+        connect_resolutions.append(notebook_os.socket.getaddrinfo(host, port)[0][4][0])
+        raise OSError("stop before network I/O")
+
+    monkeypatch.setattr(notebook_os.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(notebook_os.socket, "create_connection", fake_create_connection)
+
+    with pytest.raises(httpx.ConnectError):
+        notebook_os.source_from_url(f"http://{PUBLIC_HOST}/article")
+
+    assert connect_resolutions == ["93.184.216.34"]
+    assert resolver_calls == 1
+
+
+def test_cgnat_shared_address_space_is_blocked_without_fetch(monkeypatch):
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        requested.append(str(request.url))
+        return httpx.Response(200, text=LEAK_MARKER)
+
+    _pin_dns(monkeypatch, {PUBLIC_HOST: "100.64.0.1"})
+    _pin_transport(monkeypatch, handler)
+
+    with pytest.raises(ValueError) as excinfo:
+        notebook_os.source_from_url(f"http://{PUBLIC_HOST}/article")
+
+    assert str(excinfo.value) == "private_url_blocked"
+    assert requested == []
+
+
 def test_redirect_loop_is_capped(monkeypatch):
     requested: list[str] = []
 
@@ -174,3 +220,52 @@ def test_direct_loopback_url_is_blocked_without_any_fetch(monkeypatch):
 
     assert str(excinfo.value) == "private_url_blocked"
     assert requested == []
+
+
+def test_declared_oversized_url_response_is_rejected_without_body_read(monkeypatch):
+    class ExplodingStream(httpx.SyncByteStream):
+        def __iter__(self):
+            raise AssertionError("oversized declared body should not be read")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-length": "9", "content-type": "text/plain"},
+            stream=ExplodingStream(),
+        )
+
+    monkeypatch.setattr(notebook_os, "MAX_URL_SOURCE_BYTES", 8)
+    _pin_dns(monkeypatch, {PUBLIC_HOST: "93.184.216.34"})
+    _pin_transport(monkeypatch, handler)
+
+    with pytest.raises(ValueError) as excinfo:
+        notebook_os.source_from_url(f"http://{PUBLIC_HOST}/too-large")
+
+    assert str(excinfo.value) == "source_url_too_large"
+
+
+def test_chunked_oversized_url_response_is_rejected_while_streaming(monkeypatch):
+    yielded: list[bytes] = []
+
+    class ChunkedStream(httpx.SyncByteStream):
+        def __iter__(self):
+            for chunk in (b"1234", b"5678", b"9", b"unread"):
+                yielded.append(chunk)
+                yield chunk
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            stream=ChunkedStream(),
+        )
+
+    monkeypatch.setattr(notebook_os, "MAX_URL_SOURCE_BYTES", 8)
+    _pin_dns(monkeypatch, {PUBLIC_HOST: "93.184.216.34"})
+    _pin_transport(monkeypatch, handler)
+
+    with pytest.raises(ValueError) as excinfo:
+        notebook_os.source_from_url(f"http://{PUBLIC_HOST}/chunked-too-large")
+
+    assert str(excinfo.value) == "source_url_too_large"
+    assert yielded == [b"1234", b"5678", b"9"]

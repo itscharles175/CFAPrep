@@ -9,6 +9,7 @@
 
 import type { CfaSourceChunk, CfaSourceDocument, CfaSourceLevel } from './cfaSourceTypes';
 import { db } from './progressStore';
+import { encryptSourceChunksForStorage } from './sourceChunkSecureVault';
 
 /** True when we're running inside the Tauri webview (vs plain browser dev). */
 export function isTauri(): boolean {
@@ -130,9 +131,10 @@ export async function ingestPdfPaths(params: {
       };
 
       onProgress?.({ index, total: paths.length, fileName: name, status: 'storing' });
+      const chunksForStorage = await encryptSourceChunksForStorage(chunks);
       await db.transaction('rw', db.sourceDocuments, db.sourceChunks, async () => {
         await db.sourceDocuments.put(document);
-        await db.sourceChunks.bulkPut(chunks);
+        await db.sourceChunks.bulkPut(chunksForStorage);
       });
       existingHashes.add(hash);
       result.ingested += 1;
@@ -523,9 +525,10 @@ export async function ingestTextSource(params: {
     importedAt,
     privateUseOnly: true,
   };
+  const chunksForStorage = await encryptSourceChunksForStorage(chunks);
   await db.transaction('rw', db.sourceDocuments, db.sourceChunks, async () => {
     await db.sourceDocuments.put(document);
-    await db.sourceChunks.bulkPut(chunks);
+    await db.sourceChunks.bulkPut(chunksForStorage);
   });
   return { documentId, chunkCount: chunks.length, deduped: false };
 }
@@ -624,9 +627,10 @@ export async function ingestFolder(params: {
       };
 
       onProgress?.({ index, total: pdfs.length, fileName: pdf.name, status: 'storing' });
+      const chunksForStorage = await encryptSourceChunksForStorage(chunks);
       await db.transaction('rw', db.sourceDocuments, db.sourceChunks, async () => {
         await db.sourceDocuments.put(document);
-        await db.sourceChunks.bulkPut(chunks);
+        await db.sourceChunks.bulkPut(chunksForStorage);
       });
       existingHashes.add(hash);
       result.ingested += 1;

@@ -56,7 +56,11 @@ export function StudyConsistency({ sessions }: { sessions: SessionSummary[] }) {
             : "Your day-by-day practice cadence will appear here."}
         </CardDescription>
       </CardHeader>
-      <CardContent className="overflow-x-auto">
+      <CardContent
+        className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        tabIndex={0}
+        aria-label="Study consistency heatmap scroll area"
+      >
         {days.length ? (
           <ContributionHeatmap data={days} />
         ) : (
