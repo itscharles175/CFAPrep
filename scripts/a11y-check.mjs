@@ -125,6 +125,7 @@ function assertPreferenceSnapshot(snapshot, scope, scenario) {
 }
 
 async function collectPreferenceSnapshot(page, entry) {
+  /* global HTMLElement, SVGElement, getComputedStyle, window */
   return page.evaluate(({ focusSelector, surfaceSelector, chartSelector }) => {
     const visible = (el) => {
       if (!(el instanceof HTMLElement || el instanceof SVGElement)) return false;

@@ -582,6 +582,9 @@ fn services_dir_search(env_override: Option<&Path>, cwd: &Path, exe_dir: &Path) 
 /// exercised by the integration tests. Returns false on any DNS, connect, or
 /// timeout error — callers treat absence as "not yet listening".
 fn is_port_listening(host: &str, port: u16, timeout_ms: u64) -> bool {
+    if host.trim().is_empty() {
+        return false;
+    }
     let timeout = Duration::from_millis(timeout_ms);
     let addrs: Vec<SocketAddr> = match (host, port).to_socket_addrs() {
         Ok(it) => it.collect(),

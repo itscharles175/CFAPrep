@@ -30,7 +30,7 @@ export function normalizeLoopbackHttpBaseUrl(value, label = 'URL') {
   let parsed;
   try {
     parsed = new URL(raw);
-  } catch (error) {
+  } catch (_error) {
     throw new LocalUrlPolicyError(`${label} must be a valid http(s) URL.`);
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {

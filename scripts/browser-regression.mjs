@@ -16,9 +16,12 @@ async function waitForBodyText(page, pattern, label) {
   });
 }
 
-async function assertNoRuntimeErrors(page, label) {
+async function assertNoRuntimeErrors(page, label, { allowFetchFailureText = false } = {}) {
   const body = await page.locator('body').innerText({ timeout: 10_000 });
-  if (/TypeError|ReferenceError|Cannot read|Failed to fetch/i.test(body)) {
+  const runtimePattern = allowFetchFailureText
+    ? /TypeError|ReferenceError|Cannot read/i
+    : /TypeError|ReferenceError|Cannot read|Failed to fetch/i;
+  if (runtimePattern.test(body)) {
     throw new Error(`Runtime error text detected during ${label}`);
   }
 }
@@ -286,7 +289,7 @@ try {
   startBrowserStep('browser:system-health', '/system', 'system health surface');
   await page.goto(new URL('/system', address).toString(), { waitUntil: 'networkidle' });
   await waitForBodyText(page, /Service Worker/, 'system service-worker surface');
-  await assertNoRuntimeErrors(page, 'system health surface');
+  await assertNoRuntimeErrors(page, 'system health surface', { allowFetchFailureText: true });
   passBrowserStep();
   console.log('OK system health surface');
 

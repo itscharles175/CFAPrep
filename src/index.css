@@ -4543,6 +4543,50 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     color: var(--text-primary) !important;
     border-color: var(--border-hover) !important;
   }
+
+  :root[data-theme="light"] .status-badge-accent {
+    color: #003F52;
+    background: #F4FCFD;
+    border-color: #7DDCEA;
+  }
+
+  :root[data-theme="light"] .status-badge-exam {
+    color: #5F3A00;
+    background: #FEFBF5;
+    border-color: #C4932F;
+  }
+
+  :root[data-theme="light"] .status-badge-success,
+  :root[data-theme="light"] .status-badge-excel {
+    color: #064E3B;
+    background: #F1FCF8;
+    border-color: #67D8B2;
+  }
+
+  :root[data-theme="light"] .status-badge-warning,
+  :root[data-theme="light"] .status-badge-ops {
+    color: #602400;
+    background: #FFF9EF;
+    border-color: #D48632;
+  }
+
+  :root[data-theme="light"] .status-badge-danger {
+    color: #8F1111;
+    background: #FEF4F4;
+    border-color: #E17C7C;
+  }
+
+  :root[data-theme="light"] .status-badge-vault {
+    color: #005C54;
+    background: #F4FCFB;
+    border-color: #63D1C7;
+  }
+
+  :root[data-theme="light"] .status-badge-quant {
+    color: #4C1BA8;
+    background: #F8F4FE;
+    border-color: #A98AF0;
+  }
 }
 
 @media (forced-colors: active) {
