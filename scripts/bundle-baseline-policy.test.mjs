@@ -27,6 +27,7 @@ describe('bundle baseline policy', () => {
       'KaTeX_Size4-Regular-[hash].ttf',
     );
     expect(stableAssetKey('ContentOps-CKQ-AJ2A.js')).toBe('ContentOps-[hash].js');
+    expect(stableAssetKey('storage-Czi-DerV.js')).toBe('storage-[hash].js');
     expect(stableAssetKey('surrealDriver-Dokp1U_-.js')).toBe('surrealDriver-[hash].js');
     expect(stableAssetKey('ai-markdown-pVvpNdp-.js')).toBe('ai-markdown-pVvpNdp-.js');
   });

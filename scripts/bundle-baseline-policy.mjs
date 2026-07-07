@@ -31,11 +31,13 @@ export function stableAssetKey(name) {
   const previousHyphen = prefix.lastIndexOf('-');
   if (previousHyphen < 0) return input;
   const candidate = body.slice(previousHyphen + 1);
+  const hasDigitOrUnderscore = /[0-9_]/.test(candidate);
+  const hasInteriorHyphen = /^[A-Za-z0-9_]+-[A-Za-z0-9_]+$/.test(candidate);
   if (
     candidate.length >= 8 &&
     candidate.length <= 12 &&
     /^[A-Za-z0-9_-]+$/.test(candidate) &&
-    /[0-9_]/.test(candidate)
+    (hasDigitOrUnderscore || hasInteriorHyphen)
   ) {
     return `${body.slice(0, previousHyphen)}-[hash]${ext}`;
   }
