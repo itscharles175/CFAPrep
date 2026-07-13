@@ -1,0 +1,510 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Network } from 'lucide-react';
+import { PageHeader, SegmentedControl, StatusBadge, Surface } from '../components/ui/Primitives';
+import { getCfaLevelSummaries } from '../domains/cfa/cfaSummary';
+import { getCfaSourceCoverageMap } from '../lib/cfaSourceVault';
+import { db } from '../lib/progressStore';
+import { analyzeKnowledgeGraph, buildCurriculumGraph } from '../lib/knowledge/graph';
+
+// Interactive curriculum knowledge-graph canvas.
+//
+// Lays out every CFA topic across the three levels as nodes in three vertical
+// columns (L1 / L2 / L3). Cross-level edges connect topics that share an id
+// across consecutive levels (e.g., fixed-income L1 → fixed-income L2 →
+// fixed-income L3), so the user can see how the curriculum spirals through
+// each subject as they advance. Node size scales with question count; node
+// color reflects whether the user has ingested curriculum for that topic.
+// Click a node to navigate; hover (or focus) to see its details inline.
+//
+// Pillar 9. SVG-based, no external graph deps; works fully offline.
+
+const LEVEL_COLUMNS = ['level1', 'level2', 'level3'];
+const LEVEL_LABELS = { level1: 'Level I', level2: 'Level II', level3: 'Level III' };
+const COLUMN_X = { level1: 220, level2: 580, level3: 940 };
+const COLUMN_HEADER_Y = 56;
+const ROW_HEIGHT = 80;
+const FIRST_ROW_Y = 130;
+const NODE_RADIUS_BASE = 16;
+const NODE_RADIUS_MAX = 36;
+
+function radiusFor(questionCount, maxCount) {
+  if (!questionCount || !maxCount) return NODE_RADIUS_BASE;
+  const t = Math.min(1, questionCount / maxCount);
+  return NODE_RADIUS_BASE + (NODE_RADIUS_MAX - NODE_RADIUS_BASE) * t;
+}
+
+function nodeColor(hasCurriculum) {
+  return hasCurriculum ? 'var(--accent, #60a5fa)' : 'var(--text-muted, #94a3b8)';
+}
+
+// Interpolate red→yellow→green for a mastery score 0..100.
+function masteryColor(score) {
+  if (score == null) return 'var(--text-muted, #94a3b8)';
+  const clamped = Math.max(0, Math.min(100, score));
+  // 0 = #ef4444 (danger), 50 = #f59e0b (warning), 100 = #34d399 (success)
+  if (clamped < 50) {
+    const t = clamped / 50;
+    return blendHex('#ef4444', '#f59e0b', t);
+  }
+  const t = (clamped - 50) / 50;
+  return blendHex('#f59e0b', '#34d399', t);
+}
+
+// CONTENT-1 — readiness overlay color for a propagated readiness in 0..1.
+// Reuses the same red→yellow→green ramp so the overlay reads consistently with
+// the mastery overlay; null (no node) falls back to muted.
+function readinessColor(readiness) {
+  if (readiness == null) return 'var(--text-muted, #94a3b8)';
+  return masteryColor(Math.round(Math.max(0, Math.min(1, readiness)) * 100));
+}
+
+function blendHex(a, b, t) {
+  const pa = parseHex(a);
+  const pb = parseHex(b);
+  const r = Math.round(pa[0] + (pb[0] - pa[0]) * t);
+  const g = Math.round(pa[1] + (pb[1] - pa[1]) * t);
+  const bl = Math.round(pa[2] + (pb[2] - pa[2]) * t);
+  return `rgb(${r},${g},${bl})`;
+}
+
+function parseHex(hex) {
+  const m = hex.replace('#', '');
+  return [parseInt(m.slice(0, 2), 16), parseInt(m.slice(2, 4), 16), parseInt(m.slice(4, 6), 16)];
+}
+
+export default function KnowledgeGraph() {
+  const levels = useMemo(() => getCfaLevelSummaries(), []);
+  const [coverageMap, setCoverageMap] = useState(null);
+  const [hoverId, setHoverId] = useState(null);
+  const [colorMode, setColorMode] = useState('coverage'); // 'coverage' | 'mastery'
+  const [masteryByTopic, setMasteryByTopic] = useState(null);
+  const [filter, setFilter] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    getCfaSourceCoverageMap()
+      .then((map) => {
+        if (active) setCoverageMap(map);
+      })
+      .catch(() => undefined);
+
+    // Per-topic mastery: aggregate masterySnapshots by `topic` (which is
+    // either bare 'fixed-income' for level1 or 'level2:fixed-income' for
+    // level2+; we key by the bare id at the end).
+    db.masterySnapshots
+      .toArray()
+      .then((snaps) => {
+        if (!active) return;
+        const bucket = new Map();
+        for (const snap of snaps) {
+          if (!snap?.topic) continue;
+          const bare = snap.topic.includes(':') ? snap.topic.split(':').at(-1) : snap.topic;
+          const row = bucket.get(bare) || { sum: 0, count: 0 };
+          row.sum += snap.score;
+          row.count += 1;
+          bucket.set(bare, row);
+        }
+        const result = {};
+        for (const [topicId, { sum, count }] of bucket) result[topicId] = Math.round(sum / count);
+        setMasteryByTopic(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Build per-level positioned nodes.
+  const nodesByLevel = useMemo(() => {
+    const out = {};
+    for (const level of levels) {
+      const topics = level.topics;
+      const maxQs = Math.max(1, ...topics.map((t) => t.questions));
+      const x = COLUMN_X[level.id] ?? 0;
+      out[level.id] = topics.map((topic, index) => ({
+        id: `${level.id}:${topic.id}`,
+        topicId: topic.id,
+        levelId: level.id,
+        title: topic.label,
+        questions: topic.questions,
+        vignettes: topic.vignettes,
+        weight: topic.weight,
+        flashcards: topic.flashcards,
+        hasCurriculum: Boolean(coverageMap?.topicCounts?.[topic.id]),
+        mastery: masteryByTopic?.[topic.id] ?? null,
+        x,
+        y: FIRST_ROW_Y + index * ROW_HEIGHT,
+        radius: radiusFor(topic.questions, maxQs),
+      }));
+    }
+    return out;
+  }, [levels, coverageMap, masteryByTopic]);
+
+  const allNodes = useMemo(
+    () => LEVEL_COLUMNS.flatMap((id) => nodesByLevel[id] || []),
+    [nodesByLevel],
+  );
+  const nodesById = useMemo(() => new Map(allNodes.map((n) => [n.id, n])), [allNodes]);
+
+  // Cross-level edges: same topicId in consecutive levels.
+  const edges = useMemo(() => {
+    const out = [];
+    for (let i = 0; i < LEVEL_COLUMNS.length - 1; i += 1) {
+      const a = LEVEL_COLUMNS[i];
+      const b = LEVEL_COLUMNS[i + 1];
+      const aById = new Map((nodesByLevel[a] || []).map((n) => [n.topicId, n]));
+      const bById = new Map((nodesByLevel[b] || []).map((n) => [n.topicId, n]));
+      for (const [topicId, fromNode] of aById) {
+        const toNode = bById.get(topicId);
+        if (toNode) out.push({ id: `${fromNode.id}->${toNode.id}`, from: fromNode, to: toNode, topicId });
+      }
+    }
+    return out;
+  }, [nodesByLevel]);
+
+  // CONTENT-1 — prerequisite-aware knowledge graph: topo-order, critical path,
+  // and a readiness overlay where downstream readiness propagates from
+  // prerequisite mastery. Built from the SAME level summaries + per-topic
+  // mastery the canvas already uses, so it never diverges from what's drawn.
+  const knowledge = useMemo(() => {
+    const graphInput = buildCurriculumGraph({
+      levels: levels.map((level) => ({
+        id: level.id,
+        topics: level.topics.map((topic) => ({
+          id: topic.id,
+          label: topic.label,
+          weight: topic.weight,
+        })),
+      })),
+      masteryByTopic: masteryByTopic || undefined,
+    });
+    return analyzeKnowledgeGraph(graphInput);
+  }, [levels, masteryByTopic]);
+
+  const criticalPathSet = useMemo(
+    () => new Set(knowledge.criticalPath.path),
+    [knowledge],
+  );
+
+  // Critical-path edges (consecutive pairs along the path) so we can render the
+  // gating chain distinctly from the rest of the spiral.
+  const criticalEdgeSet = useMemo(() => {
+    const set = new Set();
+    const path = knowledge.criticalPath.path;
+    for (let i = 0; i < path.length - 1; i += 1) set.add(`${path[i]}->${path[i + 1]}`);
+    return set;
+  }, [knowledge]);
+
+  const maxRows = Math.max(...LEVEL_COLUMNS.map((id) => (nodesByLevel[id] || []).length));
+  const height = FIRST_ROW_Y + maxRows * ROW_HEIGHT + 40;
+  const width = 1160;
+
+  // Search-filter highlighting: a node matches if its title contains the
+  // filter (case-insensitive); the topic id is also matched so users can
+  // type `fixed-income` directly.
+  const normalizedFilter = filter.trim().toLowerCase();
+  function matchesFilter(node) {
+    if (!normalizedFilter) return true;
+    return (
+      node.title.toLowerCase().includes(normalizedFilter) ||
+      node.topicId.toLowerCase().includes(normalizedFilter)
+    );
+  }
+  const filterMatches = normalizedFilter ? allNodes.filter(matchesFilter).length : null;
+
+  const selected = hoverId ? nodesById.get(hoverId) : null;
+
+  return (
+    <div className="page-container">
+      <PageHeader
+        tone="analytics"
+        badge="KNOWLEDGE GRAPH"
+        title="Curriculum Knowledge Graph"
+        subtitle="Every CFA topic across Levels I, II, and III. Edges link topics that recur across levels; size reflects authored question volume; color reflects the selected overlay."
+        meta={
+          <>
+            <StatusBadge tone="analytics">
+              <Network size={14} /> {allNodes.length} topics
+            </StatusBadge>
+            <StatusBadge tone="exam">{edges.length} cross-level links</StatusBadge>
+            {coverageMap && (
+              <StatusBadge tone="accent">
+                {allNodes.filter((n) => n.hasCurriculum).length} with curriculum
+              </StatusBadge>
+            )}
+            {knowledge.criticalPath.path.length > 1 && (
+              <StatusBadge tone="warning">
+                critical path · {knowledge.criticalPath.path.length} concepts
+              </StatusBadge>
+            )}
+          </>
+        }
+        actions={
+          <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+            <input
+              className="input"
+              type="search"
+              placeholder="Filter topics…"
+              aria-label="Filter knowledge graph by topic"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              style={{ minWidth: 180 }}
+            />
+            {normalizedFilter && (
+              <StatusBadge tone="accent">{filterMatches} match{filterMatches === 1 ? '' : 'es'}</StatusBadge>
+            )}
+            <SegmentedControl
+              label="Color overlay"
+              density="compact"
+              options={[
+                { value: 'coverage', label: 'Curriculum' },
+                { value: 'mastery', label: 'Mastery' },
+                { value: 'readiness', label: 'Readiness' },
+              ]}
+              value={colorMode}
+              onChange={setColorMode}
+            />
+          </div>
+        }
+      />
+
+      <Surface tone="analytics" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <svg
+            role="group"
+            aria-label="CFA curriculum knowledge graph"
+            width={width}
+            height={height}
+            viewBox={`0 0 ${width} ${height}`}
+            style={{ display: 'block', maxWidth: '100%' }}
+          >
+            {/* Column headers */}
+            {LEVEL_COLUMNS.map((id) => (
+              <g key={id}>
+                <text
+                  x={COLUMN_X[id]}
+                  y={COLUMN_HEADER_Y}
+                  textAnchor="middle"
+                  fontSize="18"
+                  fontWeight="700"
+                  fill="var(--text-secondary, #cbd5e1)"
+                >
+                  {LEVEL_LABELS[id]}
+                </text>
+              </g>
+            ))}
+
+            {/* Edges — prerequisite spiral; the critical-path chain is drawn
+                solid + accented so the gating sequence stands out (CONTENT-1). */}
+            {edges.map((edge) => {
+              const isActive = hoverId === edge.from.id || hoverId === edge.to.id;
+              const isCritical = criticalEdgeSet.has(`${edge.from.id}->${edge.to.id}`);
+              const stroke = isActive
+                ? 'var(--accent, #60a5fa)'
+                : isCritical
+                  ? 'var(--warning, #f59e0b)'
+                  : 'var(--border, #334155)';
+              return (
+                <line
+                  key={edge.id}
+                  x1={edge.from.x + edge.from.radius}
+                  y1={edge.from.y}
+                  x2={edge.to.x - edge.to.radius}
+                  y2={edge.to.y}
+                  stroke={stroke}
+                  strokeWidth={isActive ? 2 : isCritical ? 2 : 1}
+                  strokeDasharray={isActive || isCritical ? '0' : '4 4'}
+                  opacity={isActive ? 0.95 : isCritical ? 0.85 : 0.45}
+                />
+              );
+            })}
+
+            {/* Nodes */}
+            {allNodes.map((node) => {
+              const isActive = hoverId === node.id;
+              const matches = matchesFilter(node);
+              const readiness = knowledge.readiness.get(node.id)?.readiness ?? null;
+              const isCritical = criticalPathSet.has(node.id);
+              const fill =
+                colorMode === 'mastery'
+                  ? masteryColor(node.mastery)
+                  : colorMode === 'readiness'
+                    ? readinessColor(readiness)
+                    : nodeColor(node.hasCurriculum);
+              return (
+                <Link
+                  key={node.id}
+                  to={`/cfa/${node.levelId}/${node.topicId}`}
+                  aria-label={`Open ${node.title}`}
+                  onMouseEnter={() => setHoverId(node.id)}
+                  onMouseLeave={() => setHoverId((id) => (id === node.id ? null : id))}
+                  onFocus={() => setHoverId(node.id)}
+                  onBlur={() => setHoverId((id) => (id === node.id ? null : id))}
+                >
+                  <g
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {/* Critical-path nodes get an outer warning ring so the
+                        gating chain is visible in every overlay (CONTENT-1). */}
+                    {isCritical && (
+                      <circle
+                        cx={node.x}
+                        cy={node.y}
+                        r={node.radius + 4}
+                        fill="none"
+                        stroke="var(--warning, #f59e0b)"
+                        strokeWidth={2}
+                        opacity={matches ? 0.85 : 0.18}
+                      />
+                    )}
+                    <circle
+                      cx={node.x}
+                      cy={node.y}
+                      r={node.radius}
+                      fill={fill}
+                      stroke={isActive ? 'var(--text-primary, #f8fafc)' : 'transparent'}
+                      strokeWidth={2}
+                      opacity={matches ? (isActive ? 1 : 0.85) : 0.18}
+                    />
+                    <text
+                      x={node.x + node.radius + 8}
+                      y={node.y + 4}
+                      fontSize="12"
+                      fontWeight={isActive ? 700 : 500}
+                      fill="var(--text-primary, #f1f5f9)"
+                    >
+                      {node.title}
+                    </text>
+                    <text
+                      x={node.x + node.radius + 8}
+                      y={node.y + 18}
+                      fontSize="10"
+                      fill="var(--text-muted, #94a3b8)"
+                    >
+                      {node.weight} · {node.questions}Q · {node.vignettes} cases
+                    </text>
+                  </g>
+                </Link>
+              );
+            })}
+          </svg>
+        </div>
+      </Surface>
+
+      <div className="grid-2" style={{ gap: 'var(--space-4)' }}>
+        <Surface tone="analytics" density="compact">
+          <StatusBadge tone="accent">Legend</StatusBadge>
+          {colorMode === 'coverage' ? (
+            <ul className="qv-stack-2 qv-mt-2" style={{ listStyle: 'none', padding: 0 }}>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--accent)' }} />
+                <span>Topic has ingested curriculum (Ask the curriculum will return grounded answers)</span>
+              </li>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--text-muted)', opacity: 0.65 }} />
+                <span>No curriculum yet — only authored questions available; ingest from System Health</span>
+              </li>
+            </ul>
+          ) : colorMode === 'readiness' ? (
+            <ul className="qv-stack-2 qv-mt-2" style={{ listStyle: 'none', padding: 0 }}>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: readinessColor(0.15) }} />
+                <span>Blocked — prerequisites are weak; shore up the upstream chain first</span>
+              </li>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: readinessColor(0.5) }} />
+                <span>Partly ready — foundations + own progress are mid-strength</span>
+              </li>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: readinessColor(0.85) }} />
+                <span>Ready — prerequisites are solid; this concept is unblocked to study</span>
+              </li>
+              <li className="qv-text-muted">
+                Readiness propagates downstream from prerequisite mastery: a concept can&apos;t be more ready than its weakest prerequisite.
+              </li>
+            </ul>
+          ) : (
+            <ul className="qv-stack-2 qv-mt-2" style={{ listStyle: 'none', padding: 0 }}>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: masteryColor(0) }} />
+                <span>0–25% mastery — schedule focused review</span>
+              </li>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: masteryColor(50) }} />
+                <span>~50% — exam-edge; keep drilling</span>
+              </li>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: masteryColor(85) }} />
+                <span>85%+ — exam-ready; maintain with spaced reviews</span>
+              </li>
+              <li className="qv-row-2">
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--text-muted)', opacity: 0.65 }} />
+                <span>No mastery snapshots yet — answer a few quiz questions</span>
+              </li>
+            </ul>
+          )}
+          <ul className="qv-stack-2 qv-mt-2" style={{ listStyle: 'none', padding: 0 }}>
+            <li className="qv-row-2">
+              <svg width="40" height="14" viewBox="0 0 40 14"><line x1="0" y1="7" x2="40" y2="7" stroke="var(--border)" strokeDasharray="4 4" /></svg>
+              <span>Dashed edge: same topic across consecutive levels (the curriculum spiral)</span>
+            </li>
+            <li className="qv-row-2">
+              <svg width="40" height="14" viewBox="0 0 40 14"><line x1="0" y1="7" x2="40" y2="7" stroke="var(--warning, #f59e0b)" strokeWidth="2" /></svg>
+              <span>Solid amber edge + ring: the critical path — the longest prerequisite chain that gates the most downstream material</span>
+            </li>
+            <li className="qv-text-muted">
+              Node radius scales with authored question count. Click any node to open the topic; hover/focus to highlight its cross-level chain.
+            </li>
+          </ul>
+        </Surface>
+        <Surface tone="analytics" density="compact">
+          <StatusBadge tone="accent">Selected topic</StatusBadge>
+          {selected ? (
+            <div className="qv-mt-2">
+              <h3 className="qv-m-0">{selected.title}</h3>
+              <p className="muted-copy qv-mt-1" style={{ marginBottom: 0 }}>
+                {LEVEL_LABELS[selected.levelId]} · weight {selected.weight} · {selected.questions} questions ·{' '}
+                {selected.vignettes} vignettes · {selected.flashcards} flashcards
+              </p>
+              <p className="muted-copy qv-mt-1" style={{ marginBottom: 0 }}>
+                Curriculum: {selected.hasCurriculum ? 'ingested' : 'not yet ingested'}
+                {' · Mastery: '}
+                {selected.mastery == null ? 'no snapshots' : `${selected.mastery}%`}
+              </p>
+              {(() => {
+                const r = knowledge.readiness.get(selected.id);
+                if (!r) return null;
+                const prereqs = knowledge.reverse.get(selected.id) || [];
+                const weakest = r.weakestPrerequisite
+                  ? knowledge.nodesById.get(r.weakestPrerequisite)?.label
+                  : null;
+                return (
+                  <p className="muted-copy qv-mt-1" style={{ marginBottom: 0 }}>
+                    {'Readiness: '}
+                    {Math.round(r.readiness * 100)}%
+                    {prereqs.length
+                      ? ` · ${prereqs.length} prerequisite${prereqs.length === 1 ? '' : 's'}`
+                      : ' · no prerequisites (a root concept)'}
+                    {weakest ? ` · gated by ${weakest}` : ''}
+                    {criticalPathSet.has(selected.id) ? ' · on the critical path' : ''}
+                  </p>
+                );
+              })()}
+              <Link
+                to={`/cfa/${selected.levelId}/${selected.topicId}`}
+                className="btn btn-secondary btn-sm qv-mt-2"
+              >
+                Open {selected.title}
+              </Link>
+            </div>
+          ) : (
+            <p className="muted-copy qv-mt-2" style={{ marginBottom: 0 }}>
+              Hover or focus a node to see its details.
+            </p>
+          )}
+        </Surface>
+      </div>
+    </div>
+  );
+}

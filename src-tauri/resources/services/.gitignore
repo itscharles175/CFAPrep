@@ -1,0 +1,6 @@
+# Binaries produced by scripts/build-onb-binary.mjs at release time.
+# Don't commit them — they're large and platform-specific.
+*.exe
+open-notebook/
+surreal
+surreal.exe

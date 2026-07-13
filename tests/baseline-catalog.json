@@ -1,0 +1,152 @@
+{
+  "schemaVersion": "studyvault.baseline-catalog.v1",
+  "baselines": [
+    {
+      "id": "bundle-trend-baseline",
+      "title": "Bundle Trend Baseline",
+      "kind": "bundle-size",
+      "owner": "Frontend QA",
+      "storage": "committed",
+      "paths": [{ "path": "tests/bundle-baseline.json", "type": "file" }],
+      "verify": { "command": "npm run bundle:report" },
+      "refresh": { "command": "npm run bundle:baseline" },
+      "ci": { "command": "npm run bundle:report" },
+      "docs": ["TESTING.md", "docs/TESTING-BASELINES.md"],
+      "failureMode": "Tracked logical assets fail on gzip growth over 5% or 10,240 bytes, and new tracked assets over 10,240 gzip bytes block until reviewed.",
+      "review": "Run after npm run build, inspect dist/reports/bundle-report.md, then commit tests/bundle-baseline.json."
+    },
+    {
+      "id": "client-openapi-snapshot",
+      "title": "Generated Client OpenAPI Snapshot",
+      "kind": "api-contract",
+      "owner": "LSAT integration",
+      "storage": "committed",
+      "paths": [
+        { "path": "src/domains/lsat/_meta/openapi.json", "type": "file" },
+        { "path": "src/domains/lsat/lib/api.gen.ts", "type": "file" }
+      ],
+      "verify": { "command": "npm run contract:check:client" },
+      "refresh": { "command": "npm run gen:api" },
+      "ci": { "command": "npm run contract:check:client" },
+      "docs": ["TESTING.md", "docs/TESTING-BASELINES.md"],
+      "failureMode": "The typed client snapshot must not lag behind the live LSAT backend OpenAPI surface.",
+      "review": "Regenerate after backend contract changes and review both the JSON snapshot and generated TypeScript diff."
+    },
+    {
+      "id": "direct-sidecar-fetch-inventory",
+      "title": "Direct Sidecar Fetch Inventory Baseline",
+      "kind": "ratchet-inventory",
+      "owner": "Frontend architecture",
+      "storage": "committed",
+      "paths": [{ "path": "scripts/direct-sidecar-fetches-baseline.json", "type": "file" }],
+      "verify": { "command": "npm run check:sidecar-fetches" },
+      "refresh": { "command": "node scripts/check-direct-sidecar-fetches.mjs --inventory-only --json" },
+      "ci": { "command": "npm run check:sidecar-fetches" },
+      "docs": ["docs/TESTING-BASELINES.md"],
+      "failureMode": "New direct localhost:8100 fetch callers outside approved adapters fail until routed through an adapter or explicitly baselined.",
+      "review": "Prefer removing resolved entries; only add new entries after deferring an adapter migration intentionally."
+    },
+    {
+      "id": "lsat-openapi-baseline",
+      "title": "LSAT Backend OpenAPI Baseline",
+      "kind": "api-contract",
+      "owner": "LSAT backend",
+      "storage": "committed",
+      "paths": [{ "path": "services/lsat-backend/openapi-baseline.json", "type": "file" }],
+      "verify": { "command": "node scripts/export-lsat-openapi.mjs --check" },
+      "refresh": { "command": "node scripts/export-lsat-openapi.mjs --write" },
+      "ci": { "command": "node scripts/export-lsat-openapi.mjs --check" },
+      "docs": ["TESTING.md", "docs/TESTING-BASELINES.md"],
+      "failureMode": "Removed paths, methods, or 2xx response fields are treated as breaking contract drift.",
+      "review": "Refresh only after backend route changes and generated client updates are reviewed together."
+    },
+    {
+      "id": "lsat-typed-route-schema-baseline",
+      "title": "LSAT Typed Route Schema Baseline",
+      "kind": "api-contract",
+      "owner": "LSAT backend",
+      "storage": "committed",
+      "workingDirectory": "services/lsat-backend",
+      "paths": [{ "path": "services/lsat-backend/tests/schemas-baseline.json", "type": "file" }],
+      "verify": { "command": "python -m pytest tests/test_openapi_contract.py -q" },
+      "refresh": { "command": "UPDATE_SCHEMA_BASELINE=1 python -m pytest tests/test_openapi_contract.py -q" },
+      "ci": { "command": "python -m pytest tests/test_openapi_contract.py -q" },
+      "docs": ["TESTING.md", "docs/TESTING-BASELINES.md"],
+      "failureMode": "Host-consumed typed routes may add fields, but may not silently drop fields promised by the baseline.",
+      "review": "Refresh only with the backend contract and host generated-client diff."
+    },
+    {
+      "id": "prompt-regression-fixture",
+      "title": "Prompt Regression Fixture",
+      "kind": "prompt-golden",
+      "owner": "AI quality",
+      "storage": "committed",
+      "paths": [{ "path": "tests/prompt-fixtures/prompt-regression.json", "type": "file" }],
+      "verify": { "command": "node --import ./scripts/register-ts-loader.mjs scripts/prompt-regression-fixture-floor.mjs" },
+      "refresh": { "command": "python -m app.prompt_contracts --dump" },
+      "ci": { "command": "node --import ./scripts/register-ts-loader.mjs scripts/prompt-regression-fixture-floor.mjs" },
+      "docs": ["TESTING.md", "docs/TESTING-BASELINES.md"],
+      "failureMode": "Prompt hashes and required substrings must match the committed host and backend prompt fixture.",
+      "review": "Refresh host and backend prompt cases in one fixture change; run the host and backend prompt floor checks before committing."
+    },
+    {
+      "id": "rag-retrieval-fixtures",
+      "title": "RAG Retrieval Fixtures",
+      "kind": "retrieval-golden",
+      "owner": "RAG quality",
+      "storage": "committed",
+      "paths": [
+        { "path": "tests/rag-fixtures/corpus.json", "type": "file" },
+        { "path": "tests/rag-fixtures/queries.json", "type": "file" }
+      ],
+      "verify": { "command": "node --import ./scripts/register-ts-loader.mjs scripts/rag-eval.mjs" },
+      "refresh": { "command": "node --import ./scripts/register-ts-loader.mjs scripts/rag-eval.mjs" },
+      "ci": { "command": "node --import ./scripts/register-ts-loader.mjs scripts/rag-eval.mjs" },
+      "docs": ["TESTING.md", "docs/TESTING-BASELINES.md"],
+      "failureMode": "Recall, precision, MRR, and nDCG must stay at or above the seeded fixture floor.",
+      "review": "Hand-edit corpus and relevance judgments, then reseed floors only with a documented retrieval tradeoff or improvement."
+    },
+    {
+      "id": "route-performance-baseline",
+      "title": "Route Performance Baseline",
+      "kind": "runtime-performance",
+      "owner": "Frontend QA",
+      "storage": "committed",
+      "paths": [{ "path": "tests/performance-baseline.json", "type": "file" }],
+      "verify": { "command": "npm run perf:regression" },
+      "refresh": { "command": "UPDATE_PERF_BASELINES=1 npm run perf:regression" },
+      "ci": { "command": "npm run perf:regression" },
+      "docs": ["TESTING.md", "docs/TESTING-BASELINES.md"],
+      "failureMode": "Cold and warm route metrics must stay within the committed navigation/FCP/LCP/CLS/TBT budgets.",
+      "review": "Refresh only after stable CI evidence and keep dist/reports/perf-regression.json with the review notes."
+    },
+    {
+      "id": "source-grounded-answer-fixture",
+      "title": "Source Grounded Answer Fixture",
+      "kind": "grounding-golden",
+      "owner": "AI quality",
+      "storage": "committed",
+      "paths": [{ "path": "tests/rag-fixtures/source-grounded-answers.json", "type": "file" }],
+      "verify": { "command": "node --import ./scripts/register-ts-loader.mjs scripts/source-grounded-answer-eval.mjs" },
+      "refresh": { "command": "node --import ./scripts/register-ts-loader.mjs scripts/source-grounded-answer-eval.mjs" },
+      "ci": { "command": "node --import ./scripts/register-ts-loader.mjs scripts/source-grounded-answer-eval.mjs" },
+      "docs": ["TESTING.md", "docs/TESTING-BASELINES.md"],
+      "failureMode": "Grounded CFA and LSAT answers must cite entailed chunks, and unsupported cross-domain answers must be rejected.",
+      "review": "Hand-edit fixture cases and chunks together; keep unsupported negative cases in the same fixture."
+    },
+    {
+      "id": "visual-regression-baselines",
+      "title": "Visual Regression PNG Baselines",
+      "kind": "visual-png",
+      "owner": "Frontend QA",
+      "storage": "approved-ci-cache",
+      "paths": [{ "path": "tests/visual-baselines", "type": "directory", "required": false, "minFiles": 20 }],
+      "verify": { "command": "npm run visual:regression" },
+      "refresh": { "command": "UPDATE_VISUAL_BASELINES=1 npm run visual:regression" },
+      "ci": { "command": "npm run visual:regression" },
+      "docs": ["TESTING.md", "docs/TESTING-BASELINES.md"],
+      "failureMode": "Missing route/theme/viewport PNG baselines fail closed inside visual regression unless update mode is explicit.",
+      "review": "Review dist/reports/visual screenshots and diffs before approving the Linux baseline cache refresh."
+    }
+  ]
+}

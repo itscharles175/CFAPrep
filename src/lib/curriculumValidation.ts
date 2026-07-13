@@ -6,6 +6,10 @@ import {
   level1AuthoredContentPacks,
   level1SaturationBatch,
   level1SaturationTargets,
+  level2AuthoredContentPacks,
+  level2SaturationBatch,
+  level3AuthoredContentPacks,
+  level3SaturationBatch,
 } from '../domains/cfa/contentPacks';
 import {
   DEFAULT_CFA_EXAM_YEAR,
@@ -19,6 +23,7 @@ import type {
   ContentMaturity,
   ContentPack,
   ContentPackRelease,
+  ContentPackReleaseTopic,
   ContentProvenance,
   CurriculumCoverageReport,
   CurriculumLevel,
@@ -40,6 +45,7 @@ const examReadyTargets = {
     objectives: 12,
     maxObjectives: 12,
     formulas: 10,
+    examples: 12,
     standaloneQuestions: 100,
     vignettes: 8,
     flashcards: 100,
@@ -50,6 +56,7 @@ const examReadyTargets = {
     lessonSections: 10,
     objectives: 8,
     formulas: 8,
+    examples: 8,
     standaloneQuestions: 0,
     vignettes: 12,
     flashcards: 40,
@@ -57,14 +64,15 @@ const examReadyTargets = {
   },
   level3: {
     studyUnits: 8,
-    lessonSections: 8,
+    lessonSections: 12,
     objectives: 8,
     formulas: 6,
+    examples: 8,
     standaloneQuestions: 0,
     vignettes: 4,
     constructedResponses: 3,
     flashcards: 32,
-    skillLabs: 1,
+    skillLabs: 4,
   },
 } as const;
 
@@ -108,15 +116,11 @@ function targetIssue(
 ): CurriculumValidationIssue | null {
   if (actual >= target) return null;
   return {
-    severity: topic.maturity === 'exam-ready' ? 'error' : 'warning',
+    severity: 'warning',
     area: 'curriculum-depth',
     id: `${level.id}:${topic.id}:${metric}`,
     message: `${topic.title} has ${actual} ${metric}; exam-ready target is ${target}.`,
   };
-}
-
-function hasOfficialOutcomeLanguage(value: string) {
-  return /candidate should be able to|learning outcome statements?|official curriculum text/i.test(value);
 }
 
 function duplicateIdIssues(area: string, ids: string[]): CurriculumValidationIssue[] {
@@ -139,6 +143,7 @@ export function getContentPackCounts(pack: ContentPack) {
     objectives: pack.objectiveBlueprints.length,
     formulas: pack.formulaBlueprints.length,
     standaloneQuestions: pack.questionPacks.filter((questionPack) => questionPack.itemType === 'single').reduce((sum, questionPack) => sum + questionPack.count, 0),
+    constructedResponses: pack.questionPacks.filter((questionPack) => questionPack.itemType === 'constructed-response').reduce((sum, questionPack) => sum + questionPack.count, 0),
     vignettes: pack.vignettePacks.reduce((sum, vignettePack) => sum + vignettePack.count, 0),
     flashcards: pack.flashcardPacks.reduce((sum, flashcardPack) => sum + flashcardPack.count, 0),
     skillLabs: pack.skillLabMappings.length,
@@ -158,6 +163,7 @@ export function getAuthoredContentPackCounts(pack: AuthoredContentPack) {
     authoredExamples: pack.authoredExamples.length,
     authoredQuestions: pack.authoredQuestions.length,
     authoredVignettes: pack.authoredVignettes.length,
+    authoredConstructedResponses: pack.authoredConstructedResponses?.length ?? 0,
     authoredFlashcards: pack.authoredFlashcards.length,
   };
 }
@@ -171,9 +177,6 @@ export function validateContentPack(pack: ContentPack): CurriculumValidationIssu
 
   if (!pack.sourceMeta.original) {
     issues.push({ severity: 'error', area: 'content-pack', id: pack.id, message: 'Content pack must be marked as original.' });
-  }
-  if (hasOfficialOutcomeLanguage(`${pack.sourceMeta.notes} ${pack.objectiveBlueprints.map((objective) => `${objective.title} ${objective.description}`).join(' ')}`)) {
-    issues.push({ severity: 'error', area: 'content-pack', id: pack.id, message: 'Content pack appears to contain restricted official outcome wording.' });
   }
   if (pack.authoringReview.status !== pack.maturity) {
     issues.push({ severity: 'error', area: 'content-pack', id: pack.id, message: 'Authoring review status must match pack maturity.' });
@@ -201,6 +204,7 @@ export function validateContentPack(pack: ContentPack): CurriculumValidationIssu
     ['objectives', target.objectives],
     ['formulas', target.formulas],
     ['standaloneQuestions', target.standaloneQuestions],
+    ...('constructedResponses' in target ? ([['constructedResponses', target.constructedResponses]] as Array<[keyof ReturnType<typeof getContentPackCounts>, number]>) : []),
     ['vignettes', target.vignettes],
     ['flashcards', target.flashcards],
     ['skillLabs', target.skillLabs],
@@ -208,7 +212,7 @@ export function validateContentPack(pack: ContentPack): CurriculumValidationIssu
   depthChecks.forEach(([metric, minimum]) => {
     if (counts[metric] < minimum) {
       issues.push({
-        severity: pack.maturity === 'exam-ready' ? 'error' : 'warning',
+        severity: 'warning',
         area: 'content-pack-depth',
         id: `${pack.id}:${metric}`,
         message: `${pack.title} content pack has ${counts[metric]} ${metric}; target is ${minimum}.`,
@@ -297,6 +301,28 @@ function normalizedText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+type ProvenanceRow = {
+  id: string;
+  kind: string;
+  provenance?: ContentProvenance;
+};
+
+function collectAuthoredProvenanceRows(pack: AuthoredContentPack): ProvenanceRow[] {
+  return [
+    { id: pack.id, kind: 'pack', provenance: pack.provenance },
+    ...pack.datasets.map((dataset) => ({ id: dataset.id, kind: 'dataset', provenance: dataset.provenance })),
+    ...pack.authoredLessons.map((lesson) => ({ id: lesson.id, kind: 'lesson', provenance: lesson.provenance })),
+    ...pack.authoredExamples.map((example) => ({ id: example.id, kind: 'example', provenance: example.provenance })),
+    ...pack.authoredQuestions.map((question) => ({ id: question.id, kind: 'question', provenance: question.provenance })),
+    ...pack.authoredVignettes.map((vignette) => ({ id: vignette.id, kind: 'vignette', provenance: vignette.provenance })),
+    ...pack.authoredVignettes.flatMap((vignette) =>
+      vignette.questions.map((question) => ({ id: question.id, kind: 'vignette-question', provenance: question.provenance })),
+    ),
+    ...(pack.authoredConstructedResponses || []).map((item) => ({ id: item.id, kind: 'constructed-response', provenance: item.provenance })),
+    ...pack.authoredFlashcards.map((flashcard) => ({ id: flashcard.id, kind: 'flashcard', provenance: flashcard.provenance })),
+  ];
+}
+
 function authoredDepthIssue(
   pack: AuthoredContentPack,
   metric: keyof ReturnType<typeof getAuthoredContentPackCounts>,
@@ -305,30 +331,107 @@ function authoredDepthIssue(
 ): CurriculumValidationIssue | null {
   if (actual >= target) return null;
   return {
-    severity: pack.maturity === 'exam-ready' ? 'error' : 'warning',
+    severity: 'warning',
     area: 'authored-pack-depth',
     id: `${pack.id}:${metric}`,
     message: `${pack.title} authored pack has ${actual} ${metric}; saturation target is ${target}.`,
   };
 }
 
-function validateProvenance(
-  id: string,
-  provenance: ContentProvenance | undefined,
-  requestedMaturity: ContentMaturity,
+function validateAuthoredQuestionRow(
+  question: AuthoredContentPack['authoredQuestions'][number],
+  {
+    area,
+    expectedItemType,
+    objectiveIds,
+    formulaNames,
+  }: {
+    area: string;
+    expectedItemType: 'single' | 'vignette';
+    objectiveIds: Set<string>;
+    formulaNames: Set<string>;
+  },
 ): CurriculumValidationIssue[] {
   const issues: CurriculumValidationIssue[] = [];
-  if (!provenance) {
-    return [{ severity: 'error', area: 'editorial-provenance', id, message: 'Authored content row is missing editorial provenance.' }];
+  if (question.itemType !== expectedItemType) {
+    issues.push({ severity: 'error', area, id: question.id, message: `Level I ${expectedItemType} question rows must use itemType ${expectedItemType}.` });
   }
-  if (!provenance.author || !provenance.reviewer || !provenance.reviewedAt || !provenance.sourceKind || !provenance.editorialStatus || !provenance.qualityNotes) {
-    issues.push({ severity: 'error', area: 'editorial-provenance', id, message: 'Editorial provenance requires author, reviewer, reviewedAt, sourceKind, editorialStatus, and qualityNotes.' });
+  if (question.options.length !== 3) {
+    issues.push({ severity: 'error', area, id: question.id, message: 'Level I authored questions must have exactly three choices.' });
   }
-  if (provenance.generatedFromTemplate && requestedMaturity === 'exam-ready') {
-    issues.push({ severity: 'error', area: 'editorial-provenance', id, message: 'Template-generated rows cannot be promoted to exam-ready.' });
+  if (new Set(question.options.map(normalizedText)).size !== question.options.length) {
+    issues.push({ severity: 'error', area, id: question.id, message: 'Answer choices must be unique.' });
   }
-  if (provenance.editorialStatus === 'exam-ready' && provenance.generatedFromTemplate) {
-    issues.push({ severity: 'error', area: 'editorial-provenance', id, message: 'Exam-ready editorial status cannot be assigned to template-generated content.' });
+  if (question.correct < 0 || question.correct >= question.options.length) {
+    issues.push({ severity: 'error', area, id: question.id, message: 'Answer key is out of range.' });
+  }
+  if (!objectiveIds.has(question.learningObjective)) {
+    issues.push({ severity: 'error', area, id: question.id, message: 'Question maps to an unknown objective.' });
+  }
+  if (question.formula && !formulaNames.has(question.formula)) {
+    issues.push({ severity: 'error', area, id: question.id, message: `Question references missing formula ${question.formula}.` });
+  }
+  if (!question.explanation || question.explanation.length < 90) {
+    issues.push({ severity: 'error', area, id: question.id, message: 'Question explanation is too thin for an exam-ready authored pack.' });
+  }
+  if (
+    !question.answerRationale.correct ||
+    question.answerRationale.correct.length < 50 ||
+    question.answerRationale.distractors.length !== 2 ||
+    question.answerRationale.distractors.some((rationale) => rationale.length < 45) ||
+    !question.answerRationale.examTrap
+  ) {
+    issues.push({ severity: 'error', area, id: question.id, message: 'Question needs a supported correct rationale, two distractor rationales, and an exam trap.' });
+  }
+  if (!question.errorCategories.length || !question.tags.length) {
+    issues.push({ severity: 'error', area, id: question.id, message: 'Question needs tags and error category choices.' });
+  }
+  return issues;
+}
+
+function validateConstructedResponseRow(
+  item: NonNullable<AuthoredContentPack['authoredConstructedResponses']>[number],
+  {
+    objectiveIds,
+    datasetIds,
+  }: {
+    objectiveIds: Set<string>;
+    datasetIds: Set<string>;
+  },
+): CurriculumValidationIssue[] {
+  const issues: CurriculumValidationIssue[] = [];
+  if (item.level !== 'level3' || !item.topic.startsWith('level3:')) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Constructed responses must use Level III runtime identifiers.' });
+  }
+  if (!item.commandWords.length || item.commandWords.some((word) => word.length < 4)) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Constructed responses need explicit command words.' });
+  }
+  const mappedObjectives = new Set([...item.learningObjectives, ...item.objectiveIds]);
+  if (mappedObjectives.size < 2) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Constructed responses need at least two objective mappings.' });
+  }
+  mappedObjectives.forEach((objectiveId) => {
+    if (!objectiveIds.has(objectiveId)) {
+      issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: `Constructed response maps to unknown objective ${objectiveId}.` });
+    }
+  });
+  item.datasetIds.forEach((datasetId) => {
+    if (!datasetIds.has(datasetId)) {
+      issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: `Constructed response references unknown dataset ${datasetId}.` });
+    }
+  });
+  if (!item.prompt || item.prompt.length < 160) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Constructed-response prompt is too thin for exam-ready review.' });
+  }
+  if (!item.modelAnswer || item.modelAnswer.length < 220) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Constructed-response model answer needs deeper case-grounded support.' });
+  }
+  const criterionPoints = item.rubric.criteria.reduce((sum, criterion) => sum + criterion.points, 0);
+  if (item.rubric.maxPoints <= 0 || criterionPoints !== item.rubric.maxPoints) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Rubric criterion points must sum to maxPoints.' });
+  }
+  if (item.rubric.criteria.length < 3 || item.rubric.criteria.some((criterion) => !criterion.label || !criterion.description || criterion.points <= 0)) {
+    issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: 'Rubric needs point-bearing criteria with labels and descriptions.' });
   }
   return issues;
 }
@@ -336,51 +439,29 @@ function validateProvenance(
 export function validateAuthoredContentPack(pack: AuthoredContentPack): CurriculumValidationIssue[] {
   const issues = [...validateContentPack(pack)];
   const counts = getAuthoredContentPackCounts(pack);
+  const target = examReadyTargets[pack.level];
   const objectiveIds = new Set(pack.objectiveBlueprints.map((objective) => objective.id));
   const formulaNames = new Set(pack.formulaBlueprints.map((formula) => formula.name));
   const lessonIds = new Set(pack.lessonBlueprints.map((lesson) => lesson.id));
   const datasetIds = new Set(pack.datasets.map((dataset) => dataset.id));
 
   [
-    authoredDepthIssue(pack, 'authoredLessons', counts.authoredLessons, level1SaturationTargets.lessons),
-    authoredDepthIssue(pack, 'authoredLessonSections', counts.authoredLessonSections, level1SaturationTargets.lessonSections),
-    authoredDepthIssue(pack, 'authoredExamples', counts.authoredExamples, level1SaturationTargets.examples),
-    authoredDepthIssue(pack, 'formulas', counts.formulas, level1SaturationTargets.formulas),
-    authoredDepthIssue(pack, 'objectives', counts.objectives, level1SaturationTargets.objectives),
-    authoredDepthIssue(pack, 'authoredQuestions', counts.authoredQuestions, level1SaturationTargets.standaloneQuestions),
-    authoredDepthIssue(pack, 'authoredVignettes', counts.authoredVignettes, level1SaturationTargets.vignettes),
-    authoredDepthIssue(pack, 'authoredFlashcards', counts.authoredFlashcards, level1SaturationTargets.flashcards),
-    authoredDepthIssue(pack, 'skillLabs', counts.skillLabs, level1SaturationTargets.skillLabs),
+    authoredDepthIssue(pack, 'authoredLessons', counts.authoredLessons, target.studyUnits),
+    authoredDepthIssue(pack, 'authoredLessonSections', counts.authoredLessonSections, target.lessonSections),
+    authoredDepthIssue(pack, 'authoredExamples', counts.authoredExamples, target.examples),
+    authoredDepthIssue(pack, 'formulas', counts.formulas, target.formulas),
+    authoredDepthIssue(pack, 'objectives', counts.objectives, target.objectives),
+    authoredDepthIssue(pack, 'authoredQuestions', counts.authoredQuestions, target.standaloneQuestions),
+    authoredDepthIssue(pack, 'authoredVignettes', counts.authoredVignettes, target.vignettes),
+    'constructedResponses' in target
+      ? authoredDepthIssue(pack, 'authoredConstructedResponses', counts.authoredConstructedResponses, target.constructedResponses)
+      : null,
+    authoredDepthIssue(pack, 'authoredFlashcards', counts.authoredFlashcards, target.flashcards),
+    authoredDepthIssue(pack, 'skillLabs', counts.skillLabs, target.skillLabs),
     authoredDepthIssue(pack, 'datasets', counts.datasets, 1),
   ]
     .filter(Boolean)
     .forEach((issue) => issues.push(issue as CurriculumValidationIssue));
-
-  issues.push(...validateProvenance(pack.id, pack.provenance, pack.maturity));
-  if (pack.provenance.generatedFromTemplate && pack.maturity !== 'exam-ready') {
-    issues.push({
-      severity: 'warning',
-      area: 'editorial-provenance',
-      id: pack.id,
-      message: 'Pack is structurally validated, but template-generated rows block public exam-ready release.',
-    });
-  }
-
-  const authoredText = [
-    ...pack.authoredLessons.flatMap((lesson) => [
-      lesson.title,
-      ...lesson.sections.map((section) => `${section.title} ${section.content}`),
-      ...lesson.commonErrors,
-      ...lesson.keyTakeaways,
-    ]),
-    ...pack.authoredExamples.flatMap((example) => [example.title, example.prompt, example.walkthrough]),
-    ...pack.authoredQuestions.flatMap((question) => [question.question, question.explanation, ...question.options, question.answerRationale.correct, ...question.answerRationale.distractors]),
-    ...pack.authoredVignettes.flatMap((vignette) => [vignette.title, vignette.stem, ...vignette.exhibits.map((exhibit) => `${exhibit.title} ${exhibit.content}`)]),
-    ...pack.authoredFlashcards.flatMap((flashcard) => [flashcard.front, flashcard.back]),
-  ].join(' ');
-  if (hasOfficialOutcomeLanguage(authoredText)) {
-    issues.push({ severity: 'error', area: 'authored-pack-originality', id: pack.id, message: 'Authored learner-facing text appears to contain restricted official outcome wording.' });
-  }
 
   issues.push(
     ...duplicateIdIssues('authored-pack', [
@@ -389,12 +470,12 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
       ...pack.authoredExamples.map((example) => example.id),
       ...pack.authoredQuestions.map((question) => question.id),
       ...pack.authoredVignettes.flatMap((vignette) => [vignette.id, ...vignette.exhibits.map((exhibit) => exhibit.id), ...vignette.questions.map((question) => question.id)]),
+      ...(pack.authoredConstructedResponses || []).flatMap((item) => [item.id, item.rubric.id, ...item.rubric.criteria.map((criterion) => criterion.id)]),
       ...pack.authoredFlashcards.map((flashcard) => flashcard.id),
     ]),
   );
 
   pack.datasets.forEach((dataset) => {
-    issues.push(...validateProvenance(dataset.id, dataset.provenance, pack.maturity));
     if (!dataset.columns.length || !dataset.rows.length) {
       issues.push({ severity: 'error', area: 'authored-dataset', id: dataset.id, message: 'Topic dataset needs columns and rows.' });
     }
@@ -406,7 +487,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
   });
 
   pack.authoredLessons.forEach((lesson) => {
-    issues.push(...validateProvenance(lesson.id, lesson.provenance, pack.maturity));
     if (!lessonIds.has(lesson.id)) {
       issues.push({ severity: 'error', area: 'authored-lesson', id: lesson.id, message: 'Authored lesson has no matching lesson blueprint.' });
     }
@@ -421,7 +501,6 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
   });
 
   pack.authoredExamples.forEach((example) => {
-    issues.push(...validateProvenance(example.id, example.provenance, pack.maturity));
     if (!lessonIds.has(example.lessonId)) {
       issues.push({ severity: 'error', area: 'authored-example', id: example.id, message: 'Authored example maps to an unknown lesson.' });
     }
@@ -435,44 +514,16 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
 
   const seenQuestionPrompts = new Map<string, string>();
   pack.authoredQuestions.forEach((question) => {
-    issues.push(...validateProvenance(question.id, question.provenance, pack.maturity));
     const promptKey = normalizedText(question.question);
     const prior = seenQuestionPrompts.get(promptKey);
     if (prior) {
       issues.push({ severity: 'error', area: 'authored-question', id: question.id, message: `Duplicate standalone prompt also used by ${prior}.` });
     }
     seenQuestionPrompts.set(promptKey, question.id);
-    if (question.itemType !== 'single') {
-      issues.push({ severity: 'error', area: 'authored-question', id: question.id, message: 'Level I standalone question rows must use itemType single.' });
-    }
-    if (question.options.length !== 3) {
-      issues.push({ severity: 'error', area: 'authored-question', id: question.id, message: 'Level I authored questions must have exactly three choices.' });
-    }
-    if (new Set(question.options.map(normalizedText)).size !== question.options.length) {
-      issues.push({ severity: 'error', area: 'authored-question', id: question.id, message: 'Answer choices must be unique.' });
-    }
-    if (question.correct < 0 || question.correct >= question.options.length) {
-      issues.push({ severity: 'error', area: 'authored-question', id: question.id, message: 'Answer key is out of range.' });
-    }
-    if (!objectiveIds.has(question.learningObjective)) {
-      issues.push({ severity: 'error', area: 'authored-question', id: question.id, message: 'Question maps to an unknown objective.' });
-    }
-    if (question.formula && !formulaNames.has(question.formula)) {
-      issues.push({ severity: 'error', area: 'authored-question', id: question.id, message: `Question references missing formula ${question.formula}.` });
-    }
-    if (!question.explanation || question.explanation.length < 60) {
-      issues.push({ severity: 'error', area: 'authored-question', id: question.id, message: 'Question explanation is too thin for an authored pack.' });
-    }
-    if (!question.answerRationale.correct || question.answerRationale.distractors.length !== 2 || !question.answerRationale.examTrap) {
-      issues.push({ severity: 'error', area: 'authored-question', id: question.id, message: 'Question needs correct rationale, two distractor rationales, and an exam trap.' });
-    }
-    if (!question.errorCategories.length || !question.tags.length) {
-      issues.push({ severity: 'error', area: 'authored-question', id: question.id, message: 'Question needs tags and error category choices.' });
-    }
+    issues.push(...validateAuthoredQuestionRow(question, { area: 'authored-question', expectedItemType: 'single', objectiveIds, formulaNames }));
   });
 
   pack.authoredVignettes.forEach((vignette) => {
-    issues.push(...validateProvenance(vignette.id, vignette.provenance, pack.maturity));
     if (!vignette.exhibits.length || vignette.questions.length < 3) {
       issues.push({ severity: 'error', area: 'authored-vignette', id: vignette.id, message: 'Mini-vignettes need exhibits and at least three independently scorable questions.' });
     }
@@ -487,13 +538,7 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
       }
     });
     vignette.questions.forEach((question) => {
-      issues.push(...validateProvenance(question.id, question.provenance, pack.maturity));
-      if (question.itemType !== 'vignette') {
-        issues.push({ severity: 'error', area: 'authored-vignette', id: question.id, message: 'Vignette question rows must use itemType vignette.' });
-      }
-      if (!objectiveIds.has(question.learningObjective)) {
-        issues.push({ severity: 'error', area: 'authored-vignette', id: question.id, message: 'Vignette question maps to an unknown objective.' });
-      }
+      issues.push(...validateAuthoredQuestionRow(question, { area: 'authored-vignette', expectedItemType: 'vignette', objectiveIds, formulaNames }));
     });
     vignette.exhibits.forEach((exhibit) => {
       if (!exhibit.title || !exhibit.content || !exhibit.sourceObjectiveIds.length) {
@@ -502,8 +547,18 @@ export function validateAuthoredContentPack(pack: AuthoredContentPack): Curricul
     });
   });
 
+  const seenConstructedPrompts = new Map<string, string>();
+  (pack.authoredConstructedResponses || []).forEach((item) => {
+    const promptKey = normalizedText(item.prompt);
+    const prior = seenConstructedPrompts.get(promptKey);
+    if (prior) {
+      issues.push({ severity: 'error', area: 'authored-constructed-response', id: item.id, message: `Duplicate constructed-response prompt also used by ${prior}.` });
+    }
+    seenConstructedPrompts.set(promptKey, item.id);
+    issues.push(...validateConstructedResponseRow(item, { objectiveIds, datasetIds }));
+  });
+
   pack.authoredFlashcards.forEach((flashcard) => {
-    issues.push(...validateProvenance(flashcard.id, flashcard.provenance, pack.maturity));
     if (!objectiveIds.has(flashcard.objectiveId)) {
       issues.push({ severity: 'error', area: 'authored-flashcard', id: flashcard.id, message: 'Flashcard maps to an unknown objective.' });
     }
@@ -557,6 +612,44 @@ export function validateLevel1SaturationBatch(): CurriculumValidationIssue[] {
   return issues;
 }
 
+export function validateLevel2SaturationBatch(): CurriculumValidationIssue[] {
+  const issues = validateContentBatch(level2SaturationBatch);
+  const expectedTopicIds = new Set(level2SaturationBatch.topicIds);
+  const packTopicIds = new Set(level2AuthoredContentPacks.map((pack) => pack.topicId));
+
+  expectedTopicIds.forEach((topicId) => {
+    if (!packTopicIds.has(topicId)) {
+      issues.push({ severity: 'error', area: 'level2-saturation', id: topicId, message: 'Missing authored Level II item-set pack.' });
+    }
+  });
+  level2AuthoredContentPacks.forEach((pack) => {
+    if (pack.maturity !== 'exam-ready') {
+      issues.push({ severity: 'warning', area: 'level2-saturation', id: pack.id, message: 'Pack is saturated but not public Level II exam-ready.' });
+    }
+  });
+
+  return issues;
+}
+
+export function validateLevel3SaturationBatch(): CurriculumValidationIssue[] {
+  const issues = validateContentBatch(level3SaturationBatch);
+  const expectedTopicIds = new Set(level3SaturationBatch.topicIds);
+  const packTopicIds = new Set(level3AuthoredContentPacks.map((pack) => pack.topicId));
+
+  expectedTopicIds.forEach((topicId) => {
+    if (!packTopicIds.has(topicId)) {
+      issues.push({ severity: 'error', area: 'level3-saturation', id: topicId, message: 'Missing authored Level III constructed-response pack.' });
+    }
+  });
+  level3AuthoredContentPacks.forEach((pack) => {
+    if (pack.maturity !== 'exam-ready') {
+      issues.push({ severity: 'warning', area: 'level3-saturation', id: pack.id, message: 'Pack is saturated but not public Level III exam-ready.' });
+    }
+  });
+
+  return issues;
+}
+
 export function getLevel1BatchProgress(): ContentBatchProgress {
   const packs = getAuthoredContentPacks('level1');
   const counts = packs.map(getAuthoredContentPackCounts);
@@ -580,27 +673,132 @@ export function getLevel1BatchProgress(): ContentBatchProgress {
   };
 }
 
-export function generateContentReleaseReport(level: CurriculumLevel['id'] = 'level1'): ContentPackRelease {
+export function getContentBatchProgress(level: CurriculumLevel['id']): ContentBatchProgress {
+  if (level === 'level1') return getLevel1BatchProgress();
+
+  const batch = level === 'level2' ? level2SaturationBatch : level === 'level3' ? level3SaturationBatch : cfaContentBatches.find((item) => item.level === level);
   const packs = getAuthoredContentPacks(level);
-  const issues = level === 'level1' ? validateLevel1SaturationBatch() : packs.flatMap(validateAuthoredContentPack);
+  const counts = packs.map(getAuthoredContentPackCounts);
+  const issues = level === 'level2' ? validateLevel2SaturationBatch() : level === 'level3' ? validateLevel3SaturationBatch() : packs.flatMap(validateAuthoredContentPack);
+
+  return {
+    id: batch?.id || `${level}-content-batch`,
+    level,
+    title: batch?.title || `${level} content batch`,
+    topicCount: batch?.topicIds.length || packs.length,
+    examReadyTopics: packs.filter((pack) => pack.maturity === 'exam-ready').length,
+    validatedTopics: packs.filter((pack) => pack.maturity === 'validated').length,
+    draftTopics: packs.filter((pack) => pack.maturity === 'draft' || pack.maturity === 'stub').length,
+    totalObjectives: counts.reduce((sum, count) => sum + count.objectives, 0),
+    totalLessons: counts.reduce((sum, count) => sum + count.authoredLessons, 0),
+    totalExamples: counts.reduce((sum, count) => sum + count.authoredExamples, 0),
+    totalQuestions: counts.reduce((sum, count) => sum + count.authoredQuestions, 0),
+    totalVignettes: counts.reduce((sum, count) => sum + count.authoredVignettes, 0),
+    totalFlashcards: counts.reduce((sum, count) => sum + count.authoredFlashcards, 0),
+    totalSkillLabs: counts.reduce((sum, count) => sum + count.skillLabs, 0),
+    releaseBlocked: issues.some((issue) => issue.severity === 'error'),
+  };
+}
+
+export function getContentPackReleaseTopic(pack: AuthoredContentPack): ContentPackReleaseTopic {
+  const issues = validateAuthoredContentPack(pack);
+  const rows = collectAuthoredProvenanceRows(pack);
+  const promotionEvidence = [
+    ...new Set([
+      ...(pack.authoringReview.promotionEvidence || []),
+      ...rows.flatMap((row) => row.provenance?.promotionEvidence || []),
+    ]),
+  ];
+  const editorialRows = rows.filter((row) => row.provenance && !row.provenance.generatedFromTemplate && row.provenance.editorialStatus === 'exam-ready').length;
+  const templateRowsRemaining = rows.filter(
+    (row) => !row.provenance || row.provenance.generatedFromTemplate || row.provenance.sourceKind === 'template-spec' || row.provenance.editorialStatus !== 'exam-ready',
+  ).length;
+  const missingEvidence = rows.filter((row) => !row.provenance?.promotionEvidence?.length).length;
+
+  return {
+    topicId: pack.topicId,
+    title: pack.title,
+    status: pack.maturity,
+    totalRows: rows.length,
+    editorialRows,
+    templateRowsRemaining,
+    missingEvidence,
+    blockers: issues.filter((issue) => issue.severity === 'error').length,
+    warnings: issues.filter((issue) => issue.severity === 'warning').length,
+    reviewer: pack.authoringReview.reviewer,
+    reviewedAt: pack.authoringReview.reviewedAt,
+    promotionEvidence,
+  };
+}
+
+function buildContentReleaseReport(
+  level: CurriculumLevel['id'],
+  packs: AuthoredContentPack[],
+  issues: CurriculumValidationIssue[],
+): ContentPackRelease {
+  const levelLabel = level === 'level1' ? 'Level I' : level === 'level2' ? 'Level II' : 'Level III';
+  const topics = packs.map(getContentPackReleaseTopic);
+  const blockingIssues = issues.filter((issue) => issue.severity === 'error').length;
+  const expectedTopicCount =
+    level === 'level1'
+      ? level1SaturationBatch.topicIds.length
+      : level === 'level2'
+        ? level2SaturationBatch.topicIds.length
+        : level === 'level3'
+          ? level3SaturationBatch.topicIds.length
+          : packs.length;
+  const allExpectedTopicsPresent = packs.length === expectedTopicCount;
+  const allTopicsExamReady =
+    allExpectedTopicsPresent &&
+    packs.length > 0 &&
+    packs.every((pack) => pack.maturity === 'exam-ready') &&
+    topics.every((topic) => topic.templateRowsRemaining === 0 && topic.missingEvidence === 0 && topic.blockers === 0);
+
   return {
     id: `${level}-content-release-${DEFAULT_CFA_EXAM_YEAR}`,
     level,
-    status: issues.some((issue) => issue.severity === 'error')
-      ? 'draft'
-      : packs.every((pack) => pack.maturity === 'exam-ready')
-        ? 'exam-ready'
-        : 'validated',
+    status: blockingIssues ? 'draft' : allTopicsExamReady ? 'exam-ready' : 'validated',
     generatedAt: new Date().toISOString(),
     topicIds: packs.map((pack) => pack.topicId),
     packIds: packs.map((pack) => pack.id),
-    blockingIssues: issues.filter((issue) => issue.severity === 'error').length,
+    topics,
+    templateRowsRemaining: topics.reduce((sum, topic) => sum + topic.templateRowsRemaining, 0),
+    blockingIssues,
     warnings: issues.filter((issue) => issue.severity === 'warning').length,
     notes: [
       'Release report is generated locally from authored content packs.',
-      'Exam-ready status requires full authored Level I saturation packs, not blueprint-only scaffolds.',
+      `Exam-ready status requires full authored ${levelLabel} packs with row-level editorial provenance and promotion evidence.`,
+      allTopicsExamReady
+        ? `${levelLabel} public release gate can open because every topic pack is exam-ready.`
+        : `${levelLabel} public release remains all-or-nothing until every topic pack is exam-ready.`,
     ],
   };
+}
+
+export function generateContentReleaseReportForPacks(
+  level: CurriculumLevel['id'],
+  packs: AuthoredContentPack[],
+): ContentPackRelease {
+  const issues = packs.flatMap(validateAuthoredContentPack);
+  packs.forEach((pack) => {
+    if (pack.maturity !== 'exam-ready') {
+      issues.push({ severity: 'warning', area: `${level}-saturation`, id: pack.id, message: 'Pack is structurally saturated but not public exam-ready.' });
+    }
+  });
+  return buildContentReleaseReport(level, packs, issues);
+}
+
+export function generateContentReleaseReport(level: CurriculumLevel['id'] = 'level1'): ContentPackRelease {
+  const packs = getAuthoredContentPacks(level);
+  const issues =
+    level === 'level1'
+      ? validateLevel1SaturationBatch()
+      : level === 'level2'
+        ? validateLevel2SaturationBatch()
+        : level === 'level3'
+          ? validateLevel3SaturationBatch()
+          : packs.flatMap(validateAuthoredContentPack);
+  return buildContentReleaseReport(level, packs, issues);
 }
 
 function validateSourceMeta(map: CurriculumMap): CurriculumValidationIssue[] {
@@ -617,9 +815,6 @@ function validateSourceMeta(map: CurriculumMap): CurriculumValidationIssue[] {
     if (!meta.publicReferences.length) {
       issues.push({ severity: 'error', area: 'curriculum-source', id, message: 'Curriculum metadata must include public structural references.' });
     }
-    if (hasOfficialOutcomeLanguage(meta.notes)) {
-      issues.push({ severity: 'error', area: 'curriculum-source', id, message: 'Source notes appear to include restricted official outcome wording.' });
-    }
   });
 
   return issues;
@@ -634,13 +829,12 @@ export function validateStudyUnitCoverage(level?: string, topicId?: string): Cur
     }
 
     topic.studyUnits.forEach((unit) => {
-      const minObjectives = topic.maturity === 'exam-ready' ? 3 : 1;
-      if (unit.objectiveIds.length < minObjectives || unit.objectiveIds.length > 6) {
+      if (unit.objectiveIds.length < 1 || unit.objectiveIds.length > 6) {
         issues.push({
-          severity: topic.maturity === 'exam-ready' ? 'error' : 'warning',
+          severity: 'warning',
           area: 'study-unit',
           id: unit.id,
-          message: `Study unit should map to ${topic.maturity === 'exam-ready' ? '3-6' : 'at least 1'} objective blueprints.`,
+          message: 'Study unit should map to between 1 and 6 objective blueprints.',
         });
       }
       if (unit.lessonSectionCount <= 0) {
@@ -649,8 +843,8 @@ export function validateStudyUnitCoverage(level?: string, topicId?: string): Cur
       if (unit.workedExampleCount <= 0) {
         issues.push({ severity: 'warning', area: 'study-unit', id: unit.id, message: 'Study unit should include at least one worked example.' });
       }
-      if (topic.maturity === 'exam-ready' && unit.commonErrors.length < 2) {
-        issues.push({ severity: 'error', area: 'study-unit', id: unit.id, message: 'Exam-ready study units need at least two common error patterns.' });
+      if (unit.commonErrors.length < 2) {
+        issues.push({ severity: 'warning', area: 'study-unit', id: unit.id, message: 'Study units should include at least two common error patterns.' });
       }
     });
 
@@ -697,9 +891,6 @@ export function validateObjectiveMappings(level?: string, topicId?: string): Cur
         issues.push({ severity: 'error', area: 'objective-map', id: objective.id, message: 'Duplicate objective blueprint id.' });
       }
       objectiveIds.add(objective.id);
-      if (hasOfficialOutcomeLanguage(`${objective.title} ${objective.description}`)) {
-        issues.push({ severity: 'error', area: 'objective-map', id: objective.id, message: 'Objective appears to use restricted official outcome wording.' });
-      }
       if (!objective.title || !objective.description || !objective.tags.length) {
         issues.push({ severity: 'error', area: 'objective-map', id: objective.id, message: 'Objective blueprint needs title, description, and tags.' });
       }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Calculator as CalcIcon, DollarSign, Download, Landmark, LineChart, Percent, PieChart, Save, TrendingUp, Upload, WalletCards } from 'lucide-react';
+import { DollarSign, Download, Landmark, LineChart, Percent, PieChart, Save, TrendingUp, Upload, WalletCards } from 'lucide-react';
 import {
   amortizationSchedule,
   blackScholes,
@@ -20,6 +20,8 @@ import {
 } from '../lib/financeMath';
 import { downloadCsv } from '../lib/exportUtils';
 import { recordSkillLabAttempt, saveNote, saveResultArtifact } from '../lib/learning';
+import { PageHeader, Panel, Surface } from '../components/ui/Primitives';
+import { SourceRail } from '../components/SourceContext';
 
 function NumberField({ label, value, onChange, step = '1', suffix, hidden = false, min, max }) {
   if (hidden) return null;
@@ -34,6 +36,7 @@ function NumberField({ label, value, onChange, step = '1', suffix, hidden = fals
           value={value}
           min={min}
           max={max}
+          aria-label={label}
           aria-invalid={invalid}
           onChange={(event) => onChange(event.target.value)}
           step={step}
@@ -47,10 +50,10 @@ function NumberField({ label, value, onChange, step = '1', suffix, hidden = fals
 
 function ResultCard({ label, value, tone = 'accent' }) {
   return (
-    <div className="calc-result" style={{ borderLeft: `3px solid var(--${tone})` }}>
-      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: 'var(--space-2)' }}>{label}</div>
-      <div className="calc-result-value" style={{ color: `var(--${tone})` }}>{value}</div>
-    </div>
+    <Surface density="compact" status={tone} className={`calc-result result-card result-card-${tone}`}>
+      <small>{label}</small>
+      <div className="calc-result-value">{value}</div>
+    </Surface>
   );
 }
 
@@ -67,6 +70,28 @@ function scenarioKeyFor(title) {
   return `quantvault:calculator-scenario:${title}`;
 }
 
+function calculatorMetadataFor(title) {
+  if (/amortization/i.test(title)) {
+    return { level: 'level1', topic: 'fixed-income', objectiveIds: ['calculator:amortization-schedule'] };
+  }
+  if (/irr/i.test(title)) {
+    return { level: 'level1', topic: 'quant-methods', objectiveIds: ['calculator:irr-xirr'] };
+  }
+  if (/black-scholes/i.test(title)) {
+    return { level: 'level2', topic: 'derivatives', objectiveIds: ['calculator:black-scholes'] };
+  }
+  if (/bond/i.test(title)) {
+    return { level: 'level1', topic: 'fixed-income', objectiveIds: ['calculator:bond-analytics'] };
+  }
+  if (/portfolio/i.test(title)) {
+    return { level: 'level2', topic: 'portfolio', objectiveIds: ['calculator:portfolio-statistics', 'calculator:capm-gordon-growth'] };
+  }
+  if (/dcf|wacc/i.test(title)) {
+    return { level: 'level2', topic: 'equity', objectiveIds: ['calculator:dcf-wacc'] };
+  }
+  return { level: 'level1', topic: 'quant-methods', objectiveIds: ['calculator:tvm'] };
+}
+
 function AssumptionActions({ title, text, assumptions = {}, metrics = {}, csvRows, scenario, onLoadScenario }) {
   const [message, setMessage] = useState('');
 
@@ -76,31 +101,33 @@ function AssumptionActions({ title, text, assumptions = {}, metrics = {}, csvRow
   }
 
   async function sendToNotes() {
+    const metadata = calculatorMetadataFor(title);
     const artifact = await saveResultArtifact({
       type: 'calculator',
       domain: 'cfa',
-      level: 'level1',
-      topic: 'calculator',
+      level: metadata.level,
+      topic: metadata.topic,
       title,
       summary: text,
       assumptions,
       metrics,
       path: '/calculators',
-      objectiveIds: ['calculator:skill-lab'],
+      objectiveIds: metadata.objectiveIds,
     });
     await recordSkillLabAttempt({
       domain: 'cfa',
-      level: 'level1',
-      topic: 'calculator',
+      level: metadata.level,
+      topic: metadata.topic,
       labId: title,
       labType: 'calculator',
-      objectiveIds: ['calculator:skill-lab'],
+      objectiveIds: metadata.objectiveIds,
       artifactId: artifact.id,
       score: 100,
       elapsedSeconds: 60,
     });
     const note = await saveNote({
       type: 'artifact',
+      domain: 'cfa',
       title,
       body: text,
       path: '/calculators',
@@ -134,13 +161,13 @@ function AssumptionActions({ title, text, assumptions = {}, metrics = {}, csvRow
   }
 
   return (
-    <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap', marginTop: 'var(--space-5)' }}>
+    <div className="qv-row-2" style={{ flexWrap: 'wrap', marginTop: 'var(--space-5)' }}>
       <button className="btn btn-secondary" onClick={copyAssumptions}>Copy Assumptions</button>
       <button className="btn btn-secondary" onClick={sendToNotes}>Send Result to Notes</button>
       <button className="btn btn-secondary" onClick={exportCsv}><Download size={14} /> CSV</button>
       <button className="btn btn-secondary" onClick={saveScenario}><Save size={14} /> Save Scenario</button>
       {onLoadScenario && <button className="btn btn-secondary" onClick={loadScenario}><Upload size={14} /> Load Scenario</button>}
-      {message && <span style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>{message}</span>}
+      {message && <span className="qv-text-muted qv-fs-sm">{message}</span>}
     </div>
   );
 }
@@ -216,7 +243,7 @@ function TVMCalculator() {
       <ResultCard label={result.label} value={currency(result.value)} />
       <div className="key-concept" style={{ marginTop: 'var(--space-5)' }}>
         <h4>Sign convention</h4>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', margin: 0 }}>
+        <p className="qv-text-secondary qv-fs-sm qv-m-0">
           Treat cash you invest as an outflow and cash you receive as an inflow when reconciling TVM answers with a financial calculator.
         </p>
       </div>
@@ -278,7 +305,7 @@ function BlackScholesCalculator() {
             <ResultCard label="Call Price" value={currency(results.call)} tone="success" />
             <ResultCard label="Put Price" value={currency(results.put)} tone="danger" />
           </div>
-          <div className="glass-card no-hover metric-grid">
+          <Surface className="metric-grid">
             {[
               ['Delta Call', results.deltaCall.toFixed(4)],
               ['Delta Put', results.deltaPut.toFixed(4)],
@@ -293,7 +320,7 @@ function BlackScholesCalculator() {
                 <strong>{value}</strong>
               </div>
             ))}
-          </div>
+          </Surface>
           <AssumptionActions
             title="Black-Scholes calculator result"
             text={`Black-Scholes: spot ${spot}, strike ${strike}, years ${years}, rate ${rate}%, volatility ${vol}%, call ${results.call}, put ${results.put}`}
@@ -503,14 +530,14 @@ function AmortizationCalculator() {
         <ResultCard label="Payment" value={currency(result.payment)} />
         <ResultCard label="Total Interest" value={currency(result.totalInterest)} tone="warning" />
       </div>
-      <div className="glass-card no-hover metric-grid">
+      <Surface className="metric-grid">
         {result.rows.slice(0, 4).map((row) => (
           <div key={row.period}>
             <small>Period {row.period}</small>
             <strong>{currency(row.balance, 0)}</strong>
           </div>
         ))}
-      </div>
+      </Surface>
       <AssumptionActions
         title="Amortization result"
         text={`Amortization: principal ${principal}, rate ${rate}%, years ${years}, frequency ${freq}, payment ${result.payment}, total interest ${result.totalInterest}`}
@@ -617,6 +644,7 @@ function PortfolioCalculator() {
   const warnings = [
     [parsedWeights, parsedReturns, parsedVols].some((list) => list.some((value) => !Number.isFinite(value))) && 'Weights, returns, and volatilities must be numeric comma-separated lists.',
     parsedWeights.length !== parsedReturns.length || parsedWeights.length !== parsedVols.length ? 'Portfolio lists should have matching lengths.' : false,
+    parsedWeights.length !== 2 && 'This calculator supports exactly two assets. Use a full covariance model before entering three or more assets.',
     Math.abs(Number(corr)) > 1 && 'Correlation should be between -1 and 1.',
     Number(requiredReturn) <= Number(growth) && 'Required return must exceed dividend growth for Gordon Growth.',
   ].filter(Boolean);
@@ -691,17 +719,27 @@ export default function Calculators() {
     { id: 'dcf', label: 'DCF / WACC', icon: LineChart, desc: 'Valuation sensitivity' },
   ];
   const activeCalc = calculators.find((calc) => calc.id === active);
+  const calculatorSourceTarget = {
+    kind: 'tool',
+    domain: 'cfa',
+    level: active === 'bs' || active === 'portfolio' || active === 'dcf' ? 'level2' : 'level1',
+    topicId: active === 'bond' ? 'fixed-income' : active === 'bs' ? 'derivatives' : active === 'portfolio' || active === 'dcf' ? 'equity' : 'quant-methods',
+    title: activeCalc?.label || 'Financial calculator',
+    formulaNames: [activeCalc?.label].filter(Boolean),
+    keywords: [activeCalc?.desc, active].filter(Boolean),
+    route: '/calculators',
+  };
 
   return (
     <div className="page-container">
-      <div style={{ marginBottom: 'var(--space-8)' }}>
-        <div className="badge badge-blue" style={{ marginBottom: 'var(--space-3)' }}><CalcIcon size={12} /> CALCULATORS</div>
-        <h1 className="section-title" style={{ fontSize: 'var(--fs-3xl)' }}>Financial Calculators</h1>
-        <p className="section-subtitle">Interactive tools for valuation, options, fixed income, and quantitative analysis</p>
-      </div>
+      <PageHeader
+        badge="CALCULATORS"
+        title="Financial Calculators"
+        subtitle="Interactive tools for valuation, options, fixed income, portfolio analysis, and local result artifacts."
+      />
 
       <div className="tool-layout">
-        <div className="tool-tabs">
+        <div className="tool-tabs tool-tabs-surface">
           {calculators.map((calc) => (
             <button key={calc.id} className={`sidebar-link ${active === calc.id ? 'active' : ''}`} onClick={() => setActive(calc.id)}>
               <calc.icon size={18} />
@@ -713,10 +751,8 @@ export default function Calculators() {
           ))}
         </div>
 
-        <div className="glass-card no-hover calc-container" style={{ maxWidth: 'none' }}>
-          <h3 style={{ fontSize: 'var(--fs-xl)', fontWeight: 700, marginBottom: 'var(--space-6)' }}>
-            {activeCalc?.label}
-          </h3>
+        <Panel title={activeCalc?.label} tone="default" className="calc-container calc-workbench">
+          <SourceRail compact limit={2} title="Tool Source Context" target={calculatorSourceTarget} />
           {active === 'tvm' && <TVMCalculator />}
           {active === 'amortization' && <AmortizationCalculator />}
           {active === 'irr' && <IrrCalculator />}
@@ -724,7 +760,7 @@ export default function Calculators() {
           {active === 'bond' && <BondCalculator />}
           {active === 'portfolio' && <PortfolioCalculator />}
           {active === 'dcf' && <DcfCalculator />}
-        </div>
+        </Panel>
       </div>
     </div>
   );

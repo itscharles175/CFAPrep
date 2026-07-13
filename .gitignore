@@ -11,7 +11,40 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+.quantvault/
+*.qvsource
 qa-screenshots/
+spike/
+.claude/worktrees/
+
+# open-notebook PyInstaller sidecar build artifacts (scripts/build-onb-binary.mjs)
+.venv-onb/
+.pyinstaller-build/
+.pyinstaller-dist/
+/open-notebook.spec
+# open-notebook runtime working dir (sqlite checkpoints, tiktoken cache,
+# uploads) — created in cwd when the sidecar binary boots. Root-anchored so it
+# never shadows the tracked src/data/ source.
+/data/
+
+# LSAT (StudyVault) backend sidecar — build venv, PyInstaller artifacts, and
+# the SQLite question bank. The bank is user data / copyrighted content and
+# must NEVER enter git history (it is ~2.4GB live). Source lives in
+# services/lsat-backend/; the DB is created in app-data at runtime.
+.venv-lsat/
+.pyinstaller-lsat-build/
+.pyinstaller-lsat-dist/
+/lsatlab.spec
+services/lsat-backend/**/*.db
+services/lsat-backend/**/*.db-shm
+services/lsat-backend/**/*.db-wal
+services/lsat-backend/**/*.sqlite*
+services/lsat-backend/.venv*/
+services/lsat-backend/datasets/
+**/lsatlab.db
 
 # Editor directories and files
 .vscode/*
@@ -23,3 +56,30 @@ qa-screenshots/
 *.njsproj
 *.sln
 *.sw?
+
+# Python build artifacts created in-tree by the PyInstaller build (pip build/ + egg-info)
+services/lsat-backend/build/
+services/lsat-backend/*.egg-info/
+services/lsat-backend/dist/
+
+# Python bytecode + pytest caches (backend test env)
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv-lsat-test/
+
+# LSAT backend runtime artifacts (test/smoke writes)
+services/lsat-backend/backups/
+services/lsat-backend/**/*.db
+services/lsat-backend/data/
+
+# UA7 visual-regression baselines are machine-specific (font hinting / AA differs
+# across OS + headless vs system Chrome), so committing host-captured PNGs would
+# make the CI gate (Linux Chromium) fail on first run — hence gitignored.
+# audit M19: the gate fails closed when any required baseline is missing. Baselines
+# are restored from an approved Linux-generated cache; intentional refreshes must
+# be run with UPDATE_VISUAL_BASELINES=1 after reviewing the generated frames.
+tests/visual-baselines/

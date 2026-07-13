@@ -1,0 +1,7 @@
+dist
+node_modules
+coverage
+spike
+.claude
+src-tauri/target
+**/*.qvsource

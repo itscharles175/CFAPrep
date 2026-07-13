@@ -13,6 +13,8 @@ const report = {
   curriculum: generateCurriculumCoverageReport(),
   level1Batch: getLevel1BatchProgress(),
   level1Release: generateContentReleaseReport('level1'),
+  level2Release: generateContentReleaseReport('level2'),
+  level3Release: generateContentReleaseReport('level3'),
   runtime: getCfaRuntimeReport(),
 };
 
@@ -20,5 +22,7 @@ await mkdir('dist/reports', { recursive: true });
 await writeFile('dist/reports/content-report.json', `${JSON.stringify(report, null, 2)}\n`);
 
 console.log('Wrote dist/reports/content-report.json');
-console.log(`Level I release: ${report.level1Release.status} (${report.level1Release.blockingIssues} blockers, ${report.level1Release.warnings} warnings)`);
+console.log(`Level I release: ${report.level1Release.status} (${report.level1Release.blockingIssues} blockers, ${report.level1Release.warnings} warnings, ${report.level1Release.templateRowsRemaining} template rows remaining)`);
+console.log(`Level II release: ${report.level2Release.status} (${report.level2Release.blockingIssues} blockers, ${report.level2Release.warnings} warnings, ${report.level2Release.templateRowsRemaining} template rows remaining)`);
+console.log(`Level III release: ${report.level3Release.status} (${report.level3Release.blockingIssues} blockers, ${report.level3Release.warnings} warnings, ${report.level3Release.templateRowsRemaining} template rows remaining)`);
 console.log(`Catalog coverage: ${report.catalog.totals.topics} topics, ${report.catalog.totals.questions} questions, ${report.catalog.totals.vignettes} vignettes`);

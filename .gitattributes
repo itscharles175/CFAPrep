@@ -1,0 +1,24 @@
+# Normalize line endings. The project is developed cross-platform (Windows
+# + macOS + Linux) but every text source is LF in the repo. Without this,
+# Git on Windows aggressively converts to CRLF on checkout and prints a
+# "LF will be replaced by CRLF" warning on every staged change.
+
+* text=auto eol=lf
+
+# Binary assets — never touch.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.icns  binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.exe   binary
+*.dll   binary
+*.so    binary
+*.dylib binary
+*.qvsource binary

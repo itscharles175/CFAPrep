@@ -1,49 +1,46 @@
 import { useMemo, useState } from 'react';
 import { useLocation, useParams, Link } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, FlaskConical, Lightbulb } from 'lucide-react';
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Line,
-  LineChart as ReLineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+// K4-3 — migrated off bare recharts onto the shared, host-styled @visx viz
+// barrel (src/domains/shared/components/viz). recharts is no longer a dependency.
+import { LineTrend } from '../shared/components/viz';
 import EmptyState from '../../components/EmptyState';
 import FormulaBlock from '../../components/FormulaBlock';
+import { quantModules } from '../../data/catalog';
 import { quantContent } from '../../data/quantContent';
 import { binomialOptionPrice, blackScholes, currency, durationShock, normalCdf, parametricVarCvar, percent } from '../../lib/financeMath';
 import { downloadCsv } from '../../lib/exportUtils';
 import { useModuleProgress } from '../../hooks/useProgress';
 import { recordSkillLabAttempt, saveResultArtifact } from '../../lib/learning';
+import { Panel, Surface } from '../../components/ui/Primitives';
+import { SourceRail } from '../../components/SourceContext';
 
 function LabShell({ title, children, assumptions = {}, metrics = {}, csvRows }) {
   const [message, setMessage] = useState('');
 
   async function saveLabRep() {
     const topic = window.location.pathname.split('/').at(-1) || 'quant-lab';
+    const sourceMeta = quantModules.find((module) => module.id === topic)?.sourceMeta || { level: 'level1', topicId: 'quant-methods' };
+    const reviewTopic = sourceMeta.level === 'level1' ? sourceMeta.topicId : `${sourceMeta.level}:${sourceMeta.topicId}`;
     const artifact = await saveResultArtifact({
       type: 'quant-lab',
       domain: 'quant',
-      level: 'level1',
-      topic,
+      level: sourceMeta.level,
+      topic: reviewTopic,
       title,
       summary: `${title} completed as a CFA-mapped Quant skill lab.`,
       assumptions: { route: window.location.pathname, ...assumptions },
       metrics: { score: 100, ...metrics },
       path: window.location.pathname,
-      objectiveIds: [`quant:${topic}`],
+      objectiveIds: [`quant:${topic}:${sourceMeta.topicId}`],
     });
     await recordSkillLabAttempt({
       domain: 'quant',
-      level: 'level1',
-      topic,
+      level: sourceMeta.level,
+      topic: reviewTopic,
       labId: title,
       labType: 'quant-lab',
-      objectiveIds: [`quant:${topic}`],
+      objectiveIds: [`quant:${topic}:${sourceMeta.topicId}`],
       artifactId: artifact.id,
       score: 100,
       elapsedSeconds: 90,
@@ -61,19 +58,22 @@ function LabShell({ title, children, assumptions = {}, metrics = {}, csvRows }) 
   }
 
   return (
-    <div className="glass-card no-hover lab-panel">
-      <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center' }}>
-        <h3>
-          <FlaskConical size={18} color="var(--accent)" /> {title}
-        </h3>
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+    <Panel
+      title={title}
+      icon={FlaskConical}
+      tone="quant"
+      status="quant"
+      className="lab-panel"
+      actions={
+        <>
           <button className="btn btn-secondary btn-sm" onClick={exportCsv}>Export CSV</button>
           <button className="btn btn-secondary btn-sm" onClick={saveLabRep}>Save Lab Rep</button>
-        </div>
-      </div>
+        </>
+      }
+    >
       {children}
-      {message && <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)' }}>{message}</p>}
-    </div>
+      {message && <p className="muted-copy">{message}</p>}
+    </Panel>
   );
 }
 
@@ -188,6 +188,11 @@ function BrownianPathLab() {
       return [...points, { day: index, price: Number(next.toFixed(2)) }];
     }, []);
   }, [drift, vol]);
+  // Preserve the recharts `domain={['dataMin - 2', 'dataMax + 2']}` padding.
+  const priceDomain = useMemo(() => {
+    const prices = path.map((point) => point.price);
+    return [Math.min(...prices) - 2, Math.max(...prices) + 2];
+  }, [path]);
 
   return (
     <LabShell title="Geometric Brownian Path">
@@ -196,15 +201,15 @@ function BrownianPathLab() {
         <NumberField label="Annual Volatility" value={vol} onChange={setVol} step="0.1" suffix="%" />
       </div>
       <div className="chart-frame">
-        <ResponsiveContainer width="100%" height={240}>
-          <AreaChart data={path}>
-            <CartesianGrid stroke="rgba(148,163,184,0.12)" />
-            <XAxis dataKey="day" stroke="var(--text-muted)" />
-            <YAxis stroke="var(--text-muted)" domain={['dataMin - 2', 'dataMax + 2']} />
-            <Tooltip contentStyle={{ background: 'var(--navy-800)', border: '1px solid var(--border)' }} />
-            <Area type="monotone" dataKey="price" stroke="var(--accent)" fill="rgba(59,130,246,0.18)" />
-          </AreaChart>
-        </ResponsiveContainer>
+        <LineTrend
+          data={path}
+          xKey="day"
+          height={240}
+          yDomain={priceDomain}
+          series={[
+            { dataKey: 'price', name: 'Price', color: 'var(--accent, #60a5fa)', area: true },
+          ]}
+        />
       </div>
     </LabShell>
   );
@@ -243,16 +248,15 @@ function OptionSurfaceLab() {
         <div><small>Delta</small><strong>{model ? model.deltaCall.toFixed(3) : '-'}</strong></div>
       </div>
       <div className="chart-frame">
-        <ResponsiveContainer width="100%" height={220}>
-          <ReLineChart data={payoff}>
-            <CartesianGrid stroke="rgba(148,163,184,0.12)" />
-            <XAxis dataKey="price" stroke="var(--text-muted)" />
-            <YAxis stroke="var(--text-muted)" />
-            <Tooltip contentStyle={{ background: 'var(--navy-800)', border: '1px solid var(--border)' }} />
-            <Line type="monotone" dataKey="call" stroke="var(--success)" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="put" stroke="var(--danger)" strokeWidth={2} dot={false} />
-          </ReLineChart>
-        </ResponsiveContainer>
+        <LineTrend
+          data={payoff}
+          xKey="price"
+          height={220}
+          series={[
+            { dataKey: 'call', name: 'Call', color: 'var(--success, #34d399)', strokeWidth: 2 },
+            { dataKey: 'put', name: 'Put', color: 'var(--danger, #f87171)', strokeWidth: 2 },
+          ]}
+        />
       </div>
     </LabShell>
   );
@@ -401,15 +405,14 @@ function EfficientFrontierLab() {
         <div><small>Normal Loss Probability</small><strong>{percent(normalCdf(-ret / risk), 2)}</strong></div>
       </div>
       <div className="chart-frame">
-        <ResponsiveContainer width="100%" height={220}>
-          <ReLineChart data={frontier}>
-            <CartesianGrid stroke="rgba(148,163,184,0.12)" />
-            <XAxis dataKey="risk" stroke="var(--text-muted)" label={{ value: 'Risk %', position: 'insideBottom', offset: -4 }} />
-            <YAxis dataKey="return" stroke="var(--text-muted)" />
-            <Tooltip contentStyle={{ background: 'var(--navy-800)', border: '1px solid var(--border)' }} />
-            <Line type="monotone" dataKey="return" stroke="var(--accent)" strokeWidth={2} dot />
-          </ReLineChart>
-        </ResponsiveContainer>
+        <LineTrend
+          data={frontier}
+          xKey="risk"
+          height={220}
+          series={[
+            { dataKey: 'return', name: 'Return %', color: 'var(--accent, #60a5fa)', strokeWidth: 2, dots: true },
+          ]}
+        />
       </div>
       <div className="data-table compact-table" aria-label="Efficient frontier scenario table">
         <div><strong>Weight</strong><strong>Return</strong><strong>Risk</strong></div>
@@ -435,6 +438,7 @@ export default function QuantModule() {
   const { module: modId } = useParams();
   const location = useLocation();
   const data = quantContent[modId];
+  const sourceMeta = quantModules.find((module) => module.id === modId)?.sourceMeta || { level: 'level1', topicId: 'quant-methods' };
   const { completed, toggleComplete } = useModuleProgress({
     domain: 'quant',
     moduleId: data ? modId : null,
@@ -475,31 +479,45 @@ export default function QuantModule() {
       <div className="learning-layout">
         <div className="module-content">
           {data.sections.map((section, index) => (
-            <div key={section.title} className="glass-card no-hover animate-fade" style={{ marginBottom: 'var(--space-6)', animationDelay: `${index * 80}ms` }}>
+            <Surface key={section.title} tone="quant" className="module-section-panel animate-fade" style={{ animationDelay: `${index * 80}ms` }}>
               <h2 style={{ marginTop: 0 }}>{section.title}</h2>
               <p>{section.content}</p>
               <div className="key-concept">
                 <h4><Lightbulb size={16} /> Desk Notes</h4>
-                <ul style={{ margin: 0, paddingLeft: 'var(--space-5)' }}>
+                <ul className="qv-m-0" style={{ paddingLeft: 'var(--space-5)' }}>
                   {section.keyPoints.map((point) => <li key={point}>{point}</li>)}
                 </ul>
               </div>
-            </div>
+            </Surface>
           ))}
         </div>
 
         <aside className="learning-sidebar">
-          <div className="glass-card no-hover">
-            <h3>Outcomes</h3>
+          <Panel tone="quant" title="Outcomes">
             <ul className="outcome-list">
               {data.outcomes.map((outcome) => <li key={outcome}>{outcome}</li>)}
             </ul>
-          </div>
+          </Panel>
 
-          <div className="glass-card no-hover">
-            <h3>Formula Reference</h3>
+          <Panel tone="quant" title="Formula Reference">
             {data.formulas.map((formula) => <FormulaBlock key={formula.name} {...formula} />)}
-          </div>
+          </Panel>
+          <SourceRail
+            compact
+            limit={2}
+            title="CFA Source Context"
+            target={{
+              kind: 'tool',
+              domain: 'quant',
+              level: sourceMeta.level,
+              topicId: sourceMeta.topicId,
+              pathway: sourceMeta.pathway,
+              title: data.title,
+              formulaNames: data.formulas.map((formula) => formula.name),
+              keywords: [data.summary, ...data.outcomes, ...data.sections.map((section) => section.title)],
+              route: location.pathname,
+            }}
+          />
         </aside>
       </div>
 

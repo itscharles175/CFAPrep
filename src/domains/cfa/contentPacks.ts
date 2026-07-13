@@ -32,6 +32,10 @@ import type {
   VignettePack,
 } from '../../lib/contentTypes';
 import type { Difficulty, ErrorCategory, Formula, LessonSection } from '../../lib/learningTypes';
+import { buildLevel1EditorialPacks } from './level1Packs';
+import { enrichCfaFormula } from './formulaLexicon.js';
+import { level2AuthoredContentPacks, level2TopicIds } from './level2Packs';
+import { level3AuthoredContentPacks, level3TopicIds } from './level3Packs';
 
 const CONTENT_PACK_EXAM_YEAR = 2026;
 const LEVEL1_TOPIC_IDS = [
@@ -509,13 +513,21 @@ function objectiveBlueprints(spec: Level1TopicSpec): ObjectiveBlueprint[] {
 }
 
 function formulaBlueprints(spec: Level1TopicSpec, objectives: ObjectiveBlueprint[]): FormulaBlueprint[] {
-  return spec.keyConcepts.map((concept, index) => ({
-    id: `level1-${spec.id}-formula-${String(index + 1).padStart(2, '0')}`,
-    name: concept,
-    latex: `\\text{${concept.replace(/[^a-zA-Z0-9 ]+/g, ' ')}} = \\text{Input}_{${index + 1}} \\rightarrow \\text{Decision}_{${index + 1}}`,
-    description: `Original ${spec.title} formula or key concept used to convert provided facts into an exam-ready decision.`,
-    objectiveIds: [objectives[index % objectives.length].id, objectives[(index + 3) % objectives.length].id],
-  }));
+  return spec.keyConcepts.map((concept, index) => {
+    const enrichment = enrichCfaFormula({
+      level: 'level1',
+      topicId: spec.id,
+      name: concept,
+      index,
+    });
+    return {
+      id: `level1-${spec.id}-formula-${String(index + 1).padStart(2, '0')}`,
+      name: concept,
+      latex: enrichment.latex,
+      description: `${enrichment.description} It is linked to original ${spec.title} practice facts and exam-ready decisions.`,
+      objectiveIds: [objectives[index % objectives.length].id, objectives[(index + 3) % objectives.length].id],
+    };
+  });
 }
 
 function lessonBlueprints(spec: Level1TopicSpec, objectives: ObjectiveBlueprint[]): LessonBlueprint[] {
@@ -568,27 +580,35 @@ function flashcardPackForLesson(lesson: LessonBlueprint, index: number): Flashca
 }
 
 function assessmentFromQuestionPack(pack: QuestionPack): AssessmentBlueprint {
+  const isConstructedResponse = pack.itemType === 'constructed-response';
   return {
     id: `${pack.id}-assessment`,
-    itemType: 'single',
-    scope: 'standalone',
+    itemType: pack.itemType,
+    scope: isConstructedResponse ? 'constructed-response-set' : 'standalone',
     count: pack.count,
     objectiveIds: pack.objectiveIds,
     difficultyMix: pack.difficultyMix,
-    promptStyle: 'Original Level I standalone item with three choices, one best answer, and distractor rationales.',
-    notes: 'Authored question rows are required before an exam-ready release.',
+    promptStyle: isConstructedResponse
+      ? 'Original Level III constructed response with explicit command words, model answer, and point-scored rubric.'
+      : 'Original Level I standalone item with three choices, one best answer, and distractor rationales.',
+    notes: isConstructedResponse
+      ? 'Constructed-response rows are required before a Level III exam-ready release.'
+      : 'Authored question rows are required before an exam-ready release.',
+    commandWords: isConstructedResponse ? ['determine', 'justify', 'recommend'] : undefined,
+    rubricBands: isConstructedResponse ? ['identify', 'apply', 'justify', 'communicate'] : undefined,
   };
 }
 
-function assessmentFromVignettePack(pack: VignettePack): AssessmentBlueprint {
+function assessmentFromVignettePack(pack: VignettePack, level: CurriculumLevel['id'] = 'level1'): AssessmentBlueprint {
+  const isItemSet = level === 'level2' || level === 'level3';
   return {
     id: `${pack.id}-assessment`,
     itemType: 'vignette',
-    scope: 'mini-vignette',
+    scope: isItemSet ? 'item-set' : 'mini-vignette',
     count: pack.count,
     objectiveIds: pack.objectiveIds,
     difficultyMix: { foundation: 0.25, intermediate: 0.5, advanced: 0.25 },
-    promptStyle: `Original mini-vignette with ${pack.questionsPerVignette} independently scorable questions and structured exhibits.`,
+    promptStyle: `Original ${isItemSet ? 'item set' : 'mini-vignette'} with ${pack.questionsPerVignette} independently scorable questions and structured exhibits.`,
     notes: `Required exhibits: ${pack.exhibitTypes.join(', ')}.`,
   };
 }
@@ -607,12 +627,21 @@ function overlaps(left: string[], right: string[]) {
   return left.some((item) => right.includes(item));
 }
 
+function pathwayForPack(pack: ContentPack): CurriculumTopic['pathway'] {
+  if (pack.level !== 'level3') return undefined;
+  if (pack.topicId === 'pm-pathway') return 'portfolio-management';
+  if (pack.topicId === 'private-markets-pathway') return 'private-markets';
+  if (pack.topicId === 'private-wealth-pathway') return 'private-wealth';
+  return 'core';
+}
+
 export function contentPackToCurriculumTopic(pack: ContentPack): CurriculumTopic {
   return {
     id: pack.topicId,
     title: pack.title,
     examWeight: pack.examWeight,
     maturity: pack.maturity,
+    pathway: pathwayForPack(pack),
     sourceMeta: pack.sourceMeta,
     objectiveBlueprints: pack.objectiveBlueprints,
     formulaBlueprints: pack.formulaBlueprints,
@@ -631,7 +660,7 @@ export function contentPackToCurriculumTopic(pack: ContentPack): CurriculumTopic
         workedExampleCount: lesson.workedExampleTitles.length,
         assessmentBlueprints: [
           ...questionPacks.map(assessmentFromQuestionPack),
-          ...vignettePacks.map(assessmentFromVignettePack),
+          ...vignettePacks.map((vignettePack) => assessmentFromVignettePack(vignettePack, pack.level)),
         ],
         flashcardBlueprints: flashcardPacks.map(flashcardBlueprintFromPack),
         commonErrors: lesson.commonErrors,
@@ -1002,8 +1031,10 @@ function buildAuthoredContentPack(spec: Level1TopicSpec): AuthoredContentPack {
   };
 }
 
-export const level1AuthoredContentPacks: AuthoredContentPack[] = level1TopicSpecs.map(buildAuthoredContentPack);
+export const level1ValidatedContentPacks: AuthoredContentPack[] = level1TopicSpecs.map(buildAuthoredContentPack);
+export const level1AuthoredContentPacks: AuthoredContentPack[] = buildLevel1EditorialPacks(level1ValidatedContentPacks);
 export const fsaLevel1ContentPack = level1AuthoredContentPacks.find((pack) => pack.topicId === 'fsa') as AuthoredContentPack;
+export { level2AuthoredContentPacks, level3AuthoredContentPacks };
 
 export const level1SaturationBatch: CfaContentBatch = {
   id: 'level1-saturation-batch-2026',
@@ -1021,7 +1052,37 @@ export const level1SaturationBatch: CfaContentBatch = {
   ],
 };
 
-export const cfaContentBatches: CfaContentBatch[] = [level1SaturationBatch];
+export const level2SaturationBatch: CfaContentBatch = {
+  id: 'level2-saturation-batch-2026',
+  title: 'Level II Full Item-Set Saturation Batch',
+  sequence: 2,
+  level: 'level2',
+  topicIds: [...level2TopicIds],
+  maturity: 'exam-ready',
+  packs: level2AuthoredContentPacks,
+  acceptanceCriteria: [
+    'Every Level II topic has a strict authored content pack with 8 objectives, 8 study units, 12 item-set vignettes, 40 flashcards, datasets, formulas or key concepts, and mapped skill labs.',
+    'All Level II item sets use original QuantVault wording and public CFA sources only for structure, format, and topic weights.',
+    'Level II public exam-ready status is all-or-nothing across all ten topics.',
+  ],
+};
+
+export const level3SaturationBatch: CfaContentBatch = {
+  id: 'level3-saturation-batch-2026',
+  title: 'Level III Constructed Response Saturation Batch',
+  sequence: 3,
+  level: 'level3',
+  topicIds: [...level3TopicIds],
+  maturity: 'exam-ready',
+  packs: level3AuthoredContentPacks,
+  acceptanceCriteria: [
+    'Every Level III topic has a strict authored content pack with 8 objectives, command-word study units, 4 item-set vignettes, 3 constructed-response cases, rubrics, datasets, flashcards, and mapped labs.',
+    'All Level III constructed responses and item sets use original QuantVault wording and public CFA sources only for structure, format, and topic weights.',
+    'Level III public exam-ready status is all-or-nothing across core topics and all three pathway topics.',
+  ],
+};
+
+export const cfaContentBatches: CfaContentBatch[] = [level1SaturationBatch, level2SaturationBatch, level3SaturationBatch];
 
 export function getContentPacks(level?: string, topicId?: string): ContentPack[] {
   return cfaContentBatches
@@ -1116,7 +1177,7 @@ export function buildRuntimeTopicFromPack(
     formulas,
     questions: pack.authoredQuestions,
     vignettes: pack.authoredVignettes,
-    constructedResponses: [],
+    constructedResponses: pack.authoredConstructedResponses || [],
     flashcards: pack.authoredFlashcards,
     skillLabs,
     toolMappings,
@@ -1146,9 +1207,27 @@ function buildLevel1AuthoredMocks(topics: CfaTopicContent[]): MockExam[] {
   }));
 }
 
+function buildAuthoredMocks(level: CurriculumLevel['id'], topics: CfaTopicContent[]): MockExam[] {
+  if (level === 'level1') return buildLevel1AuthoredMocks(topics);
+  return Array.from({ length: 3 }, (_, index) => ({
+    id: `${level}-mixed-mock-${index + 1}`,
+    level,
+    title: `${level.replace('level', 'Level ')} Authored Mixed Mock ${index + 1}`,
+    durationMinutes: 132,
+    topics: topics.map((topic) => topic.id),
+    questionIds: topics.flatMap((topic) => topic.questions.slice(index * 2, index * 2 + 2).map((question) => question.id)),
+    vignetteIds: topics.flatMap((topic) => topic.vignettes.slice(index, index + 2).map((vignette) => vignette.id)),
+    constructedResponseIds:
+      level === 'level3'
+        ? topics.flatMap((topic) => topic.constructedResponses.slice(index % 3, (index % 3) + 1).map((item) => item.id))
+        : [],
+    itemTypes: level === 'level2' ? ['vignette'] : ['constructed-response', 'vignette'],
+  }));
+}
+
 export function buildRuntimeLevelFromPacks(
   level: CurriculumLevel['id'] = 'level1',
-  runtimeMode: ContentRuntimeMode = getLevel1AuthoredRuntimeMode(),
+  runtimeMode: ContentRuntimeMode = 'exam-ready',
 ): CfaLevelContent {
   const packs = getAuthoredContentPacks(level);
   const topics = packs.map((pack) => buildRuntimeTopicFromPack(pack, runtimeMode));
@@ -1161,8 +1240,8 @@ export function buildRuntimeLevelFromPacks(
         ? 'Editorial-authored local topic packs with exam-ready provenance and release gates.'
         : 'Validated beta authored runtime generated from topic-owned content packs, including lessons, examples, questions, vignettes, flashcards, datasets, and mapped tools.',
     topics,
-    mockExams: level === 'level1' ? buildLevel1AuthoredMocks(topics) : [],
-    constructedResponses: [],
+    mockExams: buildAuthoredMocks(level, topics),
+    constructedResponses: topics.flatMap((topic) => topic.constructedResponses),
     sourceMeta: {
       original: true,
       curriculumMap: level,
@@ -1175,51 +1254,41 @@ export function buildRuntimeLevelFromPacks(
   };
 }
 
-export function hasCompleteLevel1AuthoredRuntime(): boolean {
-  const packIds = new Set(level1AuthoredContentPacks.map((pack) => pack.topicId));
-  return LEVEL1_TOPIC_IDS.every((topicId) => packIds.has(topicId)) && level1AuthoredContentPacks.every((pack) => pack.maturity === 'exam-ready');
+function expectedTopicIdsForLevel(level: CurriculumLevel['id']) {
+  if (level === 'level1') return [...LEVEL1_TOPIC_IDS];
+  if (level === 'level2') return [...level2TopicIds];
+  if (level === 'level3') return [...level3TopicIds];
+  return [];
 }
 
-export function hasCompleteLevel1ValidatedRuntime(): boolean {
-  const packIds = new Set(level1AuthoredContentPacks.map((pack) => pack.topicId));
-  return (
-    LEVEL1_TOPIC_IDS.every((topicId) => packIds.has(topicId)) &&
-    level1AuthoredContentPacks.every((pack) => pack.maturity === 'validated' || pack.maturity === 'exam-ready')
-  );
-}
-
-export function getLevel1AuthoredRuntimeMode(): ContentRuntimeMode {
-  if (hasCompleteLevel1AuthoredRuntime()) return 'exam-ready';
-  if (hasCompleteLevel1ValidatedRuntime()) return 'validated-beta';
-  return 'generated';
+// The maturity ladder (generated / validated-beta / exam-ready gating) was removed.
+// The runtime always serves authored content; this stays as an inert descriptive
+// summary for ContentOps and never blocks anything.
+export function getRuntimeStatus(level: CurriculumLevel['id'] = 'level1') {
+  const packs = getAuthoredContentPacks(level);
+  const expectedTopicIds = expectedTopicIdsForLevel(level);
+  return {
+    level,
+    mode: 'exam-ready' as ContentRuntimeMode,
+    label: runtimeLabel('exam-ready'),
+    releaseEligible: true,
+    topicCount: expectedTopicIds.length,
+    authoredPackCount: packs.length,
+    validatedTopics: packs.filter((pack) => pack.maturity === 'validated').length,
+    examReadyTopics: packs.filter((pack) => pack.maturity === 'exam-ready').length,
+    blockers: [] as string[],
+    warnings: [] as string[],
+  };
 }
 
 export function getLevel1RuntimeStatus() {
-  const packIds = new Set(level1AuthoredContentPacks.map((pack) => pack.topicId));
-  const missingTopics = LEVEL1_TOPIC_IDS.filter((topicId) => !packIds.has(topicId));
-  const mode = getLevel1AuthoredRuntimeMode();
-  const examReadyTopics = level1AuthoredContentPacks.filter((pack) => pack.maturity === 'exam-ready').length;
-  const validatedTopics = level1AuthoredContentPacks.filter((pack) => pack.maturity === 'validated').length;
-  return {
-    level: 'level1',
-    mode,
-    label: runtimeLabel(mode),
-    releaseEligible: mode === 'exam-ready',
-    topicCount: LEVEL1_TOPIC_IDS.length,
-    authoredPackCount: level1AuthoredContentPacks.length,
-    validatedTopics,
-    examReadyTopics,
-    blockers:
-      mode === 'exam-ready'
-        ? []
-        : [
-            missingTopics.length
-              ? `${missingTopics.length} Level I topic packs are missing.`
-              : 'Level I authored runtime is beta because packs are structurally validated but not editorial exam-ready.',
-          ],
-    warnings:
-      mode === 'validated-beta'
-        ? ['Validated beta content is usable locally, but public release remains blocked by editorial provenance gates.']
-        : [],
-  };
+  return getRuntimeStatus('level1');
+}
+
+export function getLevel2RuntimeStatus() {
+  return getRuntimeStatus('level2');
+}
+
+export function getLevel3RuntimeStatus() {
+  return getRuntimeStatus('level3');
 }

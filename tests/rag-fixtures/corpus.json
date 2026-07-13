@@ -1,0 +1,123 @@
+{
+  "_comment": "RAG-1 golden corpus — tiny, synthetic, deterministic CFA/Quant/Excel curriculum chunks. Used by scripts/rag-eval.mjs and src/lib/rag/ragEval.test.ts to make retrieval quality a non-regression gate. NO real curriculum text; every chunk is hand-written to give the eval distinct lexical signals. Keep this file small.",
+  "chunks": [
+    {
+      "id": "fi-dur-1",
+      "domain": "cfa",
+      "level": "level2",
+      "topic": "fixed-income",
+      "text": "Modified duration measures the percentage change in a bond price for a small parallel shift in yield, assuming cash flows do not change."
+    },
+    {
+      "id": "fi-dur-2",
+      "domain": "cfa",
+      "level": "level2",
+      "topic": "fixed-income",
+      "text": "Effective duration is the appropriate duration measure for bonds with embedded options because their cash flows change when yields move."
+    },
+    {
+      "id": "fi-conv-1",
+      "domain": "cfa",
+      "level": "level2",
+      "topic": "fixed-income",
+      "text": "Convexity captures the curvature of the price-yield relationship and corrects the linear estimate that duration alone provides for large yield changes."
+    },
+    {
+      "id": "fi-spread-1",
+      "domain": "cfa",
+      "level": "level2",
+      "topic": "fixed-income",
+      "text": "The option-adjusted spread removes the value of embedded options from the nominal spread, isolating the compensation for credit and liquidity risk."
+    },
+    {
+      "id": "eq-ddm-1",
+      "domain": "cfa",
+      "level": "level1",
+      "topic": "equity",
+      "text": "The dividend discount model values a share of equity as the present value of its expected future dividends discounted at the required return on equity."
+    },
+    {
+      "id": "eq-fcfe-1",
+      "domain": "cfa",
+      "level": "level2",
+      "topic": "equity",
+      "text": "Free cash flow to equity is the cash available to common shareholders after operating expenses, reinvestment, and net debt repayment, and it drives the FCFE valuation model."
+    },
+    {
+      "id": "eq-mult-1",
+      "domain": "cfa",
+      "level": "level1",
+      "topic": "equity",
+      "text": "Price-to-earnings and enterprise-value-to-EBITDA are relative valuation multiples used to compare a company against peers rather than against an intrinsic value estimate."
+    },
+    {
+      "id": "qm-ci-1",
+      "domain": "quant",
+      "level": "level1",
+      "topic": "stats",
+      "text": "A confidence interval gives a range of plausible values for a population parameter at a stated confidence level, widening as the desired confidence increases."
+    },
+    {
+      "id": "qm-se-1",
+      "domain": "quant",
+      "level": "level1",
+      "topic": "stats",
+      "text": "The standard error of the sample mean equals the population standard deviation divided by the square root of the sample size, so larger samples give more precise estimates."
+    },
+    {
+      "id": "qm-hyp-1",
+      "domain": "quant",
+      "level": "level1",
+      "topic": "stats",
+      "text": "Hypothesis testing compares a test statistic against a critical value to decide whether to reject the null hypothesis at a chosen significance level."
+    },
+    {
+      "id": "qm-bayes-1",
+      "domain": "quant",
+      "level": "level2",
+      "topic": "stats",
+      "text": "Bayesian inference updates a prior probability into a posterior probability by weighting it with the likelihood of the observed evidence."
+    },
+    {
+      "id": "xl-xlookup-1",
+      "domain": "excel",
+      "topic": "lookup",
+      "text": "XLOOKUP searches a lookup array and returns a matching value from a result array, supporting both vertical and horizontal lookups and an explicit if-not-found argument."
+    },
+    {
+      "id": "xl-index-1",
+      "domain": "excel",
+      "topic": "lookup",
+      "text": "INDEX MATCH combines two functions to perform a flexible two-way lookup that, unlike VLOOKUP, can return a value to the left of the lookup column."
+    },
+    {
+      "id": "xl-pivot-1",
+      "domain": "excel",
+      "topic": "analysis",
+      "text": "A PivotTable summarises and aggregates large ranges of data by dragging fields into rows, columns, values, and filters without writing any formulas."
+    },
+    {
+      "id": "los-9a-intact",
+      "domain": "cfa",
+      "level": "level2",
+      "topic": "derivatives",
+      "text": "LOS 9.a Describe how a forward rate agreement settles. A forward rate agreement settles in cash at expiration based on the difference between the contracted forward rate and the realized reference rate, discounted back over the FRA period.",
+      "embedding": [0.9, 0.1, 0.0, 0.05]
+    },
+    {
+      "id": "los-9a-split-noise",
+      "domain": "cfa",
+      "level": "level2",
+      "topic": "derivatives",
+      "text": "the realized reference rate, discounted back. Separately, margin requirements for futures are posted daily through mark-to-market, which is a distinct mechanism from FRA cash settlement.",
+      "embedding": [0.2, 0.8, 0.1, 0.0]
+    },
+    {
+      "id": "nb-body-1",
+      "domain": "open-notebook",
+      "topic": "notes",
+      "text": "My personal note on swap valuation: the value of a plain-vanilla interest-rate swap at initiation is zero, and thereafter equals the difference between the present values of the fixed and floating legs.",
+      "embedding": [0.05, 0.1, 0.95, 0.0]
+    }
+  ]
+}

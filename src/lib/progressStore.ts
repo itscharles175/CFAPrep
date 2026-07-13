@@ -1,8 +1,9 @@
-import Dexie, { liveQuery, type Table } from 'dexie';
+import { liveQuery } from 'dexie';
 import {
   isDue,
   masteryScoreForResults,
   nextRecommendation,
+  predictRetention,
   rankReviewItems,
   scheduleReview,
 } from './scheduler';
@@ -16,48 +17,138 @@ import type {
   DomainId,
   ErrorCategory,
   FlashcardAttempt,
+  ImportJob,
   FormulaDrillAttempt,
   LessonProgress,
+  LearningEventEnvelope,
   MasterySnapshot,
   MockSectionState,
   MockAttempt,
   ConstructedResponseAttempt,
   ObjectiveReadiness,
+  ObjectiveReadinessV2,
   QuestionResult,
   QuizAttempt,
+  RetentionForecast,
   ResultArtifact,
   ReviewEvent,
   ReviewQueueItem,
   ReviewItem,
+  ReviewReason,
+  CalculatorScenario,
   SkillLabAttempt,
-  StudyPlan,
+  SourceBundleManifest,
+  StudySessionPlan,
   StudyPlanSettings,
   StudySession,
+  ReleaseRunHistory,
+  RollbackSnapshot,
+  PsychometricStats,
   TopicReadiness,
   VignetteAttempt,
+  MockBlueprint,
+  VaultRollbackReason,
   VaultBookmark,
+  VaultHealthReport,
+  VaultHealthSnapshot,
+  VaultImportHistoryEntry,
   VaultNote,
 } from './learningTypes';
+import { secureVault, type SecureVault } from './secureVault';
+import type {
+  CfaSourceChunk,
+  CfaSourceDocument,
+  CfaSourceIndex,
+  CfaSourceIngestionRun,
+  CfaSourceLink,
+  CfaSourceLinkOverride,
+  CfaSourceVaultStores,
+} from './cfaSourceTypes';
+import { level3PathwayForTopic, level3TopicBelongsToPathway } from '../domains/cfa/cfaLevel3Pathways';
+import {
+  DEFAULT_SHARED_STUDY_PROFILE,
+  type SharedStudyProfile,
+  type StudyProfilePatch,
+} from './types/StudyProfile';
+// UX-6 — fold the LSAT sidecar's ability-ranked due queue (LEARN-2) into the
+// host's cross-domain notification surface. Degrading by contract: any sidecar
+// failure returns `{ ok: false, items: [] }`, so the host nudge simply omits the
+// LSAT rows rather than erroring.
+import { fetchUnifiedDue, type UnifiedReviewItem } from './lsatReviewBridge';
+// DATA-1 Phase 2 — route cleanly-mappable direct Dexie accesses through the
+// generic keyed-table primitive. `getStorage()` returns the active driver (Dexie
+// by default), and `dexieDriver.table(name)` is a 1:1 pass-through over
+// `db.table(name)`, so each rerouted `getStorage().table('<store>').<op>(...)`
+// is behaviourally identical to the `db.<store>.<op>(...)` it replaces today.
+// The Dexie schema singleton lives in `progressDb.ts`, keeping this store and
+// the Dexie driver pointed at a neutral lower-level module instead of each other.
+import { getStorage } from './storage';
+import type { KeyedTable, StorageTransactionScope } from './storage/types';
+import { db, VAULT_CONTENT_VERSION, VAULT_SCHEMA_HASH, VAULT_SCHEMA_VERSION } from './progressDb';
+import type { QuestionResultRow, QuizAttemptRow, SettingRow } from './progressDb';
+import {
+  decryptSourceChunkForRead,
+  decryptSourceChunksForRead,
+  encryptSourceChunkForStorage,
+  encryptSourceChunksForStorage,
+  isSecureSourceChunk,
+  setSourceChunkSecureVaultForTesting,
+} from './sourceChunkSecureVault';
+
+export { db, VAULT_CONTENT_VERSION, VAULT_SCHEMA_HASH, VAULT_SCHEMA_VERSION } from './progressDb';
+
+const ENCRYPTED_NOTE_TITLE = '[Secure Vault encrypted]';
+const ENCRYPTED_NOTE_BODY = 'This note is encrypted at rest. Unlock Secure Vault to read it.';
+const ENCRYPTED_ARTIFACT_TITLE = '[Secure Vault encrypted artifact]';
+const ENCRYPTED_ARTIFACT_SUMMARY = 'This artifact is encrypted at rest. Unlock Secure Vault to read it.';
+let noteSecureVault: SecureVault = secureVault;
+
+export function setNoteSecureVaultForTesting(vault: SecureVault | null) {
+  noteSecureVault = vault ?? secureVault;
+  setSourceChunkSecureVaultForTesting(vault);
+}
+
+/**
+ * DATA-1 Phase 2 — resolve the active driver's generic keyed-table primitive for
+ * `name`. `StorageDriver.table` is declared OPTIONAL on the interface (callers
+ * feature-detect it), but BOTH shipped drivers (`dexie`, `surrealdb`) provide it,
+ * and the Dexie default is a 1:1 pass-through over `db.table(name)`. This thin
+ * wrapper asserts its presence so each rerouted call site stays a clean,
+ * behaviour-identical replacement for the `db.<store>.<op>(...)` it supersedes.
+ */
+function vaultTable<T>(name: string): KeyedTable<T> {
+  const driver = getStorage();
+  if (!driver.table) {
+    throw new Error(`Active storage driver '${driver.name}' does not implement table().`);
+  }
+  return driver.table<T>(name);
+}
+
+/**
+ * DATA-1 Phase 3 — run `fn` as an atomic read-write batch across `tableNames`
+ * through the active driver's `transaction` primitive. Like {@link vaultTable},
+ * `StorageDriver.transaction` is OPTIONAL but both shipped drivers provide it;
+ * the Dexie default wraps `db.transaction('rw', tables, fn)` faithfully, so each
+ * rerouted call site is behaviour-identical (same tables, same order, same atomic
+ * boundary) to the `db.transaction('rw', […], fn)` it supersedes. The callback
+ * receives a scope whose `tx.table(name)` ops run INSIDE the transaction.
+ */
+function vaultTransaction<T>(
+  tableNames: string[],
+  fn: (tx: StorageTransactionScope) => Promise<T>,
+): Promise<T> {
+  const driver = getStorage();
+  if (!driver.transaction) {
+    throw new Error(`Active storage driver '${driver.name}' does not implement transaction().`);
+  }
+  return driver.transaction<T>(tableNames, 'rw', fn);
+}
 
 export const PROGRESS_EVENT = 'quantvault:progress';
-export const VAULT_SCHEMA_VERSION = 5;
+const PROGRESS_CHANNEL = 'quantvault:progress-channel';
 
-type SettingRow = { key: string; value: unknown; updatedAt: string };
-type QuestionResultRow = QuestionResult & {
-  id?: number;
-  selected?: number;
-  correctIndex?: number;
-  formula?: string;
-  title?: string;
-  objectiveTitle?: string;
-  path?: string;
-  level?: string;
-  itemType?: string;
-  createdAt: string;
-};
-
-type QuizAttemptRow = Omit<QuizAttempt, 'answers'> & {
-  answers: QuestionResultRow[];
+type Level3PathwayQuery = {
+  level3Pathway?: string;
 };
 
 export type VaultDataStores = {
@@ -79,6 +170,15 @@ export type VaultDataStores = {
   flashcardAttempts: FlashcardAttempt[];
   resultArtifacts: ResultArtifact[];
   mockSectionState: MockSectionState[];
+  learningEvents: LearningEventEnvelope[];
+  vaultHealthSnapshots: VaultHealthSnapshot[];
+  rollbackSnapshots: RollbackSnapshot[];
+  calculatorScenarios: CalculatorScenario[];
+  releaseRunHistory: ReleaseRunHistory[];
+  importJobs: ImportJob[];
+  sourceBundleManifests: SourceBundleManifest[];
+  psychometricStats: PsychometricStats[];
+  mockBlueprints: MockBlueprint[];
   notes: VaultNote[];
   bookmarks: VaultBookmark[];
   settings: SettingRow[];
@@ -86,33 +186,46 @@ export type VaultDataStores = {
 
 export type VaultExport = {
   app: 'QuantVault';
+  exportId: string;
   schemaVersion: number;
+  schemaHash: string;
+  contentVersion: string;
   exportedAt: string;
+  checksum: string;
+  encryption?: {
+    encrypted: boolean;
+    algorithm: 'none' | 'AES-GCM';
+    keyDerivation?: 'PBKDF2';
+  };
   stores: VaultDataStores;
+  sourceVault?: CfaSourceVaultStores;
 };
 
-type VaultDatabase = Dexie & {
-  lessonProgress: Table<LessonProgress, string>;
-  quizAttempts: Table<QuizAttemptRow, number>;
-  questionResults: Table<QuestionResultRow, number>;
-  reviewItems: Table<ReviewItem, string>;
-  masterySnapshots: Table<MasterySnapshot, string>;
-  mockAttempts: Table<MockAttempt, number>;
-  vignetteAttempts: Table<VignetteAttempt, number>;
-  constructedResponseAttempts: Table<ConstructedResponseAttempt, number>;
-  formulaDrillAttempts: Table<FormulaDrillAttempt, number>;
-  skillLabAttempts: Table<SkillLabAttempt, number>;
-  studySessions: Table<StudySession, number>;
-  studyPlanSettings: Table<StudyPlanSettings, string>;
-  contentVersions: Table<ContentVersion, string>;
-  reviewEvents: Table<ReviewEvent, number>;
-  confidenceCalibration: Table<ConfidenceCalibration, number>;
-  flashcardAttempts: Table<FlashcardAttempt, number>;
-  resultArtifacts: Table<ResultArtifact, string>;
-  mockSectionState: Table<MockSectionState, string>;
-  notes: Table<VaultNote, string>;
-  bookmarks: Table<VaultBookmark, string>;
-  settings: Table<SettingRow, string>;
+export type EncryptedVaultExport = Omit<VaultExport, 'stores' | 'encryption'> & {
+  encryption: {
+    encrypted: true;
+    algorithm: 'AES-GCM';
+    keyDerivation: 'PBKDF2';
+    iterations: number;
+    salt: string;
+    iv: string;
+    hash: 'SHA-256';
+  };
+  payload: string;
+};
+
+export type VaultExportOptions = {
+  encryption?: {
+    passphrase: string;
+  };
+  includeSourceVault?: boolean;
+};
+
+export type VaultImportOptions = {
+  mode?: 'merge' | 'replace';
+  passphrase?: string;
+  conflictPolicy?: 'keep-existing' | 'prefer-import' | 'replace';
+  includeSourceVault?: boolean;
 };
 
 const STORE_NAMES = [
@@ -134,6 +247,15 @@ const STORE_NAMES = [
   'flashcardAttempts',
   'resultArtifacts',
   'mockSectionState',
+  'learningEvents',
+  'vaultHealthSnapshots',
+  'rollbackSnapshots',
+  'calculatorScenarios',
+  'releaseRunHistory',
+  'importJobs',
+  'sourceBundleManifests',
+  'psychometricStats',
+  'mockBlueprints',
   'notes',
   'bookmarks',
   'settings',
@@ -153,6 +275,40 @@ const AUTO_ID_STORES = new Set<(typeof STORE_NAMES)[number]>([
   'flashcardAttempts',
 ]);
 
+const SOURCE_STORE_NAMES = ['sourceDocuments', 'sourceChunks', 'sourceIndexes', 'sourceIngestionRuns', 'sourceLinks', 'sourceLinkOverrides'] as const;
+
+// DATA-1 Phase 3 — registered-but-NOT-exported derived stores. They persist via
+// getStorage().table(name) (PSY-11 ability snapshots, NAV-1 study trail) but are
+// excluded from the canonical vault export/import/validate surface (STORE_NAMES)
+// because they are recomputable / ephemeral. A 'full' resetVaultData still wipes
+// them, the same way it wipes the unexported source* stores.
+const DERIVED_STORE_NAMES = ['abilitySnapshots', 'studyTrail'] as const;
+
+export type VaultImportPreviewBase = {
+  valid: boolean;
+  errors: string[];
+  schemaVersion: number | null;
+  schemaHash: string | null;
+  contentVersion: string | null;
+  exportId: string | null;
+  checksumValid: boolean;
+  counts: Record<(typeof STORE_NAMES)[number], number>;
+  sourceCounts: Record<(typeof SOURCE_STORE_NAMES)[number], number>;
+};
+
+export type VaultImportPreview = VaultImportPreviewBase & {
+  encrypted: boolean;
+  exportedAt: string | null;
+  totalRows: number;
+  sourceIncluded: boolean;
+  sourceAvailable: boolean;
+  conflictPolicy: 'keep-existing' | 'prefer-import' | 'replace';
+  conflicts: {
+    total: number;
+    byStore: Partial<Record<(typeof STORE_NAMES)[number], number>>;
+  };
+};
+
 const CONFIDENCE_SCORE: Record<Confidence, number> = {
   low: 34,
   medium: 67,
@@ -171,47 +327,50 @@ const ERROR_CATEGORIES: ErrorCategory[] = [
   'none',
 ];
 
-export const db = new Dexie('quantvault') as VaultDatabase;
-
-db.version(1).stores({
-  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
-  quizAttempts: '++id, domain, topic, pct, createdAt',
-  bookmarks: 'id, type, domain, moduleId, createdAt',
-  settings: 'key',
-});
-
-db.version(VAULT_SCHEMA_VERSION).stores({
-  lessonProgress: 'id, domain, moduleId, completed, updatedAt, lastVisitedAt',
-  quizAttempts: '++id, domain, topic, pct, createdAt, mode',
-  questionResults: '++id, domain, topic, learningObjective, questionId, correct, createdAt',
-  reviewItems: 'id, domain, topic, learningObjective, dueAt, ease, attempts',
-  masterySnapshots: 'id, domain, topic, learningObjective, score, lastAttemptAt, nextReviewAt',
-  mockAttempts: '++id, domain, level, pct, createdAt, mode',
-  vignetteAttempts: '++id, domain, level, topic, vignetteId, pct, createdAt',
-  constructedResponseAttempts: '++id, domain, level, topic, itemId, pct, createdAt',
-  formulaDrillAttempts: '++id, domain, level, topic, formulaName, correct, createdAt',
-  skillLabAttempts: '++id, domain, level, topic, labId, labType, createdAt',
-  studySessions: '++id, domain, topic, mode, startedAt',
-  studyPlanSettings: 'id, updatedAt, examDate',
-  contentVersions: 'id, version, updatedAt',
-  reviewEvents: '++id, domain, topic, learningObjective, eventType, createdAt',
-  confidenceCalibration: '++id, domain, topic, learningObjective, confidence, correct, createdAt',
-  flashcardAttempts: '++id, domain, topic, cardId, outcome, createdAt',
-  resultArtifacts: 'id, type, domain, topic, createdAt',
-  mockSectionState: 'id, status, updatedAt, expiresAt',
-  notes: 'id, type, domain, moduleId, questionId, formulaName, updatedAt',
-  bookmarks: 'id, type, domain, moduleId, questionId, formulaName, createdAt',
-  settings: 'key',
-});
-
 function nowIso() {
   return new Date().toISOString();
+}
+
+let sharedProgressChannel: BroadcastChannel | null | undefined;
+
+function getSharedProgressChannel() {
+  if (sharedProgressChannel !== undefined) return sharedProgressChannel;
+  if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return null;
+  sharedProgressChannel = new BroadcastChannel(PROGRESS_CHANNEL);
+  return sharedProgressChannel;
+}
+
+function createProgressChannel() {
+  if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return null;
+  return new BroadcastChannel(PROGRESS_CHANNEL);
 }
 
 function emitProgressChange() {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(PROGRESS_EVENT));
   }
+  getSharedProgressChannel()?.postMessage({ type: PROGRESS_EVENT, emittedAt: nowIso() });
+}
+
+export function subscribeProgressChanges(handler: () => void) {
+  const channel = createProgressChannel();
+  const handleWindowEvent = () => handler();
+  const handleChannelMessage = (event: MessageEvent) => {
+    if (event.data?.type === PROGRESS_EVENT) handler();
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener(PROGRESS_EVENT, handleWindowEvent);
+  }
+  channel?.addEventListener('message', handleChannelMessage);
+
+  return () => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener(PROGRESS_EVENT, handleWindowEvent);
+    }
+    channel?.removeEventListener('message', handleChannelMessage);
+    channel?.close();
+  };
 }
 
 function objectiveId(domain: DomainId, topic: string, learningObjective: string) {
@@ -226,6 +385,26 @@ function defaultPathFor(domain: DomainId, topic: string, mode = 'review-due') {
     return `/cfa/${level}/${topicId}/quiz?mode=${mode}`;
   }
   return `/${domain}/${topic}`;
+}
+
+function isPathwayScopedLevel3Topic(topic?: string | null) {
+  const pathway = level3PathwayForTopic(topic || '');
+  return pathway !== null && pathway !== 'core';
+}
+
+function isLevel3TopicRow(row: { level?: string; topic?: string }) {
+  return row.level === 'level3' || row.topic?.startsWith('level3:') || isPathwayScopedLevel3Topic(row.topic);
+}
+
+function level3TopicRowAllowed(row: { level?: string; topic?: string }, level3Pathway?: string) {
+  if (!level3Pathway || !isLevel3TopicRow(row)) return true;
+  return level3TopicBelongsToPathway(row.topic, level3Pathway);
+}
+
+function level3MockAttemptAllowed(attempt: MockAttempt, level3Pathway?: string) {
+  if (!level3Pathway || attempt.level !== 'level3') return true;
+  const pathwayTopics = attempt.topicBreakdown.map((row) => row.topic).filter(isPathwayScopedLevel3Topic);
+  return !pathwayTopics.length || pathwayTopics.some((topic) => level3TopicBelongsToPathway(topic, level3Pathway));
 }
 
 function normalizeDifficulty(value: unknown): Difficulty {
@@ -259,6 +438,17 @@ function normalizeQuestionResult(
   const questionId = result.questionId || `${result.topic}:question`;
   const learningObjective = result.learningObjective || `${result.topic}:general`;
 
+  // ANL-3 — persist the blind-review pass when one was captured. `brCorrect` is
+  // taken verbatim when given, else derived from the BR answer vs the correct
+  // index (the 2x2's br_correct axis), so a caller can supply just `brAnswer`.
+  const hasBr = typeof result.brAnswer === 'number';
+  const brCorrect =
+    typeof result.brCorrect === 'boolean'
+      ? result.brCorrect
+      : hasBr && typeof result.correctIndex === 'number'
+        ? result.brAnswer === result.correctIndex
+        : undefined;
+
   return {
     domain: result.domain,
     topic: result.topic,
@@ -278,17 +468,33 @@ function normalizeQuestionResult(
     level: result.level,
     itemType: result.itemType,
     createdAt: result.createdAt || timestamp,
+    // ANL-3 — blind-review capture (omitted when no BR pass).
+    brAnswer: hasBr ? result.brAnswer : undefined,
+    brConfidence: result.brConfidence ? normalizeConfidence(result.brConfidence) : undefined,
+    brCorrect,
   };
 }
 
-async function updateMasterySnapshot(result: QuestionResultRow, review: ReviewItem) {
+async function updateMasterySnapshot(
+  result: QuestionResultRow,
+  review: ReviewItem,
+  tx: StorageTransactionScope,
+) {
   const id = objectiveId(result.domain, result.topic, result.learningObjective);
-  const existing = await db.masterySnapshots.get(id);
-  const objectiveResults = await db.questionResults
-    .where('learningObjective')
-    .equals(result.learningObjective)
-    .filter((row) => row.domain === result.domain && row.topic === result.topic)
-    .toArray();
+  // DATA-1 Phase 3: runs INSIDE the rw transaction opened by persistQuestionResult's
+  // callers via the storage `transaction` primitive — every op goes through the
+  // `tx` scope so it stays in the same atomic boundary as the direct db.* it
+  // replaced.
+  const masterySnapshotsTx = tx.table<MasterySnapshot>('masterySnapshots');
+  const existing = await masterySnapshotsTx.get(id);
+  // DATA-1 Phase 3: the original `.where('learningObjective').equals(v).filter(fn)
+  // .toArray()` chained a JS `.filter()` between the indexed equality and the read,
+  // which `KeyedTable.whereEquals` (a bare `.equals().toArray()`) cannot express.
+  // We issue the SAME indexed equality through the tx scope and apply the identical
+  // JS `.filter()` on the returned array — behaviour-identical to the direct chain.
+  const objectiveResults = (
+    await tx.table<QuestionResultRow>('questionResults').whereEquals('learningObjective', result.learningObjective)
+  ).filter((row) => row.domain === result.domain && row.topic === result.topic);
   const score = masteryScoreForResults(objectiveResults);
   const confidenceScore = Math.round(
     objectiveResults.reduce((sum, row) => sum + CONFIDENCE_SCORE[row.confidence], 0) /
@@ -303,7 +509,8 @@ async function updateMasterySnapshot(result: QuestionResultRow, review: ReviewIt
         : 'flat'
     : 'new';
 
-  await db.masterySnapshots.put({
+  // DATA-1 Phase 3: this put() runs inside the caller's rw transaction (see above).
+  await masterySnapshotsTx.put({
     id,
     domain: result.domain,
     topic: result.topic,
@@ -319,14 +526,20 @@ async function updateMasterySnapshot(result: QuestionResultRow, review: ReviewIt
   });
 }
 
-async function persistQuestionResult(result: QuestionResultRow) {
+async function persistQuestionResult(result: QuestionResultRow, tx: StorageTransactionScope) {
+  // DATA-1 Phase 3: every caller invokes this inside an rw transaction via the
+  // storage `transaction` primitive (recordQuestionResult / recordQuizAttempt /
+  // recordFlashcardResult / recordMockAttempt / recordVignetteAttempt /
+  // recordConstructedResponseAttempt / recordFormulaDrillAttempt /
+  // recordSkillLabAttempt). All ops below route through the `tx` scope so they
+  // stay inside that same atomic transaction (same tables, same order).
   const id = objectiveId(result.domain, result.topic, result.learningObjective);
-  const previous = await db.reviewItems.get(id);
+  const previous = await tx.table<ReviewItem>('reviewItems').get(id);
   const review = buildReviewItem(result, previous);
 
-  await db.questionResults.add(result);
-  await db.reviewItems.put(review);
-  await db.reviewEvents.add({
+  await tx.table<QuestionResultRow>('questionResults').add(result);
+  await tx.table<ReviewItem>('reviewItems').put(review);
+  await tx.table<ReviewEvent>('reviewEvents').add({
     domain: result.domain,
     topic: result.topic,
     learningObjective: result.learningObjective,
@@ -335,7 +548,7 @@ async function persistQuestionResult(result: QuestionResultRow) {
     dueAt: review.dueAt,
     createdAt: result.createdAt,
   });
-  await db.confidenceCalibration.add({
+  await tx.table<ConfidenceCalibration>('confidenceCalibration').add({
     domain: result.domain,
     topic: result.topic,
     learningObjective: result.learningObjective,
@@ -344,7 +557,7 @@ async function persistQuestionResult(result: QuestionResultRow) {
     correct: result.correct,
     createdAt: result.createdAt,
   });
-  await updateMasterySnapshot(result, review);
+  await updateMasterySnapshot(result, review, tx);
 
   return review;
 }
@@ -361,6 +574,7 @@ function buildReviewItem(result: QuestionResultRow, previous?: ReviewItem): Revi
     path: result.path || defaultPathFor(result.domain, result.topic),
     intervalDays: scheduled.intervalDays,
     ease: scheduled.ease,
+    fsrsDifficulty: scheduled.fsrsDifficulty,
     dueAt: scheduled.dueAt,
     lastResultAt: result.createdAt,
     attempts: scheduled.attempts,
@@ -368,6 +582,10 @@ function buildReviewItem(result: QuestionResultRow, previous?: ReviewItem): Revi
     lastCorrect: result.correct,
     lastConfidence: result.confidence,
     lastErrorCategory: result.errorCategory,
+    // ANL-3 — surface the latest blind-review pass on the card (append-only).
+    brAnswer: result.brAnswer,
+    brConfidence: result.brConfidence,
+    brCorrect: result.brCorrect,
   };
 }
 
@@ -376,7 +594,7 @@ export function progressId(domain: DomainId, moduleId: string) {
 }
 
 export async function getLessonProgress(domain: DomainId, moduleId: string) {
-  return db.lessonProgress.get(progressId(domain, moduleId));
+  return vaultTable<LessonProgress>('lessonProgress').get(progressId(domain, moduleId));
 }
 
 export async function recordModuleVisit({
@@ -391,10 +609,11 @@ export async function recordModuleVisit({
   path: string;
 }) {
   const id = progressId(domain, moduleId);
-  const existing = await db.lessonProgress.get(id);
+  const lessonProgressTable = vaultTable<LessonProgress>('lessonProgress');
+  const existing = await lessonProgressTable.get(id);
   const timestamp = nowIso();
 
-  await db.lessonProgress.put({
+  await lessonProgressTable.put({
     id,
     domain,
     moduleId,
@@ -409,7 +628,7 @@ export async function recordModuleVisit({
   });
 
   emitProgressChange();
-  return db.lessonProgress.get(id);
+  return lessonProgressTable.get(id);
 }
 
 export async function setModuleCompleted({
@@ -426,10 +645,11 @@ export async function setModuleCompleted({
   completed: boolean;
 }) {
   const id = progressId(domain, moduleId);
-  const existing = await db.lessonProgress.get(id);
+  const lessonProgressTable = vaultTable<LessonProgress>('lessonProgress');
+  const existing = await lessonProgressTable.get(id);
   const timestamp = nowIso();
 
-  await db.lessonProgress.put({
+  await lessonProgressTable.put({
     id,
     domain,
     moduleId,
@@ -444,7 +664,7 @@ export async function setModuleCompleted({
   });
 
   emitProgressChange();
-  return db.lessonProgress.get(id);
+  return lessonProgressTable.get(id);
 }
 
 export async function toggleModuleCompleted({
@@ -458,7 +678,7 @@ export async function toggleModuleCompleted({
   title: string;
   path: string;
 }) {
-  const existing = await db.lessonProgress.get(progressId(domain, moduleId));
+  const existing = await vaultTable<LessonProgress>('lessonProgress').get(progressId(domain, moduleId));
   return setModuleCompleted({
     domain,
     moduleId,
@@ -478,7 +698,17 @@ export async function recordQuestionResult(
   },
 ) {
   const normalized = normalizeQuestionResult(result, nowIso());
-  const review = await persistQuestionResult(normalized);
+  // Data-safety: persistQuestionResult writes 5 stores; wrap them in ONE rw
+  // transaction (matching recordQuizAttempt and the other recorders) so an
+  // interruption can't leave a questionResult without its review/event/
+  // calibration/mastery rows. This is the lone single-result path that was
+  // previously unprotected (audit M4).
+  // DATA-1 Phase 3: rerouted through the storage `transaction` primitive — same
+  // tables, same atomic boundary as the prior db.transaction('rw', […]) call.
+  const review = await vaultTransaction(
+    ['questionResults', 'reviewItems', 'reviewEvents', 'confidenceCalibration', 'masterySnapshots'],
+    (tx) => persistQuestionResult(normalized, tx),
+  );
   emitProgressChange();
   return review;
 }
@@ -517,19 +747,20 @@ export async function recordQuizAttempt({
     ),
   );
 
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same
+  // tables, same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.quizAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'quizAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.quizAttempts.add({
+    async (tx) => {
+      await tx.table<QuizAttemptRow>('quizAttempts').add({
         domain,
         topic,
         title,
@@ -543,10 +774,10 @@ export async function recordQuizAttempt({
       });
 
       for (const answer of normalizedAnswers) {
-        await persistQuestionResult(answer);
+        await persistQuestionResult(answer, tx);
       }
 
-      await db.studySessions.add({
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode,
@@ -562,29 +793,34 @@ export async function recordQuizAttempt({
   emitProgressChange();
 }
 
-export async function getDueReviews(date = new Date()) {
-  const reviewItems = await db.reviewItems.toArray();
-  return rankReviewItems(reviewItems, date).filter((item) => isDue(item, date));
+export async function getDueReviews(date = new Date(), options: Level3PathwayQuery = {}) {
+  const reviewItems = await vaultTable<ReviewItem>('reviewItems').toArray();
+  return rankReviewItems(reviewItems.filter((item) => level3TopicRowAllowed(item, options.level3Pathway)), date).filter((item) => isDue(item, date));
 }
 
-export async function getMasterySummary() {
-  const snapshots = await db.masterySnapshots.toArray();
-  const ranked = [...snapshots].sort((a, b) => a.score - b.score || b.lastAttemptAt.localeCompare(a.lastAttemptAt));
+export async function getMasterySummary(options: Level3PathwayQuery = {}) {
+  const snapshots = await vaultTable<MasterySnapshot>('masterySnapshots').toArray();
+  const visibleSnapshots = snapshots.filter((snapshot) => level3TopicRowAllowed(snapshot, options.level3Pathway));
+  const ranked = [...visibleSnapshots].sort((a, b) => a.score - b.score || b.lastAttemptAt.localeCompare(a.lastAttemptAt));
   return {
-    snapshots,
+    snapshots: visibleSnapshots,
     weakObjectives: ranked.filter((snapshot) => snapshot.score < 72).slice(0, 6),
-    averageScore: snapshots.length
-      ? Math.round(snapshots.reduce((sum, snapshot) => sum + snapshot.score, 0) / snapshots.length)
+    averageScore: visibleSnapshots.length
+      ? Math.round(visibleSnapshots.reduce((sum, snapshot) => sum + snapshot.score, 0) / visibleSnapshots.length)
       : null,
   };
 }
 
-export async function getNextRecommendation() {
-  const [dueReviews, mastery, lessonProgress] = await Promise.all([
-    getDueReviews(),
-    getMasterySummary(),
-    db.lessonProgress.orderBy('lastVisitedAt').reverse().first(),
+export async function getNextRecommendation(options: Level3PathwayQuery = {}) {
+  const [dueReviews, mastery, lessonProgressRows] = await Promise.all([
+    getDueReviews(new Date(), options),
+    getMasterySummary(options),
+    // `.orderBy('lastVisitedAt').reverse().first()` → desc-ordered read capped at
+    // 1 row, then `[0]` (undefined when empty, exactly like Dexie `.first()`).
+    // `lastVisitedAt` is a declared index on lessonProgress.
+    vaultTable<LessonProgress>('lessonProgress').orderedBy('lastVisitedAt', { desc: true, limit: 1 }),
   ]);
+  const lessonProgress = lessonProgressRows[0];
 
   return nextRecommendation({
     dueReviews,
@@ -593,7 +829,7 @@ export async function getNextRecommendation() {
       path: defaultPathFor(objective.domain, objective.topic, 'weak-areas'),
       score: objective.score,
     })),
-    continuePath: lessonProgress?.path || null,
+    continuePath: lessonProgress && level3TopicRowAllowed({ topic: lessonProgress.moduleId }, options.level3Pathway) ? lessonProgress.path : null,
   });
 }
 
@@ -680,19 +916,21 @@ export async function getProgressSummary() {
       notes,
       bookmarks,
     ] = await Promise.all([
-      db.lessonProgress.toArray(),
-      db.quizAttempts.orderBy('createdAt').reverse().toArray(),
-      db.mockAttempts.orderBy('createdAt').reverse().toArray(),
-      db.vignetteAttempts.orderBy('createdAt').reverse().toArray(),
-      db.constructedResponseAttempts.orderBy('createdAt').reverse().toArray(),
-      db.formulaDrillAttempts.orderBy('createdAt').reverse().toArray(),
-      db.skillLabAttempts.orderBy('createdAt').reverse().toArray(),
-      db.flashcardAttempts.orderBy('createdAt').reverse().toArray(),
-      db.studySessions.toArray(),
-      db.reviewItems.toArray(),
-      db.masterySnapshots.toArray(),
-      db.notes.toArray(),
-      db.bookmarks.toArray(),
+      // `createdAt` is a declared index on each attempt store, so the desc reads
+      // below map faithfully to orderedBy(field, { desc: true }).
+      vaultTable<LessonProgress>('lessonProgress').toArray(),
+      vaultTable<QuizAttemptRow>('quizAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<MockAttempt>('mockAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<VignetteAttempt>('vignetteAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<ConstructedResponseAttempt>('constructedResponseAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<FormulaDrillAttempt>('formulaDrillAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<SkillLabAttempt>('skillLabAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<FlashcardAttempt>('flashcardAttempts').orderedBy('createdAt', { desc: true }),
+      vaultTable<StudySession>('studySessions').toArray(),
+      vaultTable<ReviewItem>('reviewItems').toArray(),
+      vaultTable<MasterySnapshot>('masterySnapshots').toArray(),
+      vaultTable<VaultNote>('notes').toArray(),
+      vaultTable<VaultBookmark>('bookmarks').toArray(),
     ]);
 
     const completed = lessonProgress.filter((row) => row.completed);
@@ -766,18 +1004,231 @@ export function progressSummaryQuery() {
   return liveQuery(getProgressSummary);
 }
 
+/**
+ * UX-6 — one cross-domain "due" row for the proactive notification surface. The
+ * host's own Dexie reviews and the LSAT sidecar's queue speak different native
+ * vocabularies, so both are projected onto this single shape: a title, a target
+ * path, the due timestamp, and the domain badge. The CFA bell popover renders
+ * these uniformly ("N reviews due across CFA + LSAT").
+ */
+export interface CrossDomainNotification {
+  /** Namespaced so host + LSAT ids never collide in the rendered list. */
+  id: string;
+  domain: DomainId | 'lsat';
+  title: string;
+  /** Where the row sends the user (host route, or LSAT deep-link hard-nav). */
+  path: string;
+  /** ISO due timestamp when known (host rows always carry one; LSAT may not). */
+  dueAt?: string;
+  /** True for LSAT rows so the consumer can hard-navigate across the app split. */
+  external?: boolean;
+}
+
+/**
+ * UX-6 — the folded cross-domain due summary backing the notification center.
+ * `upcomingReviews` is the host-local queue (unchanged from `getProgressSummary`)
+ * folded together with the LSAT sidecar's LEARN-2 unified queue. Counts are split
+ * so the surface can say "N reviews due across CFA + LSAT" precisely.
+ */
+export interface CrossDomainNotificationSummary {
+  notifications: CrossDomainNotification[];
+  total: number;
+  cfaCount: number;
+  lsatCount: number;
+  /** False when the LSAT sidecar was unreachable (rows simply omitted). */
+  lsatAvailable: boolean;
+  /** False when the local Dexie read failed (host rows omitted, no throw). */
+  indexedDbAvailable: boolean;
+}
+
+export const emptyCrossDomainNotificationSummary: CrossDomainNotificationSummary = {
+  notifications: [],
+  total: 0,
+  cfaCount: 0,
+  lsatCount: 0,
+  lsatAvailable: false,
+  indexedDbAvailable: true,
+};
+
+/** Project a host {@link ReviewItem} onto the unified notification row. */
+function hostReviewToNotification(item: ReviewItem): CrossDomainNotification {
+  return {
+    id: `host:${item.id}`,
+    domain: item.domain,
+    title: item.title,
+    path: item.path,
+    dueAt: item.dueAt,
+  };
+}
+
+/** Project an LSAT {@link UnifiedReviewItem} onto the unified notification row. */
+function lsatReviewToNotification(item: UnifiedReviewItem): CrossDomainNotification {
+  return {
+    id: `lsat:${item.id}`,
+    domain: 'lsat',
+    title: item.title,
+    path: item.deepLinkPath,
+    dueAt: item.canonical.dueAt,
+    external: true,
+  };
+}
+
+/**
+ * UX-6 — fold the host's local due reviews together with the LSAT sidecar's
+ * ability-ranked unified queue (LEARN-2 {@link fetchUnifiedDue}) into one
+ * cross-domain notification list. Fully degrading on both legs:
+ *   - the Dexie read failing yields `indexedDbAvailable: false` (host rows omitted);
+ *   - the sidecar being down/timed-out yields `lsatAvailable: false` (LSAT rows
+ *     omitted) — never throws, so the surface always renders something.
+ *
+ * `limit` caps each domain independently (so a flood of LSAT cards can't crowd
+ * out the host's, and vice-versa), keeping the popover compact.
+ */
+export async function getCrossDomainUpcomingReviews(
+  options: { limit?: number; timeoutMs?: number } & Level3PathwayQuery = {},
+): Promise<CrossDomainNotificationSummary> {
+  const { limit = 5, timeoutMs = 2500, level3Pathway } = options;
+
+  let hostRows: CrossDomainNotification[] = [];
+  let indexedDbAvailable = true;
+  try {
+    const due = await getDueReviews(new Date(), { level3Pathway });
+    hostRows = due.slice(0, limit).map(hostReviewToNotification);
+  } catch {
+    indexedDbAvailable = false;
+  }
+
+  // The sidecar leg already degrades to `{ ok: false, items: [] }` by contract,
+  // so no try/catch is needed here — we just read its `ok` flag for availability.
+  const lsat = await fetchUnifiedDue({ limit, timeoutMs });
+  const lsatRows = lsat.ok ? lsat.items.map(lsatReviewToNotification) : [];
+
+  // Host rows first (the active CFA study domain), then the LSAT sidecar queue.
+  const notifications = [...hostRows, ...lsatRows];
+
+  return {
+    notifications,
+    total: notifications.length,
+    cfaCount: hostRows.length,
+    lsatCount: lsatRows.length,
+    lsatAvailable: lsat.ok,
+    indexedDbAvailable,
+  };
+}
+
 function noteIdFor({
   type,
   domain,
   moduleId,
   questionId,
   formulaName,
-}: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName'>) {
-  return [type, domain || 'vault', moduleId || questionId || formulaName || 'general'].join(':');
+  artifactId,
+}: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName' | 'artifactId'>) {
+  return [type, domain || 'vault', artifactId || moduleId || questionId || formulaName || 'general'].join(':');
 }
 
-export async function getNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName'>) {
-  return db.notes.get(noteIdFor(target));
+function isSecureNote(note: VaultNote | undefined): note is VaultNote & { secureVault: NonNullable<VaultNote['secureVault']> } {
+  return note?.secureVault?.v === 1 && note.secureVault.scheme === 'secure-vault-note.v1';
+}
+
+function assertSecureVaultUnlocked(vault: SecureVault, resource: string) {
+  if (!vault.isUnlocked()) {
+    throw new Error(`Secure Vault is enabled but locked. Unlock it before reading or writing ${resource}.`);
+  }
+}
+
+function assertNoteVaultUnlocked(vault: SecureVault) {
+  assertSecureVaultUnlocked(vault, 'encrypted notes');
+}
+
+async function encryptNoteForStorage(note: VaultNote, vault: SecureVault = noteSecureVault): Promise<VaultNote> {
+  if (!vault.isEnabled()) {
+    const { secureVault: _secureVault, ...plain } = note;
+    return plain;
+  }
+  assertNoteVaultUnlocked(vault);
+  return {
+    ...note,
+    title: ENCRYPTED_NOTE_TITLE,
+    body: ENCRYPTED_NOTE_BODY,
+    secureVault: {
+      v: 1,
+      scheme: 'secure-vault-note.v1',
+      title: await vault.encrypt(note.title),
+      body: await vault.encrypt(note.body),
+    },
+  };
+}
+
+async function decryptNoteForRead(note: VaultNote | undefined, vault: SecureVault = noteSecureVault): Promise<VaultNote | undefined> {
+  if (!note || !isSecureNote(note)) return note;
+  assertNoteVaultUnlocked(vault);
+  const { secureVault: _secureVault, ...plain } = note;
+  return {
+    ...plain,
+    title: await vault.decrypt(note.secureVault.title),
+    body: await vault.decrypt(note.secureVault.body),
+  };
+}
+
+function isSecureResultArtifact(
+  artifact: ResultArtifact | undefined,
+): artifact is ResultArtifact & { secureVault: NonNullable<ResultArtifact['secureVault']> } {
+  return artifact?.secureVault?.v === 1 && artifact.secureVault.scheme === 'secure-vault-result-artifact.v1';
+}
+
+function parseSecureArtifactRecord(value: string, field: 'assumptions' | 'metrics'): ResultArtifact['assumptions'] {
+  const parsed = JSON.parse(value);
+  if (!isObject(parsed)) {
+    throw new Error(`Secure Vault artifact ${field} payload is invalid.`);
+  }
+  return parsed as ResultArtifact['assumptions'];
+}
+
+async function encryptResultArtifactForStorage(
+  artifact: ResultArtifact,
+  vault: SecureVault = noteSecureVault,
+): Promise<ResultArtifact> {
+  if (!vault.isEnabled()) {
+    const { secureVault: _secureVault, ...plain } = artifact;
+    return plain;
+  }
+  assertSecureVaultUnlocked(vault, 'encrypted result artifacts');
+  return {
+    ...artifact,
+    title: ENCRYPTED_ARTIFACT_TITLE,
+    summary: ENCRYPTED_ARTIFACT_SUMMARY,
+    assumptions: {},
+    metrics: {},
+    secureVault: {
+      v: 1,
+      scheme: 'secure-vault-result-artifact.v1',
+      title: await vault.encrypt(artifact.title),
+      summary: await vault.encrypt(artifact.summary),
+      assumptions: await vault.encrypt(stableStringify(artifact.assumptions)),
+      metrics: await vault.encrypt(stableStringify(artifact.metrics)),
+    },
+  };
+}
+
+async function decryptResultArtifactForRead(
+  artifact: ResultArtifact | undefined,
+  vault: SecureVault = noteSecureVault,
+): Promise<ResultArtifact | undefined> {
+  if (!artifact || !isSecureResultArtifact(artifact)) return artifact;
+  assertSecureVaultUnlocked(vault, 'encrypted result artifacts');
+  const { secureVault: _secureVault, ...plain } = artifact;
+  return {
+    ...plain,
+    title: await vault.decrypt(artifact.secureVault.title),
+    summary: await vault.decrypt(artifact.secureVault.summary),
+    assumptions: parseSecureArtifactRecord(await vault.decrypt(artifact.secureVault.assumptions), 'assumptions'),
+    metrics: parseSecureArtifactRecord(await vault.decrypt(artifact.secureVault.metrics), 'metrics'),
+  };
+}
+
+export async function getNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName' | 'artifactId'>) {
+  return decryptNoteForRead(await vaultTable<VaultNote>('notes').get(noteIdFor(target)));
 }
 
 export async function saveNote({
@@ -786,34 +1237,141 @@ export async function saveNote({
   moduleId,
   questionId,
   formulaName,
+  artifactId,
   title,
   body,
   path,
 }: Omit<VaultNote, 'id' | 'createdAt' | 'updatedAt'>) {
-  const id = noteIdFor({ type, domain, moduleId, questionId, formulaName });
-  const existing = await db.notes.get(id);
+  const id = noteIdFor({ type, domain, moduleId, questionId, formulaName, artifactId });
+  const notesTable = vaultTable<VaultNote>('notes');
+  const existing = await notesTable.get(id);
   const timestamp = nowIso();
-  const note: VaultNote = {
+  const note: VaultNote = await encryptNoteForStorage({
     id,
     type,
     domain,
     moduleId,
     questionId,
     formulaName,
+    artifactId,
     title,
     body,
     path,
     createdAt: existing?.createdAt || timestamp,
     updatedAt: timestamp,
-  };
+  });
 
-  await db.notes.put(note);
+  await notesTable.put(note);
+  if (artifactId) await attachArtifactToNote(artifactId, id);
   emitProgressChange();
-  return note;
+  return (await decryptNoteForRead(note)) as VaultNote;
 }
 
-export async function deleteNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName'>) {
-  await db.notes.delete(noteIdFor(target));
+export async function encryptExistingNotesForSecureVault(vault: SecureVault = noteSecureVault) {
+  if (!vault.isEnabled()) return { encrypted: 0, alreadyEncrypted: 0 };
+  assertNoteVaultUnlocked(vault);
+  const notesTable = vaultTable<VaultNote>('notes');
+  const notes = await notesTable.toArray();
+  let encrypted = 0;
+  let alreadyEncrypted = 0;
+  for (const note of notes) {
+    if (isSecureNote(note)) {
+      alreadyEncrypted += 1;
+      continue;
+    }
+    await notesTable.put(await encryptNoteForStorage(note, vault));
+    encrypted += 1;
+  }
+  if (encrypted) emitProgressChange();
+  return { encrypted, alreadyEncrypted };
+}
+
+export async function decryptEncryptedNotesForSecureVault(vault: SecureVault = noteSecureVault) {
+  assertNoteVaultUnlocked(vault);
+  const notesTable = vaultTable<VaultNote>('notes');
+  const notes = await notesTable.toArray();
+  let decrypted = 0;
+  for (const note of notes) {
+    const plain = await decryptNoteForRead(note, vault);
+    if (plain && isSecureNote(note)) {
+      await notesTable.put(plain);
+      decrypted += 1;
+    }
+  }
+  if (decrypted) emitProgressChange();
+  return { decrypted };
+}
+
+export async function encryptExistingResultArtifactsForSecureVault(vault: SecureVault = noteSecureVault) {
+  if (!vault.isEnabled()) return { encrypted: 0, alreadyEncrypted: 0 };
+  assertSecureVaultUnlocked(vault, 'encrypted result artifacts');
+  const artifactsTable = vaultTable<ResultArtifact>('resultArtifacts');
+  const artifacts = await artifactsTable.toArray();
+  let encrypted = 0;
+  let alreadyEncrypted = 0;
+  for (const artifact of artifacts) {
+    if (isSecureResultArtifact(artifact)) {
+      alreadyEncrypted += 1;
+      continue;
+    }
+    await artifactsTable.put(await encryptResultArtifactForStorage(artifact, vault));
+    encrypted += 1;
+  }
+  if (encrypted) emitProgressChange();
+  return { encrypted, alreadyEncrypted };
+}
+
+export async function decryptEncryptedResultArtifactsForSecureVault(vault: SecureVault = noteSecureVault) {
+  assertSecureVaultUnlocked(vault, 'encrypted result artifacts');
+  const artifactsTable = vaultTable<ResultArtifact>('resultArtifacts');
+  const artifacts = await artifactsTable.toArray();
+  let decrypted = 0;
+  for (const artifact of artifacts) {
+    const plain = await decryptResultArtifactForRead(artifact, vault);
+    if (plain && isSecureResultArtifact(artifact)) {
+      await artifactsTable.put(plain);
+      decrypted += 1;
+    }
+  }
+  if (decrypted) emitProgressChange();
+  return { decrypted };
+}
+
+export async function encryptExistingSourceChunksForSecureVault(vault: SecureVault = noteSecureVault) {
+  if (!vault.isEnabled()) return { encrypted: 0, alreadyEncrypted: 0 };
+  assertSecureVaultUnlocked(vault, 'encrypted source chunks');
+  const chunks = await db.sourceChunks.toArray();
+  let encrypted = 0;
+  let alreadyEncrypted = 0;
+  for (const chunk of chunks) {
+    if (isSecureSourceChunk(chunk)) {
+      alreadyEncrypted += 1;
+      continue;
+    }
+    await db.sourceChunks.put(await encryptSourceChunkForStorage(chunk, vault));
+    encrypted += 1;
+  }
+  if (encrypted) emitProgressChange();
+  return { encrypted, alreadyEncrypted };
+}
+
+export async function decryptEncryptedSourceChunksForSecureVault(vault: SecureVault = noteSecureVault) {
+  assertSecureVaultUnlocked(vault, 'encrypted source chunks');
+  const chunks = await db.sourceChunks.toArray();
+  let decrypted = 0;
+  for (const chunk of chunks) {
+    const plain = await decryptSourceChunkForRead(chunk, vault);
+    if (plain && isSecureSourceChunk(chunk)) {
+      await db.sourceChunks.put(plain);
+      decrypted += 1;
+    }
+  }
+  if (decrypted) emitProgressChange();
+  return { decrypted };
+}
+
+export async function deleteNote(target: Pick<VaultNote, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName' | 'artifactId'>) {
+  await vaultTable<VaultNote>('notes').delete(noteIdFor(target));
   emitProgressChange();
 }
 
@@ -830,7 +1388,7 @@ function bookmarkIdFor({
 export async function getBookmark(
   target: Pick<VaultBookmark, 'type' | 'domain' | 'moduleId' | 'questionId' | 'formulaName'>,
 ) {
-  return db.bookmarks.get(bookmarkIdFor(target));
+  return vaultTable<VaultBookmark>('bookmarks').get(bookmarkIdFor(target));
 }
 
 export async function toggleBookmark({
@@ -843,10 +1401,11 @@ export async function toggleBookmark({
   path,
 }: Omit<VaultBookmark, 'id' | 'createdAt'>) {
   const id = bookmarkIdFor({ type, domain, moduleId, questionId, formulaName });
-  const existing = await db.bookmarks.get(id);
+  const bookmarksTable = vaultTable<VaultBookmark>('bookmarks');
+  const existing = await bookmarksTable.get(id);
 
   if (existing) {
-    await db.bookmarks.delete(id);
+    await bookmarksTable.delete(id);
     emitProgressChange();
     return null;
   }
@@ -863,12 +1422,237 @@ export async function toggleBookmark({
     createdAt: nowIso(),
   };
 
-  await db.bookmarks.put(bookmark);
+  await bookmarksTable.put(bookmark);
   emitProgressChange();
   return bookmark;
 }
 
-export async function exportVaultData(): Promise<VaultExport> {
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (isObject(value)) {
+    return `{${Object.keys(value)
+      .filter((key) => value[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+const SHA256_INITIAL_HASH = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+const SHA256_ROUND_CONSTANTS = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+function rotateRight(value: number, bits: number) {
+  return (value >>> bits) | (value << (32 - bits));
+}
+
+function sha256Hex(source: string) {
+  const bytes = Array.from(new TextEncoder().encode(source));
+  const bitLength = bytes.length * 8;
+  bytes.push(0x80);
+  while (bytes.length % 64 !== 56) bytes.push(0);
+  const highBits = Math.floor(bitLength / 0x100000000);
+  const lowBits = bitLength >>> 0;
+  for (let shift = 24; shift >= 0; shift -= 8) bytes.push((highBits >>> shift) & 0xff);
+  for (let shift = 24; shift >= 0; shift -= 8) bytes.push((lowBits >>> shift) & 0xff);
+
+  const hash = [...SHA256_INITIAL_HASH];
+  const words = new Array<number>(64);
+  for (let offset = 0; offset < bytes.length; offset += 64) {
+    for (let index = 0; index < 16; index += 1) {
+      const position = offset + index * 4;
+      words[index] =
+        ((bytes[position] << 24) | (bytes[position + 1] << 16) | (bytes[position + 2] << 8) | bytes[position + 3]) >>> 0;
+    }
+    for (let index = 16; index < 64; index += 1) {
+      const sigma0 = rotateRight(words[index - 15], 7) ^ rotateRight(words[index - 15], 18) ^ (words[index - 15] >>> 3);
+      const sigma1 = rotateRight(words[index - 2], 17) ^ rotateRight(words[index - 2], 19) ^ (words[index - 2] >>> 10);
+      words[index] = (words[index - 16] + sigma0 + words[index - 7] + sigma1) >>> 0;
+    }
+
+    let [a, b, c, d, e, f, g, h] = hash;
+    for (let index = 0; index < 64; index += 1) {
+      const sum1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + sum1 + ch + SHA256_ROUND_CONSTANTS[index] + words[index]) >>> 0;
+      const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (sum0 + maj) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+
+    hash[0] = (hash[0] + a) >>> 0;
+    hash[1] = (hash[1] + b) >>> 0;
+    hash[2] = (hash[2] + c) >>> 0;
+    hash[3] = (hash[3] + d) >>> 0;
+    hash[4] = (hash[4] + e) >>> 0;
+    hash[5] = (hash[5] + f) >>> 0;
+    hash[6] = (hash[6] + g) >>> 0;
+    hash[7] = (hash[7] + h) >>> 0;
+  }
+
+  return hash.map((value) => value.toString(16).padStart(8, '0')).join('');
+}
+
+function fnv1a32ForStablePayload(payload: unknown) {
+  const source = stableStringify(payload);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function checksumForStablePayload(payload: unknown) {
+  return `sha256:${sha256Hex(stableStringify(payload))}`;
+}
+
+function checksumForExport(payload: Omit<VaultExport, 'checksum'>) {
+  return checksumForStablePayload(payload);
+}
+
+function checksumMatchesPayload(payload: Record<string, unknown>, checksum: string) {
+  const { checksum: _checksum, ...payloadForChecksum } = payload;
+  if (checksum.startsWith('fnv1a32:')) return checksum === fnv1a32ForStablePayload(payloadForChecksum);
+  return checksum === checksumForStablePayload(payloadForChecksum);
+}
+
+function exportIdFor(timestamp: string) {
+  const random = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `qv-${timestamp.replace(/[^0-9]/g, '').slice(0, 14)}-${random}`;
+}
+
+function withChecksum(payload: Omit<VaultExport, 'checksum'>): VaultExport {
+  return {
+    ...payload,
+    checksum: checksumForExport(payload),
+  };
+}
+
+function buildVaultExport(stores: VaultDataStores, exportedAt = nowIso()): VaultExport {
+  return withChecksum({
+    app: 'QuantVault',
+    exportId: exportIdFor(exportedAt),
+    schemaVersion: VAULT_SCHEMA_VERSION,
+    schemaHash: VAULT_SCHEMA_HASH,
+    contentVersion: VAULT_CONTENT_VERSION,
+    exportedAt,
+    encryption: {
+      encrypted: false,
+      algorithm: 'none',
+    },
+    stores,
+  });
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function requireCryptoSubtle() {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) throw new Error('Web Crypto is required for encrypted vault exports.');
+  return subtle;
+}
+
+async function deriveVaultKey(passphrase: string, salt: Uint8Array, iterations: number) {
+  if (!passphrase) throw new Error('Encrypted vault exports require a passphrase.');
+  const subtle = requireCryptoSubtle();
+  const material = await subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  const saltBytes = new Uint8Array(salt);
+  return subtle.deriveKey(
+    { name: 'PBKDF2', salt: saltBytes, iterations, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+async function encryptVaultExport(payload: VaultExport, passphrase: string): Promise<EncryptedVaultExport> {
+  const subtle = requireCryptoSubtle();
+  const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const iterations = 210_000;
+  const key = await deriveVaultKey(passphrase, salt, iterations);
+  const encrypted = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(stableStringify(payload))));
+  const encryptedPayload: Omit<EncryptedVaultExport, 'checksum'> = {
+    app: 'QuantVault',
+    exportId: payload.exportId,
+    schemaVersion: payload.schemaVersion,
+    schemaHash: payload.schemaHash,
+    contentVersion: payload.contentVersion,
+    exportedAt: payload.exportedAt,
+    encryption: {
+      encrypted: true,
+      algorithm: 'AES-GCM',
+      keyDerivation: 'PBKDF2',
+      iterations,
+      salt: bytesToBase64(salt),
+      iv: bytesToBase64(iv),
+      hash: 'SHA-256',
+    },
+    payload: bytesToBase64(encrypted),
+  };
+  return {
+    ...encryptedPayload,
+    checksum: checksumForStablePayload(encryptedPayload),
+  };
+}
+
+async function decryptVaultExport(payload: EncryptedVaultExport, passphrase?: string): Promise<VaultExport> {
+  if (!passphrase) throw new Error('Encrypted QuantVault exports require a passphrase.');
+  if (!checksumMatchesPayload(payload, payload.checksum)) {
+    throw new Error('Encrypted vault export checksum does not match its payload.');
+  }
+  const key = await deriveVaultKey(passphrase, base64ToBytes(payload.encryption.salt), payload.encryption.iterations);
+  try {
+    const decrypted = await requireCryptoSubtle().decrypt(
+      { name: 'AES-GCM', iv: base64ToBytes(payload.encryption.iv) },
+      key,
+      base64ToBytes(payload.payload),
+    );
+    return migrateVaultData(JSON.parse(new TextDecoder().decode(decrypted)));
+  } catch {
+    throw new Error('Unable to decrypt vault export. Check the passphrase and payload integrity.');
+  }
+}
+
+function isEncryptedVaultExport(payload: unknown): payload is EncryptedVaultExport {
+  return isObject(payload) && isObject(payload.encryption) && payload.encryption.encrypted === true && payload.encryption.algorithm === 'AES-GCM' && typeof payload.payload === 'string';
+}
+
+export async function exportVaultData(): Promise<VaultExport>;
+export async function exportVaultData(options: { encryption: { passphrase: string } }): Promise<EncryptedVaultExport>;
+export async function exportVaultData(options: { includeSourceVault: true }): Promise<VaultExport>;
+export async function exportVaultData(options: VaultExportOptions): Promise<VaultExport | EncryptedVaultExport>;
+export async function exportVaultData(options: VaultExportOptions = {}): Promise<VaultExport | EncryptedVaultExport> {
   const [
     lessonProgress,
     quizAttempts,
@@ -888,61 +1672,98 @@ export async function exportVaultData(): Promise<VaultExport> {
     flashcardAttempts,
     resultArtifacts,
     mockSectionState,
+    learningEvents,
+    vaultHealthSnapshots,
+    rollbackSnapshots,
+    calculatorScenarios,
+    releaseRunHistory,
+    importJobs,
+    sourceBundleManifests,
+    psychometricStats,
+    mockBlueprints,
     notes,
     bookmarks,
     settings,
   ] = await Promise.all([
-    db.lessonProgress.toArray(),
-    db.quizAttempts.toArray(),
-    db.questionResults.toArray(),
-    db.reviewItems.toArray(),
-    db.masterySnapshots.toArray(),
-    db.mockAttempts.toArray(),
-    db.vignetteAttempts.toArray(),
-    db.constructedResponseAttempts.toArray(),
-    db.formulaDrillAttempts.toArray(),
-    db.skillLabAttempts.toArray(),
-    db.studySessions.toArray(),
-    db.studyPlanSettings.toArray(),
-    db.contentVersions.toArray(),
-    db.reviewEvents.toArray(),
-    db.confidenceCalibration.toArray(),
-    db.flashcardAttempts.toArray(),
-    db.resultArtifacts.toArray(),
-    db.mockSectionState.toArray(),
-    db.notes.toArray(),
-    db.bookmarks.toArray(),
-    db.settings.toArray(),
+    vaultTable<LessonProgress>('lessonProgress').toArray(),
+    vaultTable<QuizAttemptRow>('quizAttempts').toArray(),
+    vaultTable<QuestionResultRow>('questionResults').toArray(),
+    vaultTable<ReviewItem>('reviewItems').toArray(),
+    vaultTable<MasterySnapshot>('masterySnapshots').toArray(),
+    vaultTable<MockAttempt>('mockAttempts').toArray(),
+    vaultTable<VignetteAttempt>('vignetteAttempts').toArray(),
+    vaultTable<ConstructedResponseAttempt>('constructedResponseAttempts').toArray(),
+    vaultTable<FormulaDrillAttempt>('formulaDrillAttempts').toArray(),
+    vaultTable<SkillLabAttempt>('skillLabAttempts').toArray(),
+    vaultTable<StudySession>('studySessions').toArray(),
+    vaultTable<StudyPlanSettings>('studyPlanSettings').toArray(),
+    vaultTable<ContentVersion>('contentVersions').toArray(),
+    vaultTable<ReviewEvent>('reviewEvents').toArray(),
+    vaultTable<ConfidenceCalibration>('confidenceCalibration').toArray(),
+    vaultTable<FlashcardAttempt>('flashcardAttempts').toArray(),
+    vaultTable<ResultArtifact>('resultArtifacts').toArray(),
+    vaultTable<MockSectionState>('mockSectionState').toArray(),
+    vaultTable<LearningEventEnvelope>('learningEvents').toArray(),
+    vaultTable<VaultHealthSnapshot>('vaultHealthSnapshots').toArray(),
+    vaultTable<RollbackSnapshot>('rollbackSnapshots').toArray(),
+    vaultTable<CalculatorScenario>('calculatorScenarios').toArray(),
+    vaultTable<ReleaseRunHistory>('releaseRunHistory').toArray(),
+    vaultTable<ImportJob>('importJobs').toArray(),
+    vaultTable<SourceBundleManifest>('sourceBundleManifests').toArray(),
+    vaultTable<PsychometricStats>('psychometricStats').toArray(),
+    vaultTable<MockBlueprint>('mockBlueprints').toArray(),
+    vaultTable<VaultNote>('notes').toArray(),
+    vaultTable<VaultBookmark>('bookmarks').toArray(),
+    vaultTable<SettingRow>('settings').toArray(),
   ]);
 
-  return {
-    app: 'QuantVault',
-    schemaVersion: VAULT_SCHEMA_VERSION,
-    exportedAt: nowIso(),
-    stores: {
-      lessonProgress,
-      quizAttempts,
-      questionResults,
-      reviewItems,
-      masterySnapshots,
-      mockAttempts,
-      vignetteAttempts,
-      constructedResponseAttempts,
-      formulaDrillAttempts,
-      skillLabAttempts,
-      studySessions,
-      studyPlanSettings,
-      contentVersions,
-      reviewEvents,
-      confidenceCalibration,
-      flashcardAttempts,
-      resultArtifacts,
-      mockSectionState,
-      notes,
-      bookmarks,
-      settings,
-    },
-  };
+  const sourceVault: CfaSourceVaultStores | undefined = options.includeSourceVault
+    ? {
+        sourceDocuments: await vaultTable<CfaSourceDocument>('sourceDocuments').toArray(),
+        sourceChunks: await decryptSourceChunksForRead(await vaultTable<CfaSourceChunk>('sourceChunks').toArray()),
+        sourceIndexes: await vaultTable<CfaSourceIndex>('sourceIndexes').toArray(),
+        sourceIngestionRuns: await vaultTable<CfaSourceIngestionRun>('sourceIngestionRuns').toArray(),
+        sourceLinks: await vaultTable<CfaSourceLink>('sourceLinks').toArray(),
+        sourceLinkOverrides: await vaultTable<CfaSourceLinkOverride>('sourceLinkOverrides').toArray(),
+      }
+    : undefined;
+
+  const vaultExport = buildVaultExport({
+    lessonProgress,
+    quizAttempts,
+    questionResults,
+    reviewItems,
+    masterySnapshots,
+    mockAttempts,
+    vignetteAttempts,
+    constructedResponseAttempts,
+    formulaDrillAttempts,
+    skillLabAttempts,
+    studySessions,
+    studyPlanSettings,
+    contentVersions,
+    reviewEvents,
+    confidenceCalibration,
+    flashcardAttempts,
+    resultArtifacts,
+    mockSectionState,
+    learningEvents,
+    vaultHealthSnapshots,
+    rollbackSnapshots,
+    calculatorScenarios,
+    releaseRunHistory,
+    importJobs,
+    sourceBundleManifests,
+    psychometricStats,
+    mockBlueprints,
+    notes,
+    bookmarks,
+    settings,
+  });
+  const { checksum: _checksum, ...vaultExportPayload } = vaultExport;
+  const exportWithSource = sourceVault ? withChecksum({ ...vaultExportPayload, sourceVault }) : vaultExport;
+  if (options.encryption) return encryptVaultExport(exportWithSource, options.encryption.passphrase);
+  return exportWithSource;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -969,10 +1790,50 @@ function emptyVaultStores(): VaultDataStores {
     flashcardAttempts: [],
     resultArtifacts: [],
     mockSectionState: [],
+    learningEvents: [],
+    vaultHealthSnapshots: [],
+    rollbackSnapshots: [],
+    calculatorScenarios: [],
+    releaseRunHistory: [],
+    importJobs: [],
+    sourceBundleManifests: [],
+    psychometricStats: [],
+    mockBlueprints: [],
     notes: [],
     bookmarks: [],
     settings: [],
   };
+}
+
+function emptyVaultCounts(): Record<(typeof STORE_NAMES)[number], number> {
+  return STORE_NAMES.reduce(
+    (counts, storeName) => ({
+      ...counts,
+      [storeName]: 0,
+    }),
+    {} as Record<(typeof STORE_NAMES)[number], number>,
+  );
+}
+
+function emptySourceVaultStores(): CfaSourceVaultStores {
+  return {
+    sourceDocuments: [],
+    sourceChunks: [],
+    sourceIndexes: [],
+    sourceIngestionRuns: [],
+    sourceLinks: [],
+    sourceLinkOverrides: [],
+  };
+}
+
+function emptySourceVaultCounts(): Record<(typeof SOURCE_STORE_NAMES)[number], number> {
+  return SOURCE_STORE_NAMES.reduce(
+    (counts, storeName) => ({
+      ...counts,
+      [storeName]: 0,
+    }),
+    {} as Record<(typeof SOURCE_STORE_NAMES)[number], number>,
+  );
 }
 
 export function migrateVaultData(payload: unknown): VaultExport {
@@ -988,12 +1849,59 @@ export function migrateVaultData(payload: unknown): VaultExport {
       [storeName]: Array.isArray(stores[storeName]) ? stores[storeName] : emptyStores[storeName],
     };
   }, emptyStores);
+  const storesWithV6Defaults: VaultDataStores = {
+    ...migratedStores,
+    reviewItems: migratedStores.reviewItems.map((row) => ({
+      ...row,
+      fsrsDifficulty: Number.isFinite(row.fsrsDifficulty) ? row.fsrsDifficulty : 5,
+    })),
+  };
+  const exportedAt = typeof payload.exportedAt === 'string' ? payload.exportedAt : nowIso();
+  const sourceVaultPayload = isObject(payload.sourceVault) ? payload.sourceVault : undefined;
+  const sourceVault = sourceVaultPayload
+    ? {
+        sourceDocuments: Array.isArray(sourceVaultPayload.sourceDocuments) ? (sourceVaultPayload.sourceDocuments as CfaSourceVaultStores['sourceDocuments']) : [],
+        sourceChunks: Array.isArray(sourceVaultPayload.sourceChunks) ? (sourceVaultPayload.sourceChunks as CfaSourceVaultStores['sourceChunks']) : [],
+        sourceIndexes: Array.isArray(sourceVaultPayload.sourceIndexes) ? (sourceVaultPayload.sourceIndexes as CfaSourceVaultStores['sourceIndexes']) : [],
+        sourceIngestionRuns: Array.isArray(sourceVaultPayload.sourceIngestionRuns)
+          ? (sourceVaultPayload.sourceIngestionRuns as CfaSourceVaultStores['sourceIngestionRuns'])
+          : [],
+        sourceLinks: Array.isArray(sourceVaultPayload.sourceLinks) ? (sourceVaultPayload.sourceLinks as CfaSourceVaultStores['sourceLinks']) : [],
+        sourceLinkOverrides: Array.isArray(sourceVaultPayload.sourceLinkOverrides)
+          ? (sourceVaultPayload.sourceLinkOverrides as CfaSourceVaultStores['sourceLinkOverrides'])
+          : [],
+      }
+    : undefined;
+  const baseExport: Omit<VaultExport, 'checksum'> = {
+    app: payload.app === 'QuantVault' ? 'QuantVault' : 'QuantVault',
+    exportId: typeof payload.exportId === 'string' ? payload.exportId : exportIdFor(exportedAt),
+    schemaVersion: VAULT_SCHEMA_VERSION,
+    schemaHash: typeof payload.schemaHash === 'string' ? payload.schemaHash : VAULT_SCHEMA_HASH,
+    contentVersion: typeof payload.contentVersion === 'string' ? payload.contentVersion : VAULT_CONTENT_VERSION,
+    exportedAt,
+    encryption: isObject(payload.encryption)
+      ? {
+          encrypted: Boolean(payload.encryption.encrypted),
+          algorithm: payload.encryption.algorithm === 'AES-GCM' ? 'AES-GCM' : 'none',
+          keyDerivation: payload.encryption.keyDerivation === 'PBKDF2' ? 'PBKDF2' : undefined,
+        }
+      : {
+          encrypted: false,
+          algorithm: 'none',
+    },
+    stores: storesWithV6Defaults,
+    ...(sourceVault ? { sourceVault } : {}),
+  };
+
+  const hasCurrentShaChecksum =
+    payload.schemaVersion === VAULT_SCHEMA_VERSION &&
+    payload.schemaHash === VAULT_SCHEMA_HASH &&
+    typeof payload.checksum === 'string' &&
+    payload.checksum.startsWith('sha256:');
 
   return {
-    app: payload.app === 'QuantVault' ? 'QuantVault' : 'QuantVault',
-    schemaVersion: VAULT_SCHEMA_VERSION,
-    exportedAt: typeof payload.exportedAt === 'string' ? payload.exportedAt : nowIso(),
-    stores: migratedStores,
+    ...baseExport,
+    checksum: hasCurrentShaChecksum ? (payload.checksum as string) : checksumForExport(baseExport),
   };
 }
 
@@ -1008,9 +1916,71 @@ export function validateVaultData(payload: unknown): { valid: boolean; errors: s
   }
 
   if (isObject(payload) && payload.app !== 'QuantVault') errors.push('Payload is not a QuantVault export.');
+  // Data-safety (audit M5): migrateVaultData copies only known STORE_NAMES and
+  // forces schemaVersion, so a backup from a NEWER build would silently drop its
+  // unknown stores and re-checksum the down-converted payload (hiding the loss).
+  // Refuse a forward-incompatible import outright, and refuse any backup carrying
+  // store keys this build doesn't know, rather than downgrade-and-drop.
+  if (isObject(payload)) {
+    if (typeof payload.schemaVersion === 'number' && payload.schemaVersion > VAULT_SCHEMA_VERSION) {
+      errors.push(
+        `This backup is from a newer app version (vault schema v${payload.schemaVersion} > v${VAULT_SCHEMA_VERSION}). Update the app before importing it.`,
+      );
+    }
+    if (isObject(payload.stores)) {
+      const knownStores = STORE_NAMES as readonly string[];
+      const unknownStores = Object.keys(payload.stores).filter((key) => !knownStores.includes(key));
+      if (unknownStores.length) {
+        errors.push(
+          `Backup contains ${unknownStores.length} unknown data store(s) (${unknownStores.join(', ')}) this app version cannot import without losing them.`,
+        );
+      }
+    }
+  }
+  if (isObject(payload) && typeof payload.checksum === 'string') {
+    if (!checksumMatchesPayload(payload, payload.checksum)) {
+      errors.push('Vault export checksum does not match its payload.');
+    }
+  }
+  if (migrated.encryption?.encrypted) {
+    errors.push('Encrypted QuantVault exports require decryption before import.');
+  }
   STORE_NAMES.forEach((storeName) => {
     if (!Array.isArray(migrated.stores[storeName])) errors.push(`${storeName} must be an array.`);
   });
+  if (migrated.sourceVault) {
+    SOURCE_STORE_NAMES.forEach((storeName) => {
+      if (!Array.isArray(migrated.sourceVault?.[storeName])) errors.push(`${storeName} must be an array.`);
+    });
+    const publicSourceDocuments = migrated.sourceVault.sourceDocuments.filter((document) => document.privateUseOnly !== true);
+    if (publicSourceDocuments.length) {
+      errors.push(`${publicSourceDocuments.length} source document rows are not marked privateUseOnly.`);
+    }
+    const orphanedSourceChunks = migrated.sourceVault.sourceChunks.filter(
+      (chunk) => !migrated.sourceVault?.sourceDocuments.some((document) => document.id === chunk.documentId),
+    );
+    if (orphanedSourceChunks.length) {
+      errors.push(`${orphanedSourceChunks.length} source chunk rows reference unknown source documents.`);
+    }
+    const sourceChunkIds = new Set(migrated.sourceVault.sourceChunks.map((chunk) => chunk.id));
+    const sourceDocumentIds = new Set(migrated.sourceVault.sourceDocuments.map((document) => document.id));
+    const sourceChunkById = new Map(migrated.sourceVault.sourceChunks.map((chunk) => [chunk.id, chunk]));
+    const orphanedSourceLinks = (migrated.sourceVault.sourceLinks || []).filter((link) => !sourceChunkIds.has(link.chunkId));
+    if (orphanedSourceLinks.length) {
+      errors.push(`${orphanedSourceLinks.length} source link rows reference unknown source chunks.`);
+    }
+    const mismatchedSourceLinks = (migrated.sourceVault.sourceLinks || []).filter((link) => {
+      const chunk = sourceChunkById.get(link.chunkId);
+      return !sourceDocumentIds.has(link.documentId) || (chunk && chunk.documentId !== link.documentId);
+    });
+    if (mismatchedSourceLinks.length) {
+      errors.push(`${mismatchedSourceLinks.length} source link rows have mismatched source document citations.`);
+    }
+    const orphanedSourceOverrides = (migrated.sourceVault.sourceLinkOverrides || []).filter((override) => !sourceChunkIds.has(override.chunkId));
+    if (orphanedSourceOverrides.length) {
+      errors.push(`${orphanedSourceOverrides.length} source override rows reference unknown source chunks.`);
+    }
+  }
 
   const invalidQuestionResults = migrated.stores.questionResults.filter(
     (row) => !row.domain || !row.topic || !row.questionId || !row.learningObjective,
@@ -1048,10 +2018,20 @@ export function validateVaultData(payload: unknown): { valid: boolean; errors: s
   return { valid: errors.length === 0, errors };
 }
 
-export function previewVaultImport(payload: unknown) {
+export function previewVaultImport(payload: unknown): VaultImportPreviewBase {
   const validation = validateVaultData(payload);
   if (!validation.valid) {
-    return { valid: false, errors: validation.errors, schemaVersion: null, counts: emptyVaultStores() };
+    return {
+      valid: false,
+      errors: validation.errors,
+      schemaVersion: null,
+      schemaHash: null,
+      contentVersion: null,
+      exportId: null,
+      checksumValid: false,
+      counts: emptyVaultCounts(),
+      sourceCounts: emptySourceVaultCounts(),
+    };
   }
 
   const migrated = migrateVaultData(payload);
@@ -1059,12 +2039,23 @@ export function previewVaultImport(payload: unknown) {
     valid: true,
     errors: [],
     schemaVersion: migrated.schemaVersion,
+    schemaHash: migrated.schemaHash,
+    contentVersion: migrated.contentVersion,
+    exportId: migrated.exportId,
+    checksumValid: checksumMatchesPayload(migrated, migrated.checksum),
     counts: STORE_NAMES.reduce(
       (counts, storeName) => ({
         ...counts,
         [storeName]: migrated.stores[storeName].length,
       }),
       {} as Record<(typeof STORE_NAMES)[number], number>,
+    ),
+    sourceCounts: SOURCE_STORE_NAMES.reduce(
+      (counts, storeName) => ({
+        ...counts,
+        [storeName]: migrated.sourceVault?.[storeName]?.length || 0,
+      }),
+      {} as Record<(typeof SOURCE_STORE_NAMES)[number], number>,
     ),
   };
 }
@@ -1085,70 +2076,361 @@ function remapMergeIds(stores: VaultDataStores): VaultDataStores {
   );
 }
 
-export async function importVaultData(payload: unknown, mode: 'merge' | 'replace' = 'merge') {
-  const exportPayload = migrateVaultData(payload);
-  const validation = validateVaultData(payload);
+function normalizeVaultImportOptions(options: 'merge' | 'replace' | VaultImportOptions = 'merge'): Required<Pick<VaultImportOptions, 'mode' | 'conflictPolicy' | 'includeSourceVault'>> &
+  Pick<VaultImportOptions, 'passphrase'> {
+  if (typeof options === 'string') {
+    return { mode: options, conflictPolicy: options === 'replace' ? 'replace' : 'prefer-import', includeSourceVault: false };
+  }
+  const conflictPolicy = options.conflictPolicy || (options.mode === 'replace' ? 'replace' : 'prefer-import');
+  return {
+    mode: conflictPolicy === 'replace' ? 'replace' : options.mode || 'merge',
+    conflictPolicy,
+    passphrase: options.passphrase,
+    includeSourceVault: options.includeSourceVault === true,
+  };
+}
+
+function primaryKeyPathForStore(storeName: (typeof STORE_NAMES)[number]) {
+  // DATA-1 Phase 3: reads Dexie schema metadata (`schema.primKey.keyPath`), which
+  // is not part of the KeyedTable surface — stays on direct db.*.
+  const keyPath = db[storeName].schema.primKey.keyPath;
+  return typeof keyPath === 'string' ? keyPath : null;
+}
+
+function rowKey(row: unknown, keyPath: string | null) {
+  return keyPath && isObject(row) ? row[keyPath] : undefined;
+}
+
+async function filterKeepExisting(stores: VaultDataStores): Promise<VaultDataStores> {
+  const entries = await Promise.all(
+    STORE_NAMES.map(async (storeName) => {
+      if (AUTO_ID_STORES.has(storeName)) return [storeName, stores[storeName]] as const;
+      const keyPath = primaryKeyPathForStore(storeName);
+      const rows = stores[storeName];
+      const keys = rows.map((row) => rowKey(row, keyPath));
+      const existing = await vaultTable(storeName).bulkGet(keys.filter((key) => key !== undefined) as any[]);
+      const existingKeys = new Set<unknown>(
+        existing
+          .filter(Boolean)
+          .map((row) => rowKey(row, keyPath))
+          .filter((key) => key !== undefined),
+      );
+      return [storeName, rows.filter((row) => !existingKeys.has(rowKey(row, keyPath)))] as const;
+    }),
+  );
+  return entries.reduce(
+    (nextStores, [storeName, rows]) => ({
+      ...nextStores,
+      [storeName]: rows,
+    }),
+    emptyVaultStores(),
+  );
+}
+
+async function detectImportConflicts(stores: VaultDataStores) {
+  const entries = await Promise.all(
+    STORE_NAMES.map(async (storeName) => {
+      if (AUTO_ID_STORES.has(storeName)) return [storeName, 0] as const;
+      const keyPath = primaryKeyPathForStore(storeName);
+      if (!keyPath) return [storeName, 0] as const;
+      const keys = stores[storeName].map((row) => rowKey(row, keyPath)).filter((key) => key !== undefined) as any[];
+      if (!keys.length) return [storeName, 0] as const;
+      const existing = await vaultTable(storeName).bulkGet(keys);
+      return [storeName, existing.filter(Boolean).length] as const;
+    }),
+  );
+  const byStore = entries.reduce<Partial<Record<(typeof STORE_NAMES)[number], number>>>((result, [storeName, count]) => {
+    if (count > 0) result[storeName] = count;
+    return result;
+  }, {});
+  return {
+    total: Object.values(byStore).reduce((sum, count) => sum + (count || 0), 0),
+    byStore,
+  };
+}
+
+async function resolveVaultImportPayload(payload: unknown, passphrase?: string): Promise<VaultExport> {
+  if (isEncryptedVaultExport(payload)) return decryptVaultExport(payload, passphrase);
+  return migrateVaultData(payload);
+}
+
+export async function previewVaultImportPayload(payload: unknown, options: VaultImportOptions = {}): Promise<VaultImportPreview> {
+  const importOptions = normalizeVaultImportOptions(options);
+  const encrypted = isEncryptedVaultExport(payload);
+
+  try {
+    const exportPayload = await resolveVaultImportPayload(payload, importOptions.passphrase);
+    const preview = previewVaultImport(exportPayload);
+    const totalRows = Object.values(preview.counts).reduce((sum, count) => sum + count, 0);
+    const sourceAvailable = Object.values(preview.sourceCounts).some((count) => count > 0);
+    return {
+      ...preview,
+      encrypted,
+      exportedAt: exportPayload.exportedAt,
+      totalRows,
+      sourceIncluded: importOptions.includeSourceVault && sourceAvailable,
+      sourceAvailable,
+      conflictPolicy: importOptions.conflictPolicy,
+      conflicts: importOptions.mode === 'merge' ? await detectImportConflicts(exportPayload.stores) : { total: 0, byStore: {} },
+    };
+  } catch (error) {
+    return {
+      ...previewVaultImport({}),
+      valid: false,
+      errors: [error instanceof Error ? error.message : 'Import preview failed.'],
+      encrypted,
+      exportedAt: null,
+      totalRows: 0,
+      sourceIncluded: false,
+      sourceAvailable: false,
+      conflictPolicy: importOptions.conflictPolicy,
+      conflicts: { total: 0, byStore: {} },
+    };
+  }
+}
+
+async function appendVaultImportHistory({
+  exportPayload,
+  mode,
+  conflictPolicy,
+  encrypted,
+}: {
+  exportPayload: VaultExport;
+  mode: 'merge' | 'replace';
+  conflictPolicy: 'keep-existing' | 'prefer-import' | 'replace';
+  encrypted: boolean;
+}) {
+  const key = 'vault:import-history';
+  const settingsTable = vaultTable<SettingRow>('settings');
+  const existing = await settingsTable.get(key);
+  const current = Array.isArray(existing?.value) ? (existing.value as VaultImportHistoryEntry[]) : [];
+  const entry: VaultImportHistoryEntry = {
+    exportId: exportPayload.exportId,
+    importedAt: nowIso(),
+    exportedAt: exportPayload.exportedAt,
+    schemaVersion: exportPayload.schemaVersion,
+    schemaHash: exportPayload.schemaHash,
+    contentVersion: exportPayload.contentVersion,
+    mode,
+    conflictPolicy,
+    encrypted,
+  };
+  await settingsTable.put({
+    key,
+    updatedAt: nowIso(),
+    value: [entry, ...current].slice(0, 20),
+  });
+}
+
+export async function getVaultImportHistory(): Promise<VaultImportHistoryEntry[]> {
+  const existing = await vaultTable<SettingRow>('settings').get('vault:import-history');
+  return Array.isArray(existing?.value) ? (existing.value as VaultImportHistoryEntry[]) : [];
+}
+
+function vaultRowCounts(stores: VaultDataStores): Record<string, number> {
+  return STORE_NAMES.reduce(
+    (counts, storeName) => ({
+      ...counts,
+      [storeName]: stores[storeName].length,
+    }),
+    {} as Record<string, number>,
+  );
+}
+
+function sourceVaultRowCounts(sourceVault?: CfaSourceVaultStores): Record<string, number> | undefined {
+  if (!sourceVault) return undefined;
+  return SOURCE_STORE_NAMES.reduce(
+    (counts, storeName) => ({
+      ...counts,
+      [storeName]: sourceVault[storeName]?.length || 0,
+    }),
+    {} as Record<string, number>,
+  );
+}
+
+export async function getRollbackSnapshots(limit = 10): Promise<RollbackSnapshot[]> {
+  // `createdAt` is a declared index on rollbackSnapshots, so the desc+limit read
+  // maps faithfully to orderedBy.
+  return vaultTable<RollbackSnapshot>('rollbackSnapshots').orderedBy('createdAt', { desc: true, limit });
+}
+
+/**
+ * Restore the vault from a previously-captured rollback snapshot (audit M1).
+ * Snapshots are written before every reset/import/repair but were never
+ * consumable — this is the missing recovery half of that safety net. The
+ * snapshot payload is a checksummed VaultExport, so the replace-import below
+ * validates it like any backup and (because importVaultData itself snapshots
+ * first) the restore is itself rollback-able.
+ */
+export async function restoreRollbackSnapshot(id: string): Promise<void> {
+  const snapshot = await vaultTable<RollbackSnapshot>('rollbackSnapshots').get(id);
+  if (!snapshot) throw new Error(`Rollback snapshot "${id}" was not found.`);
+  if (!snapshot.payload) throw new Error(`Rollback snapshot "${id}" has no payload to restore from.`);
+  await importVaultData(snapshot.payload, 'replace');
+  emitProgressChange();
+}
+
+export async function createRollbackSnapshot(reason: VaultRollbackReason = 'manual'): Promise<RollbackSnapshot> {
+  const exported = await exportVaultData();
+  const { checksum: _checksum, ...rollbackPayloadWithoutChecksum } = {
+    ...exported,
+    stores: {
+      ...exported.stores,
+      rollbackSnapshots: [],
+    },
+  };
+  const rollbackPayload = withChecksum(rollbackPayloadWithoutChecksum);
+  const snapshot: RollbackSnapshot = {
+    id: `rollback:${reason}:${exported.exportId}`,
+    reason,
+    createdAt: nowIso(),
+    schemaVersion: exported.schemaVersion,
+    schemaHash: exported.schemaHash,
+    contentVersion: exported.contentVersion,
+    checksum: rollbackPayload.checksum,
+    encrypted: false,
+    rowCounts: vaultRowCounts(exported.stores),
+    sourceRowCounts: sourceVaultRowCounts(exported.sourceVault),
+    payload: rollbackPayload,
+  };
+  const rollbackSnapshotsTable = vaultTable<RollbackSnapshot>('rollbackSnapshots');
+  await rollbackSnapshotsTable.put(snapshot);
+  // `.orderBy('createdAt').reverse().offset(10).toArray()` → desc read skipping
+  // the 10 newest; `createdAt` is a declared index on rollbackSnapshots.
+  const staleSnapshots = await rollbackSnapshotsTable.orderedBy('createdAt', { desc: true, offset: 10 });
+  await Promise.all(staleSnapshots.map((stale) => rollbackSnapshotsTable.delete(stale.id)));
+  return snapshot;
+}
+
+export async function importVaultData(payload: unknown, mode?: 'merge' | 'replace'): Promise<void>;
+export async function importVaultData(payload: unknown, options?: VaultImportOptions): Promise<void>;
+export async function importVaultData(payload: unknown, options: 'merge' | 'replace' | VaultImportOptions = 'merge') {
+  const importOptions = normalizeVaultImportOptions(options);
+  const exportPayload = await resolveVaultImportPayload(payload, importOptions.passphrase);
+  const importStartedAt = nowIso();
+  const importJobId = `import-job:${exportPayload.exportId}:${importStartedAt.replace(/[^0-9]/g, '')}`;
+  const encrypted = isEncryptedVaultExport(payload);
+  const validation = validateVaultData(exportPayload);
   if (!validation.valid) {
+    await vaultTable<ImportJob>('importJobs').put({
+      id: importJobId,
+      startedAt: importStartedAt,
+      completedAt: nowIso(),
+      status: 'blocked',
+      mode: importOptions.mode,
+      conflictPolicy: importOptions.conflictPolicy,
+      encrypted,
+      includeSourceVault: importOptions.includeSourceVault,
+      exportId: exportPayload.exportId,
+      rowCounts: vaultRowCounts(exportPayload.stores),
+      sourceRowCounts: sourceVaultRowCounts(exportPayload.sourceVault),
+      errors: validation.errors,
+    });
     throw new Error(validation.errors.join(' '));
   }
-  const storesToWrite = mode === 'merge' ? remapMergeIds(exportPayload.stores) : exportPayload.stores;
+  const sourceChunksToWrite =
+    importOptions.includeSourceVault && exportPayload.sourceVault
+      ? await encryptSourceChunksForStorage(exportPayload.sourceVault.sourceChunks, noteSecureVault)
+      : [];
+  // Data-safety: snapshot for BOTH modes. A merge bulkPut still overwrites local
+  // rows whose primary key collides with the imported file (settings, notes,
+  // bookmarks, reviewItems, masterySnapshots are keyed), so merging a stale/foreign
+  // backup over newer local progress was previously unrecoverable (snapshot was
+  // replace-only). Now every import is rollback-able.
+  const rollbackSnapshot = await createRollbackSnapshot(
+    importOptions.mode === 'replace' ? 'import-replace' : 'import-merge',
+  );
+  const mergeStores = importOptions.mode === 'merge' ? remapMergeIds(exportPayload.stores) : exportPayload.stores;
+  const storesToWrite =
+    importOptions.mode === 'merge' && importOptions.conflictPolicy === 'keep-existing'
+      ? await filterKeepExisting(mergeStores)
+      : mergeStores;
 
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — the table
+  // list (and the clear()/bulkPut() ops inside the block) preserve the SAME
+  // all-or-nothing import semantics as the prior db.transaction call. The
+  // source-vault stores are enrolled only when includeSourceVault is set, exactly
+  // as before.
+  await vaultTransaction(
     [
-      db.lessonProgress,
-      db.quizAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.mockAttempts,
-      db.vignetteAttempts,
-      db.constructedResponseAttempts,
-      db.formulaDrillAttempts,
-      db.skillLabAttempts,
-      db.studySessions,
-      db.studyPlanSettings,
-      db.contentVersions,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.flashcardAttempts,
-      db.resultArtifacts,
-      db.mockSectionState,
-      db.notes,
-      db.bookmarks,
-      db.settings,
+      ...STORE_NAMES,
+      ...(importOptions.includeSourceVault ? SOURCE_STORE_NAMES : []),
     ],
-    async () => {
-      if (mode === 'replace') {
-        await Promise.all(STORE_NAMES.map((storeName) => db[storeName].clear()));
+    async (tx) => {
+      if (importOptions.mode === 'replace') {
+        await Promise.all(STORE_NAMES.map((storeName) => tx.table(storeName).clear()));
+        if (importOptions.includeSourceVault) {
+          await Promise.all(SOURCE_STORE_NAMES.map((storeName) => tx.table(storeName).clear()));
+        }
       }
 
       await Promise.all([
-        db.lessonProgress.bulkPut(storesToWrite.lessonProgress),
-        db.quizAttempts.bulkPut(storesToWrite.quizAttempts),
-        db.questionResults.bulkPut(storesToWrite.questionResults),
-        db.reviewItems.bulkPut(storesToWrite.reviewItems),
-        db.masterySnapshots.bulkPut(storesToWrite.masterySnapshots),
-        db.mockAttempts.bulkPut(storesToWrite.mockAttempts),
-        db.vignetteAttempts.bulkPut(storesToWrite.vignetteAttempts),
-        db.constructedResponseAttempts.bulkPut(storesToWrite.constructedResponseAttempts),
-        db.formulaDrillAttempts.bulkPut(storesToWrite.formulaDrillAttempts),
-        db.skillLabAttempts.bulkPut(storesToWrite.skillLabAttempts),
-        db.studySessions.bulkPut(storesToWrite.studySessions),
-        db.studyPlanSettings.bulkPut(storesToWrite.studyPlanSettings),
-        db.contentVersions.bulkPut(storesToWrite.contentVersions),
-        db.reviewEvents.bulkPut(storesToWrite.reviewEvents),
-        db.confidenceCalibration.bulkPut(storesToWrite.confidenceCalibration),
-        db.flashcardAttempts.bulkPut(storesToWrite.flashcardAttempts),
-        db.resultArtifacts.bulkPut(storesToWrite.resultArtifacts),
-        db.mockSectionState.bulkPut(storesToWrite.mockSectionState),
-        db.notes.bulkPut(storesToWrite.notes),
-        db.bookmarks.bulkPut(storesToWrite.bookmarks),
-        db.settings.bulkPut(storesToWrite.settings),
+        tx.table<LessonProgress>('lessonProgress').bulkPut(storesToWrite.lessonProgress),
+        tx.table<QuizAttemptRow>('quizAttempts').bulkPut(storesToWrite.quizAttempts),
+        tx.table<QuestionResultRow>('questionResults').bulkPut(storesToWrite.questionResults),
+        tx.table<ReviewItem>('reviewItems').bulkPut(storesToWrite.reviewItems),
+        tx.table<MasterySnapshot>('masterySnapshots').bulkPut(storesToWrite.masterySnapshots),
+        tx.table<MockAttempt>('mockAttempts').bulkPut(storesToWrite.mockAttempts),
+        tx.table<VignetteAttempt>('vignetteAttempts').bulkPut(storesToWrite.vignetteAttempts),
+        tx.table<ConstructedResponseAttempt>('constructedResponseAttempts').bulkPut(storesToWrite.constructedResponseAttempts),
+        tx.table<FormulaDrillAttempt>('formulaDrillAttempts').bulkPut(storesToWrite.formulaDrillAttempts),
+        tx.table<SkillLabAttempt>('skillLabAttempts').bulkPut(storesToWrite.skillLabAttempts),
+        tx.table<StudySession>('studySessions').bulkPut(storesToWrite.studySessions),
+        tx.table<StudyPlanSettings>('studyPlanSettings').bulkPut(storesToWrite.studyPlanSettings),
+        tx.table<ContentVersion>('contentVersions').bulkPut(storesToWrite.contentVersions),
+        tx.table<ReviewEvent>('reviewEvents').bulkPut(storesToWrite.reviewEvents),
+        tx.table<ConfidenceCalibration>('confidenceCalibration').bulkPut(storesToWrite.confidenceCalibration),
+        tx.table<FlashcardAttempt>('flashcardAttempts').bulkPut(storesToWrite.flashcardAttempts),
+        tx.table<ResultArtifact>('resultArtifacts').bulkPut(storesToWrite.resultArtifacts),
+        tx.table<MockSectionState>('mockSectionState').bulkPut(storesToWrite.mockSectionState),
+        tx.table<LearningEventEnvelope>('learningEvents').bulkPut(storesToWrite.learningEvents),
+        tx.table<VaultHealthSnapshot>('vaultHealthSnapshots').bulkPut(storesToWrite.vaultHealthSnapshots),
+        tx.table<RollbackSnapshot>('rollbackSnapshots').bulkPut(storesToWrite.rollbackSnapshots),
+        tx.table<CalculatorScenario>('calculatorScenarios').bulkPut(storesToWrite.calculatorScenarios),
+        tx.table<ReleaseRunHistory>('releaseRunHistory').bulkPut(storesToWrite.releaseRunHistory),
+        tx.table<ImportJob>('importJobs').bulkPut(storesToWrite.importJobs),
+        tx.table<SourceBundleManifest>('sourceBundleManifests').bulkPut(storesToWrite.sourceBundleManifests),
+        tx.table<PsychometricStats>('psychometricStats').bulkPut(storesToWrite.psychometricStats),
+        tx.table<MockBlueprint>('mockBlueprints').bulkPut(storesToWrite.mockBlueprints),
+        tx.table<VaultNote>('notes').bulkPut(storesToWrite.notes),
+        tx.table<VaultBookmark>('bookmarks').bulkPut(storesToWrite.bookmarks),
+        tx.table<SettingRow>('settings').bulkPut(storesToWrite.settings),
+        ...(importOptions.includeSourceVault && exportPayload.sourceVault
+          ? [
+              tx.table<CfaSourceDocument>('sourceDocuments').bulkPut(exportPayload.sourceVault.sourceDocuments),
+              tx.table<CfaSourceChunk>('sourceChunks').bulkPut(sourceChunksToWrite),
+              tx.table<CfaSourceIndex>('sourceIndexes').bulkPut(exportPayload.sourceVault.sourceIndexes),
+              tx.table<CfaSourceIngestionRun>('sourceIngestionRuns').bulkPut(exportPayload.sourceVault.sourceIngestionRuns),
+              tx.table<CfaSourceLink>('sourceLinks').bulkPut(exportPayload.sourceVault.sourceLinks || []),
+              tx.table<CfaSourceLinkOverride>('sourceLinkOverrides').bulkPut(exportPayload.sourceVault.sourceLinkOverrides || []),
+            ]
+          : []),
       ]);
+      if (rollbackSnapshot) await tx.table<RollbackSnapshot>('rollbackSnapshots').put(rollbackSnapshot);
     },
   );
 
+  await appendVaultImportHistory({
+    exportPayload,
+    mode: importOptions.mode,
+    conflictPolicy: importOptions.conflictPolicy,
+    encrypted,
+  });
+  await vaultTable<ImportJob>('importJobs').put({
+    id: importJobId,
+    startedAt: importStartedAt,
+    completedAt: nowIso(),
+    status: 'ok',
+    mode: importOptions.mode,
+    conflictPolicy: importOptions.conflictPolicy,
+    encrypted,
+    includeSourceVault: importOptions.includeSourceVault,
+    exportId: exportPayload.exportId,
+    rowCounts: vaultRowCounts(exportPayload.stores),
+    sourceRowCounts: sourceVaultRowCounts(exportPayload.sourceVault),
+    errors: [],
+    rollbackSnapshotId: rollbackSnapshot?.id,
+  });
   await rebuildLearningIndexes({ emit: false });
   emitProgressChange();
 }
@@ -1164,7 +2446,8 @@ export async function recordSession({
   score = 0,
 }: Omit<StudySession, 'id'>) {
   const timestamp = nowIso();
-  await db.studySessions.add({
+  // `studySessions` is an auto-id (`++id`) store, so the backend assigns the key.
+  await vaultTable<StudySession>('studySessions').add({
     domain,
     topic,
     mode,
@@ -1181,12 +2464,40 @@ export async function recordStudyEvent(event: Omit<StudySession, 'id'>) {
   return recordSession(event);
 }
 
+export async function recordLearningEventEnvelope(envelope: LearningEventEnvelope) {
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same
+  // tables (learningEvents + studySessions + reviewEvents), same order, same
+  // atomic boundary as the prior db.transaction call.
+  await vaultTransaction(['learningEvents', 'studySessions', 'reviewEvents'], async (tx) => {
+    await tx.table<LearningEventEnvelope>('learningEvents').put(envelope);
+    await tx.table<StudySession>('studySessions').add({
+      domain: envelope.event.domain,
+      topic: envelope.event.topic,
+      mode: envelope.event.mode,
+      startedAt: envelope.event.createdAt,
+      endedAt: envelope.event.createdAt,
+      elapsedSeconds: envelope.event.elapsedSeconds || 0,
+      questionsAnswered: envelope.event.total || 0,
+      score: envelope.event.total ? Math.round(((envelope.event.score || 0) / envelope.event.total) * 100) : envelope.event.score || 0,
+    });
+    await tx.table<ReviewEvent>('reviewEvents').add({
+      domain: envelope.event.domain,
+      topic: envelope.event.topic,
+      learningObjective: envelope.sourceIds[0] || envelope.event.sourceId || `${envelope.event.sourceType}:unmapped`,
+      eventType: 'completed',
+      reviewItemId: envelope.event.sourceId || envelope.id,
+      createdAt: envelope.recordedAt,
+    });
+  });
+  emitProgressChange();
+}
+
 export async function recordContentVersion(version: Omit<ContentVersion, 'updatedAt'>) {
   const row: ContentVersion = {
     ...version,
     updatedAt: nowIso(),
   };
-  await db.contentVersions.put(row);
+  await vaultTable<ContentVersion>('contentVersions').put(row);
   emitProgressChange();
   return row;
 }
@@ -1208,7 +2519,7 @@ export async function saveResultArtifact({
   noteId,
   objectiveIds,
 }: Omit<ResultArtifact, 'id' | 'createdAt'>) {
-  const artifact: ResultArtifact = {
+  const artifact: ResultArtifact = await encryptResultArtifactForStorage({
     id: artifactIdFor(type, title),
     type,
     domain,
@@ -1222,19 +2533,21 @@ export async function saveResultArtifact({
     noteId,
     objectiveIds,
     createdAt: nowIso(),
-  };
-  await db.resultArtifacts.put(artifact);
+  });
+  await vaultTable<ResultArtifact>('resultArtifacts').put(artifact);
   emitProgressChange();
-  return artifact;
+  return (await decryptResultArtifactForRead(artifact)) as ResultArtifact;
 }
 
 export async function getResultArtifacts(type?: ResultArtifact['type']) {
-  const artifacts = await db.resultArtifacts.orderBy('createdAt').reverse().toArray();
-  return type ? artifacts.filter((artifact) => artifact.type === type) : artifacts;
+  // `createdAt` is a declared index on resultArtifacts.
+  const artifacts = await vaultTable<ResultArtifact>('resultArtifacts').orderedBy('createdAt', { desc: true });
+  const filtered = type ? artifacts.filter((artifact) => artifact.type === type) : artifacts;
+  return Promise.all(filtered.map((artifact) => decryptResultArtifactForRead(artifact))) as Promise<ResultArtifact[]>;
 }
 
 export async function deleteResultArtifact(id: string) {
-  await db.resultArtifacts.delete(id);
+  await vaultTable<ResultArtifact>('resultArtifacts').delete(id);
   emitProgressChange();
 }
 
@@ -1246,23 +2559,24 @@ export async function saveMockSectionState(state: Omit<MockSectionState, 'update
     updatedAt: timestamp,
     expiresAt: expires,
   };
-  await db.mockSectionState.put(row);
+  await vaultTable<MockSectionState>('mockSectionState').put(row);
   emitProgressChange();
   return row;
 }
 
 export async function getMockSectionState(id = 'cfa-level1-mixed-mock') {
-  const state = await db.mockSectionState.get(id);
+  const mockSectionStateTable = vaultTable<MockSectionState>('mockSectionState');
+  const state = await mockSectionStateTable.get(id);
   if (!state) return null;
   if (new Date(state.expiresAt).getTime() < Date.now()) {
-    await db.mockSectionState.delete(id);
+    await mockSectionStateTable.delete(id);
     return null;
   }
   return state;
 }
 
 export async function clearMockSectionState(id = 'cfa-level1-mixed-mock') {
-  await db.mockSectionState.delete(id);
+  await vaultTable<MockSectionState>('mockSectionState').delete(id);
   emitProgressChange();
 }
 
@@ -1306,19 +2620,21 @@ export async function recordFlashcardResult({
     timestamp,
   );
 
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables
+  // (attempt + persistQuestionResult's 5 stores + session), same order, same
+  // atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.flashcardAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'flashcardAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.flashcardAttempts.add({
+    async (tx) => {
+      await tx.table<FlashcardAttempt>('flashcardAttempts').add({
         domain,
         topic,
         cardId,
@@ -1327,8 +2643,8 @@ export async function recordFlashcardResult({
         elapsedSeconds,
         createdAt: timestamp,
       });
-      await persistQuestionResult(result);
-      await db.studySessions.add({
+      await persistQuestionResult(result, tx);
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode: 'flashcard-drill',
@@ -1355,14 +2671,16 @@ function scoreVolatility(scores: number[]) {
   return Math.round(Math.sqrt(variance));
 }
 
-export async function getReadinessByTopic(date = new Date()): Promise<TopicReadiness[]> {
+export async function getReadinessByTopic(dateOrOptions: Date | Level3PathwayQuery = new Date(), maybeOptions: Level3PathwayQuery = {}): Promise<TopicReadiness[]> {
+  const date = dateOrOptions instanceof Date ? dateOrOptions : new Date();
+  const options = dateOrOptions instanceof Date ? maybeOptions : dateOrOptions;
   const [snapshots, reviewItems, results] = await Promise.all([
-    db.masterySnapshots.toArray(),
-    db.reviewItems.toArray(),
-    db.questionResults.toArray(),
+    vaultTable<MasterySnapshot>('masterySnapshots').toArray(),
+    vaultTable<ReviewItem>('reviewItems').toArray(),
+    vaultTable<QuestionResultRow>('questionResults').toArray(),
   ]);
   const grouped = new Map<string, MasterySnapshot[]>();
-  snapshots.forEach((snapshot) => {
+  snapshots.filter((snapshot) => level3TopicRowAllowed(snapshot, options.level3Pathway)).forEach((snapshot) => {
     const key = `${snapshot.domain}:${snapshot.topic}`;
     grouped.set(key, [...(grouped.get(key) || []), snapshot]);
   });
@@ -1372,8 +2690,8 @@ export async function getReadinessByTopic(date = new Date()): Promise<TopicReadi
       const [domainPart, ...topicParts] = key.split(':');
       const domain = domainPart as DomainId;
       const topic = topicParts.join(':');
-      const topicResults = results.filter((result) => result.domain === domain && result.topic === topic);
-      const topicReviews = reviewItems.filter((item) => item.domain === domain && item.topic === topic);
+      const topicResults = results.filter((result) => result.domain === domain && result.topic === topic && level3TopicRowAllowed(result, options.level3Pathway));
+      const topicReviews = reviewItems.filter((item) => item.domain === domain && item.topic === topic && level3TopicRowAllowed(item, options.level3Pathway));
       const dueCount = topicReviews.filter((item) => isDue(item, date)).length;
       const averageMastery = Math.round(
         topicSnapshots.reduce((sum, snapshot) => sum + snapshot.score, 0) / Math.max(1, topicSnapshots.length),
@@ -1422,18 +2740,143 @@ export async function getReadinessByTopic(date = new Date()): Promise<TopicReadi
     .sort((a, b) => a.readinessScore - b.readinessScore);
 }
 
-export async function forecastReviewLoad(days = 14, date = new Date()) {
-  const reviewItems = await db.reviewItems.toArray();
+export async function forecastReviewLoad(days = 14, date = new Date(), options: Level3PathwayQuery = {}): Promise<RetentionForecast[]> {
+  const reviewItems = await vaultTable<ReviewItem>('reviewItems').toArray();
+  const visibleItems = reviewItems.filter((item) => level3TopicRowAllowed(item, options.level3Pathway));
   return Array.from({ length: days }, (_, index) => {
     const day = new Date(date);
     day.setDate(date.getDate() + index);
     const key = day.toISOString().slice(0, 10);
+    const dueItems = visibleItems.filter((item) => item.dueAt.slice(0, 10) === key);
+    const retention = dueItems.length
+      ? Math.round((dueItems.reduce((sum, item) => sum + predictRetention(item, day), 0) / dueItems.length) * 100)
+      : null;
     return {
       date: key,
-      count: reviewItems.filter((item) => item.dueAt.slice(0, 10) === key).length,
+      count: dueItems.length,
+      averageRetention: retention,
+      atRiskCount: dueItems.filter((item) => predictRetention(item, day) < 0.72).length,
     };
   });
 }
+
+function topicWeightFor(topicWeights: Record<string, number> | undefined, topic?: string) {
+  if (!topic || !topicWeights) return 0;
+  return Number(topicWeights[topic] ?? topicWeights[topic.split(':').at(-1) || topic] ?? 0) || 0;
+}
+
+const ITEM_TYPE_WEIGHTS: Record<string, number> = {
+  'constructed-response': 1.45,
+  mock: 1.3,
+  vignette: 1.2,
+  'quant-lab': 1.18,
+  'excel-drill': 1.14,
+  calculator: 1.12,
+  'formula-drill': 1.08,
+  flashcard: 1.04,
+  single: 1,
+};
+
+function itemTypeWeightFor(itemType?: string) {
+  return ITEM_TYPE_WEIGHTS[itemType || 'single'] ?? 1;
+}
+
+function itemTypeLabel(itemType?: string) {
+  return (itemType || 'single').replace(/-/g, ' ');
+}
+
+function weightedAccuracyFor(results: QuestionResultRow[]) {
+  if (!results.length) return 100;
+  const totalWeight = results.reduce((sum, result) => sum + itemTypeWeightFor(result.itemType), 0);
+  const earnedWeight = results.reduce((sum, result) => sum + (result.correct ? itemTypeWeightFor(result.itemType) : 0), 0);
+  return Math.round((earnedWeight / Math.max(1, totalWeight)) * 100);
+}
+
+function impactFromScore(score: number, weight = 1) {
+  return Math.max(0, Math.round((100 - score) * weight));
+}
+
+function lowestRubricSignals(attempts: ConstructedResponseAttempt[], topic?: string, limit = 3) {
+  const relevant = topic ? attempts.filter((attempt) => attempt.topic === topic) : attempts;
+  const rubricKeys = [...new Set(relevant.flatMap((attempt) => Object.keys(attempt.rubricScores || {})))].sort();
+  return rubricKeys
+    .map((criterion) => {
+      const scores = relevant.map((attempt) => Math.round(((attempt.rubricScores[criterion] ?? 0) / 2) * 100));
+      const averagePct = scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : 0;
+      return {
+        criterion,
+        attempts: scores.length,
+        averagePct,
+        impact: impactFromScore(averagePct, 0.35),
+      };
+    })
+    .filter((row) => row.attempts > 0 && row.averagePct < 75)
+    .sort((a, b) => b.impact - a.impact || a.averagePct - b.averagePct)
+    .slice(0, limit);
+}
+
+function artifactObjectiveImpacts(artifacts: ResultArtifact[], skillLabAttempts: SkillLabAttempt[]) {
+  const grouped = new Map<string, { objectiveId: string; topic?: string; sourceType: string; scores: number[] }>();
+  const add = (objectiveId: string, topic: string | undefined, sourceType: string, score: number) => {
+    const key = `${sourceType}:${topic || 'unmapped'}:${objectiveId}`;
+    const row = grouped.get(key) || { objectiveId, topic, sourceType, scores: [] };
+    row.scores.push(score);
+    grouped.set(key, row);
+  };
+
+  artifacts.forEach((artifact) => {
+    const metricScore = Number(artifact.metrics.score ?? artifact.metrics.accuracy ?? artifact.metrics.pct);
+    const score = Number.isFinite(metricScore) ? Math.max(0, Math.min(100, metricScore)) : 100;
+    artifact.objectiveIds?.forEach((objectiveId) => add(objectiveId, artifact.topic, artifact.type, score));
+  });
+  skillLabAttempts.forEach((attempt) => {
+    const score = Math.max(0, Math.min(100, Number(attempt.score ?? 100)));
+    attempt.objectiveIds.forEach((objectiveId) => add(objectiveId, attempt.topic, attempt.labType, score));
+  });
+
+  return [...grouped.values()]
+    .map((row) => {
+      const averageScore = Math.round(row.scores.reduce((sum, score) => sum + score, 0) / Math.max(1, row.scores.length));
+      return {
+        objectiveId: row.objectiveId,
+        topic: row.topic,
+        sourceType: row.sourceType,
+        attempts: row.scores.length,
+        averageScore,
+        impact: impactFromScore(averageScore, row.sourceType === 'calculator' ? 0.22 : 0.3),
+      };
+    })
+    .filter((row) => row.impact > 0)
+    .sort((a, b) => b.impact - a.impact || a.averageScore - b.averageScore);
+}
+
+function explainReviewReason(reason: ReviewReason, context: { score?: number; retentionPct?: number; topicWeight?: number; itemType?: string } = {}) {
+  const details: string[] = [];
+  if (reason === 'due-review') details.push(`Retention forecast is ${context.retentionPct ?? 'below target'}%.`);
+  if (reason === 'weak-objective') details.push(`Readiness is ${context.score ?? 'below target'}%.`);
+  if (reason === 'rubric-miss') details.push('Constructed-response rubric bands are below the command-word target.');
+  if (reason === 'skill-lab-gap') details.push(`${context.itemType ? itemTypeLabel(context.itemType) : 'Lab'} practice is below target.`);
+  if (reason === 'stale-topic') details.push('Prior evidence has decayed or accumulated review debt.');
+  if (reason === 'missed-question') details.push('The latest evidence includes an incorrect answer.');
+  if (reason === 'flashcard-decay') details.push('Recall evidence needs another retrieval rep.');
+  if (reason === 'unfinished-lesson') details.push('Started lesson progress has not been completed.');
+  if (reason === 'saved-artifact') details.push('Saved vault artifact is available for follow-up.');
+  if ((context.topicWeight ?? 0) >= 12) details.push(`Topic carries ${context.topicWeight}% planning weight.`);
+  return details;
+}
+
+const DEFAULT_CFA_TOPIC_WEIGHTS: Record<string, number> = {
+  ethics: 20,
+  'quant-methods': 9,
+  economics: 9,
+  fsa: 14,
+  corporate: 9,
+  equity: 14,
+  'fixed-income': 14,
+  derivatives: 8,
+  alternatives: 10,
+  portfolio: 12,
+};
 
 const DEFAULT_STUDY_PLAN_SETTINGS: StudyPlanSettings = {
   id: 'local-study-plan',
@@ -1442,12 +2885,12 @@ const DEFAULT_STUDY_PLAN_SETTINGS: StudyPlanSettings = {
   examDate: null,
   restDays: [],
   mockCadenceDays: 14,
-  topicWeights: {},
+  topicWeights: DEFAULT_CFA_TOPIC_WEIGHTS,
   updatedAt: '',
 };
 
 export async function getStudyPlanSettings(): Promise<StudyPlanSettings> {
-  const existing = await db.studyPlanSettings.get('local-study-plan');
+  const existing = await vaultTable<StudyPlanSettings>('studyPlanSettings').get('local-study-plan');
   return {
     ...DEFAULT_STUDY_PLAN_SETTINGS,
     ...existing,
@@ -1474,32 +2917,89 @@ export async function saveStudyPlanSettings({
     topicWeights: topicWeights || existing.topicWeights || {},
     updatedAt: nowIso(),
   };
-  await db.studyPlanSettings.put(settings);
+  await vaultTable<StudyPlanSettings>('studyPlanSettings').put(settings);
   emitProgressChange();
   return settings;
+}
+
+/**
+ * DATA-6 — map the host's `StudyPlanSettings` onto the cross-domain
+ * {@link SharedStudyProfile} shape (used by `studyProfileBridge.ts` as the local
+ * Dexie fallback). The host owns `targetLevel` / `dailyTargetMinutes` /
+ * `examDate` / `restDays` / `mockCadenceDays` / `topicWeights`; it has no LSAT
+ * `targetScore`, so that scalar keeps the shared default until the backend
+ * arbiter (or the LSAT side) supplies one. `lastWriter` is `"host"` because this
+ * projection represents a host-local view.
+ */
+export function studyPlanSettingsToProfile(settings: StudyPlanSettings): SharedStudyProfile {
+  return {
+    ...DEFAULT_SHARED_STUDY_PROFILE,
+    targetLevel: settings.targetLevel ?? null,
+    dailyMinutes: settings.dailyTargetMinutes ?? DEFAULT_SHARED_STUDY_PROFILE.dailyMinutes,
+    examDate: settings.examDate ?? null,
+    restDays: Array.isArray(settings.restDays) ? settings.restDays : [],
+    mockCadenceDays: settings.mockCadenceDays ?? null,
+    topicWeights: settings.topicWeights ?? {},
+    lastWriter: 'host',
+    updatedAt: settings.updatedAt || null,
+  };
+}
+
+/**
+ * DATA-6 — map a cross-domain {@link StudyProfilePatch} onto the host
+ * `saveStudyPlanSettings` argument shape (the inverse of
+ * {@link studyPlanSettingsToProfile}). Only the host-owned fields are carried
+ * over; the LSAT-only `targetScore` is intentionally dropped (the host does not
+ * store it). Used by `studyProfileBridge.ts` to dual-write a profile edit to
+ * Dexie. Only keys present on the patch are forwarded so unset fields are not
+ * overwritten.
+ */
+export function studyProfileToPlanSettingsPatch(
+  patch: StudyProfilePatch,
+): Partial<Omit<StudyPlanSettings, 'id' | 'updatedAt'>> {
+  const out: Partial<Omit<StudyPlanSettings, 'id' | 'updatedAt'>> = {};
+  if (patch.targetLevel !== undefined) out.targetLevel = patch.targetLevel ?? undefined;
+  if (patch.dailyMinutes !== undefined) out.dailyTargetMinutes = patch.dailyMinutes;
+  if (patch.examDate !== undefined) out.examDate = patch.examDate;
+  if (patch.restDays !== undefined) out.restDays = patch.restDays;
+  if (patch.mockCadenceDays !== undefined) out.mockCadenceDays = patch.mockCadenceDays ?? undefined;
+  if (patch.topicWeights !== undefined) out.topicWeights = patch.topicWeights;
+  return out;
 }
 
 export async function getStudyPlan({
   examDate,
   dailyTargetMinutes,
   targetLevel,
+  level3Pathway,
 }: {
   examDate?: string | null;
   dailyTargetMinutes?: number;
   targetLevel?: string;
-} = {}): Promise<StudyPlan> {
-  const [settings, dueReviews, forecast, readiness, recommendation] = await Promise.all([
+  level3Pathway?: string;
+} = {}): Promise<StudySessionPlan> {
+  const [settings, dueReviews, forecast, readiness, objectiveReadiness, recommendation] = await Promise.all([
     getStudyPlanSettings(),
-    getDueReviews(),
-    forecastReviewLoad(14),
-    getReadinessByTopic(),
-    getNextRecommendation(),
+    getDueReviews(new Date(), { level3Pathway }),
+    forecastReviewLoad(14, new Date(), { level3Pathway }),
+    getReadinessByTopic({ level3Pathway }),
+    getReadinessByObjectiveV2({ level3Pathway }),
+    getNextRecommendation({ level3Pathway }),
   ]);
   const effectiveExamDate = examDate !== undefined ? examDate : settings.examDate;
   const effectiveDailyTarget = dailyTargetMinutes ?? settings.dailyTargetMinutes;
   const effectiveTargetLevel = targetLevel || settings.targetLevel || 'level1';
   const daysToExam = effectiveExamDate ? Math.max(0, Math.ceil(daysBetween(new Date(), new Date(effectiveExamDate)))) : null;
-  const weakest = readiness[0];
+  const weightedReadiness = [...readiness].sort(
+    (a, b) =>
+      a.readinessScore -
+      topicWeightFor(settings.topicWeights, a.topic) * 0.4 -
+      (b.readinessScore - topicWeightFor(settings.topicWeights, b.topic) * 0.4),
+  );
+  const weakest = weightedReadiness[0];
+  const weakestObjective = objectiveReadiness[0];
+  const recommendationReason: ReviewReason =
+    recommendation.label === 'Review Due' ? 'due-review' : recommendation.label === 'Weak Area' ? 'weak-objective' : 'unfinished-lesson';
 
   return {
     id: 'local-study-plan',
@@ -1513,23 +3013,43 @@ export async function getStudyPlan({
     dueToday: dueReviews.length,
     forecastReviewCount: forecast.reduce((sum, item) => sum + item.count, 0),
     nextActions: [
-      recommendation,
+      {
+        ...recommendation,
+        reasonDetails: explainReviewReason(recommendationReason, {
+          score: weakestObjective?.readinessScore,
+          retentionPct: weakestObjective?.retentionForecastPct,
+          topicWeight: weakestObjective?.topicWeight,
+        }),
+      },
       ...(weakest
         ? [
             {
               label: 'Readiness',
-              title: weakest.title,
-              path: defaultPathFor(weakest.domain, weakest.topic, 'weak-areas'),
-              reason: `Topic readiness is ${weakest.readinessScore}%.`,
+              title: weakestObjective?.title || weakest.title,
+              path: defaultPathFor(weakestObjective?.domain || weakest.domain, weakestObjective?.topic || weakest.topic, 'weak-areas'),
+              reason: weakestObjective
+                ? `Objective readiness is ${weakestObjective.readinessScore}% after item-type, retention, rubric, and lab evidence.`
+                : `Topic readiness is ${weakest.readinessScore}%.`,
+              reasonDetails: weakestObjective?.reasonDetails || [
+                `Topic readiness is ${weakest.readinessScore}%.`,
+                `Planning weight is ${topicWeightFor(settings.topicWeights, weakest.topic)}%.`,
+              ],
+              reviewReason: weakestObjective?.primaryReason || ('weak-objective' as ReviewReason),
+              estimatedMinutes: Math.min(30, Math.max(12, Math.round(effectiveDailyTarget * 0.35))),
             },
           ]
         : []),
     ],
+    planVersion: 2,
+    generatedForDate: new Date().toISOString().slice(0, 10),
+    focusLevel: effectiveTargetLevel,
+    budgetMinutes: effectiveDailyTarget,
+    reviewLoad: forecast,
     updatedAt: nowIso(),
   };
 }
 
-export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
+export async function getReviewInbox(options: Level3PathwayQuery = {}): Promise<ReviewQueueItem[]> {
   const [
     dueReviews,
     mastery,
@@ -1544,24 +3064,43 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
     skillLabAttempts,
     artifacts,
   ] = await Promise.all([
-    getDueReviews(),
-    getMasterySummary(),
-    db.questionResults.orderBy('createdAt').reverse().toArray(),
-    db.bookmarks.toArray(),
-    db.lessonProgress.toArray(),
-    getReadinessByTopic(),
-    db.mockAttempts.orderBy('createdAt').reverse().toArray(),
-    db.vignetteAttempts.orderBy('createdAt').reverse().toArray(),
-    db.constructedResponseAttempts.orderBy('createdAt').reverse().toArray(),
-    db.formulaDrillAttempts.orderBy('createdAt').reverse().toArray(),
-    db.skillLabAttempts.orderBy('createdAt').reverse().toArray(),
-    db.resultArtifacts.orderBy('createdAt').reverse().toArray(),
+    getDueReviews(new Date(), options),
+    getMasterySummary(options),
+    // `createdAt` is a declared index on each of these stores.
+    vaultTable<QuestionResultRow>('questionResults').orderedBy('createdAt', { desc: true }),
+    vaultTable<VaultBookmark>('bookmarks').toArray(),
+    vaultTable<LessonProgress>('lessonProgress').toArray(),
+    getReadinessByTopic(options),
+    vaultTable<MockAttempt>('mockAttempts').orderedBy('createdAt', { desc: true }),
+    vaultTable<VignetteAttempt>('vignetteAttempts').orderedBy('createdAt', { desc: true }),
+    vaultTable<ConstructedResponseAttempt>('constructedResponseAttempts').orderedBy('createdAt', { desc: true }),
+    vaultTable<FormulaDrillAttempt>('formulaDrillAttempts').orderedBy('createdAt', { desc: true }),
+    vaultTable<SkillLabAttempt>('skillLabAttempts').orderedBy('createdAt', { desc: true }),
+    vaultTable<ResultArtifact>('resultArtifacts').orderedBy('createdAt', { desc: true }),
   ]);
+  const visibleResults = results.filter((result) => level3TopicRowAllowed(result, options.level3Pathway));
+  const visibleBookmarks = bookmarks.filter((item) => level3TopicRowAllowed({ topic: item.moduleId }, options.level3Pathway));
+  const visibleLessonProgress = lessonProgress.filter((item) => level3TopicRowAllowed({ topic: item.moduleId }, options.level3Pathway));
+  const visibleMockAttempts = mockAttempts.filter((attempt) => level3MockAttemptAllowed(attempt, options.level3Pathway));
+  const visibleVignetteAttempts = vignetteAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleConstructedResponseAttempts = constructedResponseAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleFormulaDrillAttempts = formulaDrillAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleSkillLabAttempts = skillLabAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleArtifacts = artifacts.filter((artifact) => level3TopicRowAllowed(artifact, options.level3Pathway));
   const latestWrongByQuestion = new Map<string, QuestionResultRow>();
-  results.forEach((result) => {
+  visibleResults.forEach((result) => {
     const key = `${result.domain}:${result.topic}:${result.questionId}`;
     if (!result.correct && !latestWrongByQuestion.has(key)) latestWrongByQuestion.set(key, result);
   });
+  const objectiveReadiness = await getReadinessByObjectiveV2();
+  const readinessById = new Map(objectiveReadiness.map((item) => [item.id, item]));
+  const rubricSignalsByTopic = new Map<string, ReturnType<typeof lowestRubricSignals>>();
+  constructedResponseAttempts.forEach((attempt) => {
+    if (!rubricSignalsByTopic.has(attempt.topic)) {
+      rubricSignalsByTopic.set(attempt.topic, lowestRubricSignals(constructedResponseAttempts, attempt.topic));
+    }
+  });
+  const artifactImpacts = artifactObjectiveImpacts(artifacts, skillLabAttempts);
 
   const items: ReviewQueueItem[] = [
     ...dueReviews.map((item) => ({
@@ -1573,6 +3112,14 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       priority: 100 - item.ease * 10,
       dueAt: item.dueAt,
       topic: item.topic,
+      reason: 'due-review' as const,
+      retentionPct: Math.round(predictRetention(item, new Date()) * 100),
+      sourceIds: [item.id, item.learningObjective],
+      reasonDetails: explainReviewReason('due-review', {
+        retentionPct: Math.round(predictRetention(item, new Date()) * 100),
+        topicWeight: readinessById.get(item.id)?.topicWeight,
+      }),
+      weaknessSignals: readinessById.get(item.id)?.weaknessSignals.map((signal) => ({ label: signal.label, impact: signal.impact })),
     })),
     ...mastery.weakObjectives.map((item) => ({
       id: `weak:${item.id}`,
@@ -1582,6 +3129,10 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       path: defaultPathFor(item.domain, item.topic, 'weak-areas'),
       priority: 85 - item.score,
       topic: item.topic,
+      reason: 'weak-objective' as const,
+      sourceIds: [item.id],
+      reasonDetails: readinessById.get(item.id)?.reasonDetails || explainReviewReason('weak-objective', { score: item.score }),
+      weaknessSignals: readinessById.get(item.id)?.weaknessSignals.map((signal) => ({ label: signal.label, impact: signal.impact })),
     })),
     ...[...latestWrongByQuestion.values()].slice(0, 12).map((item) => ({
       id: `miss:${item.domain}:${item.topic}:${item.questionId}`,
@@ -1591,8 +3142,14 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       path: item.path || defaultPathFor(item.domain, item.topic, 'review-due'),
       priority: 72,
       topic: item.topic,
+      reason: 'missed-question' as const,
+      sourceIds: [item.questionId, item.learningObjective],
+      reasonDetails: explainReviewReason('missed-question', {
+        itemType: item.itemType,
+        topicWeight: topicWeightFor(DEFAULT_STUDY_PLAN_SETTINGS.topicWeights, item.topic),
+      }),
     })),
-    ...bookmarks.map((item) => ({
+    ...visibleBookmarks.map((item) => ({
       id: `bookmark:${item.id}`,
       type: 'bookmark' as const,
       title: item.title,
@@ -1600,6 +3157,8 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       path: item.path,
       priority: 45,
       topic: item.moduleId,
+      reason: 'saved-artifact' as const,
+      sourceIds: [item.id],
     })),
     ...readiness
       .filter((item) => item.retentionDecay >= 14 || item.reviewDebt > 0)
@@ -1612,8 +3171,14 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: defaultPathFor(item.domain, item.topic, 'review-due'),
         priority: 60 - item.readinessScore,
         topic: item.topic,
-      })),
-    ...mockAttempts
+      reason: 'stale-topic' as const,
+      sourceIds: [item.id],
+      reasonDetails: explainReviewReason('stale-topic', {
+        score: item.readinessScore,
+        topicWeight: topicWeightFor(DEFAULT_STUDY_PLAN_SETTINGS.topicWeights, item.topic),
+      }),
+    })),
+    ...visibleMockAttempts
       .filter((attempt) => attempt.pct < 70 || attempt.flaggedQuestionIds.length > 0)
       .slice(0, 6)
       .map((attempt) => ({
@@ -1624,8 +3189,16 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: '/cfa/mock',
         priority: 68 - attempt.pct * 0.25 + attempt.flaggedQuestionIds.length,
         topic: 'mock',
+        reason: attempt.flaggedQuestionIds.length ? ('flagged-mock-item' as const) : ('missed-question' as const),
+        sourceIds: attempt.flaggedQuestionIds,
+        reasonDetails: [
+          `${attempt.pct}% mock score.`,
+          attempt.flaggedQuestionIds.length
+            ? `${attempt.flaggedQuestionIds.length} flagged item${attempt.flaggedQuestionIds.length === 1 ? '' : 's'}.`
+            : 'Score is below the mock review threshold.',
+        ],
       })),
-    ...vignetteAttempts
+    ...visibleVignetteAttempts
       .filter((attempt) => attempt.pct < 72)
       .slice(0, 6)
       .map((attempt) => ({
@@ -1636,8 +3209,11 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: `/cfa/${attempt.level}/${attempt.topic.split(':').at(-1)}/vignette`,
         priority: 70 - attempt.pct * 0.2,
         topic: attempt.topic,
+        reason: 'missed-question' as const,
+        sourceIds: [attempt.vignetteId],
+        reasonDetails: [`${attempt.pct}% item-set score.`, 'Vignette evidence has higher readiness weight than standalone quiz rows.'],
       })),
-    ...constructedResponseAttempts
+    ...visibleConstructedResponseAttempts
       .filter((attempt) => attempt.pct < 75)
       .slice(0, 6)
       .map((attempt) => ({
@@ -1648,8 +3224,18 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: `/cfa/${attempt.level}/${attempt.topic.split(':').at(-1)}/constructed-response`,
         priority: 74 - attempt.pct * 0.2,
         topic: attempt.topic,
+        reason: 'rubric-miss' as const,
+        sourceIds: [attempt.itemId],
+        reasonDetails: [
+          `${attempt.pct}% constructed-response score.`,
+          ...(rubricSignalsByTopic.get(attempt.topic) || []).map((signal) => `${signal.criterion} rubric average is ${signal.averagePct}%.`),
+        ],
+        weaknessSignals: (rubricSignalsByTopic.get(attempt.topic) || []).map((signal) => ({
+          label: `${signal.criterion} rubric`,
+          impact: signal.impact,
+        })),
       })),
-    ...formulaDrillAttempts
+    ...visibleFormulaDrillAttempts
       .filter((attempt) => !attempt.correct)
       .slice(0, 8)
       .map((attempt) => ({
@@ -1660,8 +3246,11 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: '/flashcards',
         priority: 66,
         topic: attempt.topic,
+        reason: 'flashcard-decay' as const,
+        sourceIds: [attempt.formulaName],
+        reasonDetails: explainReviewReason('flashcard-decay', { itemType: 'formula-drill' }),
       })),
-    ...skillLabAttempts
+    ...visibleSkillLabAttempts
       .filter((attempt) => (attempt.score ?? 100) < 75)
       .slice(0, 6)
       .map((attempt) => ({
@@ -1672,8 +3261,21 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: defaultPathFor(attempt.domain, attempt.topic, 'weak-areas'),
         priority: 52,
         topic: attempt.topic,
+        reason: 'skill-lab-gap' as const,
+        sourceIds: [attempt.labId, attempt.artifactId].filter(Boolean) as string[],
+        reasonDetails: [
+          `${attempt.labType} score is ${attempt.score ?? 100}%.`,
+          ...artifactImpacts
+            .filter((impact) => attempt.objectiveIds.includes(impact.objectiveId))
+            .slice(0, 2)
+            .map((impact) => `${impact.sourceType} maps to ${impact.objectiveId} at ${impact.averageScore}%.`),
+        ],
+        weaknessSignals: artifactImpacts
+          .filter((impact) => attempt.objectiveIds.includes(impact.objectiveId))
+          .slice(0, 3)
+          .map((impact) => ({ label: `${impact.sourceType} objective impact`, impact: impact.impact })),
       })),
-    ...artifacts.slice(0, 6).map((artifact) => ({
+    ...visibleArtifacts.slice(0, 6).map((artifact) => ({
       id: `artifact:${artifact.id}`,
       type: 'bookmark' as const,
       title: artifact.title,
@@ -1681,8 +3283,13 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
       path: artifact.path || '/vault',
       priority: 38,
       topic: artifact.topic,
+      reason: 'saved-artifact' as const,
+      sourceIds: [artifact.id],
+      reasonDetails: artifact.objectiveIds?.length
+        ? [`Maps to ${artifact.objectiveIds.length} objective${artifact.objectiveIds.length === 1 ? '' : 's'}.`]
+        : explainReviewReason('saved-artifact'),
     })),
-    ...lessonProgress
+    ...visibleLessonProgress
       .filter((item) => !item.completed)
       .slice(0, 8)
       .map((item) => ({
@@ -1693,6 +3300,9 @@ export async function getReviewInbox(): Promise<ReviewQueueItem[]> {
         path: item.path,
         priority: 35,
         topic: item.moduleId,
+        reason: 'unfinished-lesson' as const,
+        sourceIds: [item.id],
+        reasonDetails: explainReviewReason('unfinished-lesson'),
       })),
   ];
 
@@ -1714,8 +3324,7 @@ function trendForResults(results: QuestionResultRow[]): 'new' | 'up' | 'flat' | 
   return 'flat';
 }
 
-export async function getConfidenceCalibration(): Promise<ConfidenceCalibrationSummary[]> {
-  const rows = await db.confidenceCalibration.toArray();
+function confidenceCalibrationSummary(rows: ConfidenceCalibration[]): ConfidenceCalibrationSummary[] {
   return CONFIDENCES.map((confidence) => {
     const bucket = rows.filter((row) => row.confidence === confidence);
     const accuracy = accuracyFor(bucket as QuestionResultRow[]);
@@ -1728,7 +3337,11 @@ export async function getConfidenceCalibration(): Promise<ConfidenceCalibrationS
   });
 }
 
-export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
+export async function getConfidenceCalibration(): Promise<ConfidenceCalibrationSummary[]> {
+  return confidenceCalibrationSummary(await vaultTable<ConfidenceCalibration>('confidenceCalibration').toArray());
+}
+
+export async function getAnalyticsSummary(options: Level3PathwayQuery = {}): Promise<AnalyticsSummary> {
   const [
     results,
     sessions,
@@ -1739,23 +3352,33 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
     skillLabAttempts,
     flashcardAttempts,
     artifacts,
-    confidenceCalibration,
+    confidenceCalibrationRows,
   ] = await Promise.all([
-    db.questionResults.toArray(),
-    db.studySessions.toArray(),
-    db.mockAttempts.toArray(),
-    db.vignetteAttempts.toArray(),
-    db.constructedResponseAttempts.toArray(),
-    db.formulaDrillAttempts.toArray(),
-    db.skillLabAttempts.toArray(),
-    db.flashcardAttempts.toArray(),
-    db.resultArtifacts.toArray(),
-    getConfidenceCalibration(),
+    vaultTable<QuestionResultRow>('questionResults').toArray(),
+    vaultTable<StudySession>('studySessions').toArray(),
+    vaultTable<MockAttempt>('mockAttempts').toArray(),
+    vaultTable<VignetteAttempt>('vignetteAttempts').toArray(),
+    vaultTable<ConstructedResponseAttempt>('constructedResponseAttempts').toArray(),
+    vaultTable<FormulaDrillAttempt>('formulaDrillAttempts').toArray(),
+    vaultTable<SkillLabAttempt>('skillLabAttempts').toArray(),
+    vaultTable<FlashcardAttempt>('flashcardAttempts').toArray(),
+    vaultTable<ResultArtifact>('resultArtifacts').toArray(),
+    vaultTable<ConfidenceCalibration>('confidenceCalibration').toArray(),
   ]);
+  const visibleResults = results.filter((result) => level3TopicRowAllowed(result, options.level3Pathway));
+  const visibleSessions = sessions.filter((session) => level3TopicRowAllowed(session, options.level3Pathway));
+  const visibleMockAttempts = mockAttempts.filter((attempt) => level3MockAttemptAllowed(attempt, options.level3Pathway));
+  const visibleVignetteAttempts = vignetteAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleConstructedResponseAttempts = constructedResponseAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleFormulaDrillAttempts = formulaDrillAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleSkillLabAttempts = skillLabAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleFlashcardAttempts = flashcardAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleArtifacts = artifacts.filter((artifact) => level3TopicRowAllowed(artifact, options.level3Pathway));
+  const confidenceCalibration = confidenceCalibrationSummary(confidenceCalibrationRows.filter((row) => level3TopicRowAllowed(row, options.level3Pathway)));
 
-  const topics = [...new Set(results.map((result) => result.topic))].sort();
+  const topics = [...new Set(visibleResults.map((result) => result.topic))].sort();
   const byTopic = topics.map((topic) => {
-    const topicResults = results.filter((result) => result.topic === topic);
+    const topicResults = visibleResults.filter((result) => result.topic === topic);
     const confidenceAverage = Math.round(
       topicResults.reduce((sum, result) => sum + CONFIDENCE_SCORE[result.confidence], 0) / Math.max(1, topicResults.length),
     );
@@ -1777,35 +3400,35 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
   });
 
   const byDifficulty = DIFFICULTIES.map((difficulty) => {
-    const bucket = results.filter((result) => result.difficulty === difficulty);
+    const bucket = visibleResults.filter((result) => result.difficulty === difficulty);
     return { difficulty, attempts: bucket.length, accuracy: accuracyFor(bucket) };
   });
 
   const byErrorCategory = ERROR_CATEGORIES.map((errorCategory) => ({
     errorCategory,
-    attempts: results.filter((result) => result.errorCategory === errorCategory).length,
+    attempts: visibleResults.filter((result) => result.errorCategory === errorCategory).length,
   })).filter((row) => row.attempts > 0 || row.errorCategory === 'none');
 
-  const rollingTrend = [...new Set(results.map((result) => result.createdAt.slice(0, 10)))]
+  const rollingTrend = [...new Set(visibleResults.map((result) => result.createdAt.slice(0, 10)))]
     .sort()
     .slice(-14)
     .map((date) => {
-      const bucket = results.filter((result) => result.createdAt.slice(0, 10) === date);
+      const bucket = visibleResults.filter((result) => result.createdAt.slice(0, 10) === date);
       return { date, attempts: bucket.length, accuracy: accuracyFor(bucket) };
     });
 
-  const byLevel = [...new Set(results.map((result) => result.level || (result.topic.includes(':') ? result.topic.split(':')[0] : 'level1')))]
+  const byLevel = [...new Set(visibleResults.map((result) => result.level || (result.topic.includes(':') ? result.topic.split(':')[0] : 'level1')))]
     .sort()
     .map((level) => {
-      const bucket = results.filter((result) => (result.level || (result.topic.includes(':') ? result.topic.split(':')[0] : 'level1')) === level);
+      const bucket = visibleResults.filter((result) => (result.level || (result.topic.includes(':') ? result.topic.split(':')[0] : 'level1')) === level);
       return { level, attempts: bucket.length, accuracy: accuracyFor(bucket) };
     });
 
-  const byObjective = [...new Set(results.map((result) => result.learningObjective))]
+  const byObjective = [...new Set(visibleResults.map((result) => result.learningObjective))]
     .sort()
     .slice(0, 30)
     .map((objectiveId) => {
-      const bucket = results.filter((result) => result.learningObjective === objectiveId);
+      const bucket = visibleResults.filter((result) => result.learningObjective === objectiveId);
       return {
         objectiveId,
         topic: bucket[0]?.topic || 'objective',
@@ -1815,13 +3438,14 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
       };
     });
 
-  const byItemType = [...new Set(results.map((result) => result.itemType || 'single'))].sort().map((itemType) => {
-    const bucket = results.filter((result) => (result.itemType || 'single') === itemType);
+  const byItemType = [...new Set(visibleResults.map((result) => result.itemType || 'single'))].sort().map((itemType) => {
+    const bucket = visibleResults.filter((result) => (result.itemType || 'single') === itemType);
     return { itemType, attempts: bucket.length, accuracy: accuracyFor(bucket) };
   });
 
-  const essayRubrics = ['identify', 'apply', 'justify'].map((criterion) => {
-    const scores = constructedResponseAttempts
+  const rubricCriteria = [...new Set(constructedResponseAttempts.flatMap((attempt) => Object.keys(attempt.rubricScores || {})))].sort();
+  const essayRubrics = (rubricCriteria.length ? rubricCriteria : ['identify', 'apply', 'justify']).map((criterion) => {
+    const scores = visibleConstructedResponseAttempts
       .map((attempt) => {
         const possible = 2;
         const earned = attempt.rubricScores[criterion] ?? 0;
@@ -1834,29 +3458,46 @@ export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
     };
   });
 
-  const skillLabs = [...new Set(skillLabAttempts.map((attempt) => attempt.labId))].sort().map((labId) => {
-    const bucket = skillLabAttempts.filter((attempt) => attempt.labId === labId);
-    return { labId, attempts: bucket.length, latestScore: bucket.at(-1)?.score };
+  const constructedResponseWeaknesses = essayRubrics
+    .map((row) => ({ ...row, impact: impactFromScore(row.averagePct, 0.35) }))
+    .filter((row) => row.attempts > 0 && row.impact > 0)
+    .sort((a, b) => b.impact - a.impact || a.averagePct - b.averagePct);
+  const objectiveImpacts = artifactObjectiveImpacts(artifacts, skillLabAttempts).slice(0, 20);
+  const skillLabs = [...new Set(visibleSkillLabAttempts.map((attempt) => attempt.labId))].sort().map((labId) => {
+    const bucket = visibleSkillLabAttempts.filter((attempt) => attempt.labId === labId);
+    const latest = [...bucket].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).at(-1);
+    const impactedObjectives = new Set(bucket.flatMap((attempt) => attempt.objectiveIds)).size;
+    const latestScore = latest?.score;
+    return {
+      labId,
+      labType: latest?.labType,
+      attempts: bucket.length,
+      latestScore,
+      impactedObjectives,
+      impact: latestScore === undefined ? 0 : impactFromScore(latestScore, latest?.labType === 'calculator' ? 0.22 : 0.3),
+    };
   });
 
   return {
     generatedAt: nowIso(),
     totals: {
-      questionsAnswered: results.length,
-      sessions: sessions.length,
-      studyTimeSeconds: sessions.reduce((sum, session) => sum + (session.elapsedSeconds || 0), 0),
-      mockAttempts: mockAttempts.length,
-      vignetteAttempts: vignetteAttempts.length,
-      constructedResponseAttempts: constructedResponseAttempts.length,
-      skillLabAttempts: skillLabAttempts.length + formulaDrillAttempts.length,
-      flashcardAttempts: flashcardAttempts.length,
-      artifacts: artifacts.length,
+      questionsAnswered: visibleResults.length,
+      sessions: visibleSessions.length,
+      studyTimeSeconds: visibleSessions.reduce((sum, session) => sum + (session.elapsedSeconds || 0), 0),
+      mockAttempts: visibleMockAttempts.length,
+      vignetteAttempts: visibleVignetteAttempts.length,
+      constructedResponseAttempts: visibleConstructedResponseAttempts.length,
+      skillLabAttempts: visibleSkillLabAttempts.length + visibleFormulaDrillAttempts.length,
+      flashcardAttempts: visibleFlashcardAttempts.length,
+      artifacts: visibleArtifacts.length,
     },
     byLevel,
     byObjective,
     byItemType,
     essayRubrics,
+    constructedResponseWeaknesses,
     skillLabs,
+    objectiveImpacts,
     byTopic,
     byDifficulty,
     byErrorCategory,
@@ -1901,19 +3542,20 @@ export async function recordMockAttempt({
     topicMap.set(answer.topic, row);
   });
 
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables,
+  // same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.mockAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'mockAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.mockAttempts.add({
+    async (tx) => {
+      await tx.table<MockAttempt>('mockAttempts').add({
         domain,
         level,
         title,
@@ -1928,9 +3570,9 @@ export async function recordMockAttempt({
         createdAt: timestamp,
       });
       for (const answer of normalizedAnswers) {
-        await persistQuestionResult(answer);
+        await persistQuestionResult(answer, tx);
       }
-      await db.studySessions.add({
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic: 'mock',
         mode,
@@ -1976,19 +3618,20 @@ export async function recordVignetteAttempt({
     ),
   );
 
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables,
+  // same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.vignetteAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'vignetteAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.vignetteAttempts.add({
+    async (tx) => {
+      await tx.table<VignetteAttempt>('vignetteAttempts').add({
         domain,
         level,
         topic,
@@ -2002,9 +3645,9 @@ export async function recordVignetteAttempt({
         createdAt: timestamp,
       });
       for (const answer of normalizedAnswers) {
-        await persistQuestionResult(answer);
+        await persistQuestionResult(answer, tx);
       }
-      await db.studySessions.add({
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode: 'vignette-review',
@@ -2062,19 +3705,20 @@ export async function recordConstructedResponseAttempt({
     ),
   );
 
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables,
+  // same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.constructedResponseAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'constructedResponseAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.constructedResponseAttempts.add({
+    async (tx) => {
+      await tx.table<ConstructedResponseAttempt>('constructedResponseAttempts').add({
         domain,
         level,
         topic,
@@ -2089,9 +3733,9 @@ export async function recordConstructedResponseAttempt({
         createdAt: timestamp,
       });
       for (const result of results) {
-        await persistQuestionResult(result);
+        await persistQuestionResult(result, tx);
       }
-      await db.studySessions.add({
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode: 'mock-review',
@@ -2138,21 +3782,22 @@ export async function recordFormulaDrillAttempt({
     timestamp,
   );
 
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables,
+  // same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.formulaDrillAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'formulaDrillAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.formulaDrillAttempts.add({ domain, level, topic, formulaName, correct, confidence, elapsedSeconds, createdAt: timestamp });
-      await persistQuestionResult(result);
-      await db.studySessions.add({
+    async (tx) => {
+      await tx.table<FormulaDrillAttempt>('formulaDrillAttempts').add({ domain, level, topic, formulaName, correct, confidence, elapsedSeconds, createdAt: timestamp });
+      await persistQuestionResult(result, tx);
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode: 'formula-drill',
@@ -2203,19 +3848,20 @@ export async function recordSkillLabAttempt({
     ),
   );
 
-  await db.transaction(
-    'rw',
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — same tables,
+  // same order, same atomic boundary as the prior db.transaction call.
+  await vaultTransaction(
     [
-      db.skillLabAttempts,
-      db.questionResults,
-      db.reviewItems,
-      db.masterySnapshots,
-      db.reviewEvents,
-      db.confidenceCalibration,
-      db.studySessions,
+      'skillLabAttempts',
+      'questionResults',
+      'reviewItems',
+      'masterySnapshots',
+      'reviewEvents',
+      'confidenceCalibration',
+      'studySessions',
     ],
-    async () => {
-      await db.skillLabAttempts.add({
+    async (tx) => {
+      await tx.table<SkillLabAttempt>('skillLabAttempts').add({
         domain,
         level,
         topic,
@@ -2228,9 +3874,9 @@ export async function recordSkillLabAttempt({
         createdAt: timestamp,
       });
       for (const result of results) {
-        await persistQuestionResult(result);
+        await persistQuestionResult(result, tx);
       }
-      await db.studySessions.add({
+      await tx.table<StudySession>('studySessions').add({
         domain,
         topic,
         mode: labType === 'calculator' ? 'calculator-drill' : labType,
@@ -2247,12 +3893,13 @@ export async function recordSkillLabAttempt({
 }
 
 export async function attachArtifactToNote(artifactId: string, noteId: string) {
-  const artifact = await db.resultArtifacts.get(artifactId);
+  const resultArtifactsTable = vaultTable<ResultArtifact>('resultArtifacts');
+  const artifact = await resultArtifactsTable.get(artifactId);
   if (!artifact) return null;
   const updated = { ...artifact, noteId };
-  await db.resultArtifacts.put(updated);
+  await resultArtifactsTable.put(updated);
   emitProgressChange();
-  return updated;
+  return (await decryptResultArtifactForRead(updated)) as ResultArtifact;
 }
 
 export async function exportArtifactCsv(type?: ResultArtifact['type']) {
@@ -2276,9 +3923,10 @@ export function exportMockSummary(attempt: MockAttempt | VignetteAttempt | Const
   return JSON.stringify(attempt, null, 2);
 }
 
-export async function getReadinessByObjective(): Promise<ObjectiveReadiness[]> {
-  const snapshots = await db.masterySnapshots.toArray();
+export async function getReadinessByObjective(options: Level3PathwayQuery = {}): Promise<ObjectiveReadiness[]> {
+  const snapshots = await vaultTable<MasterySnapshot>('masterySnapshots').toArray();
   return snapshots
+    .filter((snapshot) => level3TopicRowAllowed(snapshot, options.level3Pathway))
     .map((snapshot) => ({
       id: snapshot.id,
       domain: snapshot.domain,
@@ -2292,6 +3940,131 @@ export async function getReadinessByObjective(): Promise<ObjectiveReadiness[]> {
       dueAt: snapshot.nextReviewAt,
       trend: snapshot.trend,
     }))
+    .sort((a, b) => a.readinessScore - b.readinessScore);
+}
+
+function reasonForObjective(readinessScore: number, retentionForecastPct?: number): ReviewReason {
+  if (retentionForecastPct !== undefined && retentionForecastPct < 72) return 'due-review';
+  if (readinessScore < 55) return 'weak-objective';
+  if (readinessScore < 75) return 'stale-topic';
+  return 'unfinished-lesson';
+}
+
+function topWeaknessSignals(signals: ObjectiveReadinessV2['weaknessSignals'], limit = 5) {
+  const sorted = [...signals].sort((a, b) => b.impact - a.impact);
+  const top = sorted.slice(0, limit);
+  const artifactSignal = sorted.find((signal) => signal.type === 'artifact');
+  if (artifactSignal && !top.some((signal) => signal.type === 'artifact')) {
+    top[Math.max(0, top.length - 1)] = artifactSignal;
+  }
+  return top.sort((a, b) => b.impact - a.impact);
+}
+
+export async function getReadinessByObjectiveV2(options: Level3PathwayQuery = {}): Promise<ObjectiveReadinessV2[]> {
+  const [objectives, reviewItems, results, settings, constructedResponseAttempts, artifacts, skillLabAttempts] = await Promise.all([
+    getReadinessByObjective(options),
+    vaultTable<ReviewItem>('reviewItems').toArray(),
+    vaultTable<QuestionResultRow>('questionResults').toArray(),
+    getStudyPlanSettings(),
+    vaultTable<ConstructedResponseAttempt>('constructedResponseAttempts').toArray(),
+    vaultTable<ResultArtifact>('resultArtifacts').toArray(),
+    vaultTable<SkillLabAttempt>('skillLabAttempts').toArray(),
+  ]);
+  const visibleResults = results.filter((result) => level3TopicRowAllowed(result, options.level3Pathway));
+  const visibleReviews = reviewItems.filter((item) => level3TopicRowAllowed(item, options.level3Pathway));
+  const visibleConstructedResponseAttempts = constructedResponseAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const visibleArtifacts = artifacts.filter((artifact) => level3TopicRowAllowed(artifact, options.level3Pathway));
+  const visibleSkillLabAttempts = skillLabAttempts.filter((attempt) => level3TopicRowAllowed(attempt, options.level3Pathway));
+  const artifactImpacts = artifactObjectiveImpacts(visibleArtifacts, visibleSkillLabAttempts);
+
+  return objectives
+    .map((objective) => {
+      const review = visibleReviews.find((item) => item.id === objective.id);
+      const objectiveResults = visibleResults.filter(
+        (result) =>
+          result.domain === objective.domain &&
+          result.topic === objective.topic &&
+          result.learningObjective === objective.learningObjective,
+      );
+      const itemTypeWeight = Math.max(1, ...objectiveResults.map((result) => itemTypeWeightFor(result.itemType)));
+      const weightedAccuracy = weightedAccuracyFor(objectiveResults);
+      const topicWeight = topicWeightFor(settings.topicWeights, objective.topic);
+      const retentionForecastPct = review ? Math.round(predictRetention(review, new Date()) * 100) : undefined;
+      const rubricSignals = lowestRubricSignals(visibleConstructedResponseAttempts, objective.topic).map((signal) => ({
+        type: 'rubric' as const,
+        label: `${signal.criterion} rubric ${signal.averagePct}%`,
+        impact: signal.impact,
+      }));
+      const objectiveArtifactSignals = artifactImpacts
+        .filter((impact) => impact.objectiveId === objective.learningObjective || impact.objectiveId === objective.id)
+        .slice(0, 3)
+        .map((impact) => ({
+          type: 'artifact' as const,
+          label: `${itemTypeLabel(impact.sourceType)} impact ${impact.averageScore}%`,
+          impact: impact.impact,
+        }));
+      const retentionImpact = retentionForecastPct === undefined ? 0 : impactFromScore(retentionForecastPct, 0.35);
+      const itemTypeImpact = impactFromScore(weightedAccuracy, itemTypeWeight - 1);
+      const topicWeightImpact = Math.round(topicWeight * 0.35);
+      const signals = [
+        itemTypeImpact
+          ? {
+              type: 'item-type' as const,
+              label: `${itemTypeLabel(objectiveResults.find((result) => itemTypeWeightFor(result.itemType) === itemTypeWeight)?.itemType)} evidence ${weightedAccuracy}%`,
+              impact: itemTypeImpact,
+            }
+          : null,
+        retentionImpact
+          ? {
+              type: 'retention' as const,
+              label: `retention forecast ${retentionForecastPct}%`,
+              impact: retentionImpact,
+            }
+          : null,
+        topicWeightImpact
+          ? {
+              type: 'topic-weight' as const,
+              label: `topic weight ${topicWeight}%`,
+              impact: topicWeightImpact,
+            }
+          : null,
+        ...rubricSignals,
+        ...objectiveArtifactSignals,
+      ].filter(Boolean) as ObjectiveReadinessV2['weaknessSignals'];
+      const signalPenalty = Math.min(24, signals.reduce((sum, signal) => sum + signal.impact, 0) * 0.18);
+      const weightedScore = Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round(
+            objective.readinessScore -
+              Math.max(0, 78 - (retentionForecastPct ?? 78)) * 0.25 -
+              topicWeight * 0.05 -
+              Math.max(0, objective.readinessScore - weightedAccuracy) * (itemTypeWeight - 1) * 0.45 -
+              signalPenalty,
+          ),
+        ),
+      );
+      const primaryReason = reasonForObjective(weightedScore, retentionForecastPct);
+      return {
+        ...objective,
+        readinessVersion: 2 as const,
+        readinessScore: weightedScore,
+        itemTypeAdjustedScore: weightedAccuracy,
+        itemTypeWeight,
+        topicWeight,
+        retentionForecastPct,
+        evidenceCount: objectiveResults.length,
+        primaryReason,
+        reasonDetails: explainReviewReason(primaryReason, {
+          score: weightedScore,
+          retentionPct: retentionForecastPct,
+          topicWeight,
+          itemType: objectiveResults.find((result) => itemTypeWeightFor(result.itemType) === itemTypeWeight)?.itemType,
+        }),
+        weaknessSignals: topWeaknessSignals(signals),
+      };
+    })
     .sort((a, b) => a.readinessScore - b.readinessScore);
 }
 
@@ -2314,26 +4087,37 @@ export function getExamPlan() {
 }
 
 export async function getNotes() {
-  return db.notes.orderBy('updatedAt').reverse().toArray();
+  // `updatedAt` is a declared index on notes.
+  const rows = await vaultTable<VaultNote>('notes').orderedBy('updatedAt', { desc: true });
+  return Promise.all(rows.map((note) => decryptNoteForRead(note))) as Promise<VaultNote[]>;
 }
 
 export async function getBookmarks() {
-  return db.bookmarks.orderBy('createdAt').reverse().toArray();
+  // `createdAt` is a declared index on bookmarks.
+  return vaultTable<VaultBookmark>('bookmarks').orderedBy('createdAt', { desc: true });
 }
 
 export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean } = {}) {
-  const results = (await db.questionResults.toArray())
+  const results = (await vaultTable<QuestionResultRow>('questionResults').toArray())
     .filter((row) => row.domain && row.topic && row.questionId && row.learningObjective && isValidIsoDate(row.createdAt))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const groupedResults = new Map<string, QuestionResultRow[]>();
   const latestReviewById = new Map<string, ReviewItem>();
 
-  await db.transaction('rw', [db.reviewItems, db.masterySnapshots, db.reviewEvents, db.confidenceCalibration], async () => {
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — the clear +
+  // repopulate of reviewItems / masterySnapshots / reviewEvents /
+  // confidenceCalibration runs in ONE atomic batch (same tables, same order) so a
+  // crash can't leave indexes half-built, exactly as the prior db.transaction.
+  await vaultTransaction(['reviewItems', 'masterySnapshots', 'reviewEvents', 'confidenceCalibration'], async (tx) => {
+    const reviewItemsTx = tx.table<ReviewItem>('reviewItems');
+    const masterySnapshotsTx = tx.table<MasterySnapshot>('masterySnapshots');
+    const reviewEventsTx = tx.table<ReviewEvent>('reviewEvents');
+    const confidenceCalibrationTx = tx.table<ConfidenceCalibration>('confidenceCalibration');
     await Promise.all([
-      db.reviewItems.clear(),
-      db.masterySnapshots.clear(),
-      db.reviewEvents.clear(),
-      db.confidenceCalibration.clear(),
+      reviewItemsTx.clear(),
+      masterySnapshotsTx.clear(),
+      reviewEventsTx.clear(),
+      confidenceCalibrationTx.clear(),
     ]);
 
     for (const result of results) {
@@ -2344,8 +4128,8 @@ export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean }
       if (!groupedResults.has(id)) groupedResults.set(id, []);
       groupedResults.get(id)?.push(result);
 
-      await db.reviewItems.put(review);
-      await db.reviewEvents.add({
+      await reviewItemsTx.put(review);
+      await reviewEventsTx.add({
         domain: result.domain,
         topic: result.topic,
         learningObjective: result.learningObjective,
@@ -2354,7 +4138,7 @@ export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean }
         dueAt: review.dueAt,
         createdAt: result.createdAt,
       });
-      await db.confidenceCalibration.add({
+      await confidenceCalibrationTx.add({
         domain: result.domain,
         topic: result.topic,
         learningObjective: result.learningObjective,
@@ -2374,7 +4158,7 @@ export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean }
         objectiveResults.reduce((sum, row) => sum + CONFIDENCE_SCORE[row.confidence], 0) /
           Math.max(1, objectiveResults.length),
       );
-      await db.masterySnapshots.put({
+      await masterySnapshotsTx.put({
         id,
         domain: latest.domain,
         topic: latest.topic,
@@ -2399,12 +4183,176 @@ export async function rebuildLearningIndexes({ emit = true }: { emit?: boolean }
   };
 }
 
+async function storageEstimate() {
+  if (typeof navigator === 'undefined') return undefined;
+  const estimate = await navigator.storage?.estimate?.().catch(() => null);
+  const persisted = await navigator.storage?.persisted?.().catch(() => undefined);
+  if (!estimate && persisted === undefined) return undefined;
+  return {
+    usage: estimate?.usage,
+    quota: estimate?.quota,
+    persisted,
+  };
+}
+
+const SECURE_OPEN_NOTEBOOK_SETTINGS_SCHEME = 'secure-vault-open-notebook-cache.v1';
+
+function isSensitiveOpenNotebookSettingKey(key: string): boolean {
+  return (
+    key === 'open-notebook:topic-notebooks' ||
+    key.startsWith('open-notebook:answer:') ||
+    key.startsWith('open-notebook:answer-history:')
+  );
+}
+
+function isSecureOpenNotebookSettingsRow(row: SettingRow): boolean {
+  const value = row.value as { v?: unknown; scheme?: unknown; payload?: { iv?: unknown; ct?: unknown } } | undefined;
+  return (
+    isSensitiveOpenNotebookSettingKey(row.key) &&
+    value?.v === 1 &&
+    value.scheme === SECURE_OPEN_NOTEBOOK_SETTINGS_SCHEME &&
+    typeof value.payload?.iv === 'string' &&
+    typeof value.payload?.ct === 'string'
+  );
+}
+
+async function countSourceVaultRowsOutsideSecureScope(): Promise<number> {
+  const counts = await Promise.all(
+    SOURCE_STORE_NAMES.filter((storeName) => storeName !== 'sourceChunks').map((storeName) =>
+      vaultTable(storeName).count().catch(() => 0),
+    ),
+  );
+  return counts.reduce((sum, count) => sum + count, 0);
+}
+
+async function buildSecureVaultHealth(
+  exported: VaultExport,
+  outsideScopeRows: { sourceVault: number },
+): Promise<NonNullable<VaultHealthReport['secureVault']>> {
+  const noteTotal = exported.stores.notes.length;
+  const artifactTotal = exported.stores.resultArtifacts.length;
+  const openNotebookSettings = exported.stores.settings.filter((row) => isSensitiveOpenNotebookSettingKey(row.key));
+  const sourceChunks = await db.sourceChunks.toArray().catch(() => []);
+  const noteEncrypted = exported.stores.notes.filter((note) => isSecureNote(note)).length;
+  const artifactEncrypted = exported.stores.resultArtifacts.filter((artifact) => isSecureResultArtifact(artifact)).length;
+  const openNotebookSettingsEncrypted = openNotebookSettings.filter((row) => isSecureOpenNotebookSettingsRow(row)).length;
+  const sourceChunkEncrypted = sourceChunks.filter((chunk) => isSecureSourceChunk(chunk)).length;
+  const encryptedRows = noteEncrypted + artifactEncrypted + openNotebookSettingsEncrypted + sourceChunkEncrypted;
+  const targetRows = noteTotal + artifactTotal + openNotebookSettings.length + sourceChunks.length;
+  const coveragePct = targetRows ? Math.round((encryptedRows / targetRows) * 100) : 100;
+  const enabled = noteSecureVault.isEnabled();
+  const unlocked = noteSecureVault.isUnlocked();
+  const available = await noteSecureVault.isAvailable().catch(() => false);
+  const status = !enabled
+    ? 'disabled'
+    : !unlocked
+      ? 'locked'
+      : encryptedRows === targetRows
+        ? 'encrypted'
+        : 'partial';
+
+  return {
+    enabled,
+    unlocked,
+    available,
+    status,
+    encryptedRows,
+    targetRows,
+    coveragePct,
+    rows: {
+      notes: { encrypted: noteEncrypted, total: noteTotal },
+      resultArtifacts: { encrypted: artifactEncrypted, total: artifactTotal },
+      openNotebookSettings: { encrypted: openNotebookSettingsEncrypted, total: openNotebookSettings.length },
+      sourceChunks: { encrypted: sourceChunkEncrypted, total: sourceChunks.length },
+    },
+    outsideScopeRows,
+  };
+}
+
+function buildVaultHealthSnapshot(exported: VaultExport, validationErrors: string[]): VaultHealthSnapshot {
+  const totalRows = STORE_NAMES.reduce((sum, storeName) => sum + exported.stores[storeName].length, 0);
+  const malformedQuestionRows = exported.stores.questionResults.filter(
+    (row) => !row.domain || !row.topic || !row.questionId || !row.learningObjective || !isValidIsoDate(row.createdAt),
+  ).length;
+  const malformedReviewRows = exported.stores.reviewItems.filter(
+    (row) => !row.id || !row.dueAt || Number.isNaN(new Date(row.dueAt).getTime()),
+  ).length;
+  const objectiveKeys = new Set(
+    exported.stores.questionResults.map((row) => objectiveId(row.domain, row.topic, row.learningObjective)),
+  );
+  const orphanedReviews = exported.stores.reviewItems.filter(
+    (row) => row.learningObjective && row.topic && !objectiveKeys.has(objectiveId(row.domain, row.topic, row.learningObjective)),
+  ).length;
+  const indexedObjectives = new Set(exported.stores.masterySnapshots.map((row) => row.id));
+  const staleIndexes = [...objectiveKeys].filter((key) => !indexedObjectives.has(key)).length;
+  const checksumIssues = validationErrors.filter((error) => /checksum/i.test(error)).length;
+  const repairActions = [
+    malformedQuestionRows || malformedReviewRows ? `Remove or normalize ${malformedQuestionRows + malformedReviewRows} malformed learning row(s).` : '',
+    orphanedReviews ? `Rebuild ${orphanedReviews} orphaned review row(s) from canonical attempts.` : '',
+    staleIndexes ? `Rebuild ${staleIndexes} stale mastery/review index row(s).` : '',
+    checksumIssues ? 'Reject the payload or regenerate it from a trusted local vault export.' : '',
+  ].filter(Boolean);
+
+  return {
+    id: `vault-health:${exported.exportId}`,
+    generatedAt: nowIso(),
+    status: checksumIssues || malformedQuestionRows || malformedReviewRows ? 'repair-needed' : orphanedReviews || staleIndexes ? 'warning' : 'ok',
+    totalRows,
+    malformedRows: malformedQuestionRows + malformedReviewRows,
+    orphanedReviews,
+    staleIndexes,
+    checksumIssues,
+    repairActions,
+  };
+}
+
+export async function getVaultHealthReport(): Promise<VaultHealthReport> {
+  const exported = await exportVaultData();
+  const validation = validateVaultData(exported);
+  const snapshot = buildVaultHealthSnapshot(exported, validation.errors);
+  // Each ordering field below is a declared index on its store.
+  const [rollbackSnapshots, importJobs, sourceBundleManifests, calculatorScenarios, releaseRunHistory] = await Promise.all([
+    vaultTable<RollbackSnapshot>('rollbackSnapshots').orderedBy('createdAt', { desc: true, limit: 10 }),
+    vaultTable<ImportJob>('importJobs').orderedBy('startedAt', { desc: true, limit: 10 }),
+    vaultTable<SourceBundleManifest>('sourceBundleManifests').orderedBy('createdAt', { desc: true, limit: 10 }),
+    vaultTable<CalculatorScenario>('calculatorScenarios').orderedBy('updatedAt', { desc: true, limit: 10 }),
+    vaultTable<ReleaseRunHistory>('releaseRunHistory').orderedBy('generatedAt', { desc: true, limit: 10 }),
+  ]);
+  const sourceVaultOutsideScopeRows = await countSourceVaultRowsOutsideSecureScope();
+  const report: VaultHealthReport = {
+    ...snapshot,
+    schemaVersion: VAULT_SCHEMA_VERSION,
+    schemaHash: VAULT_SCHEMA_HASH,
+    contentVersion: VAULT_CONTENT_VERSION,
+    secureVault: await buildSecureVaultHealth(exported, { sourceVault: sourceVaultOutsideScopeRows }),
+    importHistory: await getVaultImportHistory(),
+    rollbackSnapshots,
+    importJobs,
+    sourceBundleManifests,
+    calculatorScenarios,
+    releaseRunHistory,
+    storageEstimate: await storageEstimate(),
+  };
+  await vaultTable<VaultHealthSnapshot>('vaultHealthSnapshots').put(snapshot);
+  return report;
+}
+
+export async function previewVaultRepair(): Promise<VaultHealthReport> {
+  return getVaultHealthReport();
+}
+
 export async function repairVaultData() {
+  await createRollbackSnapshot('repair');
   const exported = await exportVaultData();
   const seenNotes = new Set<string>();
   const seenBookmarks = new Set<string>();
-  const repaired: VaultExport = {
-    ...exported,
+  // audit M2: rebuild the export WITHOUT its (now-stale) checksum after filtering,
+  // then re-checksum the filtered payload. Previously `repaired` kept the original
+  // export's checksum, so importVaultData's validation rejected it the moment any
+  // row was filtered — i.e. repair failed in exactly the case it exists to fix.
+  const { checksum: _staleChecksum, ...exportedWithoutChecksum } = exported;
+  const repaired: VaultExport = withChecksum({
+    ...exportedWithoutChecksum,
     stores: {
       ...exported.stores,
       questionResults: exported.stores.questionResults.filter(
@@ -2422,35 +4370,46 @@ export async function repairVaultData() {
         return true;
       }),
     },
-  };
+  });
+  // importVaultData already rebuilds the learning indexes internally; no second pass.
   await importVaultData(repaired, 'replace');
-  await rebuildLearningIndexes({ emit: false });
+  await getVaultHealthReport();
   return previewVaultImport(repaired);
 }
 
 export async function resetVaultData(scope: 'attempts' | 'progress' | 'full' = 'full') {
+  const rollbackSnapshot = await createRollbackSnapshot('reset');
+  // Data-safety: each branch's clears run inside ONE rw transaction so an
+  // interruption (tab close, IndexedDB error mid-Promise.all) can't leave the
+  // vault partially wiped. The 'full' branch in particular clears rollbackSnapshots
+  // and re-puts the snapshot in the SAME transaction — previously a non-atomic
+  // clear+re-put across two awaits could lose the only rollback point on a crash.
+  // DATA-1 Phase 3: rerouted to the storage `transaction` primitive — each branch
+  // clears the SAME store set inside ONE atomic batch, and the 'full' branch still
+  // clears rollbackSnapshots and re-puts the snapshot in the SAME transaction, so
+  // the all-or-nothing semantics are identical to the prior db.transaction blocks.
+  const ATTEMPT_TABLES: string[] = [
+    'quizAttempts', 'questionResults', 'reviewItems', 'masterySnapshots',
+    'mockAttempts', 'vignetteAttempts', 'constructedResponseAttempts',
+    'formulaDrillAttempts', 'skillLabAttempts', 'reviewEvents',
+    'confidenceCalibration', 'flashcardAttempts', 'resultArtifacts',
+    'mockSectionState', 'studySessions', 'learningEvents',
+  ];
   if (scope === 'attempts') {
-    await Promise.all([
-      db.quizAttempts.clear(),
-      db.questionResults.clear(),
-      db.reviewItems.clear(),
-      db.masterySnapshots.clear(),
-      db.mockAttempts.clear(),
-      db.vignetteAttempts.clear(),
-      db.constructedResponseAttempts.clear(),
-      db.formulaDrillAttempts.clear(),
-      db.skillLabAttempts.clear(),
-      db.reviewEvents.clear(),
-      db.confidenceCalibration.clear(),
-      db.flashcardAttempts.clear(),
-      db.resultArtifacts.clear(),
-      db.mockSectionState.clear(),
-      db.studySessions.clear(),
-    ]);
+    await vaultTransaction(ATTEMPT_TABLES, async (tx) => {
+      await Promise.all(ATTEMPT_TABLES.map((name) => tx.table(name).clear()));
+    });
   } else if (scope === 'progress') {
-    await Promise.all([db.lessonProgress.clear(), db.quizAttempts.clear(), db.vignetteAttempts.clear(), db.studySessions.clear()]);
+    const tables = ['lessonProgress', ...ATTEMPT_TABLES];
+    await vaultTransaction(tables, async (tx) => {
+      await Promise.all(tables.map((name) => tx.table(name).clear()));
+    });
   } else {
-    await Promise.all(STORE_NAMES.map((storeName) => db[storeName].clear()));
+    const tables = [...STORE_NAMES, ...SOURCE_STORE_NAMES, ...DERIVED_STORE_NAMES];
+    await vaultTransaction(tables, async (tx) => {
+      await Promise.all(tables.map((name) => tx.table(name).clear()));
+      await tx.table<RollbackSnapshot>('rollbackSnapshots').put(rollbackSnapshot);
+    });
   }
 
   emitProgressChange();

@@ -1,24 +1,29 @@
-import { useState } from 'react';
-import { Library, Search } from 'lucide-react';
-import { formulaLibrary } from '../data/catalog';
+import { useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
 import FormulaBlock from '../components/FormulaBlock';
+import { EmptyPanel, InlineCluster, PageHeader, Panel, StatusBadge } from '../components/ui/Primitives';
+import { SourceRail } from '../components/SourceContext';
+import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
+import { buildFormulaLibrary } from '../lib/formulaLibrary';
 
 function FormulaCard({ formula }) {
   return (
-    <div className="glass-card no-hover" style={{ padding: 'var(--space-4) var(--space-5)' }}>
-      <div className="flex-between" style={{ marginBottom: 'var(--space-2)' }}>
-        <span style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>{formula.name}</span>
-        <span className="badge badge-blue">{formula.category}</span>
-      </div>
+    <Panel tone="study" density="compact" className="formula-library-card">
+      <InlineCluster align="between">
+        <strong>{formula.name}</strong>
+        <StatusBadge tone="accent">{formula.category}</StatusBadge>
+      </InlineCluster>
       <FormulaBlock compact latex={formula.latex} />
-      <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)', margin: 0 }}>{formula.desc}</p>
-    </div>
+      <p>{formula.desc}</p>
+    </Panel>
   );
 }
 
 export default function FormulaLibrary() {
+  const [activePathway] = useLevel3Pathway();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
+  const formulaLibrary = useMemo(() => buildFormulaLibrary({ level3Pathway: activePathway }), [activePathway]);
 
   const categories = ['all', ...new Set(formulaLibrary.map(f => f.category))];
 
@@ -30,33 +35,62 @@ export default function FormulaLibrary() {
 
   return (
     <div className="page-container">
-      <div style={{ marginBottom: 'var(--space-8)' }}>
-        <div className="badge badge-blue" style={{ marginBottom: 'var(--space-3)' }}><Library size={12} /> REFERENCE</div>
-        <h1 className="section-title" style={{ fontSize: 'var(--fs-3xl)' }}>Formula Library</h1>
-        <p className="section-subtitle">Searchable reference of essential financial formulas</p>
-      </div>
+      <PageHeader
+        badge="REFERENCE"
+        title="Formula Library"
+        subtitle="Searchable reference of essential financial formulas, with KaTeX rendering and source-route links."
+        meta={<StatusBadge tone="accent">{formulaLibrary.length} formulas</StatusBadge>}
+      />
 
-      <div className="flex-between" style={{ marginBottom: 'var(--space-6)', flexWrap: 'wrap', gap: 'var(--space-4)' }}>
-        <div className="topbar-search" style={{ width: 320 }}>
+      <Panel tone="default" density="compact" className="filter-panel">
+        <div className="topbar-search formula-search">
           <Search size={16} />
-          <input type="text" placeholder="Search formulas..." value={search} onChange={e => setSearch(e.target.value)} />
+          <input type="text" aria-label="Search formulas" placeholder="Search formulas..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <InlineCluster>
           {categories.map(c => (
             <button key={c} className={`btn ${category === c ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setCategory(c)}>
               {c === 'all' ? 'All' : c}
             </button>
           ))}
-        </div>
-      </div>
+        </InlineCluster>
+      </Panel>
 
-      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: 'var(--space-4)' }}>
+      <div className="result-count">
         {filtered.length} formula{filtered.length !== 1 ? 's' : ''} found
       </div>
 
-      <div className="grid-2">
-        {filtered.map((f) => <FormulaCard key={`${f.category}-${f.name}`} formula={f} />)}
-      </div>
+      <SourceRail
+        compact
+        limit={2}
+        title="Formula Source Context"
+        target={{
+          kind: 'formula',
+          domain: 'cfa',
+          level: 'level3',
+          pathway: activePathway,
+          title: search || (category === 'all' ? 'formula library valuation duration options portfolio' : category),
+          formulaNames: filtered.slice(0, 5).map((formula) => formula.name),
+          keywords: [category, search, ...filtered.slice(0, 5).map((formula) => formula.desc)].filter(Boolean),
+          route: '/formulas',
+        }}
+      />
+
+      {filtered.length ? (
+        <div className="grid-2">
+          {filtered.map((f) => <FormulaCard key={`${f.category}-${f.name}`} formula={f} />)}
+        </div>
+      ) : (
+        <EmptyPanel
+          title="No formulas match your search"
+          description={
+            search
+              ? `Nothing matched “${search}”. Try a different term, or pick another category.`
+              : 'No formulas in this category yet.'
+          }
+          tone="study"
+        />
+      )}
     </div>
   );
 }

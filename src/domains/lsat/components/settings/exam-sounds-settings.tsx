@@ -1,0 +1,58 @@
+import { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@lsat/components/ui/card";
+import { Label } from "@lsat/components/ui/label";
+import { Switch } from "@lsat/components/ui/switch";
+import { Button } from "@lsat/components/ui/button";
+import {
+  getExamSoundsEnabled,
+  playSectionEndBeep,
+  setExamSoundsEnabled,
+} from "@lsat/lib/examSounds";
+import { toast } from "@lsat/lib/toast";
+
+export function ExamSoundsSettings() {
+  const [on, setOn] = useState(() => getExamSoundsEnabled());
+
+  function save(next: boolean) {
+    setOn(next);
+    setExamSoundsEnabled(next);
+    toast.success(next ? "Exam sounds on" : "Exam sounds off");
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Exam sounds</CardTitle>
+        <CardDescription>
+          Optional short chime when a timed section ends. Off by default.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="exam-sounds">Section end chime</Label>
+          <Switch
+            id="exam-sounds"
+            aria-label="Toggle section end chime"
+            checked={on}
+            onCheckedChange={(v) => save(v)}
+          />
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!on}
+          onClick={() => playSectionEndBeep()}
+        >
+          Preview sound
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}

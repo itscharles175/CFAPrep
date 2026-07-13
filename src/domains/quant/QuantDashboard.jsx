@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom';
-import { BrainCircuit, Binary, Layers, Flame, LineChart, Target, PieChart, ChevronRight, Cpu } from 'lucide-react';
+import { Binary, Layers, Flame, LineChart, Target, PieChart, ChevronRight, Cpu } from 'lucide-react';
 import { quantModules } from '../../data/catalog';
 import { useProgressSummary } from '../../hooks/useProgress';
+import { IconFrame, PageHeader, Panel, StatusBadge } from '../../components/ui/Primitives';
+import { SourceRail } from '../../components/SourceContext';
 
 const iconMap = {
   probability: Binary,
@@ -17,37 +19,54 @@ export default function QuantDashboard() {
 
   return (
     <div className="page-container">
-      <div style={{ marginBottom: 'var(--space-8)' }}>
-        <div className="badge badge-purple" style={{ marginBottom: 'var(--space-3)' }}>
-          <BrainCircuit size={12} /> QUANTITATIVE FINANCE
-        </div>
-        <h1 className="section-title" style={{ fontSize: 'var(--fs-3xl)' }}>Mathematical & Computational Finance</h1>
-        <p className="section-subtitle">Deep-dive into the mathematical foundations of modern finance</p>
-      </div>
+      <PageHeader
+        tone="quant"
+        badge="QUANTITATIVE FINANCE"
+        title="Mathematical & Computational Finance"
+        subtitle="Deep-dive into probability, stochastic processes, pricing engines, risk systems, and portfolio construction through live labs."
+        meta={<StatusBadge tone="quant">{quantModules.length} labs</StatusBadge>}
+      />
+
+      <SourceRail
+        compact
+        limit={2}
+        title="Quant CFA Source Context"
+        target={{
+          kind: 'tool',
+          domain: 'quant',
+          level: 'level1',
+          topicId: 'quant-methods',
+          title: 'Quantitative methods risk management portfolio optimization derivatives pricing',
+          keywords: quantModules.map((mod) => `${mod.label} ${mod.desc}`),
+          route: '/quant',
+        }}
+      />
 
       <div className="grid-2">
         {quantModules.map((mod, i) => {
           const Icon = iconMap[mod.id] || Cpu;
           const completed = summary.completedIds.has(`quant:${mod.id}`);
           return (
-          <Link
+          <Panel
+            as={Link}
             key={mod.id}
             to={mod.status === 'available' ? `/quant/${mod.id}` : '#'}
-            className="glass-card animate-fade"
-            style={{ animationDelay: `${i * 60}ms`, textDecoration: 'none', color: 'inherit', opacity: mod.status === 'coming' ? 0.5 : 1 }}
+            tone="quant"
+            status={completed ? 'success' : 'quant'}
+            interactive={mod.status === 'available'}
+            className="module-index-card animate-fade"
+            style={{ animationDelay: `${i * 60}ms`, opacity: mod.status === 'coming' ? 0.5 : 1 }}
             onClick={e => mod.status === 'coming' && e.preventDefault()}
           >
-            <div className="flex-between" style={{ marginBottom: 'var(--space-3)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                <div style={{ width: 40, height: 40, borderRadius: 'var(--radius-md)', background: `${mod.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon size={20} color={mod.color} />
-                </div>
-                <div style={{ fontWeight: 600 }}>{mod.label}</div>
+            <div className="module-index-head">
+              <IconFrame icon={Icon} tone="quant" />
+              <div>
+                <h3>{mod.label}</h3>
+                <p>{mod.desc}</p>
               </div>
-              {completed ? <span className="badge badge-green">COMPLETE</span> : <ChevronRight size={18} color="var(--text-muted)" />}
+              {completed ? <StatusBadge tone="success">Complete</StatusBadge> : <ChevronRight size={18} color="var(--text-muted)" />}
             </div>
-            <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', margin: 0 }}>{mod.desc}</p>
-          </Link>
+          </Panel>
           );
         })}
       </div>

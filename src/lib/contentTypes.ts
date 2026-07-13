@@ -11,7 +11,8 @@ export type ContentSourceKind =
   | 'editorial-authoring'
   | 'expert-review'
   | 'public-structure'
-  | 'local-dataset';
+  | 'local-dataset'
+  | 'local-source-digest';
 
 export interface ContentProvenance {
   author: string;
@@ -21,6 +22,8 @@ export interface ContentProvenance {
   editorialStatus: EditorialStatus;
   qualityNotes: string;
   generatedFromTemplate: boolean;
+  promotionEvidence?: string[];
+  sourceIds?: string[];
 }
 
 export type ItemType =
@@ -56,6 +59,7 @@ export interface CurriculumSourceMeta {
   notes: string;
   runtimeMode?: ContentRuntimeMode;
   runtimeLabel?: string;
+  sourceIds?: string[];
 }
 
 export interface ObjectiveBlueprint {
@@ -168,6 +172,7 @@ export interface AuthoringReview {
     | 'skill-lab-mapping'
     | 'accessibility'
   >;
+  promotionEvidence?: string[];
 }
 
 export interface ContentPack {
@@ -256,6 +261,12 @@ export interface AuthoredFlashcard extends Flashcard {
   provenance: ContentProvenance;
 }
 
+export interface AuthoredConstructedResponse extends ConstructedResponseItem {
+  objectiveIds: string[];
+  datasetIds: string[];
+  provenance: ContentProvenance;
+}
+
 export interface AuthoredContentPack extends ContentPack {
   provenance: ContentProvenance;
   datasets: TopicDataset[];
@@ -263,6 +274,7 @@ export interface AuthoredContentPack extends ContentPack {
   authoredExamples: AuthoredExample[];
   authoredQuestions: AuthoredQuestion[];
   authoredVignettes: AuthoredVignette[];
+  authoredConstructedResponses?: AuthoredConstructedResponse[];
   authoredFlashcards: AuthoredFlashcard[];
 }
 
@@ -273,9 +285,26 @@ export interface ContentPackRelease {
   generatedAt: string;
   topicIds: string[];
   packIds: string[];
+  topics: ContentPackReleaseTopic[];
+  templateRowsRemaining: number;
   blockingIssues: number;
   warnings: number;
   notes: string[];
+}
+
+export interface ContentPackReleaseTopic {
+  topicId: string;
+  title: string;
+  status: ContentMaturity;
+  totalRows: number;
+  editorialRows: number;
+  templateRowsRemaining: number;
+  missingEvidence: number;
+  blockers: number;
+  warnings: number;
+  reviewer: string;
+  reviewedAt: string;
+  promotionEvidence: string[];
 }
 
 export interface ContentBatchProgress {
@@ -442,17 +471,6 @@ export interface Reading {
   sections: LessonSection[];
   formulas: Formula[];
   examples?: ReadingExample[];
-}
-
-/** @deprecated Use ReadingExample for new content bundles. */
-export interface Example {
-  id: string;
-  topic: string;
-  title: string;
-  prompt: string;
-  walkthrough: string;
-  formulaName?: string;
-  tags: string[];
 }
 
 export interface Vignette {

@@ -1,0 +1,992 @@
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+/* Newsreader is loaded lazily by src/lib/serifFont.ts when serif reading mode
+   is enabled — importing it unconditionally here would add ~35 KB to every
+   page load for users who never enable serif mode. */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ---- Token mapping (docs/07 §1.4) — Light ---- */
+    /* graphite-50 */
+    --background: 228 24% 98%;
+    /* graphite-900 */
+    --foreground: 229 26% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 229 26% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 229 26% 11%;
+    /* verdict-500 */
+    --primary: 262 83% 60%;
+    --primary-foreground: 0 0% 100%;
+    /* graphite-100 */
+    --secondary: 226 22% 96%;
+    --secondary-foreground: 229 26% 11%;
+    /* graphite-100 / graphite-500. Darkened from L49 to L45 so small muted
+       labels clear AA on white and graphite-50 surfaces with margin. */
+    --muted: 226 22% 96%;
+    --muted-foreground: 222 11% 45%;
+    --accent: 226 22% 96%;
+    --accent-foreground: 229 26% 11%;
+    /* danger */
+    --destructive: 358 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 58% 42%;
+    --success-foreground: 229 26% 11%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 229 26% 11%;
+    /* a11y: amber --warning fails WCAG AA as TEXT on light surfaces; warning TEXT
+       uses this darker amber in light mode (bg-warning keeps --warning). */
+    --warning-text: 38 100% 30%;
+    --info: 200 85% 46%;
+    --info-foreground: 229 26% 11%;
+    /* graphite-200 */
+    --border: 224 18% 91%;
+    --input: 224 18% 91%;
+    --ring: 262 83% 60%;
+    --radius: 0.375rem; /* 6px (docs/07 §3.1) */
+
+    /* ---- Graphite neutral ramp (docs/07 §1.4) — the semantic tokens above
+       are sampled from these steps; charts/borders may reference a step directly ---- */
+    --graphite-50: 228 24% 98%;
+    --graphite-100: 226 22% 96%;
+    --graphite-200: 224 18% 91%;
+    --graphite-300: 223 16% 83%;
+    --graphite-400: 222 12% 64%;
+    --graphite-500: 222 11% 49%;
+    --graphite-600: 223 14% 38%;
+    --graphite-700: 225 18% 27%;
+    --graphite-800: 227 22% 17%;
+    --graphite-900: 229 26% 11%;
+    --graphite-950: 231 30% 7%;
+
+    /* ---- Verdict ramp (for non-token use, e.g. charts/UI accents §1.2) ---- */
+    --verdict-300: 256 95% 78%;
+    --verdict-400: 258 92% 70%;
+    --verdict-500: 262 83% 60%;
+    --verdict-600: 263 72% 50%;
+    --verdict-700: 264 66% 42%;
+
+    /* ---- Elevation scale (docs/07 §3.2) — light ---- */
+    --elevation-0: none;
+    --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --elevation-2: 0 2px 6px rgba(16, 18, 27, 0.08);
+    --elevation-3: 0 8px 24px rgba(16, 18, 27, 0.12);
+    --elevation-4: 0 16px 48px rgba(16, 18, 27, 0.18);
+
+    /* ---- Density (docs/07 §3.3): 4px comfortable / 3px compact ---- */
+    --space-unit: 4px;
+
+    /* ---- Reading measure (docs/07 §2.2) ---- */
+    --measure: 66ch;
+
+    /* ===== R8 "Quiet Observatory" tokens (docs/17, docs/18 W1.3) ===== */
+    /* Depth surfaces — the elevation ladder as luminance, not borders.
+       Light steps gently DOWN from the page (well → card → raised). */
+    --surface-0: 228 24% 98%; /* = background */
+    --surface-1: 0 0% 100%; /* resting card */
+    --surface-2: 226 22% 96%; /* raised / active */
+    --surface-3: 224 18% 91%; /* highest */
+
+    /* Aurora / verdict glow — the instrument's light behind hero numerals.
+       Strength is per-theme; 0 in high-contrast. */
+    --aurora: 262 83% 60%; /* verdict-500 */
+    --aurora-strength: 0.06;
+    --glow: 262 83% 60%;
+    --glow-strength: 0.16;
+
+    /* Frosted-glass surface (command palette, popovers, sticky chrome). */
+    --glass-bg: 0 0% 100%;
+    --glass-alpha: 0.72;
+    --glass-blur: 12px;
+
+    /* Semantic-subtle tints — one source for status backgrounds, replacing
+       scattered /5 /10 /15 opacity improvisations. */
+    --success-subtle: 152 58% 42%;
+    --warning-subtle: 38 92% 50%;
+    --info-subtle: 200 85% 46%;
+    --destructive-subtle: 358 70% 54%;
+    --subtle-alpha: 0.12;
+
+    /* Density-derived metrics (docs/18 W1.8) — comfortable values equal the
+       current hardcoded ones, so comfortable mode is visually unchanged. */
+    --card-pad: calc(var(--space-unit) * 6); /* 24px / 18px compact */
+    --row-h: calc(var(--space-unit) * 9); /* 36px / 27px compact */
+
+    /* Theme-aware highlighter fills (docs/18 W1.6) — replaces fixed rgba. */
+    --hl-yellow: 48 96% 53%;
+    --hl-green: 142 71% 45%;
+    --hl-pink: 330 81% 60%;
+    --hl-alpha: 0.4;
+
+    /* ---- Okabe–Ito type-color families (docs/07 §1.5) — light mode ----
+       Source of truth for hex lives in lib/labels.ts and must stay in sync. */
+    --tcolor-assumption: #0072B2;
+    --tcolor-strengthen-weaken: #009E73;
+    --tcolor-flaw-structure: #D55E00;
+    --tcolor-inference: #56B4E9;
+    --tcolor-principle: #E69F00;
+    --tcolor-parallel: #CC79A7;
+    --tcolor-paradox: #F0E442;
+    --tcolor-rc: #374151;
+  }
+
+  .dark {
+    /* graphite-950 */
+    --background: 231 30% 7%;
+    /* graphite-100 */
+    --foreground: 226 22% 96%;
+    /* graphite-900 */
+    --card: 229 26% 11%;
+    --card-foreground: 226 22% 96%;
+    --popover: 229 26% 11%;
+    --popover-foreground: 226 22% 96%;
+    /* verdict-400 */
+    --primary: 258 92% 70%;
+    --primary-foreground: 231 30% 7%;
+    /* graphite-800 */
+    --secondary: 227 22% 17%;
+    --secondary-foreground: 226 22% 96%;
+    --muted: 227 22% 17%;
+    /* graphite-400 */
+    --muted-foreground: 222 12% 64%;
+    --accent: 227 22% 17%;
+    --accent-foreground: 226 22% 96%;
+    /* F33 — lightened for 4.5:1 contrast on dark --card (graphite-900).
+       Checked: success hsl(142 70% 55%) ≈ #3dba6c, contrast ~5.1:1.
+                destructive hsl(0 90% 70%) ≈ #f4706e, contrast ~4.6:1. */
+    --destructive: 0 90% 70%;
+    --destructive-foreground: 231 30% 7%;
+    --success: 142 70% 55%;
+    --success-foreground: 231 30% 7%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 229 26% 11%;
+    --info: 200 85% 46%;
+    --info-foreground: 231 30% 7%;
+    /* graphite-800 */
+    --border: 227 22% 17%;
+    --input: 227 22% 17%;
+    --ring: 258 92% 70%;
+
+    /* ---- Elevation — dark (shadows read weakly; rely on lighter surfaces too) ---- */
+    --elevation-0: none;
+    --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --elevation-2: 0 2px 6px rgba(0, 0, 0, 0.4);
+    --elevation-3: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --elevation-4: 0 16px 48px rgba(0, 0, 0, 0.6);
+
+    /* ===== R8 Observatory — dark is the hero; surfaces step UP toward light ===== */
+    --surface-0: 231 30% 7%; /* graphite-950 = background */
+    --surface-1: 229 26% 11%; /* graphite-900 = resting card */
+    --surface-2: 227 22% 17%; /* graphite-800 = raised */
+    --surface-3: 225 18% 27%; /* graphite-700 = highest */
+    --aurora: 258 92% 70%; /* verdict-400 — glows brighter on near-black */
+    --aurora-strength: 0.1;
+    --glow: 258 92% 70%;
+    --glow-strength: 0.26;
+    --glass-bg: 229 26% 11%;
+    --glass-alpha: 0.6;
+    --glass-blur: 14px;
+    --hl-yellow: 48 96% 62%;
+    --hl-green: 142 64% 55%;
+    --hl-pink: 330 81% 68%;
+    --hl-alpha: 0.34;
+
+    /* ---- Okabe–Ito type-color families — dark mode ----
+       More accessible dark-mode hexes: yellows/greens lifted for contrast. */
+    --tcolor-assumption: #0a84d4;
+    --tcolor-strengthen-weaken: #00c88f;
+    --tcolor-flaw-structure: #f07030;
+    --tcolor-inference: #7acff0;
+    --tcolor-principle: #f5b820;
+    --tcolor-parallel: #e09ac0;
+    --tcolor-paradox: #f7d055;
+    --tcolor-rc: #9ca3af;
+  }
+
+  /* ---- "Focus" reading theme (docs/07 §1.4): warm-tinted paper ---- */
+  /* Compact density (docs/07 §3.3) */
+  [data-density="compact"] {
+    --space-unit: 3px;
+  }
+
+  /* High-contrast theme — deepened in R8 (docs/18 W1.2): cards, popovers,
+     inputs, and semantic tones all get hardened contrast; aurora/glow flatten
+     to nothing (the vision: "high-contrast flattens aurora/glow to pure borders"). */
+  .high-contrast {
+    --foreground: 0 0% 0%;
+    --background: 0 0% 100%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+    --muted-foreground: 0 0% 25%;
+    --secondary-foreground: 0 0% 0%;
+    --accent-foreground: 0 0% 0%;
+    --border: 0 0% 0%;
+    --input: 0 0% 0%;
+    --ring: 262 100% 35%;
+    --primary: 262 100% 35%;
+    --success: 152 100% 22%;
+    --warning: 38 100% 30%;
+    --info: 200 100% 28%;
+    --destructive: 358 90% 40%;
+    --aurora-strength: 0;
+    --glow-strength: 0;
+    --surface-1: 0 0% 100%;
+    --surface-2: 0 0% 96%;
+    --surface-3: 0 0% 92%;
+  }
+  .dark.high-contrast {
+    --foreground: 0 0% 100%;
+    --background: 0 0% 0%;
+    --card: 0 0% 8%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 100%;
+    --muted-foreground: 0 0% 80%;
+    --secondary-foreground: 0 0% 100%;
+    --accent-foreground: 0 0% 100%;
+    --border: 0 0% 100%;
+    --input: 0 0% 100%;
+    --primary: 258 100% 82%;
+    --ring: 258 100% 82%;
+    --success: 152 70% 62%;
+    --warning: 45 100% 62%;
+    --info: 200 90% 66%;
+    --aurora-strength: 0;
+    --glow-strength: 0;
+    --surface-1: 0 0% 8%;
+    --surface-2: 0 0% 14%;
+    --surface-3: 0 0% 20%;
+  }
+
+  /* Focus-paper DARK variant (R8 a11y fix, docs/18 W1.2) — was MISSING, so a
+     dark-theme user entering reading mode got a white flash. Warm sepia-charcoal. */
+  .dark .theme-focus {
+    --background: 30 14% 9%;
+    --foreground: 40 30% 92%;
+    --card: 30 14% 12%;
+    --card-foreground: 40 30% 92%;
+    --popover: 30 14% 12%;
+    --popover-foreground: 40 30% 92%;
+    --secondary: 30 10% 18%;
+    --secondary-foreground: 40 30% 92%;
+    --muted: 30 10% 18%;
+    --muted-foreground: 40 12% 68%;
+    --accent: 30 10% 18%;
+    --accent-foreground: 40 30% 92%;
+    --border: 30 10% 22%;
+    --input: 30 10% 22%;
+    --surface-0: 30 14% 9%;
+    --surface-1: 30 14% 12%;
+    --surface-2: 30 10% 18%;
+    --surface-3: 30 10% 24%;
+  }
+
+  .theme-focus {
+    --background: 40 30% 97%;
+    --foreground: 229 26% 11%;
+    --card: 40 40% 99%;
+    --card-foreground: 229 26% 11%;
+    --popover: 40 40% 99%;
+    --popover-foreground: 229 26% 11%;
+    --primary: 262 83% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 40 24% 93%;
+    --secondary-foreground: 229 26% 11%;
+    --muted: 40 24% 93%;
+    --muted-foreground: 222 11% 45%;
+    --accent: 40 24% 93%;
+    --accent-foreground: 229 26% 11%;
+    --border: 40 20% 88%;
+    --input: 40 20% 88%;
+    --ring: 262 83% 60%;
+    /* warm-paper depth surfaces so bg-surface-* match the focus palette
+       (without these, surface-1 stayed pure white — a cold seam, docs/18 audit) */
+    --surface-0: 40 30% 97%;
+    --surface-1: 40 40% 99%;
+    --surface-2: 40 24% 93%;
+    --surface-3: 40 20% 88%;
+    /* slightly larger reading default in focus theme */
+    --measure: 64ch;
+  }
+
+  /* R11 1.2 — high-contrast must win over focus-paper. `.theme-focus` is a
+     per-container class on the reading surfaces and locally softens border/input/
+     muted-foreground to warm-paper values; under high-contrast that silently
+     stripped the hardened contrast in the densest reading view. Re-assert the HC
+     contrast tokens (keeping the warm background — black/white ink on warm paper
+     is still high-contrast). */
+  .high-contrast .theme-focus {
+    --foreground: 0 0% 0%;
+    --border: 0 0% 0%;
+    --input: 0 0% 0%;
+    --muted-foreground: 0 0% 25%;
+  }
+  .dark.high-contrast .theme-focus {
+    --foreground: 0 0% 100%;
+    --border: 0 0% 100%;
+    --input: 0 0% 100%;
+    --muted-foreground: 0 0% 80%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    /* K4-12: the `bg-background`/`text-foreground` body apply was removed in the
+       final K4 cutover. The LSAT plane is always mounted INSIDE the host shell
+       now, so it inherits bg/text from the host shell rather than clobbering the
+       host's palette with the LSAT Tailwind tokens. */
+    font-family: theme("fontFamily.sans");
+    font-feature-settings: "rlig" 1, "calt" 1;
+    /* R8: engage Newsreader's optical-size (opsz) axis + Geist's so large serif
+       gets true display glyphs and small text stays legible (docs/18 W2.2). */
+    font-optical-sizing: auto;
+  }
+  /* R10 C3 — themed text selection + caret (was the OS default blue, jarring in
+     dark / focus-paper / high-contrast). Token-driven, so it re-themes for free. */
+  ::selection {
+    background-color: hsl(var(--primary) / 0.28);
+  }
+  input,
+  textarea,
+  [contenteditable="true"] {
+    caret-color: hsl(var(--primary));
+  }
+  /* Tabular figures everywhere digits should align (timer, scores, tables). */
+  .stat,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+}
+
+@layer utilities {
+  /* ---- Reading utilities (docs/07 §2.2) ---- */
+  .reading {
+    line-height: 1.65;
+    max-width: var(--measure);
+  }
+  .reading p + p {
+    margin-top: 0.85em;
+  }
+  .reading-serif {
+    font-family: theme("fontFamily.serif");
+  }
+  /* Three reading size steps (16/19/22px) */
+  .reading-sm {
+    font-size: 16px;
+  }
+  .reading-md {
+    font-size: 19px;
+  }
+  .reading-lg {
+    font-size: 22px;
+  }
+}
+
+@layer base {
+  /* ---- Accessibility: global visible focus ring (§2.8) ----
+     Keyboard users always get a clear ring; mouse clicks don't (focus-visible).
+     Components may override with their own ring; this is the safety net. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
+  /* Screen-reader-only utility for text alternatives. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+}
+
+@layer utilities {
+  /* ---- Tauri custom-chrome drag region (§2.11) ----
+     The titlebar (and its drag-region children) are draggable; the window
+     controls inside are not (they use pointer events). No-op in the browser. */
+  .titlebar {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+  .titlebar button,
+  .titlebar [role="button"] {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
+  /* Density-aware spacing helpers */
+  .density-gap {
+    gap: calc(var(--space-unit) * 4);
+  }
+  [data-density="compact"] main {
+    padding: calc(var(--space-unit) * 4) !important;
+  }
+  [data-density="compact"] .density-pad {
+    padding: calc(var(--space-unit) * 3);
+  }
+}
+
+/* Highlighter colors — R8: theme-aware (docs/18 W1.6). The fills now ride on
+   per-theme CSS vars so highlighted text keeps WCAG contrast in dark / focus /
+   high-contrast instead of the old fixed rgba. */
+.hl-yellow {
+  background-color: hsl(var(--hl-yellow) / var(--hl-alpha));
+  border-radius: 2px;
+}
+.hl-green {
+  background-color: hsl(var(--hl-green) / var(--hl-alpha));
+  border-radius: 2px;
+}
+.hl-pink {
+  background-color: hsl(var(--hl-pink) / var(--hl-alpha));
+  border-radius: 2px;
+}
+
+/* ===========================================================================
+   R8 "Quiet Observatory" utility layer (docs/17, docs/18 W1.3–1.4).
+   Depth surfaces, frosted glass, the aurora/glow system, semantic-subtle
+   backgrounds, and the three type-voice roles — all token-driven so they
+   re-theme across light / dark / focus / high-contrast for free.
+   =========================================================================== */
+@layer utilities {
+  /* Depth surfaces (luminance hierarchy, not borders). */
+  .bg-surface-0 { background-color: hsl(var(--surface-0)); }
+  .bg-surface-1 { background-color: hsl(var(--surface-1)); }
+  .bg-surface-2 { background-color: hsl(var(--surface-2)); }
+  .bg-surface-3 { background-color: hsl(var(--surface-3)); }
+
+  /* Frosted glass — light-bending chrome (degrades to a solid tint if
+     backdrop-filter is unsupported). */
+  .glass {
+    background-color: hsl(var(--glass-bg) / var(--glass-alpha));
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  }
+
+  /* R9 F1.1 — Mica-aware chrome. `.chrome-glass` is solid by default (web, Win10,
+     high-contrast) and only frosts when `html.mica` is set — which the app does
+     ONLY after native Mica is confirmed active on Win11. Under `.mica` the base
+     surfaces go transparent so the window's Mica reads through the frosted chrome;
+     content panels stay opaque (`bg-card`) for legibility. Safe everywhere else. */
+  .chrome-glass {
+    background-color: hsl(var(--card));
+  }
+  html.mica:not(.high-contrast) body,
+  html.mica:not(.high-contrast) #root,
+  html.mica:not(.high-contrast) [data-app-root] {
+    background: transparent;
+  }
+  html.mica:not(.high-contrast) .chrome-glass {
+    background-color: hsl(var(--glass-bg) / var(--glass-alpha));
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  }
+
+  /* R9 — wake the dormant `data-theme` hook: per-environment material finishing
+     (deeper glass at night, flatter in the accessible floor). Additive only. */
+  [data-theme="dark"] {
+    --glass-blur: 16px;
+  }
+  [data-theme="light-hc"],
+  [data-theme="dark-hc"] {
+    --glass-alpha: 1;
+    --glass-blur: 0px;
+  }
+
+  /* Aurora — a faint radial verdict glow behind hero numerals. Off in
+     high-contrast (--aurora-strength: 0). Static (no motion) by default. */
+  .aurora { position: relative; isolation: isolate; }
+  .aurora::before {
+    content: "";
+    position: absolute;
+    inset: -45% -25%;
+    z-index: -1;
+    background: radial-gradient(
+      55% 55% at 50% 42%,
+      hsl(var(--aurora) / var(--aurora-strength)) 0%,
+      transparent 70%
+    );
+    pointer-events: none;
+  }
+  /* R10 A3.2 — only a page's hero "breathes"; bare .aurora is now a STATIC glow,
+     so a dashboard full of stat cards no longer runs N infinite compositor loops.
+     Add `aurora-breathe` (alongside `aurora`) to the single hero instance.
+     R10 A3.1 — and even the hero pauses when the window is idle/hidden. */
+  .aurora-breathe::before {
+    animation: aurora-drift 16s ease-in-out infinite;
+    will-change: transform, opacity;
+  }
+  html.is-idle .aurora-breathe::before {
+    animation-play-state: paused;
+  }
+
+  /* Verdict edge-glow on hover/active surfaces (a faint asserted halo). */
+  .glow-verdict {
+    box-shadow:
+      0 0 0 1px hsl(var(--glow) / calc(var(--glow-strength) * 0.55)),
+      0 6px 26px -8px hsl(var(--glow) / var(--glow-strength));
+  }
+
+  /* Semantic-subtle status backgrounds. */
+  .bg-success-subtle { background-color: hsl(var(--success-subtle) / var(--subtle-alpha)); }
+  .bg-warning-subtle { background-color: hsl(var(--warning-subtle) / var(--subtle-alpha)); }
+  .bg-info-subtle { background-color: hsl(var(--info-subtle) / var(--subtle-alpha)); }
+  .bg-destructive-subtle { background-color: hsl(var(--destructive-subtle) / var(--subtle-alpha)); }
+  /* R10 B3.2 — the verdict-accent tint for the unified AccentPanel/hero idiom. */
+  .bg-primary-subtle { background-color: hsl(var(--primary) / var(--subtle-alpha)); }
+
+  /* Thin themed scrollbar (consumed by <ScrollArea>, docs/18 W1.9). */
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scroll-thin::-webkit-scrollbar { width: 9px; height: 9px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.5);
+  }
+
+  /* Opt-in interactive card (docs/18 W2.3) — calm hover-lift + verdict edge.
+     Surfaces add `card-interactive` to a Card to make it feel touchable. */
+  .card-interactive {
+    position: relative;
+    transition:
+      transform 0.18s cubic-bezier(0.3, 0, 0, 1),
+      border-color 0.18s cubic-bezier(0.3, 0, 0, 1);
+  }
+  /* R10 A3.4 — the lift's shadow rides an opacity-faded ::after (compositor-only)
+     instead of animating box-shadow (a paint property), so hover stays cheap. */
+  .card-interactive::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: var(--elevation-3);
+    opacity: 0;
+    transition: opacity 0.18s cubic-bezier(0.3, 0, 0, 1);
+    pointer-events: none;
+  }
+  .card-interactive:hover {
+    transform: translateY(-2px);
+  }
+  .card-interactive:hover::after {
+    opacity: 1;
+  }
+
+  /* The three type voices (docs/17 §I) — cast consistently instead of
+     hand-rolling font-semibold/tracking-tight per screen. */
+  .type-display {
+    font-family: theme("fontFamily.serif");
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    font-optical-sizing: auto;
+  }
+  .type-counsel {
+    font-family: theme("fontFamily.serif");
+    font-weight: 400;
+    font-optical-sizing: auto;
+  }
+  .type-numeric {
+    font-family: theme("fontFamily.mono");
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "zero" 1;
+  }
+  .type-overline {
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   R8 reduced-motion safety net (docs/18 W1.7). CSS keyframe animations
+   (animate-pulse, shimmer, pulse-soft, fade-up) bypass <MotionConfig>, which
+   only governs motion/react. This honors prefers-reduced-motion app-wide so the
+   navigator pulse, the streaming caret, and any keyframe animation go still —
+   without depending on every component remembering the `motion-reduce:` variant.
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* R8 themes-as-environments (docs/18 W5.1): a one-shot color cross-fade applied
+   by the theme provider for ~340ms when the theme/contrast switches. The
+   reduced-motion net above overrides the duration, so it's disabled when asked. */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition:
+    background-color 0.32s ease,
+    border-color 0.32s ease,
+    color 0.32s ease,
+    fill 0.32s ease,
+    stroke 0.32s ease !important;
+}
+
+/* ---------------------------------------------------------------------------
+   X4 — Print stylesheet. The Analytics "Print" button calls window.print();
+   this strips the app chrome (sidebar, top bar, coach, banners, toolbars) so
+   only the report content prints, in a clean light-on-white layout that fits
+   the page. Elements already tagged `print:hidden` (Tailwind) are also hidden.
+   --------------------------------------------------------------------------- */
+@media print {
+  /* Hide the app shell chrome and any explicitly print-hidden controls. */
+  aside[aria-label="Sidebar"],
+  header,
+  .titlebar,
+  [role="complementary"],
+  [data-print-hide],
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* R9 fix — the rule above hides the bare `header` element to strip the app
+     shell's top bar, but PageLayout renders its own page-title <header> inside
+     <main>. Re-show those so printed reports (Analytics "Print") keep their title. */
+  main header {
+    display: block !important;
+  }
+
+  /* Collapse the flex/scroll containers so content flows on paper, and remove
+     fixed viewport heights that would otherwise clip to a single page. */
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  body {
+    color: #000 !important;
+  }
+  main {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+  /* Neutralize app-shell flex layout so the main column takes full width. */
+  main,
+  main * {
+    overflow: visible !important;
+  }
+
+  /* Force a printable light palette regardless of the active theme. */
+  :root,
+  .dark {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 0%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 30%;
+    --border: 0 0% 80%;
+  }
+
+  /* Cards should not cast shadows or break awkwardly across pages. */
+  .shadow-e1,
+  .shadow-e2,
+  .shadow-e3,
+  .shadow-e4 {
+    box-shadow: none !important;
+  }
+  .rounded-card,
+  section,
+  .break-inside-avoid {
+    break-inside: avoid;
+  }
+
+  /* Constrain to the printable width and drop max-width caps. */
+  .max-w-none,
+  [class*="max-w-"] {
+    max-width: none !important;
+  }
+
+  @page {
+    margin: 0.6in;
+  }
+}
+
+/* a11y (#11): text-warning at the base amber (38 92% 50%) fails WCAG AA on light
+   surfaces. Use the darker --warning-text in light mode; dark / high-contrast
+   themes don't define it and fall back to their already-readable --warning.
+   Unlayered so it overrides the Tailwind `text-warning` utility; bg-warning and
+   the warning Badge variant are unaffected. */
+.text-warning {
+  color: hsl(var(--warning-text, var(--warning)));
+}
+
+/* ---------------------------------------------------------------------------
+   A11Y-4 — OS contrast preferences and Windows forced-colors.
+   The LSAT theme already has an in-app high-contrast class; these media layers
+   honor OS-level requests without requiring the user to find that setting first.
+   --------------------------------------------------------------------------- */
+@media (prefers-contrast: more) {
+  :root {
+    --a11y-contrast-mode: more;
+    --foreground: 0 0% 0%;
+    --background: 0 0% 100%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+    --muted-foreground: 0 0% 25%;
+    --secondary-foreground: 0 0% 0%;
+    --accent-foreground: 0 0% 0%;
+    --border: 0 0% 0%;
+    --input: 0 0% 0%;
+    --ring: 262 100% 35%;
+    --primary: 262 100% 35%;
+    --success: 152 100% 22%;
+    --warning: 38 100% 30%;
+    --info: 200 100% 28%;
+    --destructive: 358 90% 40%;
+    --aurora-strength: 0;
+    --glow-strength: 0;
+    --surface-1: 0 0% 100%;
+    --surface-2: 0 0% 96%;
+    --surface-3: 0 0% 92%;
+  }
+
+  .dark {
+    --foreground: 0 0% 100%;
+    --background: 0 0% 0%;
+    --card: 0 0% 8%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 100%;
+    --muted-foreground: 0 0% 80%;
+    --secondary-foreground: 0 0% 100%;
+    --accent-foreground: 0 0% 100%;
+    --border: 0 0% 100%;
+    --input: 0 0% 100%;
+    --primary: 258 100% 82%;
+    --ring: 258 100% 82%;
+    --success: 152 70% 62%;
+    --warning: 45 100% 62%;
+    --info: 200 90% 66%;
+    --aurora-strength: 0;
+    --glow-strength: 0;
+    --surface-1: 0 0% 8%;
+    --surface-2: 0 0% 14%;
+    --surface-3: 0 0% 20%;
+  }
+
+  kbd {
+    background: hsl(var(--card)) !important;
+    color: hsl(var(--foreground)) !important;
+    border-color: hsl(var(--border)) !important;
+  }
+
+  .border,
+  .border-border,
+  .border-input,
+  .border-primary,
+  .border-muted {
+    border-color: hsl(var(--border)) !important;
+    border-style: solid !important;
+    border-width: 1px !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --a11y-forced-colors: active;
+    --a11y-contrast-mode: forced-colors;
+    --aurora-strength: 0;
+    --glow-strength: 0;
+    --glass-alpha: 1;
+    --glass-blur: 0px;
+    --hl-alpha: 1;
+  }
+
+  html,
+  body,
+  #root,
+  [data-app-root],
+  main {
+    background: Canvas !important;
+    color: CanvasText !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  :focus-visible,
+  .focus-visible\:ring-2:focus-visible,
+  .focus-visible\:ring-ring:focus-visible,
+  .focus-visible\:outline-ring:focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  [role="button"],
+  [role="radio"],
+  [role="tab"],
+  [role="menuitem"] {
+    border-color: ButtonBorder !important;
+  }
+
+  button,
+  [role="button"] {
+    background-color: ButtonFace !important;
+    background-image: none !important;
+    color: ButtonText !important;
+  }
+
+  a {
+    color: LinkText !important;
+  }
+
+  input,
+  select,
+  textarea,
+  [contenteditable="true"] {
+    background: Field !important;
+    color: FieldText !important;
+  }
+
+  kbd {
+    background: ButtonFace !important;
+    background-image: none !important;
+    color: ButtonText !important;
+    border: 1px solid ButtonBorder !important;
+  }
+
+  .glass,
+  .chrome-glass,
+  .bg-background,
+  .bg-card,
+  .bg-surface-0,
+  .bg-surface-1,
+  .bg-surface-2,
+  .bg-surface-3,
+  .bg-muted,
+  .bg-accent,
+  .bg-secondary,
+  .bg-popover,
+  .rounded-card,
+  section,
+  article,
+  aside {
+    background: Canvas !important;
+    background-image: none !important;
+    color: CanvasText !important;
+    border-color: CanvasText !important;
+  }
+
+  .bg-primary,
+  .data-\[state\=active\]\:bg-primary[data-state="active"] {
+    background: Highlight !important;
+    color: HighlightText !important;
+    border-color: Highlight !important;
+  }
+
+  [aria-current="true"],
+  [aria-pressed="true"],
+  [role="radio"][aria-checked="true"] {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px !important;
+    border-color: Highlight !important;
+  }
+
+  [role="radio"][aria-labelledby*="choice-elim"] {
+    text-decoration-line: line-through;
+    text-decoration-thickness: 2px;
+    text-decoration-color: CanvasText;
+  }
+
+  .text-muted-foreground,
+  .text-foreground,
+  .text-card-foreground,
+  .text-popover-foreground,
+  .text-warning,
+  .text-success,
+  .text-destructive,
+  .text-info {
+    color: CanvasText !important;
+  }
+
+  .border,
+  .border-border,
+  .border-input,
+  .border-primary,
+  .border-muted,
+  .divide-border > :not([hidden]) ~ :not([hidden]) {
+    border-color: CanvasText !important;
+    border-style: solid !important;
+    border-width: 1px !important;
+  }
+
+  .aurora::before,
+  .card-interactive::after {
+    display: none !important;
+  }
+
+  .hl-yellow,
+  .hl-green,
+  .hl-pink {
+    background-color: Highlight !important;
+    color: HighlightText !important;
+  }
+
+  [data-heatmap-root] [role="img"] {
+    background-color: Canvas !important;
+    background-image: none !important;
+    border: 1px solid CanvasText !important;
+  }
+
+  svg line,
+  svg path,
+  svg circle,
+  svg rect {
+    stroke: CanvasText !important;
+  }
+
+  svg [fill]:not([fill="none"]) {
+    fill: Canvas !important;
+  }
+
+  svg text {
+    fill: CanvasText !important;
+    stroke: none !important;
+  }
+}

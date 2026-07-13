@@ -1,3 +1,6 @@
+import { searchToolRoutes } from '../routes/routeManifest';
+import { DEFAULT_LEVEL3_PATHWAY, level3TopicBelongsToPathway } from '../domains/cfa/cfaLevel3Pathways';
+
 export const domains = [
   {
     id: 'cfa',
@@ -35,6 +38,23 @@ export const domains = [
     badge: 'PRACTICAL',
     stats: { modules: 5, exercises: '100+', templates: 12 },
   },
+  {
+    id: 'lsat',
+    title: 'LSAT Lab',
+    subtitle: 'Law School Admission Test prep',
+    description:
+      'Logical Reasoning, Reading Comprehension, blind review, timed sections + full exams, adaptive drills, and a local question bank — backed by the LSAT sidecar.',
+    path: '/lsat',
+    color: '#6366F1',
+    gradient: 'linear-gradient(135deg, #6366F1 0%, #4338CA 100%)',
+    badge: 'NEW',
+    stats: { sections: 'LR · RC', modes: 4, bank: 'local' },
+    // The LSAT domain is a self-contained sub-app mounted at /lsat via a
+    // top-level branch in main.jsx (its own router). It is NOT a route in the
+    // host's client router, so the dashboard card must hard-navigate to it
+    // rather than use a client-side <Link>.
+    external: true,
+  },
 ];
 
 export const cfaTopics = [
@@ -50,21 +70,32 @@ export const cfaTopics = [
   { id: 'portfolio', label: 'Portfolio Management', weight: '8-12%', color: '#A855F7', modules: 4, questions: 40, status: 'available' },
 ];
 
+export const cfaLevel3Topics = [
+  { id: 'ethics', label: 'Level III Ethics & Professional Standards', weight: '10-15%', keywords: ['level iii ethics professional standards constructed response'] },
+  { id: 'asset-allocation', label: 'Level III Asset Allocation', weight: '15-20%', keywords: ['level iii asset allocation capital market expectations'] },
+  { id: 'portfolio-construction', label: 'Level III Portfolio Construction', weight: '15-20%', keywords: ['level iii portfolio construction risk budgeting manager selection'] },
+  { id: 'performance', label: 'Level III Performance Measurement', weight: '5-10%', keywords: ['level iii performance measurement attribution appraisal'] },
+  { id: 'derivatives-risk', label: 'Level III Derivatives & Risk Management', weight: '10-15%', keywords: ['level iii derivatives risk management overlays currency hedging'] },
+  { id: 'pm-pathway', label: 'Portfolio Management Pathway', weight: '30-35%', keywords: ['level iii portfolio management pathway equity fixed income implementation'] },
+  { id: 'private-markets-pathway', label: 'Private Markets Pathway', weight: '30-35%', keywords: ['level iii private markets pathway private equity credit real assets'] },
+  { id: 'private-wealth-pathway', label: 'Private Wealth Pathway', weight: '30-35%', keywords: ['level iii private wealth pathway tax estate family planning'] },
+];
+
 export const quantModules = [
-  { id: 'probability', label: 'Probability & Statistics', desc: 'Distributions, Bayesian inference, regression, and time series analysis', color: '#3B82F6', status: 'available' },
-  { id: 'linear-algebra', label: 'Linear Algebra for Finance', desc: 'Matrix operations, eigenvalues, PCA, and covariance matrices', color: '#8B5CF6', status: 'available' },
-  { id: 'stochastic-calc', label: 'Stochastic Calculus', desc: 'Brownian motion, Ito processes, SDEs, and martingales', color: '#EF4444', status: 'available' },
-  { id: 'derivatives-pricing', label: 'Derivatives Pricing', desc: 'Black-Scholes, binomial intuition, Greeks, and volatility surfaces', color: '#10B981', status: 'available' },
-  { id: 'risk-management', label: 'Risk Management', desc: 'VaR, CVaR, stress testing, copulas, and Monte Carlo simulation', color: '#F59E0B', status: 'available' },
-  { id: 'portfolio-optimization', label: 'Portfolio Optimization', desc: 'Mean-variance, Black-Litterman, factor models, and efficient frontiers', color: '#06B6D4', status: 'available' },
+  { id: 'probability', label: 'Probability & Statistics', desc: 'Distributions, Bayesian inference, regression, and time series analysis', color: '#3B82F6', status: 'available', sourceMeta: { level: 'level1', topicId: 'quant-methods' } },
+  { id: 'linear-algebra', label: 'Linear Algebra for Finance', desc: 'Matrix operations, eigenvalues, PCA, and covariance matrices', color: '#8B5CF6', status: 'available', sourceMeta: { level: 'level1', topicId: 'quant-methods' } },
+  { id: 'stochastic-calc', label: 'Stochastic Calculus', desc: 'Brownian motion, Ito processes, SDEs, and martingales', color: '#EF4444', status: 'available', sourceMeta: { level: 'level2', topicId: 'derivatives' } },
+  { id: 'derivatives-pricing', label: 'Derivatives Pricing', desc: 'Black-Scholes, binomial intuition, Greeks, and volatility surfaces', color: '#10B981', status: 'available', sourceMeta: { level: 'level2', topicId: 'derivatives' } },
+  { id: 'risk-management', label: 'Risk Management', desc: 'VaR, CVaR, stress testing, copulas, and Monte Carlo simulation', color: '#F59E0B', status: 'available', sourceMeta: { level: 'level3', topicId: 'derivatives-risk', pathway: 'core' } },
+  { id: 'portfolio-optimization', label: 'Portfolio Optimization', desc: 'Mean-variance, Black-Litterman, factor models, and efficient frontiers', color: '#06B6D4', status: 'available', sourceMeta: { level: 'level3', topicId: 'portfolio-construction', pathway: 'core' } },
 ];
 
 export const excelModules = [
-  { id: 'fundamentals', label: 'Excel Fundamentals', desc: 'Navigation, shortcuts, references, formatting, and model hygiene', color: '#10B981', status: 'available' },
-  { id: 'advanced-formulas', label: 'Advanced Formulas', desc: 'XLOOKUP, INDEX/MATCH, SUMIFS, dynamic arrays, and robust lookups', color: '#3B82F6', status: 'available' },
-  { id: 'financial-functions', label: 'Financial Functions', desc: 'NPV, IRR, XNPV, XIRR, PMT, depreciation, and date-aware cash flows', color: '#8B5CF6', status: 'available' },
-  { id: 'dcf-modeling', label: 'DCF Modeling', desc: 'Revenue build, margins, WACC, terminal value, and sensitivity tables', color: '#D4A853', status: 'available' },
-  { id: 'vba-macros', label: 'VBA & Macros', desc: 'Macro recording, procedures, loops, ranges, UDFs, and automation safety', color: '#EF4444', status: 'available' },
+  { id: 'fundamentals', label: 'Excel Fundamentals', desc: 'Navigation, shortcuts, references, formatting, and model hygiene', color: '#10B981', status: 'available', sourceMeta: { level: 'level1', topicId: 'quant-methods' } },
+  { id: 'advanced-formulas', label: 'Advanced Formulas', desc: 'XLOOKUP, INDEX/MATCH, SUMIFS, dynamic arrays, and robust lookups', color: '#3B82F6', status: 'available', sourceMeta: { level: 'level1', topicId: 'quant-methods' } },
+  { id: 'financial-functions', label: 'Financial Functions', desc: 'NPV, IRR, XNPV, XIRR, PMT, depreciation, and date-aware cash flows', color: '#8B5CF6', status: 'available', sourceMeta: { level: 'level1', topicId: 'quant-methods' } },
+  { id: 'dcf-modeling', label: 'DCF Modeling', desc: 'Revenue build, margins, WACC, terminal value, and sensitivity tables', color: '#D4A853', status: 'available', sourceMeta: { level: 'level2', topicId: 'equity' } },
+  { id: 'vba-macros', label: 'VBA & Macros', desc: 'Macro recording, procedures, loops, ranges, UDFs, and automation safety', color: '#EF4444', status: 'available', sourceMeta: { level: 'level1', topicId: 'quant-methods' } },
 ];
 
 export const formulaLibrary = [
@@ -94,114 +125,30 @@ export const formulaLibrary = [
   { category: 'Excel', name: 'XNPV', latex: 'XNPV = \\sum \\frac{CF_t}{(1+r)^{d_t/365}}', desc: 'Date-aware discounted cash flow in Excel', path: '/excel/financial-functions' },
 ];
 
-export function buildSearchItems() {
-  const toolItems = [
-    {
-      id: 'tool:review',
-      title: 'Review Inbox',
-      subtitle: 'Due reviews, weak objectives, missed questions, and unfinished lessons',
-      type: 'Tool',
-      path: '/review',
-      keywords: ['review inbox due weak objectives missed questions bookmarks stale unfinished lessons'],
-    },
-    {
-      id: 'tool:flashcards',
-      title: 'Flashcards',
-      subtitle: 'Formula, objective, and bookmark drills',
-      type: 'Tool',
-      path: '/flashcards',
-      keywords: ['flashcards formulas definitions objectives bookmarks drill'],
-    },
-    {
-      id: 'tool:vault',
-      title: 'Notes & Bookmarks',
-      subtitle: 'Local notes and saved items',
-      type: 'Tool',
-      path: '/vault',
-      keywords: ['notes bookmarks local vault saved'],
-    },
-    {
-      id: 'tool:mock',
-      title: 'CFA Level I Mock Exam',
-      subtitle: 'Timed mixed-topic Level I section',
-      type: 'Tool',
-      path: '/cfa/mock',
-      keywords: ['mock exam section cfa timed mixed practice'],
-    },
-    {
-      id: 'tool:mock-level2',
-      title: 'CFA Level II Mock Exam',
-      subtitle: 'Timed item-set mixed section',
-      type: 'Tool',
-      path: '/cfa/level2/mock',
-      keywords: ['level ii level 2 mock exam vignette item set timed cfa'],
-    },
-    {
-      id: 'tool:mock-level3',
-      title: 'CFA Level III Mock Exam',
-      subtitle: 'Timed constructed-response and item-set section',
-      type: 'Tool',
-      path: '/cfa/level3/mock',
-      keywords: ['level iii level 3 mock exam constructed response essay item set cfa'],
-    },
-    {
-      id: 'tool:vignette',
-      title: 'Start CFA Vignette',
-      subtitle: 'Open a Level II equity item set',
-      type: 'Command',
-      path: '/cfa/level2/equity/vignette',
-      keywords: ['start vignette item set case level 2 equity'],
-    },
-    {
-      id: 'tool:constructed-response',
-      title: 'Start Constructed Response',
-      subtitle: 'Open a Level III portfolio response drill',
-      type: 'Command',
-      path: '/cfa/level3/portfolio-construction/constructed-response',
-      keywords: ['constructed response essay level 3 command word rubric'],
-    },
-    {
-      id: 'tool:formula-drill',
-      title: 'Start Formula Drill',
-      subtitle: 'Open local flashcards generated from all CFA levels',
-      type: 'Command',
-      path: '/flashcards',
-      keywords: ['formula drill flashcard start formulas objectives'],
-    },
-    {
-      id: 'tool:analytics',
-      title: 'Learning Analytics',
-      subtitle: 'Accuracy, confidence, error type, and trend signals',
-      type: 'Tool',
-      path: '/analytics',
-      keywords: ['analytics readiness accuracy confidence calibration errors trend topic difficulty'],
-    },
-    {
-      id: 'tool:content-ops',
-      title: 'Content QA',
-      subtitle: 'Catalog coverage and validation',
-      type: 'Tool',
-      path: '/content-ops',
-      keywords: ['content qa validation coverage duplicate answer key formula'],
-    },
-    {
-      id: 'tool:system',
-      title: 'System Health',
-      subtitle: 'Offline cache, storage quota, and backup status',
-      type: 'Tool',
-      path: '/system',
-      keywords: ['system health pwa offline cache storage quota backup service worker'],
-    },
-  ];
-
+export function buildSearchItems(options = {}) {
+  const level3Pathway = options.level3Pathway || DEFAULT_LEVEL3_PATHWAY;
   const domainItems = domains.map((domain) => ({
     id: `domain:${domain.id}`,
     title: domain.title,
     subtitle: domain.subtitle,
     type: 'Domain',
     path: domain.path,
+    // S4: external domains (LSAT) live under their own router — the palette must
+    // soft-navigate cross-domain, not use the host client router.
+    external: domain.external || false,
     keywords: [domain.title, domain.subtitle, domain.description],
   }));
+
+  // S4: deep jumps into the LSAT domain from the host ⌘K (one palette reaches
+  // both domains). All cross-domain → soft-navigated via navigateDomain.
+  const lsatRouteItems = [
+    { id: 'lsat:practice', title: 'LSAT — Practice', path: '/lsat/practice', keywords: ['lsat', 'practice', 'questions'] },
+    { id: 'lsat:preptests', title: 'LSAT — PrepTests', path: '/lsat/preptests', keywords: ['lsat', 'preptest', 'exam', 'timed'] },
+    { id: 'lsat:drills', title: 'LSAT — Drills', path: '/lsat/drills', keywords: ['lsat', 'drill', 'adaptive'] },
+    { id: 'lsat:srs', title: 'LSAT — SRS Review', path: '/lsat/srs', keywords: ['lsat', 'srs', 'spaced repetition', 'due'] },
+    { id: 'lsat:analytics', title: 'LSAT — Analytics', path: '/lsat/analytics', keywords: ['lsat', 'analytics', 'readiness'] },
+    { id: 'lsat:settings', title: 'LSAT — Model Settings', path: '/lsat/settings', keywords: ['lsat', 'settings', 'model', 'ai', 'provider'] },
+  ].map((item) => ({ ...item, subtitle: 'LSAT domain', type: 'LSAT', external: true }));
 
   const cfaItems = cfaTopics.map((topic) => ({
     id: `cfa:${topic.id}`,
@@ -212,6 +159,17 @@ export function buildSearchItems() {
     disabled: topic.status !== 'available',
     keywords: [topic.label, topic.weight],
   }));
+
+  const cfaLevel3Items = cfaLevel3Topics
+    .filter((topic) => level3TopicBelongsToPathway(topic.id, level3Pathway))
+    .map((topic) => ({
+      id: `cfa:level3:${topic.id}`,
+      title: topic.label,
+      subtitle: `CFA Level III - ${topic.weight}`,
+      type: 'CFA',
+      path: `/cfa/level3/${topic.id}`,
+      keywords: [topic.label, topic.weight, ...topic.keywords],
+    }));
 
   const quantItems = quantModules.map((module) => ({
     id: `quant:${module.id}`,
@@ -240,5 +198,5 @@ export function buildSearchItems() {
     keywords: [formula.name, formula.category, formula.desc, formula.latex],
   }));
 
-  return [...toolItems, ...domainItems, ...cfaItems, ...quantItems, ...excelItems, ...formulaItems];
+  return [...searchToolRoutes, ...domainItems, ...lsatRouteItems, ...cfaItems, ...cfaLevel3Items, ...quantItems, ...excelItems, ...formulaItems];
 }

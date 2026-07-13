@@ -1,9 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ClipboardCheck, PenLine, Trophy } from 'lucide-react';
-import { getCfaTopicContent, getCfaTopicKey } from './cfaLevels';
-import { PageHeader, MetricCard } from '../../components/ui/Primitives';
+import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
+import { useLevel3Pathway } from './useLevel3Pathway';
+import { CommandHint, EmptyPanel, MetricCard, PageHeader, ProgressRail, RubricPanel, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
 import { recordConstructedResponseAttempt } from '../../lib/learning';
+import { SourceRail } from '../../components/SourceContext';
+import { critiqueConstructedResponse, getLlmSettings } from '../../lib/localLlm';
 
 function nowMs() {
   return Date.now();
@@ -11,7 +14,11 @@ function nowMs() {
 
 export default function CfaConstructedResponse() {
   const { level, topic } = useParams();
-  const data = useMemo(() => getCfaTopicContent(level, topic), [level, topic]);
+  const [activePathway] = useLevel3Pathway();
+  const requestKey = `${level}:${topic}:${level === 'level3' ? activePathway : 'all'}`;
+  const [contentState, setContentState] = useState({ key: null, data: null });
+  const data = contentState.key === requestKey ? contentState.data : null;
+  const loading = contentState.key !== requestKey;
   const topicKey = useMemo(() => getCfaTopicKey(level, topic), [level, topic]);
   const [itemIndex, setItemIndex] = useState(0);
   const [commandFilter, setCommandFilter] = useState('all');
@@ -26,12 +33,52 @@ export default function CfaConstructedResponse() {
   const [response, setResponse] = useState('');
   const [scores, setScores] = useState({});
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
   const [startTime] = useState(nowMs);
+  const [critique, setCritique] = useState({ state: 'idle' });
+  const abortRef = useRef(null);
+  const submitTokenRef = useRef(0);
+  const submitPendingRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCfaTopicContent(level, topic, level === 'level3' ? { pathway: activePathway } : {})
+      .then((content) => {
+        if (!cancelled) setContentState({ key: requestKey, data: content });
+      })
+      .catch(() => {
+        if (!cancelled) setContentState({ key: requestKey, data: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activePathway, level, requestKey, topic]);
+
+  useEffect(() => {
+    function handleKeyboard(event) {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && response.trim() && !submitted) {
+        event.preventDefault();
+        submit();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  });
+
+  if (loading) {
+    return (
+      <div className="page-container" aria-busy="true">
+        <div className="skeleton skeleton-heading" />
+        <div className="skeleton skeleton-card" />
+      </div>
+    );
+  }
 
   if (!data || !item) {
     return (
       <div className="page-container">
-        <div className="glass-card no-hover">Constructed-response practice is available on Level III portfolio topics.</div>
+        <EmptyPanel title="Constructed-response practice is available on Level III portfolio topics." tone="exam" />
       </div>
     );
   }
@@ -40,28 +87,85 @@ export default function CfaConstructedResponse() {
   const pct = Math.round((earnedPoints / item.rubric.maxPoints) * 100);
 
   function resetForNextItem(nextIndex) {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
     setItemIndex(nextIndex);
     setResponse('');
     setScores({});
     setSubmitted(false);
+    setSubmitError(null);
+    setCritique({ state: 'idle' });
+    submitTokenRef.current += 1;
+    submitPendingRef.current = false;
+  }
+
+  async function handleAiCritique() {
+    if (!response.trim()) return;
+    const settings = await getLlmSettings();
+    if (!settings.enabled) {
+      setCritique({ state: 'error', error: 'Enable a local model in System Health → Local AI to use AI critique.' });
+      return;
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setCritique({ state: 'loading' });
+    try {
+      const text = await critiqueConstructedResponse({
+        settings,
+        prompt: item.prompt,
+        response,
+        rubric: item.rubric.criteria,
+        signal: controller.signal,
+      });
+      if (!controller.signal.aborted) {
+        setCritique({ state: 'done', text });
+      }
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        setCritique({ state: 'idle' });
+      } else {
+        setCritique({ state: 'error', error: error?.message || 'AI critique failed.' });
+      }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+    }
   }
 
   async function submit() {
-    await recordConstructedResponseAttempt({
-      domain: 'cfa',
-      level,
-      topic: topicKey,
-      itemId: item.id,
-      title: item.title,
-      earnedPoints,
-      maxPoints: item.rubric.maxPoints,
-      rubricScores: scores,
-      response,
-      elapsedSeconds: Math.round((nowMs() - startTime) / 1000),
-      learningObjectives: item.learningObjectives,
-      path: `/cfa/${level}/${topic}/constructed-response`,
-    });
+    if (!response.trim() || submitted || submitPendingRef.current) return;
+
+    const submitToken = submitTokenRef.current + 1;
+    submitTokenRef.current = submitToken;
+    submitPendingRef.current = true;
     setSubmitted(true);
+    setSubmitError(null);
+
+    try {
+      await recordConstructedResponseAttempt({
+        domain: 'cfa',
+        level,
+        topic: topicKey,
+        itemId: item.id,
+        title: item.title,
+        earnedPoints,
+        maxPoints: item.rubric.maxPoints,
+        rubricScores: scores,
+        response,
+        elapsedSeconds: Math.round((nowMs() - startTime) / 1000),
+        learningObjectives: item.learningObjectives,
+        path: `/cfa/${level}/${topic}/constructed-response`,
+      });
+    } catch (error) {
+      if (submitTokenRef.current === submitToken) {
+        setSubmitError(error?.message || 'Progress could not be saved locally for this response.');
+      }
+    } finally {
+      if (submitTokenRef.current === submitToken) {
+        submitPendingRef.current = false;
+      }
+    }
   }
 
   return (
@@ -82,27 +186,23 @@ export default function CfaConstructedResponse() {
         <MetricCard label="Set" value={`${safeIndex + 1}/${visibleItems.length}`} detail={`${allItems.length} total prompts`} icon={ClipboardCheck} tone="accent" />
       </div>
 
-      <div className="segmented-row" role="tablist" aria-label="Constructed response command word filter">
-        {['all', ...commandWords].map((command) => (
-          <button
-            key={command}
-            type="button"
-            role="tab"
-            aria-selected={commandFilter === command}
-            className={`btn ${commandFilter === command ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => {
-              setCommandFilter(command);
-              resetForNextItem(0);
-            }}
-          >
-            {command}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        label="Constructed response command word filter"
+        options={['all', ...commandWords].map((command) => ({ value: command, label: command }))}
+        value={commandFilter}
+        onChange={(command) => {
+          setCommandFilter(command);
+          resetForNextItem(0);
+        }}
+        density="compact"
+      />
 
-      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
-        <h2 style={{ marginTop: 0 }}>Prompt</h2>
-        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>{item.prompt}</p>
+      <Surface tone="study" status="exam" style={{ marginBottom: 'var(--space-6)' }}>
+        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+          <h2 className="qv-m-0">Prompt</h2>
+          <CommandHint keys={['Ctrl', 'Enter']} label="submit response" />
+        </div>
+        <p className="qv-text-secondary" style={{ lineHeight: 1.7 }}>{item.prompt}</p>
         <textarea
           aria-label="Constructed response answer"
           value={response}
@@ -118,42 +218,152 @@ export default function CfaConstructedResponse() {
             color: 'var(--text-primary)',
             padding: 'var(--space-3)',
             lineHeight: 1.6,
-          }}
+            }}
         />
-      </div>
+      </Surface>
 
-      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
-        <h2 style={{ marginTop: 0 }}>Rubric</h2>
-        <div className="analytics-table">
-          {item.rubric.criteria.map((criterion) => (
-            <label key={criterion.id} className="analytics-row">
-              <span>
-                <strong>{criterion.label}</strong>
-                <small style={{ display: 'block', color: 'var(--text-secondary)' }}>{criterion.description}</small>
-              </span>
-              <input
-                type="number"
-                min="0"
-                max={criterion.points}
-                value={scores[criterion.id] ?? 0}
-                onChange={(event) => setScores((existing) => ({ ...existing, [criterion.id]: Number(event.target.value) }))}
-                style={{ width: 80 }}
-              />
-              <span>/ {criterion.points}</span>
-            </label>
-          ))}
+      <div style={{ marginBottom: 'var(--space-6)' }}>
+        <RubricPanel
+          title={item.rubric.title}
+          criteria={item.rubric.criteria}
+          scores={scores}
+          maxPoints={item.rubric.maxPoints}
+          onScore={(criterionId, value) => setScores((existing) => ({ ...existing, [criterionId]: value }))}
+        />
+        <div style={{ marginTop: 'var(--space-4)' }}>
+          <ProgressRail value={earnedPoints} max={item.rubric.maxPoints} label="Rubric points" detail={`${earnedPoints}/${item.rubric.maxPoints}`} tone="exam" />
         </div>
+
+        <div className="qv-row-2" style={{ marginTop: 'var(--space-4)', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!response.trim() || critique.state === 'loading'}
+            onClick={handleAiCritique}
+          >
+            🤖 AI rubric critique
+          </button>
+          {critique.state === 'loading' && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                if (abortRef.current) {
+                  abortRef.current.abort();
+                  abortRef.current = null;
+                }
+                setCritique({ state: 'idle' });
+              }}
+            >
+              Cancel
+            </button>
+          )}
+          {critique.state === 'loading' && (
+            <span className="qv-text-secondary" style={{ fontSize: '0.875rem' }}>Grading your response…</span>
+          )}
+        </div>
+
+        {critique.state === 'done' && (
+          <div
+            role="region"
+            aria-label="AI rubric critique"
+            style={{
+              marginTop: 'var(--space-4)',
+              borderLeft: '3px solid var(--color-accent, #6366f1)',
+              paddingLeft: 'var(--space-4)',
+              paddingTop: 'var(--space-3)',
+              paddingBottom: 'var(--space-3)',
+              paddingRight: 'var(--space-3)',
+              background: 'var(--surface-raised, var(--surface))',
+              borderRadius: '0 var(--radius-md) var(--radius-md) 0',
+            }}
+          >
+            <p className="qv-text-secondary qv-fw-semibold" style={{ margin: '0 0 var(--space-2)', fontSize: '0.875rem' }}>
+              🤖 AI Rubric Critique
+            </p>
+            <pre
+              className="qv-m-0 qv-text-primary"
+              style={{
+                whiteSpace: 'pre-wrap',
+                fontFamily: 'inherit',
+                fontSize: '0.9rem',
+                lineHeight: 1.65,
+              }}
+            >
+              {critique.text}
+            </pre>
+          </div>
+        )}
+
+        {critique.state === 'error' && (
+          <div
+            role="alert"
+            style={{
+              marginTop: 'var(--space-4)',
+              borderLeft: '3px solid var(--color-error, #ef4444)',
+              paddingLeft: 'var(--space-4)',
+              paddingTop: 'var(--space-3)',
+              paddingBottom: 'var(--space-3)',
+              paddingRight: 'var(--space-3)',
+              background: 'var(--surface-raised, var(--surface))',
+              borderRadius: '0 var(--radius-md) var(--radius-md) 0',
+              color: 'var(--color-error, #ef4444)',
+              fontSize: '0.9rem',
+            }}
+          >
+            {critique.error}
+          </div>
+        )}
+
+        {submitError && (
+          <div
+            role="alert"
+            style={{
+              marginTop: 'var(--space-4)',
+              borderLeft: '3px solid var(--color-warning, #f59e0b)',
+              paddingLeft: 'var(--space-4)',
+              paddingTop: 'var(--space-3)',
+              paddingBottom: 'var(--space-3)',
+              paddingRight: 'var(--space-3)',
+              background: 'var(--surface-raised, var(--surface))',
+              borderRadius: '0 var(--radius-md) var(--radius-md) 0',
+              color: 'var(--text-primary)',
+              fontSize: '0.9rem',
+            }}
+          >
+            {submitError}
+          </div>
+        )}
       </div>
 
       {submitted && (
-        <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
-          <h2 style={{ marginTop: 0 }}>Model Answer</h2>
-          <p style={{ color: 'var(--text-secondary)' }}>{item.modelAnswer}</p>
-        </div>
+        <>
+          <Surface tone="study" status="success" style={{ marginBottom: 'var(--space-6)' }}>
+            <StatusBadge tone="success">Model answer revealed</StatusBadge>
+            <h2>Model Answer</h2>
+            <p className="qv-text-secondary">{item.modelAnswer}</p>
+          </Surface>
+          <SourceRail
+            title="Constructed Response Source Context"
+            subtitle="Private snippets are shown only after submission and mapped to command words, rubric criteria, and objectives."
+            target={{
+              kind: 'constructed-response',
+              domain: 'cfa',
+              level,
+              topicId: topic,
+              pathway: level === 'level3' ? activePathway : undefined,
+              title: item.title,
+              objectiveIds: item.learningObjectives,
+              keywords: [item.prompt, item.modelAnswer, item.commandWords.join(' '), item.rubric.criteria.map((criterion) => criterion.label).join(' ')],
+              route: `/cfa/${level}/${topic}/constructed-response`,
+            }}
+            compact
+          />
+        </>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+      <div className="qv-row-between" style={{ flexWrap: 'wrap' }}>
+        <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
           {visibleItems.map((responseItem, index) => (
             <button
               key={responseItem.id}

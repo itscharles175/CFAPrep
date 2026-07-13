@@ -1,0 +1,116 @@
+{
+  "schema": "studyvault.prompt-regression-fixture.v1",
+  "host": {
+    "prompts": [
+      {
+        "id": "host.registry.cfa.flashcards",
+        "sha256": "02693ef8404ccfe265d43587b77e32d99118b891a00236913b4937e4d1ed9133",
+        "required": ["cfa_flashcards", "Using ONLY the provided curriculum excerpts", "Respond with a JSON array"]
+      },
+      {
+        "id": "host.registry.cfa.questions",
+        "sha256": "3d9073532ffe592210ee359fd8322e961bf46fdb046110b1d8f7fc34a63ad5f7",
+        "required": ["cfa_questions", "exam-style practice multiple-choice questions", "grounded strictly"]
+      },
+      {
+        "id": "host.registry.cfa.rubricGrade",
+        "sha256": "2c5c1c490b80fa6f5aaeb71a137817bdf782fa77eff2796765d7fc10990de7bd",
+        "required": ["cfa_rubric_grade", "Return ONLY a JSON object", "Score conservatively"]
+      },
+      {
+        "id": "host.request.cfa.questions",
+        "sha256": "4f6aac8f65225848dd4c56ca7c973319aaefa219d7913200580fe740d5b79eb7",
+        "required": ["\"seed\": 1311", "\"temperature\": 0", "\"top_p\": 1", "\"type\": \"json_schema\"", "Output ONLY a single valid JSON value", "cfa.questions@1"]
+      },
+      {
+        "id": "host.request.cfa.flashcards",
+        "sha256": "dc32f7facdd26583242d15eea6c5047ae41296d60b17d8c1606d56e7a4a5ed01",
+        "required": ["\"seed\": 1311", "\"temperature\": 0", "\"top_p\": 1", "\"type\": \"json_schema\"", "Output ONLY a single valid JSON value", "cfa.flashcards@1"]
+      },
+      {
+        "id": "host.request.cfa.rubricGrade",
+        "sha256": "2a28b17074d40d843ec5da486ad22b941ec265838781f7f40c80b632e5433141",
+        "required": ["\"seed\": 1311", "\"temperature\": 0", "\"top_p\": 1", "\"type\": \"json_schema\"", "Output ONLY a single valid JSON value", "Score conservatively"]
+      },
+      {
+        "id": "host.request.cfa.explainWrongAnswer",
+        "sha256": "c8b6420ee06fdd2e818c9aebca4ee697b722a7b1db79109872a08ba795d7f32b",
+        "required": ["patient CFA tutor", "Correct answer: C", "Student picked: B"]
+      },
+      {
+        "id": "host.request.cfa.critiqueConstructedResponse",
+        "sha256": "1745115cb9e1c156a2f6dcad468470e269d5c7365309e0cc458131536b97a398",
+        "required": ["CFA Level III rubric grader", "Criterion [c1]", "Do NOT inflate scores"]
+      },
+      {
+        "id": "host.request.cfa.narrateStudyPlan",
+        "sha256": "0b20bbaa90eca70d4f7398c15f1fb8cfbe9637cc802033d2ef3d9bd443203267",
+        "required": ["prioritized action list", "Headline: Duration review", "Modified duration"]
+      },
+      {
+        "id": "host.request.cfa.summarizeTopicFromCurriculum",
+        "sha256": "1ca53c706bf60cd5df89a0a8f67b33721de4bdb10cac0d608c77b8c0fe0ba4ec",
+        "required": ["Using ONLY the provided curriculum excerpts", "Topic: Fixed Income", "Modified duration measures bond price sensitivity"]
+      }
+    ]
+  },
+  "backend": {
+    "prompts": [
+      {
+        "id": "lsat.explain.personalized",
+        "sha256": "2eaeb40241d02ebaed0b80052c770450517147ee7aea02ec9dfc5c7af8da5b42",
+        "required": ["expert LSAT tutor", "The correct answer is (B)", "Socratic reasoning trail", "Common traps"]
+      },
+      {
+        "id": "lsat.explain.rc_followup",
+        "sha256": "5bf33e301494f3337bd180c76b6f4bc6825abb8ca78a2ef55a0053daedc9b1be",
+        "required": ["For Reading Comprehension", "Reading Comprehension passage", "The student asks a follow-up"]
+      },
+      {
+        "id": "lsat.hint.socratic",
+        "sha256": "898ddd9962d3797420abedab3e111d2ed09bdfb32da174be4e352899634996a0",
+        "required": ["gentle hint, never the answer", "Do NOT reveal"]
+      },
+      {
+        "id": "lsat.coach.chat",
+        "sha256": "54947b2d95f7978eb6d552c0ab5f05bc960d02b5eeb17912ac17111b90e4658a",
+        "required": ["LSAT performance coach", "My recent performance", "Weakest types"]
+      },
+      {
+        "id": "lsat.generation.lr",
+        "sha256": "db4bd659c07e0d371f6acc41c113452faf81cfd096bf1122f1f17afbb3732ed0",
+        "required": ["Write ONE original LSAT-style Logical Reasoning", "exactly five answer choices A-E"]
+      },
+      {
+        "id": "lsat.generation.rc_passage_first",
+        "sha256": "3db263d76b1f1448672eb201b0f1eb36b47163ab8f864fd9df1e935d2f1c5991",
+        "required": ["Write ONE original LSAT-style Reading Comprehension passage", "Do NOT write any questions yet", "RC passage map guidance"]
+      },
+      {
+        "id": "lsat.generation.rc_question",
+        "sha256": "a7e78fe419ba1d9a6eb352831c2398b4e97f502a284157a872cd41514120e8bc",
+        "required": ["ABOUT THIS PASSAGE", "Questions already written", "strictly on the passage"]
+      },
+      {
+        "id": "lsat.review.solve",
+        "sha256": "b0b8efce3298c68c650f6e2a184f75b04442004271afd7c3174aaab1a9a280e6",
+        "required": ["Solve this LSAT question", "Respond with ONLY the single letter"]
+      },
+      {
+        "id": "lsat.review.critique",
+        "sha256": "0af7a91cfd4881c711ed725aee3a34acddf6f64cafb623c8791344cb070cb8e6",
+        "required": ["strict LSAT item reviewer", "single_defensible"]
+      },
+      {
+        "id": "lsat.review.distractor_quality",
+        "sha256": "6cb3666bc9f74f3406cf1f8350c5ce05d14cda75a16bdb55ff8b2cdbc93c6682",
+        "required": ["strict LSAT distractor-quality reviewer", "weak_distractors"]
+      },
+      {
+        "id": "lsat.review.informativity",
+        "sha256": "3bbb3bff0e2e5761e1ee474bdab9ac9a3ca747b8c967719350e296389f0634e7",
+        "required": ["You do NOT have the stimulus", "as if guessing"]
+      }
+    ]
+  }
+}

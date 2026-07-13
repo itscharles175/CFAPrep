@@ -1,0 +1,16 @@
+{
+  "schema": "studyvault.sidecar-provenance.v1",
+  "generatedAt": "2026-07-05T20:39:59.962Z",
+  "servicesRoot": "src-tauri/resources/services",
+  "entries": [
+    {
+      "service": "LSAT backend",
+      "path": "lsat-backend/lsatlab-backend.exe",
+      "sha256": "adadb1cdb0e070b9bc089e481e2956bb9f549b893e4cc83740220aed40eaf638",
+      "size": 55494956,
+      "optional": false,
+      "source": "scripts/build-lsat-binary.mjs",
+      "recordedAt": "2026-07-05T20:39:59.961Z"
+    }
+  ]
+}

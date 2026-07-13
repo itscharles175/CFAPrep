@@ -83,6 +83,7 @@ export interface LearningEvent {
     | 'quiz'
     | 'vignette'
     | 'constructed-response'
+    | 'formula-drill'
     | 'mock'
     | 'flashcard'
     | 'skill-lab'
@@ -92,6 +93,27 @@ export interface LearningEvent {
   elapsedSeconds?: number;
   createdAt: string;
 }
+
+export interface LearningEventEnvelope<TPayload = unknown> {
+  id: string;
+  schemaVersion: 1;
+  event: LearningEvent;
+  payload?: TPayload;
+  sourceIds: string[];
+  recordedAt: string;
+}
+
+export type ReviewReason =
+  | 'due-review'
+  | 'weak-objective'
+  | 'missed-question'
+  | 'flagged-mock-item'
+  | 'rubric-miss'
+  | 'stale-topic'
+  | 'unfinished-lesson'
+  | 'flashcard-decay'
+  | 'skill-lab-gap'
+  | 'saved-artifact';
 
 export interface QuestionAttempt extends QuestionResult {
   id?: number;
@@ -130,6 +152,16 @@ export interface QuestionResult {
   difficulty: Difficulty;
   elapsedSeconds?: number;
   createdAt?: string;
+  // ANL-3 — blind-review capture (append-only, optional). Mirrors the LSAT
+  // `Attempt.br_answer`/`br_correct` 2x2 inputs so a host attempt can carry the
+  // SAME careless-vs-concept signal. All absent on a row without a BR pass, which
+  // simply doesn't contribute to the cross-domain BR gap.
+  /** Index chosen on the untimed Blind-Review pass (host index scheme). */
+  brAnswer?: number;
+  /** Confidence stated on the Blind-Review pass. */
+  brConfidence?: Confidence;
+  /** Whether the Blind-Review answer was correct — the 2x2's `br_correct` axis. */
+  brCorrect?: boolean;
 }
 
 export interface ReviewItem {
@@ -141,6 +173,7 @@ export interface ReviewItem {
   path: string;
   intervalDays: number;
   ease: number;
+  fsrsDifficulty?: number;
   dueAt: string;
   lastResultAt: string;
   attempts: number;
@@ -148,6 +181,26 @@ export interface ReviewItem {
   lastCorrect: boolean;
   lastConfidence: Confidence;
   lastErrorCategory: ErrorCategory;
+  // LEARN-5 — leech + concept-gap unification (append-only). Identity coercion
+  // (no bucketing): when a host review card mirrors cross-domain
+  // (CrossDomainReviewCard via dataDictionary.ts), these self-describe WHY it is
+  // queued so the unified Leeches/Gaps page can rank it next to LSAT rows.
+  /** Why the card exists, mirroring the host ReviewReason / LSAT origin vocabulary. */
+  origin?: string;
+  /** Number of lapses (Again ratings); drives the leech threshold. */
+  lapses?: number;
+  /** Flagged as a leech (too many lapses) for the remediation queue. */
+  leech?: boolean;
+  // ANL-3 — blind-review capture (append-only, optional). Carries the most-recent
+  // Blind-Review pass on the card's underlying question so the unified
+  // careless-vs-concept blind-review analytic (`blindReviewBridge.ts`) can read it
+  // alongside LSAT BR data. Absent on a card with no BR pass.
+  /** Index chosen on the untimed Blind-Review pass (host index scheme). */
+  brAnswer?: number;
+  /** Confidence stated on the Blind-Review pass. */
+  brConfidence?: Confidence;
+  /** Whether the Blind-Review answer was correct — the 2x2's `br_correct` axis. */
+  brCorrect?: boolean;
 }
 
 export interface QuizAttempt {
@@ -209,6 +262,29 @@ export interface ObjectiveReadiness {
   trend: 'new' | 'up' | 'flat' | 'down';
 }
 
+export interface ObjectiveReadinessV2 extends ObjectiveReadiness {
+  readinessVersion: 2;
+  itemTypeWeight: number;
+  itemTypeAdjustedScore: number;
+  topicWeight: number;
+  retentionForecastPct?: number;
+  evidenceCount: number;
+  primaryReason: ReviewReason;
+  reasonDetails: string[];
+  weaknessSignals: Array<{
+    type: 'item-type' | 'rubric' | 'artifact' | 'retention' | 'topic-weight' | 'calibration';
+    label: string;
+    impact: number;
+  }>;
+}
+
+export interface RetentionForecast {
+  date: string;
+  count: number;
+  averageRetention: number | null;
+  atRiskCount: number;
+}
+
 export interface StudyPlan {
   id: string;
   targetLevel?: string;
@@ -225,8 +301,19 @@ export interface StudyPlan {
     title: string;
     path: string;
     reason: string;
+    reasonDetails?: string[];
+    reviewReason?: ReviewReason;
+    estimatedMinutes?: number;
   }>;
   updatedAt: string;
+}
+
+export interface StudySessionPlan extends StudyPlan {
+  planVersion: 2;
+  generatedForDate: string;
+  focusLevel: string;
+  budgetMinutes: number;
+  reviewLoad: RetentionForecast[];
 }
 
 export interface StudyPlanSettings {
@@ -257,7 +344,14 @@ export interface ReviewQueueItem {
   priority: number;
   dueAt?: string;
   topic?: string;
+  reason: ReviewReason;
+  retentionPct?: number;
+  sourceIds?: string[];
+  reasonDetails?: string[];
+  weaknessSignals?: Array<{ label: string; impact: number }>;
 }
+
+export type ReviewAction = ReviewQueueItem;
 
 export interface MockAttempt {
   id?: number;
@@ -377,6 +471,21 @@ export interface FlashcardAttempt {
   createdAt: string;
 }
 
+export interface VaultSecureCipher {
+  v: 1;
+  iv: string;
+  ct: string;
+}
+
+export interface ResultArtifactSecurePayload {
+  v: 1;
+  scheme: 'secure-vault-result-artifact.v1';
+  title: VaultSecureCipher;
+  summary: VaultSecureCipher;
+  assumptions: VaultSecureCipher;
+  metrics: VaultSecureCipher;
+}
+
 export interface ResultArtifact {
   id: string;
   type: 'calculator' | 'quant-lab' | 'excel-grid' | 'mock-report';
@@ -391,6 +500,7 @@ export interface ResultArtifact {
   noteId?: string;
   objectiveIds?: string[];
   createdAt: string;
+  secureVault?: ResultArtifactSecurePayload;
 }
 
 export interface MockSectionState {
@@ -414,6 +524,211 @@ export interface ContentVersion {
   id: string;
   version: number;
   checksum?: string;
+  updatedAt: string;
+}
+
+export interface VaultImportHistoryEntry {
+  exportId: string;
+  importedAt: string;
+  exportedAt: string;
+  schemaVersion: number;
+  schemaHash: string;
+  contentVersion: string;
+  mode: 'merge' | 'replace';
+  conflictPolicy: 'keep-existing' | 'prefer-import' | 'replace';
+  encrypted: boolean;
+}
+
+export interface VaultHealthSnapshot {
+  id: string;
+  generatedAt: string;
+  status: 'ok' | 'warning' | 'repair-needed';
+  totalRows: number;
+  malformedRows: number;
+  orphanedReviews: number;
+  staleIndexes: number;
+  checksumIssues: number;
+  repairActions: string[];
+}
+
+export interface VaultHealthReport extends VaultHealthSnapshot {
+  schemaVersion: number;
+  schemaHash: string;
+  contentVersion: string;
+  secureVault?: {
+    enabled: boolean;
+    unlocked: boolean;
+    available: boolean;
+    status: 'disabled' | 'locked' | 'encrypted' | 'partial';
+    encryptedRows: number;
+    targetRows: number;
+    coveragePct: number;
+    rows: {
+      notes: { encrypted: number; total: number };
+      resultArtifacts: { encrypted: number; total: number };
+      openNotebookSettings: { encrypted: number; total: number };
+      sourceChunks: { encrypted: number; total: number };
+    };
+    outsideScopeRows: {
+      sourceVault: number;
+    };
+  };
+  importHistory: VaultImportHistoryEntry[];
+  rollbackSnapshots?: RollbackSnapshot[];
+  importJobs?: ImportJob[];
+  sourceBundleManifests?: SourceBundleManifest[];
+  calculatorScenarios?: CalculatorScenario[];
+  releaseRunHistory?: ReleaseRunHistory[];
+  storageEstimate?: {
+    usage?: number;
+    quota?: number;
+    persisted?: boolean;
+  };
+}
+
+export type VaultRollbackReason = 'import-replace' | 'import-merge' | 'repair' | 'reset' | 'source-clear' | 'manual';
+
+export interface RollbackSnapshot {
+  id: string;
+  reason: VaultRollbackReason;
+  createdAt: string;
+  schemaVersion: number;
+  schemaHash: string;
+  contentVersion: string;
+  checksum: string;
+  encrypted: boolean;
+  rowCounts: Record<string, number>;
+  sourceRowCounts?: Record<string, number>;
+  payload?: unknown;
+}
+
+export interface CalculatorScenario {
+  id: string;
+  calculatorId: string;
+  title: string;
+  level?: string;
+  topic?: string;
+  objectiveIds: string[];
+  assumptions: Record<string, string | number | boolean | null>;
+  metrics: Record<string, string | number | boolean | null>;
+  seed?: string;
+  sourceIds?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReleaseRunHistory {
+  id: string;
+  runId: string;
+  generatedAt: string;
+  status: 'ok' | 'warning' | 'blocked' | 'pending';
+  gitSha?: string;
+  branch?: string;
+  dirty?: boolean;
+  gateCount: number;
+  failedGateIds: string[];
+  staleGateIds: string[];
+  reportPath?: string;
+}
+
+export interface ImportJob {
+  id: string;
+  startedAt: string;
+  completedAt?: string;
+  status: 'pending' | 'ok' | 'blocked';
+  mode: 'merge' | 'replace';
+  conflictPolicy: 'keep-existing' | 'prefer-import' | 'replace';
+  encrypted: boolean;
+  includeSourceVault: boolean;
+  exportId?: string;
+  rowCounts: Record<string, number>;
+  sourceRowCounts?: Record<string, number>;
+  errors: string[];
+  rollbackSnapshotId?: string;
+}
+
+export interface SourceBundleManifest {
+  id: string;
+  bundleId: string;
+  createdAt: string;
+  encrypted: boolean;
+  algorithm?: 'AES-GCM';
+  sha256: string;
+  byteLength: number;
+  documentCount: number;
+  chunkCount: number;
+  sourceIds: string[];
+  staleAt?: string;
+  privateUseOnly: boolean;
+}
+
+export interface PsychometricStats {
+  id: string;
+  itemId: string;
+  level: string;
+  topic: string;
+  attempts: number;
+  difficulty: number;
+  discrimination: number;
+  distractorQuality: Record<string, number>;
+  reliability?: number;
+  retakeDrift?: number;
+  updatedAt: string;
+}
+
+export interface FormulaDependency {
+  id: string;
+  formulaName: string;
+  level?: string;
+  topic: string;
+  dependsOn: string[];
+  usedBy: string[];
+  sourceIds?: string[];
+  updatedAt: string;
+}
+
+export interface SourceCoverageStatus {
+  targetId: string;
+  targetKind: 'lesson' | 'question' | 'formula' | 'mock' | 'rubric';
+  status: 'covered' | 'partial' | 'missing' | 'stale';
+  sourceIds: string[];
+  staleAt?: string;
+  updatedAt: string;
+}
+
+export interface ConstructedResponseRubricHistory {
+  id: string;
+  attemptId?: number;
+  itemId: string;
+  criterion: string;
+  earnedPoints: number;
+  maxPoints: number;
+  scorer: 'local-rubric' | 'self' | 'grounded-tutor';
+  sourceIds: string[];
+  createdAt: string;
+}
+
+export interface MockBlueprint {
+  id: string;
+  level: 'level1' | 'level2' | 'level3';
+  title: string;
+  pathway?: string;
+  officialLength: boolean;
+  totalMinutes: number;
+  breakMinutes: number;
+  sessions: Array<{
+    id: string;
+    label: string;
+    minutes: number;
+    itemTypes: Array<'single' | 'vignette' | 'constructed-response' | 'trial'>;
+    scoredItemCount: number;
+    trialItemCount: number;
+  }>;
+  scoringBands: Array<{ label: string; minPct: number; maxPct: number }>;
+  topicWeights: Record<string, number>;
+  reviewPacketTemplate: string[];
+  variantSeed?: string;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -441,7 +756,9 @@ export interface AnalyticsSummary {
   byObjective?: Array<{ objectiveId: string; topic: string; attempts: number; accuracy: number; recentTrend: 'new' | 'up' | 'flat' | 'down' }>;
   byItemType?: Array<{ itemType: string; attempts: number; accuracy: number }>;
   essayRubrics?: Array<{ criterion: string; attempts: number; averagePct: number }>;
-  skillLabs?: Array<{ labId: string; attempts: number; latestScore?: number }>;
+  constructedResponseWeaknesses?: Array<{ criterion: string; attempts: number; averagePct: number; impact: number }>;
+  skillLabs?: Array<{ labId: string; labType?: string; attempts: number; latestScore?: number; impactedObjectives: number; impact: number }>;
+  objectiveImpacts?: Array<{ objectiveId: string; topic?: string; sourceType: string; attempts: number; averageScore: number; impact: number }>;
   byTopic: Array<{
     topic: string;
     attempts: number;
@@ -471,6 +788,16 @@ export interface VaultNote {
   artifactId?: string;
   createdAt: string;
   updatedAt: string;
+  secureVault?: VaultNoteSecurePayload;
+}
+
+export type VaultNoteSecureCipher = VaultSecureCipher;
+
+export interface VaultNoteSecurePayload {
+  v: 1;
+  scheme: 'secure-vault-note.v1';
+  title: VaultNoteSecureCipher;
+  body: VaultNoteSecureCipher;
 }
 
 export interface VaultBookmark {
@@ -483,4 +810,47 @@ export interface VaultBookmark {
   title: string;
   path: string;
   createdAt: string;
+}
+
+// LEARN-1 — unified cross-domain ability model. Pure shapes (no I/O) mirroring
+// the LSAT backend's `adaptivity.ability_estimate` payload + `domain`, read from
+// GET /api/adaptivity/ability?domain=<plane>. The `domain` plane can be a host
+// domain OR the LSAT plane ('lsat'), so it widens DomainId.
+export type AbilityDomain = DomainId | 'lsat';
+
+export interface UnifiedAbilityEstimate {
+  domain: AbilityDomain;
+  q_type: string | null;
+  section_type: string | null;
+  ability: number;
+  mastery: number;
+  uncertainty: number;
+  evidence_n: number;
+  accuracy: number | null;
+  avg_time_ms: number | null;
+  model: string;
+  learning_velocity: {
+    slope_per_week: number;
+    window: string;
+    early_signal: number | null;
+    recent_signal: number | null;
+    days?: number;
+  };
+  plateau: boolean;
+  mastery_eta_days: number | null;
+  components: {
+    blind_review_outcomes: Record<string, number>;
+    days: number | null;
+    model: string;
+    uses_official_score_anchor_only: boolean;
+  };
+}
+
+export interface PerDomainAbilitySnapshot {
+  domain: AbilityDomain;
+  theta: number;
+  mastery: number;
+  uncertainty: number;
+  slope: number;
+  evidence_n: number;
 }

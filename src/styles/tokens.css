@@ -1,0 +1,569 @@
+/*
+ * QuantVault Design Tokens — authoritative single source of truth.
+ *
+ * LAYER STRATEGY
+ * All tokens live in @layer tokens so that any rule in a higher layer
+ * (components, utilities, etc.) can override without specificity battles.
+ *
+ * MAPPING TO src/index.css
+ * The existing file defines a flat root-level token set.  The new semantic
+ * tokens below alias those same raw values so the gallery renders accurately
+ * before any component migration.  Mapping summary:
+ *
+ *   --color-bg-canvas          → --bg-primary   (#080B10 dark / #F4F7FB light)
+ *   --color-bg-surface         → --bg-secondary (#101621 dark / #FFFFFF light)
+ *   --color-bg-surface-2       → --bg-card      (#141D2B dark / #FFFFFF light)
+ *   --color-text-primary       → --text-primary
+ *   --color-text-secondary     → --text-secondary
+ *   --color-text-muted         → --text-muted
+ *   --color-border             → --border
+ *   --color-border-strong      → --border-hover
+ *   --color-accent             → --accent  (blue-400 dark / blue-700 light)
+ *   --color-accent-soft        → --surface-soft
+ *   --color-success            → --success
+ *   --color-warning            → --warning
+ *   --color-danger             → --danger
+ *   --color-exam               → --exam
+ *   --color-domain-cfa         → --exam      (gold)
+ *   --color-domain-quant       → --quant     (purple)
+ *   --color-domain-excel       → --excel     (emerald)
+ *   --color-domain-vault       → --vault     (teal)
+ *   --color-domain-analytics   → --study     (cyan)
+ *   --color-domain-ops         → --ops       (amber)
+ */
+
+@layer tokens {
+  :root {
+    /* ─────────────────────────────────────────────────────────────
+     * 1. COLOR — semantic aliases over the core palette in index.css
+     * ───────────────────────────────────────────────────────────── */
+
+    /* Background surfaces */
+    --color-bg-canvas:    var(--bg-primary);
+    --color-bg-surface:   var(--bg-secondary);
+    --color-bg-surface-2: var(--bg-card);
+
+    /* Text */
+    --color-text-primary:   var(--text-primary);
+    --color-text-secondary: var(--text-secondary);
+    --color-text-muted:     var(--text-muted);
+
+    /* Borders */
+    --color-border:        var(--border);
+    --color-border-strong: var(--border-hover);
+
+    /* Accent */
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+
+    /* Status */
+    --color-success: var(--success);
+    --color-warning: var(--warning);
+    --color-danger:  var(--danger);
+    --color-exam:    var(--exam);
+
+    /* Domain accents */
+    --color-domain-cfa:       var(--exam);
+    --color-domain-quant:     var(--quant);
+    --color-domain-excel:     var(--excel);
+    --color-domain-vault:     var(--vault);
+    --color-domain-analytics: var(--study);
+    --color-domain-ops:       var(--ops);
+
+    /* ─────────────────────────────────────────────────────────────
+     * 2. TYPOGRAPHY — strict-offline system stacks + size ramp
+     * ───────────────────────────────────────────────────────────── */
+
+    /* Font stacks — the authoritative values now live in
+       src/styles/unified-palette.css (Geist/Newsreader, shared with /lsat);
+       these are kept only as a layered fallback. (Plan S1.) */
+    --font-sans: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+      'Helvetica Neue', Arial, sans-serif;
+    --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Monaco,
+      Consolas, 'Liberation Mono', 'Courier New', monospace;
+
+    /* Font sizes — UA5: this @layer tokens copy now mirrors the LSAT domain's px
+       ramp (src/domains/lsat/_meta/tailwind.config.js `fontSize`), the same values
+       the unlayered host :root in index.css restates (and which win the cascade).
+       Keeping them identical kills the prior self-conflict where this layer carried a
+       larger upper ramp (xl 22 / 2xl 28 / 3xl 36 / 4xl 48) that never applied because
+       index.css's unlayered :root beat it. Now there's one ramp: 12/14/15/17/20/24/30/38. */
+    --fs-xs:   0.75rem;    /* 12px */
+    --fs-sm:   0.875rem;   /* 14px */
+    --fs-base: 0.9375rem;  /* 15px — LSAT base */
+    --fs-md:   1rem;       /* 16px */
+    --fs-lg:   1.0625rem;  /* 17px — LSAT reading anchor */
+    --fs-xl:   1.25rem;    /* 20px */
+    --fs-2xl:  1.5rem;     /* 24px */
+    --fs-3xl:  1.875rem;   /* 30px */
+    --fs-4xl:  2.375rem;   /* 38px */
+
+    /* Line heights — UA5: restated in index.css's unlayered :root too (so they win
+       the cascade); kept here in sync for a reviewer auditing tokens.css. */
+    --lh-tight:   1.2;
+    --lh-snug:    1.35;
+    --lh-normal:  1.55;
+    --lh-relaxed: 1.7;
+
+    /* Font weights */
+    --fw-regular:  400;
+    --fw-medium:   500;
+    --fw-semibold: 600;
+    --fw-bold:     700;
+    --fw-black:    800;
+
+    /* ─────────────────────────────────────────────────────────────
+     * 3. SPACE — 8-step 4 px modular scale
+     * ───────────────────────────────────────────────────────────── */
+
+    --space-1:  4px;   /* 0.25rem */
+    --space-2:  8px;   /* 0.5rem  */
+    --space-3:  12px;  /* 0.75rem */
+    --space-4:  16px;  /* 1rem    */
+    --space-5:  20px;  /* 1.25rem */
+    --space-6:  24px;  /* 1.5rem  */
+    --space-7:  32px;  /* 2rem — alias */
+    --space-8:  32px;  /* 2rem    */
+    --space-10: 40px;  /* 2.5rem  */
+    --space-12: 48px;  /* 3rem    */
+    --space-16: 64px;  /* 4rem    */
+
+    /* ─────────────────────────────────────────────────────────────
+     * 4. RADIUS
+     * ───────────────────────────────────────────────────────────── */
+
+    /* Single source of truth — these match index.css's unlayered :root (which
+       won the cascade anyway). The earlier --radius-lg:12px / --radius-xl:16px
+       here never applied (unlayered index.css beats this @layer); aligned to
+       kill that dead self-conflict without changing appearance. (Plan S1.) */
+    --radius-xs:   4px;
+    --radius-sm:   6px;
+    --radius-md:   8px;
+    --radius-lg:   8px;
+    --radius-xl:   10px;
+    --radius-full: 9999px;
+
+    /* ─────────────────────────────────────────────────────────────
+     * 5. ELEVATION — progressive box-shadow depth
+     *
+     * UA3: 5-step ramp (--elevation-0..4) matching the LSAT domain's scale
+     * (src/domains/lsat/index.css). The authoritative values live in the
+     * unlayered host :root (index.css) — which wins the cascade over this
+     * @layer tokens block — and are mirrored here so a reviewer reading
+     * tokens.css sees the full intent. --elevation-floating aliases
+     * --elevation-4 (the old "floating" name kept for existing consumers).
+     * ───────────────────────────────────────────────────────────── */
+
+    --elevation-0:        none;
+    --elevation-1:        0 1px 2px rgba(0, 0, 0, 0.28);
+    --elevation-2:        0 4px 12px rgba(0, 0, 0, 0.28);
+    --elevation-3:        0 8px 22px rgba(0, 0, 0, 0.30);
+    --elevation-4:        0 18px 44px rgba(0, 0, 0, 0.38),
+                          0 0 0 1px rgba(148, 163, 184, 0.08);
+    --elevation-floating: var(--elevation-4);
+
+    /* ─────────────────────────────────────────────────────────────
+     * 6. MOTION — UA3: 3 canonical easing curves + duration scale, unified
+     *    with the LSAT domain's motion tokens (src/domains/lsat/lib/motion.ts:
+     *    standard [0.2,0,0,1], emphasized [0.3,0,0,1], exit [0.4,0,1,1];
+     *    fast 120ms / base 200ms / slow 320ms). The host :root in index.css
+     *    restates these unlayered (winning the cascade); kept here in sync.
+     *    --ease-default is retained as an alias of the standard curve so prior
+     *    consumers of that name keep resolving.
+     * ───────────────────────────────────────────────────────────── */
+
+    --ease-standard:   cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+    --ease-exit:       cubic-bezier(0.4, 0, 1, 1);
+    --ease-default:    var(--ease-standard);
+
+    --duration-fast:  120ms;
+    --duration-base:  200ms;
+    --duration-slow:  320ms;
+
+    /* ─────────────────────────────────────────────────────────────
+     * 6b. FOCUS — UA3: ring + ring-offset pair matching the LSAT domain
+     *     (src/domains/lsat/index.css consumes `hsl(var(--ring))` + 2px offset).
+     *     --ring is a BARE HSL triplet (= host --accent); authoritative values
+     *     are in the unlayered host :root (index.css), mirrored here.
+     * ───────────────────────────────────────────────────────────── */
+
+    --ring:        213.1 93.9% 67.8%; /* = host --accent (#60A5FA blue-400) */
+    --ring-offset: 2px;
+
+    /* ─────────────────────────────────────────────────────────────
+     * 7. Z-INDEX — D5 (UIv2): one scale, never raw values.
+     *   --z-base     (0)   content flow; the default.
+     *   --z-overlay  (50)  in-page sticky/overlay chrome and mobile scrim.
+     *   --z-dropdown (100) popovers, dropdowns, tooltips, fixed sidebar/topbar.
+     *   --z-modal    (200) dialogs and full-screen sheets (above all page chrome).
+     *   --z-toast    (300) transient notifications (always on top, even of modals).
+     * Pick the band by ROLE, not by trial. New stacking contexts read a token;
+     * a raw z-index outside this scale is a smell to flag in review.
+     * ───────────────────────────────────────────────────────────── */
+
+    --z-base:     0;
+    --z-overlay:  50;
+    --z-dropdown: 100;
+    --z-modal:    200;
+    --z-toast:    300;
+
+    /* ─────────────────────────────────────────────────────────────
+     * 8. LAYOUT
+     * ───────────────────────────────────────────────────────────── */
+
+    --width-container:        1240px;
+    --width-prose:            72ch;
+    --sidebar-width:          240px;
+    --sidebar-width-collapsed: 64px;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+   * 9. LIGHT THEME — semantic color overrides only
+   *
+   *   Light-mode swap rebinds the raw palette references in index.css
+   *   (--bg-primary, --text-primary, …) which then propagate up through
+   *   the semantic aliases above. The block below RESTATES the semantic
+   *   mappings at the token layer so a reviewer auditing `tokens.css`
+   *   can read the full light-theme intent without flipping files.
+   *
+   *   Only color/surface tokens get themed. Spacing, typography, radius,
+   *   elevation, motion, z-index, and layout stay theme-agnostic.
+   *
+   *   Light backgrounds: `#FFFFFF` surfaces over an `#F4F7FB` canvas,
+   *   text on near-black `#0F172A` — verified WCAG AA (≥4.5:1) body
+   *   contrast against both surface colors.
+   * ───────────────────────────────────────────────────────────── */
+
+  :root[data-theme="light"] {
+    --color-bg-canvas:    var(--bg-primary);
+    --color-bg-surface:   var(--bg-secondary);
+    --color-bg-surface-2: var(--bg-card);
+
+    --color-text-primary:   var(--text-primary);
+    --color-text-secondary: var(--text-secondary);
+    --color-text-muted:     var(--text-muted);
+
+    --color-border:        var(--border);
+    --color-border-strong: var(--border-hover);
+
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+
+    --color-success: var(--success);
+    --color-warning: var(--warning);
+    --color-danger:  var(--danger);
+    --color-exam:    var(--exam);
+
+    --color-domain-cfa:       var(--exam);
+    --color-domain-quant:     var(--quant);
+    --color-domain-excel:     var(--excel);
+    --color-domain-vault:     var(--vault);
+    --color-domain-analytics: var(--study);
+    --color-domain-ops:       var(--ops);
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+   * 10. SYSTEM PREFERENCE — pick light when the OS asks for it and
+   *     the user has NOT chosen an explicit override. The
+   *     `:not([data-theme="..."])` guard makes the explicit
+   *     `data-theme` attribute always win, in both directions.
+   *
+   *     The raw palette rebinds in `index.css` already cover the
+   *     `[data-theme="light"]` case; this media query routes the
+   *     same rebinds when no explicit attribute is set.
+   * ───────────────────────────────────────────────────────────── */
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]):not([data-theme="light"]) {
+      /* Re-bind the raw palette tokens that `index.css` flips for
+         `[data-theme="light"]`. Keeping this list in sync with that
+         block is intentional — it lets users on a system-light OS
+         experience the same light palette without storing a choice.
+         UA1: the listed SEMANTIC tokens are stated in HSL (exact 1-decimal
+         equivalents of the prior hex — byte-identical round-trip); the raw
+         scale + rgba tokens below stay in their original format. */
+      --bg-primary: hsl(214 47% 97%);         /* #F4F7FB */
+      --bg-secondary: hsl(0 0% 100%);         /* #FFFFFF */
+      --bg-card: hsl(0 0% 100%);              /* #FFFFFF */
+      --bg-hover: hsl(213 27% 84%);           /* #CBD5E1 */
+      --text-primary: hsl(222.2 47.4% 11.2%); /* #0F172A */
+      --text-secondary: hsl(215.3 25% 26.7%); /* #334155 */
+      --text-muted: hsl(215 19% 41%);         /* #5B6B82 — audit LOW: distinct muted tier (system-light), ~6.6:1 on white */
+      --accent: hsl(224.3 76.3% 48%);         /* #1D4ED8 */
+      --accent-hover: hsl(225.9 70.7% 40.2%); /* #1E40AF */
+      --exam: hsl(38.3 93% 28%);              /* #8A5A05 */
+      --study: hsl(194.4 69.6% 27.1%);        /* #155E75 */
+      --vault: hsl(175.3 77.4% 26.1%);        /* #0F766E */
+      --ops: hsl(22.7 82.5% 31.4%);           /* #92400E */
+      --quant: hsl(263.4 70% 50.4%);          /* #6D28D9 */
+      --excel: hsl(163.1 88.1% 19.8%);        /* #065F46 */
+      --danger: hsl(0 73.7% 41.8%);           /* #B91C1C */
+      --success: hsl(162.9 93.5% 24.3%);      /* #047857 */
+      --border: rgba(15, 23, 42, 0.1);
+      --border-hover: rgba(15, 23, 42, 0.2);
+      --input-bg: #FFFFFF;
+      --focus-ring: rgba(37, 99, 235, 0.16);
+      --chart-grid: rgba(15, 23, 42, 0.1);
+      --glass-bg: rgba(255, 255, 255, 0.94);
+      --glass-border: rgba(15, 23, 42, 0.1);
+      --surface-raised: rgba(255, 255, 255, 0.98);
+      --surface-panel: rgba(255, 255, 255, 0.92);
+      --surface-data: rgba(15, 23, 42, 0.045);
+      --surface-soft: rgba(37, 99, 235, 0.055);
+    }
+  }
+
+  /* Honour the OS accessibility setting: zero all motion durations */
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --duration-fast: 0ms;
+      --duration-base: 0ms;
+      --duration-slow: 0ms;
+    }
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+   * 10b. DENSITY AXIS — UI-2 (Wave 6)
+   *
+   *   `[data-density="compact"]` on <html> (set by the reading engine from the
+   *   persisted preference) tightens the SPACE scale by ~25%. The AUTHORITATIVE
+   *   compact overrides live in index.css's unlayered :root[data-density="compact"]
+   *   (which wins the cascade over this @layer, exactly like the base --space-N
+   *   ramp), so they're stated there rather than here. This note keeps tokens.css
+   *   honest about the axis existing. Only the spacing axis re-tunes; typography,
+   *   color, radius, elevation, and motion are untouched — density is a breathing-
+   *   room control, not a re-skin.
+   * ───────────────────────────────────────────────────────────── */
+
+  /* ─────────────────────────────────────────────────────────────
+   * 11. PER-DOMAIN ACCENT OVERRIDES
+   *
+   *   When App.jsx sets `data-domain="<id>"` on <body> for /cfa, /excel,
+   *   and /quant routes, the accent re-tints across the whole tree without
+   *   per-component changes. We override BOTH layers of accent token:
+   *
+   *     - Semantic: `--color-accent` and `--color-accent-soft`
+   *       (used by qv-chip, qv-callout, and downstream design-system code)
+   *     - Raw: `--accent`, `--accent-hover`, `--surface-soft`
+   *       (used by hundreds of existing rules in index.css for links,
+   *        buttons, badges, and surface-status borders)
+   *
+   *   Hue choices and per-theme contrast:
+   *     - cfa  → blue (the app default — keeps the current accent).
+   *     - excel → green.  Dark theme uses #16a34a (5.0:1 vs #0F172A);
+   *               light theme uses #15803d (5.1:1 vs #FFFFFF) because
+   *               #16a34a fails AA body-text contrast on white (~3.7:1).
+   *     - quant → purple. Dark theme uses #C084FC for AA contrast on the
+   *               app's dark surfaces;
+   *               light theme uses #a21caf (5.4:1 vs #FFFFFF) because
+   *               #c026d3 dips to ~4.0:1 on white.
+   *
+   *   `accent-hover` is a slightly lighter (dark theme) or darker (light)
+   *   variant; `surface-soft` is the same hue at low opacity.
+   * ───────────────────────────────────────────────────────────── */
+
+  /* CFA — blue (same as the app default). Restated for explicit-intent.
+     UA1: --accent / --accent-hover in HSL (exact byte-identical equivalents of
+     #60A5FA / #93C5FD); --surface-soft stays rgba (not a listed semantic). */
+  [data-domain="cfa"] {
+    --accent:        hsl(213.1 93.9% 67.8%); /* #60A5FA */
+    --accent-hover:  hsl(211.7 96.4% 78.4%); /* #93C5FD */
+    --accent-strong: #2563EB;                /* A3 button fill — blue-600, white text 5.2:1 (WCAG AA) */
+    --surface-soft:  rgba(96, 165, 250, 0.06);
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+  }
+
+  /* Excel — green. Dark-theme defaults; light-theme block below tightens
+     contrast for AA on white. */
+  [data-domain="excel"] {
+    --accent:        hsl(142.1 76.2% 36.3%); /* #16A34A */
+    --accent-hover:  hsl(142 69% 58%);       /* #4ADE80 */
+    --accent-strong: #15803D;                /* A3 button fill — green-700, white text 4.5:1 */
+    --surface-soft:  rgba(22, 163, 74, 0.12);
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+  }
+
+  /* Quant — magenta. Same per-theme pattern as Excel. */
+  [data-domain="quant"] {
+    --accent:        hsl(270 95.2% 75.3%);   /* #C084FC */
+    --accent-hover:  hsl(268.6 100% 91.8%);  /* #E9D5FF */
+    --accent-strong: #A21CAF;                /* A3 button fill — magenta-700, white text 5.5:1 */
+    --surface-soft:  rgba(192, 132, 252, 0.12);
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+  }
+
+  /* LSAT — violet (K4-accent). Reconciles the host cascade with the LSAT brand
+     accent (its --primary is `262 83% 60%` ≈ #8B5CF6); App.jsx + SharedLayout
+     set data-domain="lsat" on /lsat/*. Dark-theme defaults; light block below
+     tightens for AA on white. */
+  [data-domain="lsat"] {
+    /* audit (LOW) — --accent is used as TEXT (links/headings/eyebrows) on dark
+       card/panel surfaces, where #8B5CF6 measured ~4.0:1 (sub-AA). Use the lighter
+       violet the LSAT dark theme + host --accent-hover already use (#A78BFA ≈
+       6.2:1 on #141D2B). The button fill stays --accent-strong (#6D28D9, white
+       text 6.6:1); light-theme overrides below are unchanged. */
+    --accent:        hsl(258 92% 70%);       /* #A78BFA — AA as text on dark surfaces */
+    --accent-hover:  hsl(255 95% 80%);       /* #C4B5FD — lighter violet, hover distinction */
+    --accent-strong: #6D28D9;                /* A3 button fill — violet-700, white text 6.6:1 */
+    --surface-soft:  rgba(139, 92, 246, 0.12);
+    --color-accent:      var(--accent);
+    --color-accent-soft: var(--surface-soft);
+  }
+
+  /* Light-theme contrast tightening — picks slightly darker hues that pass
+     WCAG 2.1 AA body-text contrast against #FFFFFF surface. Triggers on the
+     explicit attribute and on the system-light media branch. */
+  :root[data-theme="light"] [data-domain="cfa"] {
+    --accent:        hsl(224.3 76.3% 48%);   /* #1D4ED8 */
+    --accent-hover:  hsl(225.9 70.7% 40.2%); /* #1E40AF */
+    --surface-soft:  rgba(37, 99, 235, 0.08);
+  }
+  :root[data-theme="light"] [data-domain="excel"] {
+    --accent:        hsl(142.8 64.2% 24.1%); /* #166534 */
+    --accent-hover:  hsl(143.8 61.2% 20.2%); /* #14532D */
+    --surface-soft:  rgba(21, 128, 61, 0.10);
+  }
+  :root[data-theme="light"] [data-domain="quant"] {
+    --accent:        hsl(294.7 72.4% 39.8%); /* #A21CAF */
+    --accent-hover:  hsl(295.4 70.2% 32.9%); /* #86198F */
+    --surface-soft:  rgba(162, 28, 175, 0.10);
+  }
+  :root[data-theme="light"] [data-domain="lsat"] {
+    --accent:        hsl(262 83% 48%);       /* #6D28D9 — darker violet, AA on white */
+    --accent-hover:  hsl(263 70% 40%);       /* #5B21B6 */
+    --surface-soft:  rgba(109, 40, 217, 0.10);
+  }
+
+  /* System-theme light palette routing lives in the raw palette layer.
+     Keep domain accents on their dark-surface values unless the explicit
+     `data-theme="light"` selector above has switched the whole app to light. */
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * UTILITY CLASSES — token-aware shorthand for the most common
+ * inline-style patterns. Lives outside @layer tokens so callers
+ * win against the base layer without ! .
+ *
+ * UA6 — thin Tailwind aliases. The LAYOUT/SPACING/MARGIN utilities below are
+ * now expressed with `@apply` over Tailwind's primitives instead of bespoke
+ * declarations, so the host shares one geometry vocabulary with the LSAT
+ * domain (which is Tailwind-native). This is a ZERO-PIXEL change: Tailwind's
+ * default spacing scale is byte-identical to the host space tokens
+ * (`gap-1`=0.25rem=`--space-1` … `gap-6`=1.5rem=`--space-6`; `mt-2`=0.5rem,
+ * `m-0`=0, `ml-auto`=auto), verified against resolveConfig. `@apply` resolves
+ * at build time against tailwind.config.js even though this file carries no
+ * `@tailwind` directives (Tailwind processes @apply globally via PostCSS).
+ *
+ * The class NAMES are unchanged, so every existing consumer (~450 references
+ * across src/) keeps working with no markup churn. The COLOR / TYPE / RADIUS /
+ * card / callout / chip utilities further down are intentionally NOT migrated:
+ * Tailwind's same-named utilities (text-muted, bg-card, rounded-md, …) resolve
+ * to the LSAT graphite/HSL token values, so `@apply`-ing them would recolour
+ * the host and shrink its radii (breaking the UA1 palette + WCAG gate). Those
+ * keep reading the host's own `--color-*` / `--fs-*` / `--radius-*` tokens
+ * directly. A full inline-style → utility markup sweep remains a follow-up. */
+
+/* Flex stacks — Tailwind flex + spacing (gap-N === --space-N). */
+.qv-stack-1 { @apply flex flex-col gap-1; }
+.qv-stack-2 { @apply flex flex-col gap-2; }
+.qv-stack-3 { @apply flex flex-col gap-3; }
+
+/* Flex rows — Tailwind flex + spacing (gap-N === --space-N). */
+.qv-row-1 { @apply flex items-center gap-1; }
+.qv-row-2 { @apply flex items-center gap-2; }
+.qv-row-3 { @apply flex items-center gap-3; }
+.qv-row-4 { @apply flex items-center gap-4; }
+.qv-row-3-start { @apply flex items-start gap-3; }
+.qv-row-between { @apply flex items-center justify-between gap-3; }
+
+/* Card surfaces — bordered + padded + rounded patterns scattered across pages.
+   UA6: padding uses Tailwind spacing (p-3=--space-3, p-5=--space-5, identical),
+   but border + radius keep the host tokens (Tailwind's rounded-md/border-border
+   resolve to LSAT's radius/HSL values, which would shrink the corner + recolour
+   the hairline). */
+.qv-card {
+  @apply p-3;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+.qv-card-lg {
+  @apply p-5;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+}
+
+/* The accent-bordered callout pattern used on every grounded-answer + AI panel.
+   UA6: padding via Tailwind (p-3=--space-3); accent border, surface bg, radius,
+   and reading leading keep host tokens (no Tailwind equivalents that preserve
+   the host values). The -warning/-danger variants were grep-confirmed unused
+   and removed in UA6 — reintroduce from git history if a tinted callout is
+   needed (they mirrored .qv-callout with --color-warning/-danger borders). */
+.qv-callout {
+  @apply p-3;
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-bg-surface-2);
+  border-radius: var(--radius-md);
+  line-height: var(--lh-normal);
+}
+
+/* Text-color shorthands. UA6: NOT @apply-migrated — Tailwind's text-muted /
+   text-success / text-danger / text-warning resolve to the LSAT graphite/HSL
+   token values (hsl(var(--muted)) etc.), so aliasing them would recolour the
+   host and break the WCAG gate. These read the host's own semantic colors. */
+.qv-text-muted     { color: var(--color-text-muted); }
+.qv-text-secondary { color: var(--color-text-secondary); }
+.qv-text-primary   { color: var(--color-text-primary); }
+.qv-text-success   { color: var(--color-success); }
+.qv-text-danger    { color: var(--color-danger); }
+.qv-text-warning   { color: var(--color-warning); }
+
+/* Font-size shorthands. UA6: kept on the host --fs-* ramp (Tailwind's text-xs
+   /sm/base carry their own line-height + a different px scale, so @apply would
+   shift size AND leading). qv-fs-lg was grep-confirmed unused and removed. */
+.qv-fs-xs   { font-size: var(--fs-xs); }
+.qv-fs-sm   { font-size: var(--fs-sm); }
+.qv-fs-md   { font-size: var(--fs-md); }
+
+/* Font-weight shorthands — host --fw-* ramp (= Tailwind numerics, kept on the
+   token so the type-voice stays tunable in one place). */
+.qv-fw-semibold { font-weight: var(--fw-semibold); }
+.qv-fw-bold     { font-weight: var(--fw-bold); }
+
+/* Mono font — host --font-mono (Geist Mono). Tailwind's font-mono resolves to
+   the same family via theme.fontFamily.mono, but the token keeps it single-
+   sourced with the rest of the host type system. */
+.qv-mono { font-family: var(--font-mono); }
+
+/* Compact citation chip — used wherever locators show up. UA6: padding-y/x via
+   Tailwind (px-2=--space-2; py is 1px, no scale step), but font size/weight,
+   the mono family, the accent fill/border, and radius keep host tokens (the
+   accent + radius diverge from Tailwind's resolved values). */
+.qv-chip {
+  @apply inline-flex items-center px-2;
+  padding-top: 1px;
+  padding-bottom: 1px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  font-family: var(--font-mono);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+/* Tight margin resets used inside Surface panels. UA6: Tailwind margin scale
+   (mt-N/mb-N/ml-N === --space-N; m-0 === 0; ml-auto === auto). qv-ml-3 was
+   grep-confirmed unused and removed. */
+.qv-m-0  { @apply m-0; }
+.qv-mt-1 { @apply mt-1; }
+.qv-mt-2 { @apply mt-2; }
+.qv-mt-3 { @apply mt-3; }
+.qv-mb-2 { @apply mb-2; }
+.qv-mb-3 { @apply mb-3; }
+.qv-ml-1 { @apply ml-1; }
+.qv-ml-2 { @apply ml-2; }
+.qv-ml-auto { @apply ml-auto; }

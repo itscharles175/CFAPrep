@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "description": "Ratchet baseline for direct LSAT sidecar fetches outside approved frontend API adapters.",
+  "ratchet": "Remove entries as callers migrate to typed/generated adapters. New entries fail scripts/check-direct-sidecar-fetches.mjs.",
+  "findings": []
+}

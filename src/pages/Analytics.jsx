@@ -1,7 +1,51 @@
 import { useEffect, useState } from 'react';
 import { Activity, BarChart3, Clock, Gauge, Layers, Target } from 'lucide-react';
-import { PageHeader, MetricCard } from '../components/ui/Primitives';
+// ANL-5 — migrated off bare recharts onto the shared, host-styled @visx viz
+// barrel (src/domains/shared/components/viz). K4-3 completed the migration of
+// the remaining host consumer (QuantModule.jsx) and dropped the recharts
+// dependency from package.json.
+import {
+  LineTrend,
+  BandTrend,
+  BarSeriesChart,
+  CalibrationScatter,
+} from '../domains/shared/components/viz';
+import { PageHeader, MetricCard, Panel, SegmentedControl } from '../components/ui/Primitives';
 import { getAnalyticsSummary } from '../lib/learning';
+import { db, forecastReviewLoad } from '../lib/progressStore';
+import { predictRetention } from '../lib/scheduler';
+import { SourceRail } from '../components/SourceContext';
+import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
+import { projectExamReadiness } from '../lib/examReadiness';
+// PSY-3 / PSY-5 (Wave 5) — explainable forecast attribution + ranked study
+// recommendations. Pure, deterministic, offline functions over the SAME
+// snapshots/results the Exam-Readiness Cockpit already loads; surfaced additively
+// below the cockpit so the projection explains WHY and WHAT to do next.
+import { attributeForecast } from '../lib/psychometrics/forecastAttribution';
+import { recommendFromAttribution } from '../lib/psychometrics/recommendations';
+import { getStorage } from '../lib/storage';
+import { getLsatActivity, getLsatCalibration } from '../lib/lsatAnalyticsBridge';
+import { getLsatCrossDomain } from '../lib/lsatCrossDomainBridge';
+
+// ANL-6 — cross-domain color coding. CFA reuses the host accent (blue, the
+// analytics default); LSAT gets a distinct violet so the two series read apart
+// in the heatmap legend, the calibration scatter, and the domain toggle.
+const DOMAIN_COLOR = {
+  cfa: 'var(--accent, #60a5fa)',
+  lsat: 'var(--quant, #c084fc)',
+};
+
+// CFA | LSAT | All toggle options (All = combined per-day activity / both
+// calibration series overlaid).
+const DOMAIN_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'cfa', label: 'CFA' },
+  { value: 'lsat', label: 'LSAT' },
+];
+
+// LSAT confidence bands map to a 0–100 x position for the calibration scatter,
+// parallel to the host's low/medium/high (sure≈high, likely≈medium, guess≈low).
+const LSAT_CONFIDENCE_X = { sure: 75, likely: 50, guess: 25 };
 
 function pct(value) {
   return Number.isFinite(value) ? `${value}%` : '-';
@@ -13,18 +57,535 @@ function seconds(value) {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+// ANL-1 — host study-minute estimate for the cross-domain merge. The host does
+// not record per-question time locally, so approximate each in-window question
+// attempt at ~1.5 min (a conservative mixed quiz/vignette pace) for a comparable
+// "study time" figure beside the LSAT sidecar's measured minutes.
+const HOST_MINUTES_PER_ATTEMPT = 1.5;
+function summaryStudyMinutes(rows, windowStart) {
+  let n = 0;
+  for (const row of rows || []) {
+    const at = row.createdAt ? Date.parse(row.createdAt) : NaN;
+    if (Number.isFinite(at) && at >= windowStart) n += 1;
+  }
+  return Math.round(n * HOST_MINUTES_PER_ATTEMPT);
+}
+
+// ANL-1 — current host streak: consecutive days (back from today, allowing
+// yesterday when today is empty) with at least one local question attempt.
+function hostStreakFromResults(rows) {
+  const days = new Set();
+  for (const row of rows || []) {
+    if (typeof row.createdAt === 'string') days.add(row.createdAt.slice(0, 10));
+  }
+  if (days.size === 0) return 0;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let cursor = today.getTime();
+  const key = (ms) => new Date(ms).toISOString().slice(0, 10);
+  // Allow the streak to count from yesterday if today has no activity yet.
+  if (!days.has(key(cursor)) && days.has(key(cursor - dayMs))) cursor -= dayMs;
+  let streak = 0;
+  while (days.has(key(cursor))) {
+    streak += 1;
+    cursor -= dayMs;
+  }
+  return streak;
+}
+
+// ---------------------------------------------------------------------------
+// StudyStreakHeatmap – Pillar 9
+// ---------------------------------------------------------------------------
+const CELL = 12; // px
+const GAP = 2; // px
+const COLS = 12; // weeks
+const ROWS = 7; // Mon=0 … Sun=6
+
+// Intensity ramp keyed to a base RGB triplet so each domain (CFA blue / LSAT
+// violet) shares the same 5-bucket scale while staying color-coded. `combined`
+// (the "All" view) blends to the CFA accent token so it matches the rest of the
+// analytics charts.
+const DOMAIN_RAMP = {
+  cfa: '96, 165, 250', // accent blue
+  lsat: '192, 132, 252', // quant violet
+};
+
+function cellColor(count, domain) {
+  if (count === 0) return 'var(--border)';
+  const rgb = DOMAIN_RAMP[domain] || DOMAIN_RAMP.cfa;
+  if (count <= 2) return `rgba(${rgb}, 0.25)`;
+  if (count <= 5) return `rgba(${rgb}, 0.50)`;
+  if (count <= 10) return `rgba(${rgb}, 0.75)`;
+  return `rgba(${rgb}, 1)`;
+}
+
+const LEGEND_LABELS = ['None', '1–2', '3–5', '6–10', '11+'];
+const LEGEND_SAMPLE_COUNT = [0, 1, 3, 6, 11];
+
+/**
+ * ANL-6 — unified study-streak heatmap. The parent (`Analytics`) owns the data
+ * + domain toggle: `cfaCounts` is the host Dexie per-day map; `lsatCounts` is
+ * the LSAT sidecar per-day map (empty when the sidecar is unreachable). `domain`
+ * is "cfa" | "lsat" | "all"; "all" sums both domains per day. Cell color is keyed
+ * to the active domain so CFA reads blue and LSAT reads violet; "all" uses the
+ * CFA accent ramp to match the surrounding analytics charts.
+ */
+function StudyStreakHeatmap({ cfaCounts, lsatCounts, domain, lsatReachable }) {
+  // null counts = still loading the host telemetry.
+  const loading = cfaCounts === null;
+  const cfa = cfaCounts || new Map();
+  const lsat = lsatCounts || new Map();
+  const rampDomain = domain === 'lsat' ? 'lsat' : 'cfa';
+
+  // Per-day count for a given date under the active domain selection.
+  function countFor(dateStr) {
+    const c = cfa.get(dateStr) || 0;
+    const l = lsat.get(dateStr) || 0;
+    if (domain === 'cfa') return c;
+    if (domain === 'lsat') return l;
+    return c + l; // all
+  }
+
+  // Compute "end of current week" so today lands in the last column, last applicable row.
+  // We define week as Mon–Sun. "End of this week" = the coming Sunday (or today if Sunday).
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayDow = today.getDay(); // 0=Sun … 6=Sat
+  // Days until Sunday from today
+  const daysUntilSunday = todayDow === 0 ? 0 : 7 - todayDow;
+  const sunday = new Date(today);
+  sunday.setDate(sunday.getDate() + daysUntilSunday);
+
+  // Grid: col 0 = oldest (leftmost), col COLS-1 = this week (rightmost)
+  // row 0 = Mon, row 6 = Sun
+  // Date for cell (col, row):
+  //   sunday - (COLS-1-col)*7 - (6-row) days
+  const cells = [];
+
+  for (let col = 0; col < COLS; col++) {
+    for (let row = 0; row < ROWS; row++) {
+      const daysBack = (COLS - 1 - col) * 7 + (6 - row);
+      const d = new Date(sunday);
+      d.setDate(sunday.getDate() - daysBack);
+      const dateStr = d.toISOString().slice(0, 10);
+      const isFuture = d.getTime() > today.getTime();
+      const count = (!isFuture && !loading) ? countFor(dateStr) : 0;
+      const cfaCount = (!isFuture && !loading) ? (cfa.get(dateStr) || 0) : 0;
+      const lsatCount = (!isFuture && !loading) ? (lsat.get(dateStr) || 0) : 0;
+      cells.push({ col, row, dateStr, count, cfaCount, lsatCount, isFuture });
+    }
+  }
+
+  // Total attempts in the 12-week window under the active domain.
+  let total12w = 0;
+  if (!loading) {
+    for (const { count, isFuture } of cells) {
+      if (!isFuture) total12w += count;
+    }
+  }
+
+  const svgWidth = COLS * (CELL + GAP) - GAP;
+  const svgHeight = ROWS * (CELL + GAP) - GAP;
+
+  const domainLabel = domain === 'cfa' ? 'CFA' : domain === 'lsat' ? 'LSAT' : 'all domains';
+
+  return (
+    <Panel
+      tone="analytics"
+      title="Study Streak Heatmap"
+      subtitle={
+        domain === 'all'
+          ? 'Combined daily activity across CFA + LSAT (CFA local telemetry + LSAT sidecar).'
+          : domain === 'lsat'
+            ? 'Daily LSAT activity from the LSAT sidecar.'
+            : 'Daily CFA / Quant / Excel activity from local telemetry.'
+      }
+    >
+      {loading ? (
+        <p className="muted-copy">Loading heatmap…</p>
+      ) : total12w === 0 ? (
+        <p className="muted-copy">
+          {domain === 'lsat' && !lsatReachable
+            ? 'LSAT sidecar unreachable — start StudyVault’s LSAT backend on :8100 to see LSAT activity.'
+            : `No ${domainLabel} attempts in the last 12 weeks — answer some questions to see your streak.`}
+        </p>
+      ) : (
+        <>
+          <p className="qv-fs-sm qv-text-secondary" style={{ marginBottom: 12 }}>
+            <strong>{total12w}</strong> question{total12w !== 1 ? 's' : ''} answered in the last 12 weeks ({domainLabel})
+          </p>
+          {domain !== 'cfa' && !lsatReachable && (
+            <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
+              LSAT sidecar unreachable — showing CFA activity only.
+            </p>
+          )}
+          <svg
+            width={svgWidth}
+            height={svgHeight}
+            style={{ display: 'block', overflow: 'visible' }}
+            aria-label={`Study streak heatmap (${domainLabel})`}
+          >
+            {cells.map(({ col, row, dateStr, count, cfaCount, lsatCount, isFuture }) => (
+              <rect
+                key={`${col}-${row}`}
+                x={col * (CELL + GAP)}
+                y={row * (CELL + GAP)}
+                width={CELL}
+                height={CELL}
+                rx={2}
+                ry={2}
+                fill={isFuture ? 'transparent' : cellColor(count, rampDomain)}
+                opacity={isFuture ? 0 : 1}
+              >
+                {!isFuture && (
+                  <title>
+                    {dateStr} · {count} attempt{count !== 1 ? 's' : ''}
+                    {domain === 'all' ? ` (CFA ${cfaCount} · LSAT ${lsatCount})` : ''}
+                  </title>
+                )}
+              </rect>
+            ))}
+          </svg>
+          {/* Legend */}
+          <div className="qv-row-2" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+            <span className="qv-text-muted" style={{ fontSize: 11 }}>Less</span>
+            {LEGEND_LABELS.map((label, i) => (
+              <div key={label} className="qv-row-1">
+                <div
+                  style={{
+                    width: CELL,
+                    height: CELL,
+                    borderRadius: 2,
+                    background: cellColor(LEGEND_SAMPLE_COUNT[i], rampDomain),
+                    border: '1px solid var(--border)',
+                    flexShrink: 0,
+                  }}
+                  title={label}
+                />
+                <span className="qv-text-muted" style={{ fontSize: 11 }}>{label}</span>
+              </div>
+            ))}
+            <span className="qv-text-muted" style={{ fontSize: 11 }}>More</span>
+          </div>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+/**
+ * ANL-1 — combined cross-domain study summary. `report` is the merged rollup
+ * from the LSAT sidecar's `/api/analytics/cross-domain` (study time, accuracy by
+ * domain, merged weakest types, combined streak, 30-day trend), with the host's
+ * own CFA/Quant numbers folded in server-side. `null` = still loading; an
+ * unreachable sidecar resolves to `reachable: false` and the panel degrades to a
+ * host-only message. The CFA / LSAT / All `domain` toggle filters the per-domain
+ * accuracy + weakest-types rows shown.
+ */
+function CrossDomainSummary({ report, domain, lsatReachable }) {
+  const subtitle =
+    'One bidirectional rollup: combined study time, accuracy by domain, the longest active streak, and the weakest types across CFA + LSAT (host numbers merged with the LSAT sidecar).';
+
+  if (report === null) {
+    return (
+      <Panel tone="analytics" title="Cross-Domain Summary" subtitle={subtitle}>
+        <p className="muted-copy">Loading cross-domain summary…</p>
+      </Panel>
+    );
+  }
+
+  const byDomain = report.accuracyByDomain || [];
+  const showLsatRow = domain !== 'cfa';
+  const showHostRow = domain !== 'lsat';
+  const rows = byDomain.filter(
+    (row) => (row.domain === 'lsat' ? showLsatRow : showHostRow),
+  );
+
+  // Weakest types filtered by the active domain toggle ("host" rows read as CFA).
+  const weakest = (report.weakestTypes || [])
+    .filter((row) => (domain === 'all' ? true : (domain === 'lsat' ? row.domain === 'lsat' : row.domain === 'host')))
+    .slice(0, 5);
+
+  const trend30 = (report.trend || []).map((row) => ({
+    day: row.date.slice(5),
+    questions: row.questions,
+  }));
+
+  const domainLabel = (d) => (d === 'lsat' ? 'LSAT' : 'CFA / Quant');
+
+  return (
+    <Panel tone="analytics" title="Cross-Domain Summary" subtitle={subtitle}>
+      {!report.reachable && !lsatReachable && (
+        <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
+          LSAT sidecar unreachable — start StudyVault’s LSAT backend on :8100 to combine LSAT analytics with your CFA telemetry.
+        </p>
+      )}
+      {!report.reachable && lsatReachable && (
+        <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
+          Showing the host (CFA / Quant) summary — the LSAT cross-domain rollup didn’t respond this time.
+        </p>
+      )}
+      <div className="qv-row-2 qv-mb-3" style={{ flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+        <span className="qv-chip qv-text-secondary">Combined study {seconds(report.studyMinutes * 60)}</span>
+        <span className="qv-chip qv-text-success">Longest active streak {report.combinedStreakDays}d</span>
+      </div>
+
+      <div className="analytics-table" style={{ marginBottom: 16 }}>
+        <div className="analytics-row analytics-head">
+          <span>Domain</span>
+          <span>Attempts</span>
+          <span>Accuracy</span>
+          <span>Streak</span>
+        </div>
+        {rows.length ? (
+          rows.map((row) => (
+            <div className="analytics-row" key={row.domain}>
+              <span style={{ color: DOMAIN_COLOR[row.domain === 'lsat' ? 'lsat' : 'cfa'] }}>
+                {domainLabel(row.domain)}
+              </span>
+              <strong>{row.attempts}</strong>
+              <span>{row.accuracy === null ? '-' : `${Math.round(row.accuracy * 100)}%`}</span>
+              <span>{row.streakDays}d</span>
+            </div>
+          ))
+        ) : (
+          <p className="muted-copy">No attempts in the selected domain yet.</p>
+        )}
+      </div>
+
+      {weakest.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <p className="qv-fs-sm qv-text-secondary" style={{ marginBottom: 8 }}>
+            Weakest types (lowest accuracy first)
+          </p>
+          <div className="qv-row-2" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            {weakest.map((row) => (
+              <span
+                key={`${row.domain}:${row.label}`}
+                className="qv-chip qv-text-muted"
+                title={`${domainLabel(row.domain)} · ${row.attempts} attempts`}
+                style={{ borderColor: DOMAIN_COLOR[row.domain === 'lsat' ? 'lsat' : 'cfa'] }}
+              >
+                {row.label}
+                {row.accuracy !== null && ` · ${Math.round(row.accuracy * 100)}%`}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {trend30.length > 0 && (
+        <LineTrend
+          data={trend30}
+          xKey="day"
+          height={180}
+          series={[
+            { dataKey: 'questions', name: 'Combined questions', color: 'var(--accent, #60a5fa)', area: true },
+          ]}
+        />
+      )}
+    </Panel>
+  );
+}
+
 export default function Analytics() {
+  const [activePathway] = useLevel3Pathway();
   const [summary, setSummary] = useState(null);
+  const [forecast, setForecast] = useState([]);
+  const [masteryTrend, setMasteryTrend] = useState([]);
+  const [retentionDecay, setRetentionDecay] = useState([]);
+  const [readiness, setReadiness] = useState(null);
+  // PSY-3 / PSY-5 — { drivers, recommendations } explaining the readiness gap.
+  // null = loading / not yet computed; populated from the same snapshots+results
+  // the cockpit projection uses.
+  const [forecastExplain, setForecastExplain] = useState(null);
+  // ANL-6 — cross-domain toggle + data. `domain` drives both the heatmap and
+  // the calibration scatter. CFA counts come from local Dexie telemetry; the
+  // LSAT activity/calibration come from the sidecar (best-effort, degrading).
+  const [domain, setDomain] = useState('all');
+  const [cfaHeatCounts, setCfaHeatCounts] = useState(null); // null = loading
+  const [lsatHeatCounts, setLsatHeatCounts] = useState(new Map());
+  const [lsatCalibration, setLsatCalibration] = useState([]);
+  const [lsatReachable, setLsatReachable] = useState(false);
+  // ANL-1 — combined cross-domain rollup pulled from the LSAT sidecar
+  // (`/api/analytics/cross-domain`), merged with the host's own CFA/Quant totals
+  // so the page shows one bidirectional study summary. Best-effort + degrading.
+  const [crossDomain, setCrossDomain] = useState(null);
 
   useEffect(() => {
     let active = true;
-    getAnalyticsSummary().then((nextSummary) => {
+    getAnalyticsSummary({ level3Pathway: activePathway }).then((nextSummary) => {
       if (active) setSummary(nextSummary);
     });
+    forecastReviewLoad(14, new Date(), { level3Pathway: activePathway })
+      .then((rows) => {
+        if (active) setForecast(rows || []);
+      })
+      .catch(() => undefined);
+
+    // Mastery-over-time: aggregate masterySnapshots by lastAttemptAt date
+    // (last 30 days), report daily mean score across topics touched that day.
+    db.masterySnapshots
+      .toArray()
+      .then((snapshots) => {
+        if (!active) return;
+        const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        const byDay = new Map();
+        for (const snap of snapshots) {
+          const at = Date.parse(snap.lastAttemptAt);
+          if (!Number.isFinite(at) || at < cutoff) continue;
+          const day = snap.lastAttemptAt.slice(0, 10);
+          const bucket = byDay.get(day) || { sum: 0, count: 0 };
+          bucket.sum += snap.score;
+          bucket.count += 1;
+          byDay.set(day, bucket);
+        }
+        const trend = [...byDay.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([day, { sum, count }]) => ({ day: day.slice(5), score: Math.round(sum / count) }));
+        setMasteryTrend(trend);
+      })
+      .catch(() => undefined);
+
+    // 30-day retention decay: average projected retrievability across all
+    // FSRS review items at today + d days (d in 0..30). Visualizes how the
+    // current memory state decays under the FSRS model if nothing is reviewed.
+    db.reviewItems
+      .toArray()
+      .then((items) => {
+        if (!active || !items.length) {
+          setRetentionDecay([]);
+          return;
+        }
+        const today = new Date();
+        const points = [];
+        for (let d = 0; d <= 30; d += 1) {
+          const target = new Date(today.getTime() + d * 86400000);
+          const sum = items.reduce((acc, item) => acc + predictRetention(item, target), 0);
+          points.push({ day: d === 0 ? 'Today' : `+${d}d`, retention: Math.round((sum / items.length) * 100) });
+        }
+        setRetentionDecay(points);
+      })
+      .catch(() => undefined);
+
+    // CFA streak heatmap: build a YYYY-MM-DD → attempt-count map from local
+    // question results. Owned by the parent (ANL-6) so the domain toggle can
+    // combine it with the LSAT sidecar's per-day activity.
+    db.questionResults
+      .toArray()
+      .then((rows) => {
+        if (!active) return;
+        const counts = new Map();
+        for (const row of rows) {
+          if (!row.createdAt) continue;
+          const day = row.createdAt.slice(0, 10);
+          counts.set(day, (counts.get(day) || 0) + 1);
+        }
+        setCfaHeatCounts(counts);
+      })
+      .catch(() => {
+        if (active) setCfaHeatCounts(new Map());
+      });
+
+    // Exam-readiness cockpit: projected mastery curve with confidence band,
+    // anchored on the user's target exam date (System Health → Exam Date).
+    Promise.all([
+      db.masterySnapshots.toArray(),
+      db.questionResults.toArray(),
+      getStorage().settings.get('exam-date'),
+    ])
+      .then(([snapshots, results, examRow]) => {
+        if (!active) return;
+        const examDate = typeof examRow?.value === 'string' ? examRow.value : null;
+        const projection = projectExamReadiness({ snapshots, results, examDate });
+        setReadiness(projection);
+        // PSY-3 / PSY-5 — decompose the gap into ranked drivers and emit
+        // explainable, impact-ranked recommendations from the SAME inputs. Pure
+        // + offline; wrapped defensively so a malformed row never blanks the page.
+        try {
+          const attribution = attributeForecast({ snapshots, results, examDate });
+          setForecastExplain({
+            drivers: attribution.drivers,
+            recommendations: recommendFromAttribution(attribution, { limit: 4 }),
+          });
+        } catch {
+          setForecastExplain({ drivers: [], recommendations: [] });
+        }
+      })
+      .catch(() => undefined);
+
+    // ANL-6 — LSAT sidecar activity + calibration (best-effort; the bridge never
+    // throws, returning `reachable: false` + empty data when the sidecar is down,
+    // so the page degrades to a host-only view). Treat reachability as the OR of
+    // the two probes so either signal lights the cross-domain views.
+    getLsatActivity(120)
+      .then((report) => {
+        if (!active) return;
+        const counts = new Map();
+        for (const row of report.days) {
+          if (!row.date) continue;
+          counts.set(row.date, (counts.get(row.date) || 0) + (row.questions || 0));
+        }
+        setLsatHeatCounts(counts);
+        if (report.reachable) setLsatReachable(true);
+      })
+      .catch(() => undefined);
+    getLsatCalibration()
+      .then((report) => {
+        if (!active) return;
+        setLsatCalibration(report.bands || []);
+        if (report.reachable) setLsatReachable(true);
+      })
+      .catch(() => undefined);
+
+    // ANL-1 — combined cross-domain rollup. Derive the host (CFA/Quant/Excel)
+    // numbers over the same 30-day window from local Dexie telemetry, then pull
+    // the LSAT sidecar's `/api/analytics/cross-domain` rollup WITH those numbers
+    // so the backend returns one merged study summary (study time, accuracy by
+    // domain, merged weakest types, combined streak). Best-effort + degrading:
+    // the bridge resolves to `{ reachable: false, ... }` on any failure.
+    db.questionResults
+      .toArray()
+      .then((rows) => {
+        const windowStart = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        let hostAttempts = 0;
+        let hostCorrect = 0;
+        for (const row of rows || []) {
+          const at = row.createdAt ? Date.parse(row.createdAt) : NaN;
+          if (!Number.isFinite(at) || at < windowStart) continue;
+          hostAttempts += 1;
+          if (row.correct) hostCorrect += 1;
+        }
+        // Approximate host study minutes in the window from total study time
+        // (the host doesn't track per-question time locally). Streak comes from
+        // distinct active CFA days in the trailing run.
+        const hostStudyMinutes = summaryStudyMinutes(rows, windowStart);
+        return getLsatCrossDomain({
+          days: 30,
+          hostAttempts,
+          hostCorrect,
+          hostStudyMinutes,
+          hostStreakDays: hostStreakFromResults(rows),
+        });
+      })
+      .then((report) => {
+        if (!active || !report) return;
+        setCrossDomain(report);
+        if (report.reachable) setLsatReachable(true);
+      })
+      .catch(() => undefined);
+
     return () => {
       active = false;
     };
-  }, []);
+  }, [activePathway]);
+
+  const forecastChartData = forecast.map((row) => ({
+    day: row.date.slice(5), // MM-DD for compactness
+    due: row.count,
+    atRisk: row.atRiskCount,
+  }));
 
   const topWeakTopics = [...(summary?.byTopic || [])].sort((a, b) => a.accuracy - b.accuracy).slice(0, 8);
 
@@ -34,18 +595,28 @@ export default function Analytics() {
         badge="ANALYTICS"
         title="Learning Analytics"
         subtitle="Local-only performance telemetry by topic, difficulty, error type, confidence, and recent trend."
+        actions={
+          <SegmentedControl
+            label="Analytics domain"
+            options={DOMAIN_OPTIONS}
+            value={domain}
+            onChange={setDomain}
+            density="compact"
+          />
+        }
       />
 
-      <div className="grid-4" style={{ marginBottom: 'var(--space-6)' }}>
+      <div className="grid-4 page-metrics">
         <MetricCard label="Questions" value={summary?.totals.questionsAnswered ?? 0} detail="Recorded answer rows" icon={Target} />
         <MetricCard label="Sessions" value={summary?.totals.sessions ?? 0} detail={seconds(summary?.totals.studyTimeSeconds)} icon={Clock} tone="success" />
         <MetricCard label="Mocks" value={summary?.totals.mockAttempts ?? 0} detail={`${summary?.totals.vignetteAttempts ?? 0} vignettes`} icon={BarChart3} tone="warning" />
         <MetricCard label="Artifacts" value={summary?.totals.artifacts ?? 0} detail="Calculator/lab outputs" icon={Layers} />
       </div>
 
-      <div className="grid-2" style={{ alignItems: 'start', marginBottom: 'var(--space-6)' }}>
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Readiness By Level</h3>
+      <CrossDomainSummary report={crossDomain} domain={domain} lsatReachable={lsatReachable} />
+
+      <div className="grid-2 analytics-section-grid">
+        <Panel tone="analytics" title="Readiness By Level">
           <div className="analytics-table">
             {(summary?.byLevel || []).map((row) => (
               <div className="analytics-row" key={row.level}>
@@ -54,11 +625,10 @@ export default function Analytics() {
                 <span>{pct(row.accuracy)}</span>
               </div>
             ))}
-            {!summary?.byLevel?.length && <p style={{ color: 'var(--text-secondary)' }}>No level-specific attempts yet.</p>}
+            {!summary?.byLevel?.length && <p className="muted-copy">No level-specific attempts yet.</p>}
           </div>
-        </div>
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Item-Type Performance</h3>
+        </Panel>
+        <Panel tone="analytics" title="Item-Type Performance">
           <div className="analytics-table">
             {(summary?.byItemType || []).map((row) => (
               <div className="analytics-row" key={row.itemType}>
@@ -67,14 +637,292 @@ export default function Analytics() {
                 <span>{pct(row.accuracy)}</span>
               </div>
             ))}
-            {!summary?.byItemType?.length && <p style={{ color: 'var(--text-secondary)' }}>Quiz, vignette, mock, and skill-lab attempts will appear here.</p>}
+            {!summary?.byItemType?.length && <p className="muted-copy">Quiz, vignette, mock, and skill-lab attempts will appear here.</p>}
           </div>
-        </div>
+        </Panel>
       </div>
 
-      <div className="grid-2" style={{ alignItems: 'start' }}>
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Topic Readiness Signals</h3>
+      <Panel
+        tone="analytics"
+        title="Exam-Readiness Cockpit"
+        subtitle={
+          readiness?.examDate
+            ? `Projected mastery from today (${readiness.startDate}) to your exam on ${readiness.examDate} (${readiness.daysUntilExam} days) — 95% confidence band based on your trailing-14-day attempt rate.`
+            : 'Projected mastery for the next 90 days. Set an exam date in System Health → Exam Date to anchor the projection.'
+        }
+      >
+        {!readiness || readiness.points.length === 0 ? (
+          <p className="muted-copy">No mastery snapshots yet — answer a few quiz questions to populate the projection.</p>
+        ) : (
+          <>
+            <div className="qv-row-2 qv-mb-3" style={{ flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+              <span className="qv-chip qv-text-secondary">Current {readiness.currentMastery}%</span>
+              {readiness.projectedOnExamDate !== null && (
+                <span className="qv-chip qv-text-success">
+                  Projected{readiness.examDate ? ' on exam' : ' in 90d'} {readiness.projectedOnExamDate}%
+                  {readiness.projectedBand && ` (±${Math.round((readiness.projectedBand.upper - readiness.projectedBand.lower) / 2)}%)`}
+                </span>
+              )}
+              <span className="qv-chip qv-text-muted">~{readiness.averageDailyAttempts} attempts/day</span>
+              <span className="qv-chip qv-text-muted">Accuracy {Math.round(readiness.averageAccuracy * 100)}%</span>
+              <span className="qv-chip qv-text-muted">Per-attempt lift +{readiness.perAttemptLift} pts</span>
+            </div>
+            <BandTrend
+              data={readiness.points}
+              xKey="date"
+              lineKey="projected"
+              upperKey="upper"
+              lowerKey="lower"
+              yDomain={[0, 100]}
+              referenceX={readiness.examDate || null}
+              referenceLabel="Exam"
+              height={280}
+            />
+          </>
+        )}
+      </Panel>
+
+      {/* PSY-3 / PSY-5 — why the forecast lands where it does + what to do next.
+          Renders only when there is a measurable gap with at least one driver, so
+          a fully-ready (or empty) profile doesn't show a noisy empty panel. */}
+      {forecastExplain && forecastExplain.drivers.length > 0 && (
+        <Panel
+          tone="analytics"
+          title="Why This Forecast — Drivers & Next Steps"
+          subtitle="The projected-readiness gap, decomposed into ranked drivers (PSY-3), with explainable, impact-ranked study recommendations (PSY-5). All computed locally from your mastery snapshots and attempt history."
+        >
+          <div className="analytics-table" style={{ marginBottom: 16 }}>
+            <div className="analytics-row analytics-head">
+              <span>Driver</span>
+              <span>Impact (pts)</span>
+              <span>Share</span>
+            </div>
+            {forecastExplain.drivers.slice(0, 5).map((d) => (
+              <div className="analytics-row" key={`${d.kind}:${d.label}`}>
+                <span>{d.label}</span>
+                <strong style={{ color: d.contribution >= 0 ? 'var(--warning, #f59e0b)' : 'var(--success, #34d399)' }}>
+                  {d.contribution >= 0 ? '+' : ''}{d.contribution}
+                </strong>
+                <span>{Math.round(d.share * 100)}%</span>
+              </div>
+            ))}
+          </div>
+
+          {forecastExplain.recommendations.length > 0 && (
+            <div>
+              <p className="qv-fs-sm qv-text-secondary" style={{ marginBottom: 8 }}>
+                Recommended next steps (highest expected impact first)
+              </p>
+              <div className="qv-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                {forecastExplain.recommendations.map((rec) => (
+                  <div
+                    key={`${rec.action}:${rec.title}`}
+                    style={{
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      padding: 'var(--space-3, 12px)',
+                    }}
+                  >
+                    <div className="qv-row-2" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                      <strong>{rec.title}</strong>
+                      <span className="qv-chip qv-text-success">+{rec.expectedImpact} pts</span>
+                    </div>
+                    <p className="qv-fs-sm qv-text-muted" style={{ margin: '6px 0 0' }}>{rec.whyThis}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Panel>
+      )}
+
+      <Panel
+        tone="analytics"
+        title="Mastery Over Time"
+        subtitle="Average mastery score across topics touched on each day (last 30 days)."
+      >
+        {masteryTrend.length === 0 ? (
+          <p className="muted-copy">No mastery snapshots yet — answer a few quiz questions to populate the trend.</p>
+        ) : (
+          <LineTrend
+            data={masteryTrend}
+            xKey="day"
+            yDomain={[0, 100]}
+            yTickFormat={(v) => `${v}%`}
+            height={240}
+            series={[{ dataKey: 'score', name: 'Mastery %', color: 'var(--success, #34d399)', dots: true }]}
+          />
+        )}
+      </Panel>
+
+      <Panel
+        tone="analytics"
+        title="30-Day Retention Decay"
+        subtitle="If you reviewed nothing more, the FSRS model projects this average retention curve across your active items."
+      >
+        {retentionDecay.length === 0 ? (
+          <p className="muted-copy">No active review items yet — answer some quiz questions to populate the FSRS state.</p>
+        ) : (
+          <LineTrend
+            data={retentionDecay}
+            xKey="day"
+            yDomain={[0, 100]}
+            yTickFormat={(v) => `${v}%`}
+            maxXTicks={6}
+            height={240}
+            series={[{ dataKey: 'retention', name: 'Avg retention %', color: 'var(--warning, #f59e0b)', dots: true }]}
+          />
+        )}
+      </Panel>
+
+      <Panel
+        tone="analytics"
+        title="14-Day Review Load Forecast"
+        subtitle="Items the FSRS scheduler projects as due over the next two weeks, with at-risk reviews (low projected retention) called out."
+      >
+        {forecastChartData.length === 0 ? (
+          <p className="muted-copy">No upcoming reviews yet — record some quiz attempts to populate the scheduler.</p>
+        ) : (
+          <BarSeriesChart
+            data={forecastChartData.map((row) => ({ name: row.day, due: row.due, atRisk: row.atRisk }))}
+            layout="vertical"
+            height={240}
+            series={[
+              { dataKey: 'due', name: 'Due', color: 'var(--accent, #60a5fa)' },
+              { dataKey: 'atRisk', name: 'At risk', color: 'var(--warning, #f59e0b)' },
+            ]}
+          />
+        )}
+      </Panel>
+
+      {/* Confidence vs Accuracy Calibration scatter (ANL-6: CFA + LSAT overlay) */}
+      {(() => {
+        const CONFIDENCE_X = { low: 25, medium: 50, high: 75 };
+        // CFA: host confidence buckets (low/medium/high), accuracy already 0–100.
+        // audit (LOW) — skip zero-attempt buckets like the LSAT series below;
+        // confidenceCalibrationSummary always returns all three bands, and an
+        // unused band plots at (conf%, 0%) — a phantom point far below the 1:1
+        // line that reads as "severely overconfident" when there's simply no data.
+        const cfaData = (summary?.confidenceCalibration || [])
+          .filter((row) => (row.attempts ?? 0) > 0)
+          .map((row) => ({
+            label: `CFA · ${row.confidence}`,
+            x: CONFIDENCE_X[row.confidence] ?? 50,
+            y: row.accuracy ?? 0,
+            attempts: row.attempts ?? 0,
+          }));
+        // LSAT: sidecar confidence bands (sure/likely/guess). Accuracy is 0–1 here,
+        // so scale to 0–100; skip empty bands (null accuracy). Color-coded violet.
+        const lsatData = lsatCalibration
+          .filter((row) => row.accuracy !== null && row.attempts > 0)
+          .map((row) => ({
+            label: `LSAT · ${row.confidence}`,
+            x: LSAT_CONFIDENCE_X[row.confidence] ?? 50,
+            y: Math.round((row.accuracy ?? 0) * 100),
+            attempts: row.attempts ?? 0,
+          }));
+        const showCfa = domain !== 'lsat';
+        const showLsat = domain !== 'cfa';
+        const hasCfa = showCfa && cfaData.length > 0;
+        const hasLsat = showLsat && lsatData.length > 0;
+        const scatterSeries = [
+          hasCfa && { name: 'CFA confidence bucket', color: DOMAIN_COLOR.cfa, points: cfaData },
+          hasLsat && { name: 'LSAT confidence band', color: DOMAIN_COLOR.lsat, points: lsatData },
+        ].filter(Boolean);
+        return (
+          <Panel
+            tone="analytics"
+            title="Confidence vs Accuracy Calibration"
+            subtitle={
+              domain === 'all'
+                ? 'Each marker is a confidence bucket — CFA (blue) vs LSAT (violet). Above the 1:1 diagonal = underconfident; below = overconfident.'
+                : domain === 'lsat'
+                  ? 'Each marker is an LSAT confidence band (sure/likely/guess). Perfect calibration is a 1:1 diagonal.'
+                  : 'Each marker is a confidence bucket; perfect calibration is a 1:1 diagonal.'
+            }
+          >
+            {!hasCfa && !hasLsat ? (
+              <p className="muted-copy">
+                {domain === 'lsat' && !lsatReachable
+                  ? 'LSAT sidecar unreachable — start StudyVault’s LSAT backend on :8100 to see LSAT calibration.'
+                  : 'No confidence-labeled attempts yet — answer questions with a confidence rating to populate this chart.'}
+              </p>
+            ) : (
+              <>
+                {showLsat && !lsatReachable && (
+                  <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
+                    LSAT sidecar unreachable — showing CFA calibration only.
+                  </p>
+                )}
+                <CalibrationScatter
+                  series={scatterSeries}
+                  xLabel="Confidence %"
+                  yLabel="Accuracy %"
+                  height={240}
+                  ariaLabel={`Confidence calibration (${domain === 'cfa' ? 'CFA' : domain === 'lsat' ? 'LSAT' : 'all domains'}): each marker plots confidence % against accuracy %, with a 1:1 diagonal marking perfect calibration.`}
+                />
+              </>
+            )}
+          </Panel>
+        );
+      })()}
+
+      {/* Accuracy by Item Type horizontal bar */}
+      {(() => {
+        const itemTypeData = (summary?.byItemType || []).map((row) => ({
+          name: row.itemType,
+          accuracy: row.accuracy ?? 0,
+        }));
+        return (
+          <Panel
+            tone="analytics"
+            title="Accuracy by Item Type"
+            subtitle="Where your accuracy is strongest vs weakest across question/vignette/mock/skill-lab attempts."
+          >
+            {itemTypeData.length === 0 ? (
+              <p className="muted-copy">No item-type data yet — quiz, vignette, mock, and skill-lab attempts will appear here.</p>
+            ) : (
+              <BarSeriesChart
+                data={itemTypeData}
+                layout="horizontal"
+                yDomain={[0, 100]}
+                valueTickFormat={(v) => `${v}%`}
+                categoryWidth={96}
+                height={240}
+                series={[{ dataKey: 'accuracy', name: 'Accuracy %', color: 'var(--success, #34d399)' }]}
+              />
+            )}
+          </Panel>
+        );
+      })()}
+
+      <StudyStreakHeatmap
+        cfaCounts={cfaHeatCounts}
+        lsatCounts={lsatHeatCounts}
+        domain={domain}
+        lsatReachable={lsatReachable}
+      />
+
+      {topWeakTopics[0] && (
+        <SourceRail
+          compact
+          title="Weakest Analytics Source Context"
+          subtitle="Private snippets mapped to the lowest-accuracy topic in your local telemetry."
+          target={{
+            kind: 'review-item',
+            domain: 'cfa',
+            level: topWeakTopics[0].level || 'level1',
+            topicId: topWeakTopics[0].topic?.split(':').at(-1) || topWeakTopics[0].topic,
+            pathway: topWeakTopics[0].level === 'level3' || topWeakTopics[0].topic?.startsWith('level3:') ? activePathway : undefined,
+            title: topWeakTopics[0].topic,
+            keywords: [topWeakTopics[0].recentTrend, `${topWeakTopics[0].accuracy} accuracy`],
+            route: '/analytics',
+          }}
+        />
+      )}
+
+      <div className="grid-2 analytics-section-grid">
+        <Panel tone="analytics" title="Topic Readiness Signals">
           <div className="analytics-table">
             <div className="analytics-row analytics-head">
               <span>Topic</span>
@@ -92,13 +940,12 @@ export default function Analytics() {
                 </div>
               ))
             ) : (
-              <p style={{ color: 'var(--text-secondary)' }}>Take quizzes or mock sections to populate topic analytics.</p>
+              <p className="muted-copy">Take quizzes or mock sections to populate topic analytics.</p>
             )}
           </div>
-        </div>
+        </Panel>
 
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Confidence Calibration</h3>
+        <Panel tone="analytics" title="Confidence Calibration">
           <div className="analytics-table">
             <div className="analytics-row analytics-head">
               <span>Confidence</span>
@@ -110,28 +957,32 @@ export default function Analytics() {
               <div className="analytics-row" key={row.confidence}>
                 <span>{row.confidence}</span>
                 <strong>{row.attempts}</strong>
-                <span>{pct(row.accuracy)}</span>
-                <span>{row.calibrationGap > 0 ? '+' : ''}{row.calibrationGap}</span>
+                {/* audit LOW — a never-used confidence band has attempts=0 but
+                    accuracyFor([])=0 and calibrationGap=+100, fabricating an
+                    alarming "0% / +100 overconfident" row from absent data. Dash
+                    the derived stats when there are no attempts. */}
+                <span>{row.attempts > 0 ? pct(row.accuracy) : '—'}</span>
+                <span>{row.attempts > 0 ? `${row.calibrationGap > 0 ? '+' : ''}${row.calibrationGap}` : '—'}</span>
               </div>
             ))}
           </div>
-        </div>
+        </Panel>
 
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Difficulty Mix</h3>
+        <Panel tone="analytics" title="Difficulty Mix">
           <div className="analytics-table">
             {(summary?.byDifficulty || []).map((row) => (
               <div className="analytics-row" key={row.difficulty}>
                 <span>{row.difficulty}</span>
                 <strong>{row.attempts}</strong>
-                <span>{pct(row.accuracy)}</span>
+                {/* audit LOW — dash accuracy for an unused difficulty tier rather
+                    than show a fabricated 0%. */}
+                <span>{row.attempts > 0 ? pct(row.accuracy) : '—'}</span>
               </div>
             ))}
           </div>
-        </div>
+        </Panel>
 
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Error Types</h3>
+        <Panel tone="analytics" title="Error Types">
           <div className="analytics-table">
             {(summary?.byErrorCategory || []).map((row) => (
               <div className="analytics-row" key={row.errorCategory}>
@@ -140,12 +991,11 @@ export default function Analytics() {
               </div>
             ))}
           </div>
-        </div>
+        </Panel>
       </div>
 
-      <div className="grid-2" style={{ alignItems: 'start', marginTop: 'var(--space-6)' }}>
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Level III Rubric Bands</h3>
+      <div className="grid-2 analytics-section-grid">
+        <Panel tone="analytics" title="Level III Rubric Bands">
           <div className="analytics-table">
             {(summary?.essayRubrics || []).map((row) => (
               <div className="analytics-row" key={row.criterion}>
@@ -155,24 +1005,49 @@ export default function Analytics() {
               </div>
             ))}
           </div>
-        </div>
-        <div className="glass-card no-hover">
-          <h3 style={{ marginTop: 0 }}>Skill-Lab Feedback</h3>
+        </Panel>
+        <Panel tone="analytics" title="Skill-Lab Feedback">
           <div className="analytics-table">
             {(summary?.skillLabs || []).slice(0, 8).map((row) => (
               <div className="analytics-row" key={row.labId}>
                 <span>{row.labId}</span>
                 <strong>{row.attempts}</strong>
-                <span>{row.latestScore ?? '-'}</span>
+                <span>{row.latestScore ?? '-'} / {row.impact ?? 0}</span>
               </div>
             ))}
-            {!summary?.skillLabs?.length && <p style={{ color: 'var(--text-secondary)' }}>Calculator, Quant, and Excel drills will feed this panel.</p>}
+            {!summary?.skillLabs?.length && <p className="muted-copy">Calculator, Quant, and Excel drills will feed this panel.</p>}
           </div>
-        </div>
+        </Panel>
       </div>
 
-      <div className="glass-card no-hover" style={{ marginTop: 'var(--space-6)' }}>
-        <h3 style={{ marginTop: 0 }}><Activity size={18} /> Rolling Trend</h3>
+      <div className="grid-2 analytics-section-grid">
+        <Panel tone="analytics" title="Constructed-Response Weaknesses">
+          <div className="analytics-table">
+            {(summary?.constructedResponseWeaknesses || []).slice(0, 6).map((row) => (
+              <div className="analytics-row" key={row.criterion}>
+                <span>{row.criterion}</span>
+                <strong>{pct(row.averagePct)}</strong>
+                <span>{row.impact}</span>
+              </div>
+            ))}
+            {!summary?.constructedResponseWeaknesses?.length && <p className="muted-copy">Rubric weakness signals appear after Level III responses.</p>}
+          </div>
+        </Panel>
+        <Panel tone="analytics" title="Objective Impact">
+          <div className="analytics-table">
+            {(summary?.objectiveImpacts || []).slice(0, 8).map((row) => (
+              <div className="analytics-row" key={`${row.sourceType}:${row.objectiveId}`}>
+                <span>{row.objectiveId}</span>
+                <strong>{row.sourceType}</strong>
+                <span>{row.impact}</span>
+              </div>
+            ))}
+            {!summary?.objectiveImpacts?.length && <p className="muted-copy">Calculator and lab artifacts with objective metadata will appear here.</p>}
+          </div>
+        </Panel>
+      </div>
+
+      <Panel tone="analytics" title="Rolling Trend" icon={Activity} className="analytics-wide-panel">
         <div className="forecast-strip">
           {(summary?.rollingTrend || []).map((day) => (
             <div key={day.date}>
@@ -181,16 +1056,15 @@ export default function Analytics() {
               <small>{day.attempts} attempts</small>
             </div>
           ))}
-          {!summary?.rollingTrend?.length && <p style={{ color: 'var(--text-secondary)' }}>No trend history yet.</p>}
+          {!summary?.rollingTrend?.length && <p className="muted-copy">No trend history yet.</p>}
         </div>
-      </div>
+      </Panel>
 
-      <div className="glass-card no-hover" style={{ marginTop: 'var(--space-6)' }}>
-        <h3 style={{ marginTop: 0 }}><Gauge size={18} /> Reading The Signals</h3>
-        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+      <Panel tone="analytics" title="Reading The Signals" icon={Gauge} className="analytics-wide-panel">
+        <p className="muted-copy">
           Positive calibration gaps mean confidence is running ahead of accuracy. Formula dependency and time-pressure errors help identify whether to drill calculations, reread concepts, or slow down on mock review.
         </p>
-      </div>
+      </Panel>
     </div>
   );
 }

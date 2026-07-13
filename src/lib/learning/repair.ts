@@ -1,2 +1,1 @@
-export { rebuildLearningIndexes, repairVaultData } from '../progressStore';
-
+export { getVaultHealthReport, previewVaultRepair, rebuildLearningIndexes, repairVaultData } from '../progressStore';

@@ -1,0 +1,48 @@
+name: Mutation floor
+
+on:
+  schedule:
+    - cron: '17 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  mutation:
+    name: Host + backend mutation floor
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Node dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Provision LSAT backend venv
+        run: |
+          python -m venv .venv-lsat
+          .venv-lsat/bin/python -m pip install --upgrade pip wheel
+          .venv-lsat/bin/python -m pip install "services/lsat-backend"
+
+      - name: Host mutation score gate
+        run: npm run mutation:host
+
+      - name: Backend mutation score gate
+        run: npm run mutation:backend
+
+      - name: Upload mutation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-reports
+          path: |
+            dist/reports/mutation-*.json
+            dist/reports/mutation-*.md

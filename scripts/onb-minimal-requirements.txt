@@ -1,0 +1,27 @@
+# open-notebook sidecar — build dependencies
+# ---------------------------------------------------------------------------
+# This file is NO LONGER the source of truth for the bundled backend's deps.
+#
+# `npm run build:onb-binary` (default `--venv` mode) installs open-notebook
+# directly from its own checkout:
+#
+#     python -m pip install "spike/open-notebook"
+#
+# That pulls the authoritative dependency set declared in
+# spike/open-notebook/pyproject.toml (langchain >=1.2, langgraph >=1.0.5,
+# surrealdb >=1.0.4, content-core, esperanto, podcast-creator, numpy, …), so
+# the bundle can never drift from what the running backend actually imports.
+# A hand-maintained pin list here would silently rot — which it did: it
+# pinned the langchain 0.3.x line while the checked-out open-notebook needs
+# langchain 1.x, and it wrongly treated langchain-anthropic / -google-genai /
+# -groq / -mistralai as optional when pyproject lists them as hard deps.
+#
+# Build (Windows PowerShell):
+#     npm run build:onb-binary                 # isolated .venv-onb, reproducible
+#     npm run build:onb-binary -- --ambient    # use the Python already on PATH
+#
+# Only add lines below if you need to PIN or OVERRIDE a transitive dep beyond
+# what open-notebook's pyproject specifies (e.g. force a wheel that PyInstaller
+# can bundle). Leave empty otherwise.
+
+# (intentionally empty — deps come from open-notebook's pyproject)

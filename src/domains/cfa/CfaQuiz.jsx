@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { getCfaTopicContent, getCfaTopicKey } from './cfaLevels';
+import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
+import { useLevel3Pathway } from './useLevel3Pathway';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -15,7 +16,12 @@ import {
   ClipboardList,
 } from 'lucide-react';
 import { recordQuizAttempt, toggleBookmark } from '../../lib/learning';
+import { explainWrongAnswer, getLlmSettings } from '../../lib/localLlm';
 import { useProgressSummary } from '../../hooks/useProgress';
+import { CommandHint, EmptyPanel, ProgressRail, QuestionStage, SegmentedControl, StatusBadge, Surface } from '../../components/ui/Primitives';
+import { SourceRail } from '../../components/SourceContext';
+import AccessibleQuestionRunner from '../../components/a11y/AccessibleQuestionRunner';
+import HandsFreeController from '../../components/a11y/HandsFreeController';
 
 function currentTimestampMs() {
   return Date.now();
@@ -93,11 +99,15 @@ function nextDefaultError(selected, correct) {
 
 export default function CfaQuiz() {
   const { level, topic } = useParams();
+  const [activePathway] = useLevel3Pathway();
   const [searchParams, setSearchParams] = useSearchParams();
   const summary = useProgressSummary();
   const mode = searchParams.get('mode') || 'topic-drill';
   const objectiveParam = searchParams.get('objective');
-  const topicData = useMemo(() => getCfaTopicContent(level, topic), [level, topic]);
+  const requestKey = `${level}:${topic}:${level === 'level3' ? activePathway : 'all'}`;
+  const [contentState, setContentState] = useState({ key: null, data: null });
+  const topicData = contentState.key === requestKey ? contentState.data : null;
+  const loading = contentState.key !== requestKey;
   const topicKey = useMemo(() => getCfaTopicKey(level, topic), [level, topic]);
   const baseQuestions = useMemo(() => topicData?.questions || [], [topicData]);
   const objectives = useMemo(() => topicData?.learningObjectives || [], [topicData]);
@@ -116,6 +126,10 @@ export default function CfaQuiz() {
   const [finished, setFinished] = useState(false);
   const [confidence, setConfidence] = useState('medium');
   const [errorCategory, setErrorCategory] = useState('none');
+  // Map of question.id -> { state: 'loading'|'done'|'error', text?: string, error?: string }
+  const [aiExplain, setAiExplain] = useState({});
+  // A11Y-2: imperative handle to the accessible runner (used for focus control).
+  const runnerRef = useRef(null);
 
   const safeCurrent = Math.min(current, Math.max(questions.length - 1, 0));
   const q = questions[safeCurrent];
@@ -123,6 +137,20 @@ export default function CfaQuiz() {
   const modeLabel = quizModes.find((item) => item.id === mode)?.label || 'Topic Drill';
 
   const score = useMemo(() => answers.filter((answer) => answer.correct).length, [answers]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCfaTopicContent(level, topic, level === 'level3' ? { pathway: activePathway } : {})
+      .then((content) => {
+        if (!cancelled) setContentState({ key: requestKey, data: content });
+      })
+      .catch(() => {
+        if (!cancelled) setContentState({ key: requestKey, data: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activePathway, level, requestKey, topic]);
 
   function resetQuiz() {
     setCurrent(0);
@@ -152,6 +180,29 @@ export default function CfaQuiz() {
     setConfidence(selected === q.correct ? 'high' : 'low');
     setErrorCategory(nextDefaultError(selected, q.correct));
   }
+
+  useEffect(() => {
+    function handleKeyboard(event) {
+      if (event.defaultPrevented) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'A'].includes(target.tagName)) return;
+      if (!q || finished) return;
+      const key = event.key.toLowerCase();
+      const optionIndex = letters.findIndex((letter) => letter.toLowerCase() === key);
+      if (!confirmed && optionIndex >= 0 && optionIndex < q.options.length) {
+        event.preventDefault();
+        handleSelect(optionIndex);
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (!confirmed) handleConfirm();
+        else handleNext();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  });
 
   function buildAnswer() {
     const objective = objectiveById.get(q.learningObjective);
@@ -202,6 +253,35 @@ export default function CfaQuiz() {
     }
   }
 
+  async function handleExplainWithAi(question, answer) {
+    const id = question.id;
+    setAiExplain((map) => ({ ...map, [id]: { state: 'loading' } }));
+    try {
+      const settings = await getLlmSettings();
+      if (!settings.enabled) {
+        setAiExplain((map) => ({
+          ...map,
+          [id]: { state: 'error', error: 'Enable a local model in System Health → Local AI first.' },
+        }));
+        return;
+      }
+      const text = await explainWrongAnswer({
+        settings,
+        question: question.question,
+        options: question.options,
+        correctIndex: question.correct,
+        userIndex: answer.selected,
+        baseExplanation: question.explanation,
+      });
+      setAiExplain((map) => ({ ...map, [id]: { state: 'done', text } }));
+    } catch (error) {
+      setAiExplain((map) => ({
+        ...map,
+        [id]: { state: 'error', error: error instanceof Error ? error.message : 'Explanation failed.' },
+      }));
+    }
+  }
+
   async function bookmarkQuestion(question) {
     await toggleBookmark({
       type: 'question',
@@ -213,14 +293,40 @@ export default function CfaQuiz() {
     });
   }
 
+  function sourceTargetForQuestion(question) {
+    const objective = objectiveById.get(question.learningObjective);
+    return {
+      kind: 'question',
+      domain: 'cfa',
+      level,
+      topicId: topic,
+      pathway: level === 'level3' ? activePathway : undefined,
+      title: question.question,
+      objectiveIds: [question.learningObjective],
+      formulaNames: question.formula ? [question.formula] : [],
+      keywords: [objective?.title, question.explanation, question.difficulty, mode].filter(Boolean),
+      route: `/cfa/${level}/${topic}/quiz?mode=${mode}`,
+    };
+  }
+
+  if (loading) {
+    return (
+      <div className="page-container" aria-busy="true">
+        <div className="skeleton skeleton-heading" />
+        <div className="skeleton skeleton-card" />
+      </div>
+    );
+  }
+
   if (!questions.length) {
     return (
       <div className="page-container">
-        <div className="glass-card no-hover" style={{ textAlign: 'center', padding: 'var(--space-16)' }}>
-          <h2>Quiz Coming Soon</h2>
-          <p style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-3)' }}>Questions for this topic are being developed.</p>
-          <Link to="/cfa" className="btn btn-primary" style={{ marginTop: 'var(--space-6)' }}>Back to CFA</Link>
-        </div>
+        <EmptyPanel
+          title="Quiz Coming Soon"
+          description="Questions for this topic are being developed."
+          tone="exam"
+          action={<Link to="/cfa" className="btn btn-primary">Back to CFA</Link>}
+        />
       </div>
     );
   }
@@ -232,7 +338,7 @@ export default function CfaQuiz() {
     return (
       <div className="page-container">
         <div className="quiz-container">
-          <div className="glass-card no-hover animate-scale" style={{ textAlign: 'center', padding: 'var(--space-12)' }}>
+          <Surface className="quiz-result-panel animate-scale">
             <div style={{
               width: 80,
               height: 80,
@@ -248,31 +354,26 @@ export default function CfaQuiz() {
             <h2 style={{ fontSize: 'var(--fs-3xl)', fontWeight: 800, marginBottom: 'var(--space-2)' }}>
               {pct >= 70 ? 'Strong pass' : pct >= 50 ? 'Useful reps logged' : 'Review queue updated'}
             </h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-8)' }}>
+            <p className="qv-text-secondary" style={{ marginBottom: 'var(--space-8)' }}>
               {topicData?.title || topic} - {modeLabel}
             </p>
-            {topicData?.runtimeMode === 'validated-beta' && (
-              <div className="badge badge-amber" style={{ marginBottom: 'var(--space-6)' }}>
-                Authored beta content · release gate remains editorial
-              </div>
-            )}
 
             <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-8)', marginBottom: 'var(--space-8)', flexWrap: 'wrap' }}>
               <div>
                 <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800, color: pct >= 70 ? 'var(--success)' : 'var(--danger)' }}>{pct}%</div>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Score</div>
+                <div className="qv-fs-sm qv-text-muted">Score</div>
               </div>
               <div>
                 <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800 }}>{score}/{questions.length}</div>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Correct</div>
+                <div className="qv-fs-sm qv-text-muted">Correct</div>
               </div>
               <div>
                 <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800 }}>{missed.length}</div>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Scheduled weak reps</div>
+                <div className="qv-fs-sm qv-text-muted">Scheduled weak reps</div>
               </div>
               <div>
                 <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 800 }}>{elapsedSeconds}s</div>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>Time</div>
+                <div className="qv-fs-sm qv-text-muted">Time</div>
               </div>
             </div>
 
@@ -284,11 +385,11 @@ export default function CfaQuiz() {
                 <ArrowLeft size={16} /> Back to Module
               </Link>
             </div>
-          </div>
+          </Surface>
 
-          <div className="glass-card no-hover" style={{ marginTop: 'var(--space-6)' }}>
+          <Surface className="quiz-answer-review">
             <div className="flex-between" style={{ marginBottom: 'var(--space-4)' }}>
-              <h3 style={{ margin: 0 }}>Answer Review</h3>
+              <h3 className="qv-m-0">Answer Review</h3>
               <span className="badge badge-blue">{missed.length ? 'Missed questions first' : 'Clean run'}</span>
             </div>
             {[...answers]
@@ -306,15 +407,15 @@ export default function CfaQuiz() {
                       marginTop: index ? 'var(--space-4)' : 0,
                     }}
                   >
-                    <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+                    <div className="qv-row-3-start">
                       {answer.correct ? <CheckCircle2 size={18} color="var(--success)" /> : <XCircle size={18} color="var(--danger)" />}
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 700 }}>{question.question}</div>
-                        <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginTop: 'var(--space-2)' }}>
+                        <div className="qv-text-secondary qv-fs-sm qv-mt-2">
                           Your answer: {letters[answer.selected]} · Correct answer: {letters[answer.correctIndex]} · Confidence: {answer.confidence} · Error: {answer.errorCategory}
                         </div>
-                        <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', lineHeight: 1.6 }}>{question.explanation}</p>
-                        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <p className="qv-text-secondary qv-fs-sm" style={{ lineHeight: 1.6 }}>{question.explanation}</p>
+                        <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
                           <span className="badge badge-purple">{objective?.title || answer.learningObjective}</span>
                           {question.formula && <span className="badge badge-blue">Formula: {question.formula}</span>}
                           <Link to={`/cfa/${level}/${topic}`} className="btn btn-secondary" style={{ padding: 'var(--space-2) var(--space-3)' }}>
@@ -327,13 +428,39 @@ export default function CfaQuiz() {
                           >
                             Bookmark
                           </button>
+                          {!answer.correct && (
+                            <button
+                              className="btn btn-secondary"
+                              style={{ padding: 'var(--space-2) var(--space-3)' }}
+                              onClick={() => handleExplainWithAi(question, answer)}
+                              disabled={aiExplain[question.id]?.state === 'loading'}
+                            >
+                              {aiExplain[question.id]?.state === 'loading' ? 'Thinking…' : '🤖 Explain with AI'}
+                            </button>
+                          )}
                         </div>
+                        {aiExplain[question.id]?.state === 'done' && (
+                          <p style={{ borderLeft: '3px solid var(--accent)', padding: 'var(--space-2) var(--space-3)', margin: 'var(--space-2) 0 0', background: 'var(--surface-2, rgba(120,180,255,0.06))', borderRadius: 'var(--radius-md, 8px)', whiteSpace: 'pre-line' }}>
+                            {aiExplain[question.id].text}
+                          </p>
+                        )}
+                        {aiExplain[question.id]?.state === 'error' && (
+                          <p className="qv-text-danger qv-fs-sm" style={{ margin: 'var(--space-2) 0 0' }}>
+                            {aiExplain[question.id].error}
+                          </p>
+                        )}
+                        <SourceRail
+                          compact
+                          limit={2}
+                          title="Question Source Context"
+                          target={sourceTargetForQuestion(question)}
+                        />
                       </div>
                     </div>
                   </div>
                 );
               })}
-          </div>
+          </Surface>
         </div>
       </div>
     );
@@ -341,146 +468,150 @@ export default function CfaQuiz() {
 
   return (
     <div className="page-container">
-      <Link to={`/cfa/${level}/${topic}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-6)' }}>
+      <Link to={`/cfa/${level}/${topic}`} className="qv-row-2 qv-text-secondary qv-fs-sm" style={{ display: 'inline-flex', marginBottom: 'var(--space-6)' }}>
         <ArrowLeft size={16} /> Back to {topicData?.title || topic}
       </Link>
-      {topicData?.runtimeMode === 'validated-beta' && (
-        <div className="badge badge-amber" style={{ marginBottom: 'var(--space-4)' }}>
-          Validated authored beta · not public exam-ready
-        </div>
-      )}
 
       <div className="quiz-container">
-        <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-5)', padding: 'var(--space-4)' }}>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }} role="tablist" aria-label="Quiz mode">
-            {quizModes.map((item) => {
-              const Icon = item.icon;
-              const active = item.id === mode;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => handleModeChange(item.id)}
-                >
-                  <Icon size={16} /> {item.label}
-                </button>
-              );
-            })}
-          </div>
+        <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-5)' }}>
+          <SegmentedControl
+            label="Quiz mode"
+            options={quizModes.map((item) => ({ value: item.id, label: item.label, icon: item.icon }))}
+            value={mode}
+            onChange={handleModeChange}
+            density="compact"
+          />
           {usedFallback && (
-            <p style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', margin: 'var(--space-3) 0 0' }}>
+            <p className="qv-text-muted qv-fs-sm" style={{ margin: 'var(--space-3) 0 0' }}>
               No targeted items are currently queued for this mode, so the full topic bank is loaded.
             </p>
           )}
-        </div>
+        </Surface>
 
         <div className="quiz-header">
           <div>
             <div style={{ fontWeight: 700 }}>{topicData?.title || topic}</div>
-            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Level {level?.toUpperCase()} · {modeLabel}</div>
+            <div className="qv-fs-xs qv-text-muted">Level {level?.toUpperCase()} · {modeLabel}</div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+          <div className="qv-row-4">
             <span className={`badge ${q.difficulty === 'foundation' ? 'badge-green' : q.difficulty === 'intermediate' ? 'badge-blue' : 'badge-purple'}`}>
               {q.difficulty?.toUpperCase()}
             </span>
-            <span style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}>
+            <span className="qv-fs-sm qv-fw-semibold">
               {safeCurrent + 1} / {questions.length}
             </span>
           </div>
         </div>
 
-        <div className="quiz-progress-bar">
-          <div className="quiz-progress-fill" style={{ width: `${((safeCurrent + (confirmed ? 1 : 0)) / questions.length) * 100}%` }} />
-        </div>
+        <ProgressRail
+          value={safeCurrent + (confirmed ? 1 : 0)}
+          max={questions.length}
+          label="Question progress"
+          detail={`${safeCurrent + 1}/${questions.length}`}
+          tone="exam"
+        />
 
-        <div className="glass-card no-hover animate-fade" key={`${mode}-${safeCurrent}`}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-4)', alignItems: 'flex-start' }}>
-            <div className="quiz-question">{q.question}</div>
-            <span className="badge badge-purple">{objectiveById.get(q.learningObjective)?.title || q.learningObjective}</span>
-          </div>
+        <QuestionStage
+          key={`${mode}-${safeCurrent}`}
+          badge={q.difficulty?.toUpperCase()}
+          objective={objectiveById.get(q.learningObjective)?.title || q.learningObjective}
+          question={q.question}
+          status={confirmed ? (selected === q.correct ? 'success' : 'danger') : 'exam'}
+          footer={<CommandHint keys={['A-D', 'Enter']} label="select and confirm" />}
+        >
 
-          <div className="quiz-options">
-            {q.options.map((opt, idx) => {
-              let cls = 'quiz-option';
-              if (confirmed && idx === q.correct) cls += ' correct';
-              else if (confirmed && idx === selected && idx !== q.correct) cls += ' incorrect';
-              else if (!confirmed && idx === selected) cls += ' selected';
-
-              return (
-                <button
-                  key={idx}
-                  type="button"
-                  className={cls}
-                  onClick={() => handleSelect(idx)}
-                  aria-pressed={idx === selected}
-                  disabled={confirmed}
-                >
-                  <span className="quiz-option-letter">{letters[idx]}</span>
-                  <span style={{ flex: 1, textAlign: 'left' }}>{opt}</span>
-                  {confirmed && idx === q.correct && <CheckCircle2 size={18} color="var(--success)" />}
-                  {confirmed && idx === selected && idx !== q.correct && <XCircle size={18} color="var(--danger)" />}
-                </button>
-              );
-            })}
-          </div>
-
-          {confirmed && (
-            <div className="quiz-explanation">
-              <h4>{selected === q.correct ? 'Correct' : 'Incorrect'}</h4>
-              <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.6 }}>{q.explanation}</p>
-              {q.formula && <div className="badge badge-blue" style={{ marginTop: 'var(--space-3)' }}>Related formula: {q.formula}</div>}
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginTop: 'var(--space-5)' }}>
-                <div>
-                  <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 'var(--space-2)', fontWeight: 700 }}>
-                    CONFIDENCE
-                  </div>
-                  <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-                    {confidenceOptions.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className={`btn ${confidence === item.id ? 'btn-primary' : 'btn-secondary'}`}
-                        onClick={() => setConfidence(item.id)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <label style={{ display: 'block' }}>
-                  <span style={{ display: 'block', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 'var(--space-2)', fontWeight: 700 }}>
-                    ERROR TYPE
-                  </span>
-                  <select
-                    value={errorCategory}
-                    onChange={(event) => setErrorCategory(event.target.value)}
-                    style={{
-                      width: '100%',
-                      minHeight: 44,
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--border)',
-                      background: 'var(--surface)',
-                      color: 'var(--text-primary)',
-                      padding: '0 var(--space-3)',
-                    }}
-                  >
-                    {errorOptions
-                      .filter((item) => q.errorCategories?.includes(item.id) || item.id === 'none')
-                      .map((item) => (
-                        <option key={item.id} value={item.id}>{item.label}</option>
-                      ))}
-                  </select>
-                </label>
-              </div>
-            </div>
+          {/* A11Y-3: hands-free study controls. Untimed quiz, so a voice answer
+              applies directly (testMode={false}); read-aloud uses local TTS. The
+              strip self-hides when the browser lacks speech APIs. */}
+          {!confirmed && (
+            <HandsFreeController
+              question={q.question}
+              options={q.options.map((opt, idx) => ({ letter: letters[idx], text: opt }))}
+              onSelect={handleSelect}
+              testMode={false}
+              preface={`Question ${safeCurrent + 1} of ${questions.length}.`}
+            />
           )}
-        </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--space-6)', gap: 'var(--space-3)' }}>
+          {/* A11Y-2: the shared accessible radiogroup primitive replaces the
+              hand-rolled <button> list. Selection/confirmation stay controlled
+              here, so scoring/persistence/analytics are unchanged. The runner
+              also renders the correct/incorrect headline + explanation via its
+              aria-live region; the formula badge, source rail and confidence/
+              error controls follow as its children below that feedback. */}
+          <AccessibleQuestionRunner
+            ref={runnerRef}
+            groupLabel="Answer options"
+            question={q.question}
+            hideStem
+            options={q.options.map((opt, idx) => ({ id: idx, text: opt }))}
+            selectedIndex={selected}
+            onSelect={handleSelect}
+            confirmed={confirmed}
+            correctIndex={q.correct}
+            explanation={confirmed ? q.explanation : undefined}
+            letters={letters}
+          >
+            {confirmed && (
+              <div className="quiz-explanation">
+                {q.formula && <StatusBadge tone="accent" style={{ marginTop: 'var(--space-3)' }}>Related formula: {q.formula}</StatusBadge>}
+                <SourceRail
+                  compact
+                  limit={2}
+                  title="Source Context"
+                  subtitle="Shown after confirmation only."
+                  target={sourceTargetForQuestion(q)}
+                />
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginTop: 'var(--space-5)' }}>
+                  <div>
+                    <div className="qv-fs-xs qv-text-muted qv-mb-2 qv-fw-bold">
+                      CONFIDENCE
+                    </div>
+                    <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
+                      {confidenceOptions.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`btn ${confidence === item.id ? 'btn-primary' : 'btn-secondary'}`}
+                          onClick={() => setConfidence(item.id)}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <label style={{ display: 'block' }}>
+                    <span className="qv-fs-xs qv-text-muted qv-mb-2 qv-fw-bold" style={{ display: 'block' }}>
+                      ERROR TYPE
+                    </span>
+                    <select
+                      value={errorCategory}
+                      onChange={(event) => setErrorCategory(event.target.value)}
+                      style={{
+                        width: '100%',
+                        minHeight: 44,
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface)',
+                        color: 'var(--text-primary)',
+                        padding: '0 var(--space-3)',
+                      }}
+                    >
+                      {errorOptions
+                        .filter((item) => q.errorCategories?.includes(item.id) || item.id === 'none')
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>{item.label}</option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            )}
+          </AccessibleQuestionRunner>
+        </QuestionStage>
+
+        <div className="qv-row-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-6)' }}>
           {!confirmed ? (
             <button className="btn btn-primary btn-lg" onClick={handleConfirm} disabled={selected === null} style={{ opacity: selected === null ? 0.5 : 1 }}>
               Confirm Answer

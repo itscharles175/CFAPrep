@@ -1,0 +1,76 @@
+{
+  "_comment": "RAG-1 relevance judgments — each query is annotated with the ids of the corpus chunks that actually answer it (binary relevance). Hand-curated against corpus.json. Lexical-only (no embeddings) so the harness is fully deterministic and offline. Keep tiny.",
+  "queries": [
+    {
+      "id": "q-modified-duration",
+      "query": "What does modified duration measure for a bond?",
+      "relevant": ["fi-dur-1"]
+    },
+    {
+      "id": "q-embedded-option-duration",
+      "query": "Which duration measure is right for bonds with embedded options?",
+      "relevant": ["fi-dur-2"]
+    },
+    {
+      "id": "q-convexity",
+      "query": "How does convexity correct the duration estimate for large yield changes?",
+      "relevant": ["fi-conv-1"]
+    },
+    {
+      "id": "q-oas",
+      "query": "What does option-adjusted spread isolate?",
+      "relevant": ["fi-spread-1"]
+    },
+    {
+      "id": "q-ddm",
+      "query": "How does the dividend discount model value equity?",
+      "relevant": ["eq-ddm-1"]
+    },
+    {
+      "id": "q-fcfe",
+      "query": "What is free cash flow to equity used for in valuation?",
+      "relevant": ["eq-fcfe-1"]
+    },
+    {
+      "id": "q-confidence-interval",
+      "query": "What does a confidence interval tell you about a population parameter?",
+      "relevant": ["qm-ci-1"]
+    },
+    {
+      "id": "q-standard-error",
+      "query": "How does sample size affect the standard error of the mean?",
+      "relevant": ["qm-se-1"]
+    },
+    {
+      "id": "q-bayes",
+      "query": "How does Bayesian inference update a prior into a posterior?",
+      "relevant": ["qm-bayes-1"]
+    },
+    {
+      "id": "q-xlookup",
+      "query": "What does the XLOOKUP function do in Excel?",
+      "relevant": ["xl-xlookup-1"],
+      "domain": "excel"
+    },
+    {
+      "id": "q-index-match-vs-vlookup",
+      "query": "How is INDEX MATCH more flexible than VLOOKUP for a two-way lookup?",
+      "relevant": ["xl-index-1"]
+    },
+    {
+      "id": "q-duration-family",
+      "query": "Explain duration measures for bonds including embedded options.",
+      "relevant": ["fi-dur-1", "fi-dur-2"]
+    },
+    {
+      "id": "q-fra-settlement",
+      "query": "How does a forward rate agreement settle at expiration?",
+      "relevant": ["los-9a-intact"]
+    },
+    {
+      "id": "q-notebook-swap",
+      "query": "What is the value of a plain-vanilla interest-rate swap at initiation?",
+      "relevant": ["nb-body-1"]
+    }
+  ]
+}

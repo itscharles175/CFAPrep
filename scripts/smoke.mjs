@@ -1,26 +1,13 @@
 import { access } from 'node:fs/promises';
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { smokeRoutes as routes } from '../src/routes/routeManifest.ts';
 
-const routes = [
-  ['/', 'QuantVault'],
-  ['/cfa', 'CFA'],
-  ['/cfa/level1/fixed-income', 'Fixed Income'],
-  ['/cfa/level1/fixed-income/quiz', 'Fixed Income'],
-  ['/cfa/level1/fixed-income/vignette', 'Fixed Income'],
-  ['/cfa/mock', 'Mock'],
-  ['/flashcards', 'Flashcards'],
-  ['/review', 'Review'],
-  ['/vault', 'Vault'],
-  ['/analytics', 'Analytics'],
-  ['/content-ops', 'Content Operations'],
-  ['/calculators', 'Calculators'],
-  ['/quant', 'Quant'],
-  ['/quant/risk-management', 'Risk'],
-  ['/excel', 'Excel'],
-  ['/excel/fundamentals', 'Excel'],
-  ['/system', 'System'],
-];
+/* global document */
+
+const COLD_START_TIMEOUT_MS = 120_000;
+const ROUTE_TIMEOUT_MS = 60_000;
+const TEXT_TIMEOUT_MS = 30_000;
 
 const browserCandidates = [
   process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
@@ -68,15 +55,22 @@ const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 
 try {
-  for (const [route, expectedText] of routes) {
+  for (const [index, [route, expectedText]] of routes.entries()) {
     const url = new URL(route, address).toString();
-    await page.goto(url, { waitUntil: 'networkidle' });
-    const body = await page.locator('body').innerText({ timeout: 10_000 });
+    await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: index === 0 ? COLD_START_TIMEOUT_MS : ROUTE_TIMEOUT_MS,
+    });
+    await page.waitForFunction(
+      (text) => document.body.innerText.includes(text),
+      expectedText,
+      { timeout: TEXT_TIMEOUT_MS },
+    );
+    const body = await page.evaluate(() => document.body.innerText);
     if (!body.includes(expectedText)) {
       throw new Error(`Missing expected text "${expectedText}" at ${url}`);
     }
-    const runtimeErrors = await page.locator('text=/TypeError|ReferenceError|Cannot read|Failed to fetch/i').count();
-    if (runtimeErrors > 0) {
+    if (/TypeError|ReferenceError|Cannot read|Failed to fetch/i.test(body)) {
       throw new Error(`Runtime error text detected at ${url}`);
     }
     console.log(`OK ${route}`);

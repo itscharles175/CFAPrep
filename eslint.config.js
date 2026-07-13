@@ -4,7 +4,32 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 
 export default [
-  { ignores: ['dist', 'node_modules', 'coverage'] },
+  // `spike/` holds the gitignored open-notebook clone (its own nested eslint
+  // config); `.claude/` and `src-tauri/target` are tooling/build artifacts.
+  // `.venv-onb/` + `.pyinstaller-*` are the open-notebook PyInstaller sidecar
+  // build dirs (Python venv site-packages ship bundled legacy JS that ESLint
+  // would otherwise try — and fail — to lint). `data/` is the sidecar's
+  // runtime working dir.
+  {
+    ignores: [
+      'dist',
+      'node_modules',
+      'coverage',
+      'spike',
+      '.claude',
+      '.gitnexus',
+      'src-tauri/target',
+      '.venv-onb',
+      '.pyinstaller-build',
+      '.pyinstaller-dist',
+      'data',
+      // Vendored LSAT domain: React-18/TS-5.6 subtree with its own toolchain
+      // conventions (Tailwind, @/ alias → its own root). Linted by its own
+      // config during the merge port, not the host's strict flat config.
+      'src/domains/lsat',
+      '.venv-lsat',
+    ],
+  },
   js.configs.recommended,
   {
     files: ['**/*.{js,jsx}'],
@@ -25,7 +50,10 @@ export default [
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },

@@ -19,8 +19,11 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@lsat/*": ["src/domains/lsat/*"]
     }
   },
-  "include": ["src", "vite.config.js", "eslint.config.js"]
+  "include": ["src", "vite.config.js", "eslint.config.js"],
+  "//": "QA-4 — the vendored LSAT subtree is validated on its own by tsconfig.lsat.json (a strict TS project; run `npx tsc -p tsconfig.lsat.json`). The host now maps `@lsat/*` to the real subtree source (replacing the old `declare module '@lsat/*'` -> any shim), so cross-domain imports type-check end-to-end against real types. A formal `references` entry is intentionally omitted: it requires `composite`+emit, which fights this project's no-emit/Bundler (Vite) toolchain; both configs are `strict`, so host-strict-clean and tsconfig.lsat.json-clean are equivalent. See TESTING.md.",
+  "exclude": ["src/domains/lsat"]
 }

@@ -3,6 +3,7 @@ import { buildSearchItems, cfaTopics, excelModules, quantModules } from './catal
 import { cfaContent, cfaLearningObjectives, cfaQuestionBank, cfaQuizzes } from '../domains/cfa/cfaData';
 import { excelContent } from './excelContent';
 import { quantContent } from './quantContent';
+import { appRoutes, searchToolRoutes, smokeRoutes } from '../routes/routeManifest';
 
 describe('learning catalog integrity', () => {
   it('has content for every available quant and excel module', () => {
@@ -55,5 +56,26 @@ describe('learning catalog integrity', () => {
     expect(ids.size).toBe(items.length);
     expect(items.length).toBeGreaterThan(30);
     expect(items.some((item) => item.path === '/calculators')).toBe(true);
+  });
+
+  it('projects command palette Level III topics through the selected pathway', () => {
+    const privateMarkets = buildSearchItems({ level3Pathway: 'private-markets' });
+    const privateWealth = buildSearchItems({ level3Pathway: 'private-wealth' });
+
+    expect(privateMarkets.some((item) => item.path === '/cfa/level3/private-markets-pathway')).toBe(true);
+    expect(privateMarkets.some((item) => item.path === '/cfa/level3/private-wealth-pathway')).toBe(false);
+    expect(privateWealth.some((item) => item.path === '/cfa/level3/performance')).toBe(true);
+    expect(privateWealth.some((item) => item.path === '/cfa/level3/private-wealth-pathway')).toBe(true);
+  });
+
+  it('keeps route, search, and smoke metadata centralized', () => {
+    const routeMatches = (routePath, actualPath) => {
+      const pattern = new RegExp(`^${routePath.replace(/:[^/]+/g, '[^/]+')}$`);
+      return pattern.test(actualPath);
+    };
+    expect(searchToolRoutes.every((route) => route.id.startsWith('tool:'))).toBe(true);
+    smokeRoutes.forEach(([path]) => {
+      expect(appRoutes.some((route) => routeMatches(route.path, path))).toBe(true);
+    });
   });
 });

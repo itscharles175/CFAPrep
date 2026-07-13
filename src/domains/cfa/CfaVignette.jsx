@@ -1,9 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Layers, Trophy } from 'lucide-react';
-import { getCfaTopicContent, getCfaTopicKey } from './cfaLevels';
-import { PageHeader, MetricCard } from '../../components/ui/Primitives';
+import { getCfaTopicKey, loadCfaTopicContent } from './cfaLoaders';
+import { useLevel3Pathway } from './useLevel3Pathway';
+import AccessibleQuestionRunner from '../../components/a11y/AccessibleQuestionRunner';
+import HandsFreeController from '../../components/a11y/HandsFreeController';
+import { CaseViewer, CommandHint, EmptyPanel, MetricCard, PageHeader, QuestionStage } from '../../components/ui/Primitives';
 import { recordVignetteAttempt } from '../../lib/learning';
+import { SourceRail } from '../../components/SourceContext';
 
 function nowMs() {
   return Date.now();
@@ -11,7 +15,11 @@ function nowMs() {
 
 export default function CfaVignette() {
   const { level, topic } = useParams();
-  const data = useMemo(() => getCfaTopicContent(level, topic), [level, topic]);
+  const [activePathway] = useLevel3Pathway();
+  const requestKey = `${level}:${topic}:${level === 'level3' ? activePathway : 'all'}`;
+  const [contentState, setContentState] = useState({ key: null, data: null });
+  const data = contentState.key === requestKey ? contentState.data : null;
+  const loading = contentState.key !== requestKey;
   const topicKey = useMemo(() => getCfaTopicKey(level, topic), [level, topic]);
   const [vignetteIndex, setVignetteIndex] = useState(0);
   const [selected, setSelected] = useState({});
@@ -20,10 +28,48 @@ export default function CfaVignette() {
   const vignette = data?.vignettes?.[vignetteIndex];
   const letters = ['A', 'B', 'C', 'D'];
 
+  useEffect(() => {
+    let cancelled = false;
+    loadCfaTopicContent(level, topic, level === 'level3' ? { pathway: activePathway } : {})
+      .then((content) => {
+        if (!cancelled) setContentState({ key: requestKey, data: content });
+      })
+      .catch(() => {
+        if (!cancelled) setContentState({ key: requestKey, data: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activePathway, level, requestKey, topic]);
+
+  useEffect(() => {
+    function handleKeyboard(event) {
+      if (event.defaultPrevented) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (event.ctrlKey && event.key === 'Enter' && !submitted && vignette && Object.keys(selected).length === vignette.questions.length) {
+        event.preventDefault();
+        submit();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  });
+
+  if (loading) {
+    return (
+      <div className="page-container" aria-busy="true">
+        <div className="skeleton skeleton-heading" />
+        <div className="skeleton skeleton-card" />
+      </div>
+    );
+  }
+
   if (!data || !vignette) {
     return (
       <div className="page-container">
-        <div className="glass-card no-hover">No vignette set is available for this topic yet.</div>
+        <EmptyPanel title="No vignette set is available for this topic yet." tone="exam" />
       </div>
     );
   }
@@ -76,13 +122,9 @@ export default function CfaVignette() {
         <ArrowLeft size={16} /> Back to {data.title}
       </Link>
       <PageHeader
-        badge={data.runtimeMode === 'validated-beta' ? 'VALIDATED BETA' : level?.replace('level', 'LEVEL ')}
+        badge={level?.replace('level', 'LEVEL ')}
         title={vignette.title}
-        subtitle={
-          data.runtimeMode === 'validated-beta'
-            ? 'Authored beta vignette content is available locally; public release still waits for editorial exam-ready provenance.'
-            : 'A local item-set vignette. Read the case once, answer all questions, then review the explanation trail.'
-        }
+        subtitle="A local item-set vignette. Read the case once, answer all questions, then review the explanation trail."
       />
 
       <div className="grid-3" style={{ marginBottom: 'var(--space-6)' }}>
@@ -91,41 +133,73 @@ export default function CfaVignette() {
         <MetricCard label="Score" value={submitted ? `${pct}%` : '-'} detail={submitted ? `${score}/${vignette.questions.length}` : 'Submit to score'} icon={Trophy} tone="warning" />
       </div>
 
-      <div className="glass-card no-hover" style={{ marginBottom: 'var(--space-6)' }}>
-        <h2 style={{ marginTop: 0 }}>Case Facts</h2>
-        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>{vignette.stem}</p>
-      </div>
+      <CaseViewer title="Case Facts" exhibits={vignette.exhibits || []}>
+        <p>{vignette.stem}</p>
+      </CaseViewer>
 
-      <div className="quiz-container">
+      {submitted && (
+        <SourceRail
+          title="Vignette Source Context"
+          subtitle="Private snippets appear after submission and are mapped to the case, objectives, and item-set explanations."
+          target={{
+            kind: 'vignette',
+            domain: 'cfa',
+            level,
+            topicId: topic,
+            pathway: level === 'level3' ? activePathway : undefined,
+            title: vignette.title,
+            objectiveIds: vignette.objectiveIds || vignette.questions.map((question) => question.learningObjective),
+            formulaNames: vignette.questions.map((question) => question.formula).filter(Boolean),
+            keywords: [vignette.stem, ...vignette.questions.map((question) => `${question.question} ${question.explanation}`)],
+            route: `/cfa/${level}/${topic}/vignette`,
+          }}
+          limit={3}
+          compact
+        />
+      )}
+
+      <div className="quiz-container" style={{ marginTop: 'var(--space-6)' }}>
         {vignette.questions.map((question, index) => (
-          <div key={question.id} className="glass-card no-hover" style={{ marginBottom: 'var(--space-5)' }}>
-            <span className="badge badge-purple">Question {index + 1}</span>
-            <h3>{question.question}</h3>
-            <div className="quiz-options">
-              {question.options.map((option, optionIndex) => {
-                const picked = selected[question.id] === optionIndex;
-                const correct = submitted && optionIndex === question.correct;
-                const missed = submitted && picked && optionIndex !== question.correct;
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    className={`quiz-option ${picked ? 'selected' : ''} ${correct ? 'correct' : ''} ${missed ? 'incorrect' : ''}`}
-                    disabled={submitted}
-                    onClick={() => setSelected((existing) => ({ ...existing, [question.id]: optionIndex }))}
-                  >
-                    <span className="quiz-option-letter">{letters[optionIndex]}</span>
-                    <span style={{ textAlign: 'left' }}>{option}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {submitted && <p style={{ color: 'var(--text-secondary)' }}>{question.explanation}</p>}
-          </div>
+          <QuestionStage
+            key={question.id}
+            badge={`Question ${index + 1}`}
+            objective={question.learningObjective}
+            question={question.question}
+            status={submitted ? (selected[question.id] === question.correct ? 'success' : 'danger') : 'exam'}
+            footer={!submitted && index === 0 ? <CommandHint keys="Ctrl+Enter" label="submit once complete" /> : null}
+          >
+            {!submitted && (
+              <HandsFreeController
+                question={`Case facts. ${vignette.stem}\n\nQuestion. ${question.question}`}
+                options={question.options.map((option, optionIndex) => ({
+                  letter: letters[optionIndex],
+                  text: option,
+                }))}
+                onSelect={(optionIndex) => setSelected((existing) => ({ ...existing, [question.id]: optionIndex }))}
+                testMode={false}
+                preface={`Vignette question ${index + 1} of ${vignette.questions.length}.`}
+              />
+            )}
+            <AccessibleQuestionRunner
+              groupLabel={`Question ${index + 1} answer options`}
+              question={question.question}
+              hideStem
+              options={question.options.map((option, optionIndex) => ({
+                id: `${question.id}-${optionIndex}`,
+                text: option,
+              }))}
+              selectedIndex={selected[question.id] ?? null}
+              onSelect={(optionIndex) => setSelected((existing) => ({ ...existing, [question.id]: optionIndex }))}
+              confirmed={submitted}
+              correctIndex={question.correct}
+              explanation={submitted ? question.explanation : undefined}
+              letters={letters}
+            />
+          </QuestionStage>
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+      <div className="qv-row-3" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
         {submitted ? (
           <button className="btn btn-primary" onClick={nextSet}>Next Vignette</button>
         ) : (
