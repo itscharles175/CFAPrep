@@ -279,6 +279,24 @@ guardrails:
   preserving elimination/reveal/trap/spotlight behavior and test-mode shortcuts.
   Focused evidence: host shared-runner tests, LSAT `ChoiceList`/semantic bundle
   tests, host `tsc --noEmit`, and `tsc -p tsconfig.lsat.json` passed.
+- Wave 2 host-route contract coverage: 48 additional backend routes across
+  trust (all 14), observability (all 10), SRS (all 9), settings, search,
+  sync/FSRS write-back, unified export (validate/import/list/history),
+  adaptivity (ability/plan/readiness/recompute-item-stats), analytics
+  calibration, and AI health now declare inline permissive response models
+  (`ConfigDict(extra="allow")` + `response_model_exclude_unset=True`) mirroring
+  the wire payloads byte-for-byte; `_GUARDED_ROUTES` in
+  `services/lsat-backend/tests/test_openapi_contract.py` grew from 7 to 80
+  route/method pairs with a baseline-membership assertion so guard extensions
+  without a `UPDATE_SCHEMA_BASELINE=1` re-snapshot fail loudly;
+  `tests/test_response_models.py` adds a Wave 2 ratchet that fails if any
+  typed route regresses to the `LegacySuccessResponse` fallback or a
+  schemaless object; `openapi-baseline.json`, `_meta/openapi.json`, and
+  `api.gen.ts` were regenerated (additive: +75 component schemas, 0 deletions,
+  operations unchanged); `openapi-typescript` is pinned at 7.13.0 and CI's
+  `lsat-sidecar-smoke` job gained a full `gen:api` + `git diff --exit-code`
+  regeneration drift gate. `POST /api/export/backup` stays deliberately
+  untyped (polymorphic encrypted-blob | plaintext envelope).
 - Wave 9 hands-free runner first floor: the existing `HandsFreeController` now
   exposes style hooks so it can be embedded in both host and LSAT shells without
   CSS leakage. `CfaQuiz` keeps its existing read-aloud/spoken-answer path with a
@@ -473,14 +491,45 @@ Purpose: make the frontend/backend contract provable.
 Workstreams:
 
 - Regenerate and enforce OpenAPI/client contracts for all host-used routes.
+  **Done:** `openapi-typescript` is pinned at 7.13.0 as a devDependency,
+  `npm run gen:api` uses the local binary, and CI's `lsat-sidecar-smoke` job
+  now regenerates both client artifacts and fails on any diff
+  (`git diff --exit-code -- src/domains/lsat/_meta/openapi.json
+  src/domains/lsat/lib/api.gen.ts`), closing the field-level client-drift and
+  stale-`api.gen.ts` gaps the path-key-only `--client` gate left open.
 - Replace string-literal sidecar calls with typed generated clients.
+  **Unblocked, not started:** all 22 host string-literal callsites now exist in
+  the regenerated `api.gen.ts` paths map, so their "ships ahead of the next
+  regeneration" comments are stale; migrating them to `satisfies keyof paths`
+  + `operations[...]` anchoring is a follow-up slice.
 - Add explicit response models for import/export, observability, generation,
   bank, study, adaptivity, backup, and trust routes.
+  **Done for host-consumed routes:** 48 additional routes across trust (all
+  14), observability (all 10), SRS (all 9), settings, search, sync/FSRS
+  write-back, unified export (validate/import/list/history), adaptivity
+  (ability/plan/readiness/recompute), analytics calibration, and AI health now
+  declare inline permissive response models (`ConfigDict(extra="allow")` +
+  `response_model_exclude_unset=True`) that mirror the wire payloads
+  byte-for-byte. `POST /api/export/backup` stays deliberately untyped
+  (polymorphic encrypted-blob | plaintext envelope with key-absence tests);
+  `backup_routes`, bank list/import, generation jobs, and notebook surfaces
+  remain for a later slice.
 - Expand runtime schemas beyond hot-path LSAT calls.
+  (Host-consumed routes still have zero zod validation — follow-up slice.)
 - Add consumer contract coverage so route shape changes are tied to frontend
   consumers.
+  **Done for field-removal coverage:** `_GUARDED_ROUTES` in
+  `services/lsat-backend/tests/test_openapi_contract.py` now snapshots all 80
+  typed route/method pairs (every host-consumed route included), with a
+  baseline-membership assertion so extending the guard without re-snapshotting
+  `tests/schemas-baseline.json` fails loudly; `tests/test_response_models.py`
+  adds a Wave 2 ratchet asserting typed routes never regress to the
+  `LegacySuccessResponse` fallback or a schemaless object.
 - Add API generation drift gates for unified today, due-unified, study profile,
   adaptive next, and FSRS parameter routes.
+  **Done:** all five are guarded (`/api/study/today`, `/api/study/due-unified`,
+  `/api/study/profile` GET+PUT, `/api/adaptivity/next`, `/api/srs/params`) and
+  the whole-artifact regeneration gate runs on every PR.
 
 Verification gates:
 

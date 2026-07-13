@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session
 
 from .. import search
@@ -16,7 +17,34 @@ router = APIRouter(prefix="/search")
 _SourceLiteral = Optional[Literal["official", "sample", "ai_generated", "research", "reclor"]]
 
 
-@router.get("/questions")
+class SearchResultRowOut(BaseModel):
+    """One FTS5 hit from ``search.search_questions`` — deliberately answer-key
+    free (never includes ``correct_answer``/``is_correct``). ``extra="allow"``
+    keeps future additive row keys on the wire without a schema bump."""
+
+    model_config = ConfigDict(extra="allow")
+
+    question_id: int
+    q_type: str
+    source: str
+    stem: str
+
+
+class SearchQuestionsOut(BaseModel):
+    """Envelope for GET /api/search/questions: the echoed query plus the ranked
+    result rows (``[]`` on no match / absent FTS table)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    query: str
+    results: list[SearchResultRowOut]
+
+
+@router.get(
+    "/questions",
+    response_model=SearchQuestionsOut,
+    response_model_exclude_unset=True,
+)
 def search_questions(
     q: str = Query(min_length=1, max_length=200),
     # B14: align route max with search module cap (both 100).

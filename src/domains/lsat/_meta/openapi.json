@@ -73,9 +73,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Ai Health Api Ai Health Get"
+                  "$ref": "#/components/schemas/AiHealthOut"
                 }
               }
             }
@@ -3899,7 +3897,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/CalibrationOut"
                 }
               }
             }
@@ -4472,7 +4470,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SrsCardsCreateOut"
                 }
               }
             }
@@ -4545,7 +4543,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SrsConceptGapQueueOut"
                 }
               }
             }
@@ -4625,7 +4623,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SrsBlindReviewNoteOut"
                 }
               }
             }
@@ -4701,7 +4699,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SrsConceptGapCardsOut"
                 }
               }
             }
@@ -4760,7 +4758,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SrsDueOut"
                 }
               }
             }
@@ -4833,7 +4831,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SrsLeechesOut"
                 }
               }
             }
@@ -4892,7 +4890,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SrsOptimizeOut"
                 }
               }
             }
@@ -4971,7 +4969,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SrsReviewOut"
                 }
               }
             }
@@ -9036,9 +9034,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Validate Api Export Validate Post"
+                  "$ref": "#/components/schemas/ExportValidateOut"
                 }
               }
             }
@@ -9107,9 +9103,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Import Backup Api Export Import Post"
+                  "$ref": "#/components/schemas/ExportImportOut"
                 }
               }
             }
@@ -9190,9 +9184,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response List Exports Api Export List Get"
+                  "$ref": "#/components/schemas/ExportListOut"
                 }
               }
             }
@@ -9262,9 +9254,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response History Api Export History Get"
+                  "$ref": "#/components/schemas/ExportHistoryItemOut"
                 }
               }
             }
@@ -9851,7 +9841,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SyncProgressUpdatesOut"
                 }
               }
             }
@@ -9920,9 +9910,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Post Fsrs Write Back Api Sync Fsrs Write Back Post"
+                  "$ref": "#/components/schemas/FsrsWriteBackOut"
                 }
               }
             }
@@ -10012,9 +10000,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Fsrs Write Back Log Api Sync Fsrs Write Back Log Get"
+                  "$ref": "#/components/schemas/FsrsWriteBackLogOut"
                 }
               }
             }
@@ -10693,7 +10679,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SettingsEnvelopeOut"
                 }
               }
             }
@@ -10759,7 +10745,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SettingsEnvelopeOut"
                 }
               }
             }
@@ -11701,9 +11687,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Status Api Observability Status Get"
+                  "$ref": "#/components/schemas/ObservabilityStatusOut"
                 }
               }
             }
@@ -11762,9 +11746,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Ready Api Ready Get"
+                  "$ref": "#/components/schemas/ReadyOut"
                 }
               }
             }
@@ -11845,9 +11827,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Metrics Api Observability Metrics Get"
+                  "$ref": "#/components/schemas/MetricsOut"
                 }
               }
             }
@@ -11940,9 +11920,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Cloud Budget Api Observability Cloud Budget Get"
+                  "$ref": "#/components/schemas/CloudBudgetOut"
                 }
               }
             }
@@ -12001,9 +11979,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Runtime Evidence Api Observability Runtime Evidence Get"
+                  "$ref": "#/components/schemas/RuntimeEvidenceOut"
                 }
               }
             }
@@ -12062,9 +12038,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Sqlite Health Api Observability Sqlite Health Get"
+                  "$ref": "#/components/schemas/SqliteHealthOut"
                 }
               }
             }
@@ -12150,9 +12124,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Trust Status Api Observability Trust Status Get"
+                  "$ref": "#/components/schemas/ObsTrustStatusOut"
                 }
               }
             }
@@ -12211,9 +12183,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Health Aggregated Api Observability Health Aggregated Get"
+                  "$ref": "#/components/schemas/HealthAggregatedOut"
                 }
               }
             }
@@ -12272,9 +12242,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Schema Versions Api Observability Schema Versions Get"
+                  "$ref": "#/components/schemas/SchemaVersionsOut"
                 }
               }
             }
@@ -12333,9 +12301,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Relocation Status Api Observability Relocation Status Get"
+                  "$ref": "#/components/schemas/RelocationStatusOut"
                 }
               }
             }
@@ -13177,7 +13143,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SearchQuestionsOut"
                 }
               }
             }
@@ -13321,7 +13287,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AbilityMatrixOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AbilityWithSelectorOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnifiedAbilityEstimate"
+                    }
+                  ],
+                  "title": "Response Ability Api Adaptivity Ability Get"
                 }
               }
             }
@@ -13464,7 +13441,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/AdaptivityDailyPlanOut"
                 }
               }
             }
@@ -13522,7 +13499,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/RecomputeItemStatsOut"
                 }
               }
             }
@@ -13626,7 +13603,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/ReadinessOut"
                 }
               }
             }
@@ -19141,7 +19118,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/TrustManifestOut"
                 }
               }
             }
@@ -19236,7 +19213,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/TrustManifestOut"
                 }
               }
             }
@@ -19312,7 +19289,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/TrustDiagnosticsOut"
                 }
               }
             }
@@ -19370,7 +19347,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/ScheduledTaskListOut"
                 }
               }
             }
@@ -19436,7 +19413,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/ScheduledTaskOut"
                 }
               }
             }
@@ -19494,7 +19471,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/ScheduledDefaultsOut"
                 }
               }
             }
@@ -19552,7 +19529,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/ScheduledTaskRunDueOut"
                 }
               }
             }
@@ -19621,7 +19598,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/ScheduledTaskRunOut"
                 }
               }
             }
@@ -19679,7 +19656,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/SchedulerRunListOut"
                 }
               }
             }
@@ -19737,7 +19714,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/MigrationDryRunOut"
                 }
               }
             }
@@ -19795,7 +19772,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/PreUpgradeBackupOut"
                 }
               }
             }
@@ -19853,7 +19830,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/BenchmarkRunListOut"
                 }
               }
             }
@@ -19919,7 +19896,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/BenchmarkRunOut"
                 }
               }
             }
@@ -19977,7 +19954,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LegacySuccessResponse"
+                  "$ref": "#/components/schemas/BenchmarkSmokeOut"
                 }
               }
             }
@@ -20028,6 +20005,240 @@
   },
   "components": {
     "schemas": {
+      "AbilityMatrixOut": {
+        "properties": {
+          "overall": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Overall"
+          },
+          "by_type": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "By Type"
+          },
+          "weakest": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Weakest"
+          },
+          "selector": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Selector"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "overall",
+          "by_type",
+          "weakest",
+          "selector"
+        ],
+        "title": "AbilityMatrixOut",
+        "description": "Wire shape of ``adaptivity.ability_matrix`` — the default (LSAT-only)\nbranch of ``GET /api/adaptivity/ability``. All four keys are always present\nand REQUIRED so the response union discriminates on them; the nested\nestimate/selector payloads are engine-owned dicts and stay opaque.\n``extra=\"allow\"`` keeps any future additive keys on the wire untouched."
+      },
+      "AbilityWithSelectorOut": {
+        "properties": {
+          "q_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Type"
+          },
+          "section_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Type"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "ability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ability"
+          },
+          "mastery": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mastery"
+          },
+          "uncertainty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertainty"
+          },
+          "evidence_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence N"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "avg_time_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Time Ms"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "learning_velocity": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning Velocity"
+          },
+          "plateau": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plateau"
+          },
+          "mastery_eta_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mastery Eta Days"
+          },
+          "components": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Components"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "selector": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Selector"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "selector"
+        ],
+        "title": "AbilityWithSelectorOut",
+        "description": "Wire shape of the ``?q_type=``/``?section_type=`` branch of\n``GET /api/adaptivity/ability`` — a flat ``adaptivity.ability_estimate``\npayload with the handler-attached ``selector``. Only ``selector`` is\nrequired (it discriminates this branch from the matrix and unified-estimate\nbranches); the flat estimate fields are Optional so the model never invents\nkeys, and ``snapshot_id``/``created_at`` are only present when\n``?persist=true`` (excluded when unset). ``extra=\"allow\"`` passes any\nadditive keys through unchanged."
+      },
       "ActivityDay": {
         "properties": {
           "date": {
@@ -20310,6 +20521,205 @@
         ],
         "title": "AdaptiveNextResponse",
         "description": "``POST /api/adaptivity/next`` response envelope."
+      },
+      "AdaptivityDailyPlanOut": {
+        "properties": {
+          "minutes": {
+            "type": "integer",
+            "title": "Minutes"
+          },
+          "ability": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ability"
+          },
+          "ability_selector": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ability Selector"
+          },
+          "weakest": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Weakest"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/AdaptivityPlanTaskOut"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "utility_model": {
+            "type": "string",
+            "title": "Utility Model"
+          },
+          "utility": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utility"
+          },
+          "concept_gap_count": {
+            "type": "integer",
+            "title": "Concept Gap Count"
+          },
+          "leech_count": {
+            "type": "integer",
+            "title": "Leech Count"
+          },
+          "guardrails": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Guardrails"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "minutes",
+          "ability",
+          "ability_selector",
+          "weakest",
+          "tasks",
+          "utility_model",
+          "utility",
+          "concept_gap_count",
+          "leech_count",
+          "guardrails"
+        ],
+        "title": "AdaptivityDailyPlanOut",
+        "description": "Wire shape of ``adaptivity.daily_plan`` (``POST /api/adaptivity/plan``).\nEvery top-level key is always present; ``ability``/``ability_selector``/\n``utility``/``guardrails`` are engine-owned dicts kept opaque\n(``utility`` may be None). ``extra=\"allow\"`` keeps additive keys."
+      },
+      "AdaptivityPlanTaskOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "minutes": {
+            "type": "integer",
+            "title": "Minutes"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "q_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Type"
+          },
+          "target_difficulty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Difficulty"
+          },
+          "utility": {
+            "type": "number",
+            "title": "Utility"
+          },
+          "utility_model": {
+            "type": "string",
+            "title": "Utility Model"
+          },
+          "why": {
+            "type": "string",
+            "title": "Why"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "kind",
+          "label",
+          "minutes",
+          "utility",
+          "utility_model",
+          "why"
+        ],
+        "title": "AdaptivityPlanTaskOut",
+        "description": "One task row inside ``adaptivity.daily_plan``'s ``tasks`` list.\n``kind``/``label``/``minutes``/``utility``/``utility_model``/``why`` appear\non every task; ``count`` is absent on the blind_review task and\n``q_type``/``target_difficulty`` only appear on adaptive_drill tasks\n(excluded when unset). ``extra=\"allow\"`` keeps additive keys."
+      },
+      "AiHealthOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "models": {
+            "items": {},
+            "type": "array",
+            "title": "Models"
+          },
+          "ollama": {
+            "type": "boolean",
+            "title": "Ollama"
+          },
+          "missing_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Models"
+          },
+          "missing_models_recovery": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Missing Models Recovery"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "provider",
+          "models",
+          "ollama",
+          "missing_models",
+          "missing_models_recovery"
+        ],
+        "title": "AiHealthOut",
+        "description": "Typed wire shape of ``ai.health()`` — the six stable headline fields.\n\nThe handler spreads ``llm.provider_info()`` into the payload\n(``{**info}``), whose key set is config/provider dependent, so this model\nis permissive: ``extra=\"allow\"`` accepts AND serializes those extra keys\nuntouched, keeping the wire bytes identical to the untyped response."
       },
       "AnnotationBody": {
         "properties": {
@@ -20656,6 +21066,98 @@
         "type": "object",
         "title": "BackupBody"
       },
+      "BackupNewestOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name",
+          "size_bytes",
+          "created_at"
+        ],
+        "title": "BackupNewestOut",
+        "description": "The ``newest`` snapshot block of ``backup.backup_status``."
+      },
+      "BackupStatusOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "backup_dir": {
+            "type": "string",
+            "title": "Backup Dir"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "newest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupNewestOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "newest_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest Age Seconds"
+          },
+          "fresh_within_seconds": {
+            "type": "integer",
+            "title": "Fresh Within Seconds"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "status",
+          "ok",
+          "backup_dir",
+          "count",
+          "fresh_within_seconds"
+        ],
+        "title": "BackupStatusOut",
+        "description": "``backup.backup_status`` — ``newest``/``newest_age_seconds`` are null on\nthe missing/unavailable branches; ``error`` appears only on the\n``unavailable`` OSError branch."
+      },
       "BankStats": {
         "properties": {
           "total": {
@@ -20736,6 +21238,138 @@
           "kind"
         ],
         "title": "BenchmarkBody"
+      },
+      "BenchmarkRunListOut": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkRunOut"
+            },
+            "type": "array",
+            "title": "Runs"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "count",
+          "runs"
+        ],
+        "title": "BenchmarkRunListOut",
+        "description": "Envelope of ``GET /api/observability/benchmarks``."
+      },
+      "BenchmarkRunOut": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metrics"
+          },
+          "environment": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Environment"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "kind",
+          "status",
+          "metrics",
+          "environment",
+          "created_at"
+        ],
+        "title": "BenchmarkRunOut",
+        "description": "``_benchmark_payload`` — one stored ``BenchmarkRun`` row.\n``metrics``/``environment`` are caller-supplied arbitrary JSON."
+      },
+      "BenchmarkSmokeOut": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Metrics"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Evidence"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "kind",
+          "status",
+          "metrics",
+          "evidence",
+          "created_at"
+        ],
+        "title": "BenchmarkSmokeOut",
+        "description": "``jobs.run_benchmark_smoke`` — deliberately NOT ``BenchmarkRunOut``:\nthe smoke run carries ``evidence`` instead of ``environment``/``notes``,\nand its ``metrics`` values are always floats (timing + quality gauges)."
       },
       "BlindReview": {
         "properties": {
@@ -21156,6 +21790,130 @@
         "type": "object",
         "title": "CalibrateBody"
       },
+      "CalibrationBandOut": {
+        "properties": {
+          "confidence": {
+            "type": "string",
+            "title": "Confidence"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "correct": {
+            "type": "integer",
+            "title": "Correct"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "nominal_confidence": {
+            "type": "number",
+            "title": "Nominal Confidence"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "confidence",
+          "attempts",
+          "correct",
+          "nominal_confidence"
+        ],
+        "title": "CalibrationBandOut",
+        "description": "One confidence band from ``analytics.confidence_calibration`` — all five\nkeys are always emitted (``accuracy`` is ``null`` on an empty band).\n``extra=\"allow\"`` keeps future additive band keys on the wire."
+      },
+      "CalibrationOut": {
+        "properties": {
+          "bands": {
+            "items": {
+              "$ref": "#/components/schemas/CalibrationBandOut"
+            },
+            "type": "array",
+            "title": "Bands"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "overall_accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overall Accuracy"
+          },
+          "mean_nominal_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Nominal Confidence"
+          },
+          "calibration_gap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibration Gap"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "sure_but_wrong_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sure But Wrong Rate"
+          },
+          "guess_but_right_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guess But Right Rate"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "bands",
+          "n",
+          "verdict"
+        ],
+        "title": "CalibrationOut",
+        "description": "Envelope for GET /api/analytics/calibration. Every key is present on all\nbranches; the rate/gap fields are ``null`` (not absent) when there is no\nrated history, so they serialize as explicit nulls unchanged."
+      },
       "CaptureBody": {
         "properties": {
           "workspace_id": {
@@ -21428,6 +22186,144 @@
         ],
         "title": "ChoiceEvent",
         "description": "1.2 — one process-of-elimination interaction within an attempt."
+      },
+      "CloudBudgetDryRunOut": {
+        "properties": {
+          "spend_usd": {
+            "type": "number",
+            "title": "Spend Usd"
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd"
+          },
+          "within_budget": {
+            "type": "boolean",
+            "title": "Within Budget"
+          },
+          "remaining_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Usd"
+          },
+          "cloud_enabled": {
+            "type": "boolean",
+            "title": "Cloud Enabled"
+          },
+          "cloud_configured": {
+            "type": "boolean",
+            "title": "Cloud Configured"
+          },
+          "cloud_egress_allowed": {
+            "type": "boolean",
+            "title": "Cloud Egress Allowed"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run"
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/CloudBudgetPricingOut"
+          },
+          "next_call": {
+            "$ref": "#/components/schemas/CloudBudgetNextCallOut"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "spend_usd",
+          "within_budget",
+          "cloud_enabled",
+          "cloud_configured",
+          "cloud_egress_allowed",
+          "dry_run",
+          "pricing",
+          "next_call"
+        ],
+        "title": "CloudBudgetDryRunOut",
+        "description": "``cloud`` block of GET /observability/cloud-budget."
+      },
+      "CloudBudgetNextCallOut": {
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "estimated_cost_usd": {
+            "type": "number",
+            "title": "Estimated Cost Usd"
+          },
+          "would_exceed_budget": {
+            "type": "boolean",
+            "title": "Would Exceed Budget"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "estimated_cost_usd",
+          "would_exceed_budget"
+        ],
+        "title": "CloudBudgetNextCallOut",
+        "description": "``next_call`` dry-run forecast of ``llm.cloud_budget_dry_run``."
+      },
+      "CloudBudgetOut": {
+        "properties": {
+          "cloud": {
+            "$ref": "#/components/schemas/CloudBudgetDryRunOut"
+          },
+          "voice": {
+            "$ref": "#/components/schemas/VoiceCacheStatusOut"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "cloud",
+          "voice"
+        ],
+        "title": "CloudBudgetOut",
+        "description": "GET /observability/cloud-budget — budget picture + voice cache."
+      },
+      "CloudBudgetPricingOut": {
+        "properties": {
+          "input_cost_per_mtok_usd": {
+            "type": "number",
+            "title": "Input Cost Per Mtok Usd"
+          },
+          "output_cost_per_mtok_usd": {
+            "type": "number",
+            "title": "Output Cost Per Mtok Usd"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "input_cost_per_mtok_usd",
+          "output_cost_per_mtok_usd"
+        ],
+        "title": "CloudBudgetPricingOut",
+        "description": "``pricing`` block of ``llm.cloud_budget_dry_run``."
       },
       "CoachChatBody": {
         "properties": {
@@ -22390,6 +23286,221 @@
         "type": "object",
         "title": "ExportBody"
       },
+      "ExportHistoryItemOut": {
+        "properties": {
+          "export_id": {
+            "type": "string",
+            "title": "Export Id"
+          },
+          "exported_at": {
+            "type": "string",
+            "title": "Exported At"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "host_schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Schema Version"
+          },
+          "format": {
+            "type": "string",
+            "title": "Format"
+          },
+          "source_host": {
+            "type": "boolean",
+            "title": "Source Host"
+          },
+          "row_counts": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Row Counts"
+          },
+          "checksum": {
+            "type": "string",
+            "title": "Checksum"
+          },
+          "restore_count": {
+            "type": "integer",
+            "title": "Restore Count"
+          },
+          "last_restored": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Restored"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "export_id",
+          "exported_at",
+          "schema_version",
+          "format",
+          "source_host",
+          "row_counts",
+          "checksum",
+          "restore_count"
+        ],
+        "title": "ExportHistoryItemOut",
+        "description": "One ExportHistory provenance row (export_backup._history_dict).\n\n``row_counts`` is dynamically keyed (per-table counts plus optional\n``host_present``) so it stays an open dict."
+      },
+      "ExportImportOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "export_id": {
+            "type": "string",
+            "title": "Export Id"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts"
+          },
+          "restore_count": {
+            "type": "integer",
+            "title": "Restore Count"
+          },
+          "host_data_present": {
+            "type": "boolean",
+            "title": "Host Data Present"
+          },
+          "encrypted": {
+            "type": "boolean",
+            "title": "Encrypted"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "export_id",
+          "counts",
+          "restore_count",
+          "host_data_present",
+          "encrypted"
+        ],
+        "title": "ExportImportOut",
+        "description": "``POST /api/export/import`` — import_unified_export() + handler's\n``encrypted`` flag. ``counts`` keys are produced dynamically by\n``bank_export.import_bank`` so they stay an open int map."
+      },
+      "ExportListOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExportHistoryItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "total",
+          "offset",
+          "limit",
+          "has_more",
+          "items"
+        ],
+        "title": "ExportListOut",
+        "description": "``GET /api/export/list`` — pagination envelope from\nexport_backup.list_history()."
+      },
+      "ExportValidateOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "encrypted": {
+            "type": "boolean",
+            "title": "Encrypted"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "errors",
+          "encrypted"
+        ],
+        "title": "ExportValidateOut",
+        "description": "``POST /api/export/validate`` — validate_envelope() + handler's\n``encrypted`` flag."
+      },
       "FactoryBatch": {
         "properties": {
           "batch_id": {
@@ -22882,6 +23993,48 @@
         ],
         "title": "ForTypeBody"
       },
+      "FsrsReconciledEntryOut": {
+        "properties": {
+          "crossId": {
+            "type": "string",
+            "title": "Crossid"
+          },
+          "fsrsState": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Fsrsstate"
+          },
+          "syncRevision": {
+            "type": "integer",
+            "title": "Syncrevision"
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution"
+          },
+          "observedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observedat"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "crossId",
+          "fsrsState",
+          "syncRevision",
+          "resolution"
+        ],
+        "title": "FsrsReconciledEntryOut",
+        "description": "Per-card reconcile entry echoed by ``POST /api/sync/fsrs-write-back``.\n\nMirrors ``cross_domain_sync._reconciled`` verbatim: literal camelCase keys\n(the source dicts are already camelCase — no aliasing). ``fsrsState`` is the\nhost's opaque FSRS scheduling state (host-opaque by contract) and stays\n``dict[str, Any]``. ``extra=\"allow\"`` keeps future additive keys on the wire."
+      },
       "FsrsWriteBackBody": {
         "properties": {
           "writes": {
@@ -22896,6 +24049,162 @@
         "type": "object",
         "title": "FsrsWriteBackBody",
         "description": "A batch of per-card FSRS write-backs to apply under last-write-wins."
+      },
+      "FsrsWriteBackLogEntryOut": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "writeId": {
+            "type": "string",
+            "title": "Writeid"
+          },
+          "crossId": {
+            "type": "string",
+            "title": "Crossid"
+          },
+          "sourcePlane": {
+            "type": "string",
+            "title": "Sourceplane"
+          },
+          "targetPlane": {
+            "type": "string",
+            "title": "Targetplane"
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution"
+          },
+          "fsrsBefore": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Fsrsbefore"
+          },
+          "fsrsAfter": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Fsrsafter"
+          },
+          "observedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observedat"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "writeId",
+          "crossId",
+          "sourcePlane",
+          "targetPlane",
+          "resolution",
+          "fsrsBefore",
+          "fsrsAfter"
+        ],
+        "title": "FsrsWriteBackLogEntryOut",
+        "description": "One ``CrossDomainSyncLog`` ledger row as serialized by the log route.\n\ncamelCase keys built inline by ``get_fsrs_write_back_log``. ``fsrsBefore`` /\n``fsrsAfter`` mirror opaque JSON columns (dynamic host FSRS state) and stay\n``dict[str, Any]``."
+      },
+      "FsrsWriteBackLogOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/FsrsWriteBackLogEntryOut"
+            },
+            "type": "array",
+            "title": "Entries"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "count",
+          "entries"
+        ],
+        "title": "FsrsWriteBackLogOut",
+        "description": "Envelope returned by ``GET /api/sync/fsrs-write-back/log``."
+      },
+      "FsrsWriteBackOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "received": {
+            "type": "integer",
+            "title": "Received"
+          },
+          "applied": {
+            "type": "integer",
+            "title": "Applied"
+          },
+          "kept_existing": {
+            "type": "integer",
+            "title": "Kept Existing"
+          },
+          "deduped": {
+            "type": "integer",
+            "title": "Deduped"
+          },
+          "no_target": {
+            "type": "integer",
+            "title": "No Target"
+          },
+          "reconciled": {
+            "items": {
+              "$ref": "#/components/schemas/FsrsReconciledEntryOut"
+            },
+            "type": "array",
+            "title": "Reconciled"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "received",
+          "applied",
+          "kept_existing",
+          "deduped",
+          "no_target",
+          "reconciled"
+        ],
+        "title": "FsrsWriteBackOut",
+        "description": "Envelope returned by ``POST /api/sync/fsrs-write-back``.\n\nNote the deliberate key-casing mix mirrored from ``apply_fsrs_write_back``:\nsnake_case summary counters (``kept_existing``, ``no_target``) alongside\ncamelCase reconciled-entry keys. All keys are always present."
       },
       "FsrsWriteIn": {
         "properties": {
@@ -23597,6 +24906,121 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HealthAggregatedOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "backend_ready": {
+            "type": "boolean",
+            "title": "Backend Ready"
+          },
+          "db_ready": {
+            "type": "boolean",
+            "title": "Db Ready"
+          },
+          "worker_ready": {
+            "type": "boolean",
+            "title": "Worker Ready"
+          },
+          "backup_status": {
+            "type": "string",
+            "title": "Backup Status"
+          },
+          "gen_queued": {
+            "type": "integer",
+            "title": "Gen Queued"
+          },
+          "gen_running": {
+            "type": "integer",
+            "title": "Gen Running"
+          },
+          "explain_p50_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explain P50 Ms"
+          },
+          "cloud_tokens": {
+            "$ref": "#/components/schemas/ObsCloudTokensOut"
+          },
+          "cloud_monthly_budget_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud Monthly Budget Usd"
+          },
+          "cloud_spend_mtd_usd": {
+            "type": "number",
+            "title": "Cloud Spend Mtd Usd"
+          },
+          "cloud_budget_within": {
+            "type": "boolean",
+            "title": "Cloud Budget Within"
+          },
+          "sqlite_health": {
+            "$ref": "#/components/schemas/SqliteHealthOut"
+          },
+          "provider_capabilities": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Provider Capabilities"
+          },
+          "readiness": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Readiness"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "status",
+          "ok",
+          "generated_at",
+          "reasons",
+          "backend_ready",
+          "db_ready",
+          "worker_ready",
+          "backup_status",
+          "gen_queued",
+          "gen_running",
+          "cloud_tokens",
+          "cloud_spend_mtd_usd",
+          "cloud_budget_within",
+          "sqlite_health",
+          "provider_capabilities",
+          "readiness"
+        ],
+        "title": "HealthAggregatedOut",
+        "description": "GET /observability/health-aggregated — consolidated System Health."
+      },
       "HealthResponse": {
         "properties": {
           "ok": {
@@ -23971,6 +25395,290 @@
         ],
         "title": "LinkBody"
       },
+      "MetricsCloudOut": {
+        "properties": {
+          "spend_usd": {
+            "type": "number",
+            "title": "Spend Usd"
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd"
+          },
+          "within_budget": {
+            "type": "boolean",
+            "title": "Within Budget"
+          },
+          "remaining_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Usd"
+          },
+          "input_cost_per_mtok_usd": {
+            "type": "number",
+            "title": "Input Cost Per Mtok Usd"
+          },
+          "output_cost_per_mtok_usd": {
+            "type": "number",
+            "title": "Output Cost Per Mtok Usd"
+          },
+          "recent_calls": {
+            "items": {
+              "$ref": "#/components/schemas/MetricsRecentCallOut"
+            },
+            "type": "array",
+            "title": "Recent Calls"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "spend_usd",
+          "within_budget",
+          "input_cost_per_mtok_usd",
+          "output_cost_per_mtok_usd",
+          "recent_calls"
+        ],
+        "title": "MetricsCloudOut",
+        "description": "``cloud`` block of GET /observability/metrics (budget status + pricing)."
+      },
+      "MetricsOut": {
+        "properties": {
+          "task": {
+            "type": "string",
+            "title": "Task"
+          },
+          "window": {
+            "type": "integer",
+            "title": "Window"
+          },
+          "latency_p50_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency P50 Ms"
+          },
+          "cloud": {
+            "$ref": "#/components/schemas/MetricsCloudOut"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "task",
+          "window",
+          "cloud"
+        ],
+        "title": "MetricsOut",
+        "description": "GET /observability/metrics — persisted latency + cloud-spend reads."
+      },
+      "MetricsRecentCallOut": {
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "cost_usd"
+        ],
+        "title": "MetricsRecentCallOut",
+        "description": "One ``UsageLedger`` tail row on GET /observability/metrics."
+      },
+      "MigrationDryRunOut": {
+        "properties": {
+          "latest_expected_version": {
+            "type": "integer",
+            "title": "Latest Expected Version"
+          },
+          "pragma_user_version": {
+            "type": "integer",
+            "title": "Pragma User Version"
+          },
+          "applied_count": {
+            "type": "integer",
+            "title": "Applied Count"
+          },
+          "pending_count": {
+            "type": "integer",
+            "title": "Pending Count"
+          },
+          "applied": {
+            "items": {
+              "$ref": "#/components/schemas/MigrationItemOut"
+            },
+            "type": "array",
+            "title": "Applied"
+          },
+          "pending": {
+            "items": {
+              "$ref": "#/components/schemas/MigrationItemOut"
+            },
+            "type": "array",
+            "title": "Pending"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/MigrationItemOut"
+            },
+            "type": "array",
+            "title": "Failed"
+          },
+          "checksum_mismatches": {
+            "items": {
+              "$ref": "#/components/schemas/MigrationItemOut"
+            },
+            "type": "array",
+            "title": "Checksum Mismatches"
+          },
+          "pre_migration_backup_required": {
+            "type": "boolean",
+            "title": "Pre Migration Backup Required"
+          },
+          "restore_after_upgrade_smoke_required": {
+            "type": "boolean",
+            "title": "Restore After Upgrade Smoke Required"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "latest_expected_version",
+          "pragma_user_version",
+          "applied_count",
+          "pending_count",
+          "applied",
+          "pending",
+          "failed",
+          "checksum_mismatches",
+          "pre_migration_backup_required",
+          "restore_after_upgrade_smoke_required"
+        ],
+        "title": "MigrationDryRunOut",
+        "description": "``migrations.migration_preview`` payload\n(``GET /api/observability/migrations/dry-run``)."
+      },
+      "MigrationItemOut": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "checksum": {
+            "type": "string",
+            "title": "Checksum"
+          },
+          "recorded_checksum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Checksum"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "version",
+          "name",
+          "checksum"
+        ],
+        "title": "MigrationItemOut",
+        "description": "One ``migration_preview`` item. The additive ``error`` key appears only\non ``failed`` items — one model covers all four lists via\n``exclude_unset``."
+      },
       "NextBody": {
         "properties": {
           "count": {
@@ -24173,6 +25881,207 @@
         },
         "type": "object",
         "title": "NotePatchBody"
+      },
+      "ObsCloudTokensOut": {
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "title": "ObsCloudTokensOut",
+        "description": "In-RAM cloud token counters (``observability.cloud_token_totals``)."
+      },
+      "ObsTrustStatusOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "tier": {
+            "type": "string",
+            "title": "Tier"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "cache_ttl_seconds": {
+            "type": "integer",
+            "title": "Cache Ttl Seconds"
+          },
+          "checks": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Checks"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "status",
+          "tier",
+          "generated_at",
+          "cache_ttl_seconds",
+          "checks"
+        ],
+        "title": "ObsTrustStatusOut",
+        "description": "GET /observability/trust-status (``trust.trust_status``)."
+      },
+      "ObservabilityStatusOut": {
+        "properties": {
+          "gen_queued": {
+            "type": "integer",
+            "title": "Gen Queued"
+          },
+          "gen_running": {
+            "type": "integer",
+            "title": "Gen Running"
+          },
+          "worker_alive": {
+            "type": "boolean",
+            "title": "Worker Alive"
+          },
+          "last_coach_refresh_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Coach Refresh Ms"
+          },
+          "explain_p50_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explain P50 Ms"
+          },
+          "embed_coverage_pct": {
+            "type": "number",
+            "title": "Embed Coverage Pct"
+          },
+          "models": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Models"
+          },
+          "llm_cache": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Llm Cache"
+          },
+          "cloud_tokens": {
+            "$ref": "#/components/schemas/ObsCloudTokensOut"
+          },
+          "cloud_monthly_budget_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud Monthly Budget Usd"
+          },
+          "cloud_spend_mtd_usd": {
+            "type": "number",
+            "title": "Cloud Spend Mtd Usd"
+          },
+          "cloud_budget_within": {
+            "type": "boolean",
+            "title": "Cloud Budget Within"
+          },
+          "cloud_budget_remaining_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud Budget Remaining Usd"
+          },
+          "explain_p50_ms_persisted": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explain P50 Ms Persisted"
+          },
+          "backend_ready": {
+            "type": "boolean",
+            "title": "Backend Ready"
+          },
+          "db_ready": {
+            "type": "boolean",
+            "title": "Db Ready"
+          },
+          "worker_ready": {
+            "type": "boolean",
+            "title": "Worker Ready"
+          },
+          "backup_status": {
+            "type": "string",
+            "title": "Backup Status"
+          },
+          "readiness": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Readiness"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "gen_queued",
+          "gen_running",
+          "worker_alive",
+          "embed_coverage_pct",
+          "models",
+          "llm_cache",
+          "cloud_tokens",
+          "cloud_spend_mtd_usd",
+          "cloud_budget_within",
+          "backend_ready",
+          "db_ready",
+          "worker_ready",
+          "backup_status",
+          "readiness"
+        ],
+        "title": "ObservabilityStatusOut",
+        "description": "GET /observability/status — live backend health for the trust strip."
       },
       "PacingBudgetBody": {
         "properties": {
@@ -24662,6 +26571,35 @@
         "type": "object",
         "title": "PodcastBody"
       },
+      "PreUpgradeBackupOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BackupStatusOut"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "path",
+          "name",
+          "status"
+        ],
+        "title": "PreUpgradeBackupOut",
+        "description": "``POST /api/observability/migrations/pre-upgrade-backup`` response."
+      },
       "PregenBody": {
         "properties": {
           "limit": {
@@ -24884,6 +26822,321 @@
         ],
         "title": "RationaleBody"
       },
+      "ReadinessOut": {
+        "properties": {
+          "section_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Type"
+          },
+          "readiness_score": {
+            "type": "number",
+            "title": "Readiness Score"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "on_track": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Track"
+          },
+          "exam_ready": {
+            "type": "boolean",
+            "title": "Exam Ready"
+          },
+          "predicted_scaled_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Predicted Scaled Score"
+          },
+          "mastery_eta_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mastery Eta Days"
+          },
+          "plateau": {
+            "type": "boolean",
+            "title": "Plateau"
+          },
+          "required_weekly_slope": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Weekly Slope"
+          },
+          "components": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Components"
+          },
+          "ability": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ability"
+          },
+          "ability_selector": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ability Selector"
+          },
+          "utility": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utility"
+          },
+          "exam_simulation": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Exam Simulation"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "section_type",
+          "readiness_score",
+          "status",
+          "on_track",
+          "exam_ready",
+          "predicted_scaled_score",
+          "mastery_eta_days",
+          "plateau",
+          "required_weekly_slope",
+          "components",
+          "ability",
+          "ability_selector",
+          "utility",
+          "exam_simulation"
+        ],
+        "title": "ReadinessOut",
+        "description": "Wire shape of ``adaptivity.readiness`` (``GET /api/readiness``).\nHeadline scalars are always present (several nullable-valued);\n``snapshot_id``/``created_at`` only exist when ``?persist=true`` (the\ndefault), so they are Optional and excluded when unset. The nested\n``ability``/``ability_selector``/``components``/``exam_simulation``/\n``utility`` blocks are engine-owned dicts kept opaque. ``extra=\"allow\"``\nkeeps additive keys on the wire untouched."
+      },
+      "ReadyAiOut": {
+        "properties": {
+          "ready": {
+            "type": "boolean",
+            "title": "Ready"
+          },
+          "provider_reachable": {
+            "type": "boolean",
+            "title": "Provider Reachable"
+          },
+          "ollama_reachable": {
+            "type": "boolean",
+            "title": "Ollama Reachable"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "expected_models": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Expected Models"
+          },
+          "model_available": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Model Available"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "realtime_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realtime Provider"
+          },
+          "capabilities": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Capabilities"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ready",
+          "provider_reachable",
+          "ollama_reachable",
+          "models",
+          "expected_models",
+          "model_available",
+          "capabilities"
+        ],
+        "title": "ReadyAiOut",
+        "description": "AI-provider block of GET /ready (partly provider-dependent)."
+      },
+      "ReadyOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "db": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Db"
+          },
+          "worker": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Worker"
+          },
+          "backup": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Backup"
+          },
+          "ai": {
+            "$ref": "#/components/schemas/ReadyAiOut"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "status",
+          "generated_at",
+          "db",
+          "worker",
+          "backup",
+          "ai",
+          "errors",
+          "warnings"
+        ],
+        "title": "ReadyOut",
+        "description": "GET /ready — launch readiness for sidecar smoke tests."
+      },
+      "RecomputeItemStatsOut": {
+        "properties": {
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "updated"
+        ],
+        "title": "RecomputeItemStatsOut",
+        "description": "Wire shape of ``adaptivity.refresh_all_item_stats``\n(``POST /api/adaptivity/recompute-item-stats``): a single counter."
+      },
       "ReconcileBody": {
         "properties": {
           "job_id": {
@@ -24946,6 +27199,79 @@
         },
         "type": "object",
         "title": "ReflectionBody"
+      },
+      "RelocationStatusOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "orphaned": {
+            "type": "boolean",
+            "title": "Orphaned"
+          },
+          "oldPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldpath"
+          },
+          "newPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newpath"
+          },
+          "oldExists": {
+            "type": "boolean",
+            "title": "Oldexists"
+          },
+          "newExists": {
+            "type": "boolean",
+            "title": "Newexists"
+          },
+          "sizeBytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sizebytes"
+          },
+          "samePath": {
+            "type": "boolean",
+            "title": "Samepath"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "status",
+          "generated_at",
+          "orphaned",
+          "oldExists",
+          "newExists",
+          "samePath"
+        ],
+        "title": "RelocationStatusOut",
+        "description": "GET /observability/relocation-status (``relocation.relocation_status``).\n\nField names are the HOST-FACING camelCase contract — tests assert exact\nkey-SET equality on the wire payload, so never rename/alias these."
       },
       "RestoreBody": {
         "properties": {
@@ -25060,6 +27386,108 @@
         ],
         "title": "ReviewBody"
       },
+      "RuntimeEvidenceOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "log_dir": {
+            "type": "string",
+            "title": "Log Dir"
+          },
+          "log_dir_exists": {
+            "type": "boolean",
+            "title": "Log Dir Exists"
+          },
+          "log_dir_writable": {
+            "type": "boolean",
+            "title": "Log Dir Writable"
+          },
+          "log_file_count": {
+            "type": "integer",
+            "title": "Log File Count"
+          },
+          "log_files": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Log Files"
+          },
+          "recent_error_count": {
+            "type": "integer",
+            "title": "Recent Error Count"
+          },
+          "stale_error_count": {
+            "type": "integer",
+            "title": "Stale Error Count"
+          },
+          "recent_error_window_hours": {
+            "type": "integer",
+            "title": "Recent Error Window Hours"
+          },
+          "recent_errors": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Recent Errors"
+          },
+          "last_request_error": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Request Error"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metrics"
+          },
+          "crash_free_window": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Crash Free Window"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "status",
+          "generated_at",
+          "log_dir",
+          "log_dir_exists",
+          "log_dir_writable",
+          "log_file_count",
+          "log_files",
+          "recent_error_count",
+          "stale_error_count",
+          "recent_error_window_hours",
+          "recent_errors",
+          "metrics",
+          "crash_free_window"
+        ],
+        "title": "RuntimeEvidenceOut",
+        "description": "GET /observability/runtime-evidence\n(``observability.runtime_evidence_summary``)."
+      },
       "ScaleTableBody": {
         "properties": {
           "raw_to_scaled": {
@@ -25127,6 +27555,385 @@
           "task_type"
         ],
         "title": "ScheduleBody"
+      },
+      "ScheduledDefaultsOut": {
+        "properties": {
+          "scheduled_tasks": {
+            "type": "integer",
+            "title": "Scheduled Tasks"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keys"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "scheduled_tasks",
+          "keys"
+        ],
+        "title": "ScheduledDefaultsOut",
+        "description": "``jobs.ensure_default_schedules`` result."
+      },
+      "ScheduledTaskListOut": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduledTaskOut"
+            },
+            "type": "array",
+            "title": "Tasks"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "count",
+          "tasks"
+        ],
+        "title": "ScheduledTaskListOut",
+        "description": "Envelope of ``GET /api/observability/scheduled-tasks``."
+      },
+      "ScheduledTaskOut": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "task_type": {
+            "type": "string",
+            "title": "Task Type"
+          },
+          "cadence_s": {
+            "type": "integer",
+            "title": "Cadence S"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "next_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run At"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "task_type",
+          "cadence_s",
+          "status",
+          "enabled",
+          "payload",
+          "updated_at"
+        ],
+        "title": "ScheduledTaskOut",
+        "description": "``jobs.scheduled_task_payload`` — reused by the list envelope, the\nupsert response, and nested inside run results. ``payload`` is\nuser-supplied opaque JSON."
+      },
+      "ScheduledTaskRunDueOut": {
+        "properties": {
+          "ran": {
+            "type": "integer",
+            "title": "Ran"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduledTaskRunOut"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ran",
+          "results"
+        ],
+        "title": "ScheduledTaskRunDueOut",
+        "description": "Envelope of ``POST /api/observability/scheduled-tasks/run-due``."
+      },
+      "ScheduledTaskRunOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "task": {
+            "$ref": "#/components/schemas/ScheduledTaskOut"
+          },
+          "duration_ms": {
+            "type": "number",
+            "title": "Duration Ms"
+          },
+          "result": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "task",
+          "duration_ms",
+          "result"
+        ],
+        "title": "ScheduledTaskRunOut",
+        "description": "One ``jobs.run_scheduled_task`` run result. ``result`` is polymorphic\nper task_type (backup/calibration/embedding/content_audit/...) and stays\n``dict[str, Any]``. The ``{ok: False, reason: 'task_not_found'}`` variant\nnever reaches the wire (converted to HTTPException 404)."
+      },
+      "SchedulerRunListOut": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/SchedulerRunOut"
+            },
+            "type": "array",
+            "title": "Runs"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "count",
+          "runs"
+        ],
+        "title": "SchedulerRunListOut",
+        "description": "Envelope of ``GET /api/observability/scheduler-runs``."
+      },
+      "SchedulerRunOut": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "task_key": {
+            "type": "string",
+            "title": "Task Key"
+          },
+          "task_type": {
+            "type": "string",
+            "title": "Task Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "duration_ms": {
+            "type": "number",
+            "title": "Duration Ms"
+          },
+          "result": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "task_key",
+          "task_type",
+          "status",
+          "duration_ms",
+          "result",
+          "created_at"
+        ],
+        "title": "SchedulerRunOut",
+        "description": "``jobs.scheduler_run_payload`` — one persisted scheduler run.\n``result`` mirrors the polymorphic stored ``result_json``."
+      },
+      "SchemaVersionsOut": {
+        "properties": {
+          "cross_domain_schema_version": {
+            "type": "integer",
+            "title": "Cross Domain Schema Version"
+          },
+          "db_user_version": {
+            "type": "integer",
+            "title": "Db User Version"
+          },
+          "latest_migration_version": {
+            "type": "integer",
+            "title": "Latest Migration Version"
+          },
+          "host_min_supported": {
+            "type": "integer",
+            "title": "Host Min Supported"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "cross_domain_schema_version",
+          "db_user_version",
+          "latest_migration_version",
+          "host_min_supported",
+          "generated_at"
+        ],
+        "title": "SchemaVersionsOut",
+        "description": "GET /observability/schema-versions — cross-domain version handshake."
+      },
+      "SearchQuestionsOut": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResultRowOut"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "query",
+          "results"
+        ],
+        "title": "SearchQuestionsOut",
+        "description": "Envelope for GET /api/search/questions: the echoed query plus the ranked\nresult rows (``[]`` on no match / absent FTS table)."
+      },
+      "SearchResultRowOut": {
+        "properties": {
+          "question_id": {
+            "type": "integer",
+            "title": "Question Id"
+          },
+          "q_type": {
+            "type": "string",
+            "title": "Q Type"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "stem": {
+            "type": "string",
+            "title": "Stem"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "question_id",
+          "q_type",
+          "source",
+          "stem"
+        ],
+        "title": "SearchResultRowOut",
+        "description": "One FTS5 hit from ``search.search_questions`` — deliberately answer-key\nfree (never includes ``correct_answer``/``is_correct``). ``extra=\"allow\"``\nkeeps future additive row keys on the wire without a schema bump."
       },
       "SectionType": {
         "type": "string",
@@ -25259,6 +28066,24 @@
           "review"
         ],
         "title": "SessionType"
+      },
+      "SettingsEnvelopeOut": {
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/SettingsValuesOut"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/SettingsProviderInfoOut"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "settings",
+          "provider"
+        ],
+        "title": "SettingsEnvelopeOut",
+        "description": "Shared GET/PUT /api/settings envelope: both handlers return the same\ntwo-key shape built from ``settings_store`` + ``llm.provider_info()``."
       },
       "SettingsPatch": {
         "properties": {
@@ -25399,6 +28224,168 @@
         },
         "type": "object",
         "title": "SettingsPatch"
+      },
+      "SettingsProviderInfoOut": {
+        "properties": {
+          "realtime_provider": {
+            "type": "string",
+            "title": "Realtime Provider"
+          },
+          "local_provider": {
+            "type": "string",
+            "title": "Local Provider"
+          },
+          "lmstudio_url": {
+            "type": "string",
+            "title": "Lmstudio Url"
+          },
+          "offline_provider": {
+            "type": "string",
+            "title": "Offline Provider"
+          },
+          "cloud_configured": {
+            "type": "boolean",
+            "title": "Cloud Configured"
+          },
+          "cloud_egress_allowed": {
+            "type": "boolean",
+            "title": "Cloud Egress Allowed"
+          },
+          "cloud_enabled": {
+            "type": "boolean",
+            "title": "Cloud Enabled"
+          },
+          "capabilities": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Capabilities"
+          },
+          "explain_model": {
+            "type": "string",
+            "title": "Explain Model"
+          },
+          "explain_model_configured": {
+            "type": "string",
+            "title": "Explain Model Configured"
+          },
+          "explain_model_fallback": {
+            "type": "string",
+            "title": "Explain Model Fallback"
+          },
+          "tag_model": {
+            "type": "string",
+            "title": "Tag Model"
+          },
+          "gen_model": {
+            "type": "string",
+            "title": "Gen Model"
+          },
+          "critic_model": {
+            "type": "string",
+            "title": "Critic Model"
+          },
+          "diagnose_model": {
+            "type": "string",
+            "title": "Diagnose Model"
+          },
+          "embed_model": {
+            "type": "string",
+            "title": "Embed Model"
+          },
+          "cloud_gen_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud Gen Model"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "realtime_provider",
+          "local_provider",
+          "lmstudio_url",
+          "offline_provider",
+          "cloud_configured",
+          "cloud_egress_allowed",
+          "cloud_enabled",
+          "capabilities",
+          "explain_model",
+          "explain_model_configured",
+          "explain_model_fallback",
+          "tag_model",
+          "gen_model",
+          "critic_model",
+          "diagnose_model",
+          "embed_model"
+        ],
+        "title": "SettingsProviderInfoOut",
+        "description": "Mirror of ``llm.provider_info()`` (app/llm/__init__.py). ``capabilities``\nstays ``dict[str, Any]`` because its ``matrix`` block is dynamically keyed\nby provider name; ``cloud_gen_model`` is null when cloud is disabled."
+      },
+      "SettingsValuesOut": {
+        "properties": {
+          "explain_model": {
+            "type": "string",
+            "title": "Explain Model"
+          },
+          "gen_model": {
+            "type": "string",
+            "title": "Gen Model"
+          },
+          "diagnose_model": {
+            "type": "string",
+            "title": "Diagnose Model"
+          },
+          "embed_model": {
+            "type": "string",
+            "title": "Embed Model"
+          },
+          "gen_provider": {
+            "type": "string",
+            "title": "Gen Provider"
+          },
+          "cloud_gen_model": {
+            "type": "string",
+            "title": "Cloud Gen Model"
+          },
+          "gen_critic_model": {
+            "type": "string",
+            "title": "Gen Critic Model"
+          },
+          "local_provider": {
+            "type": "string",
+            "title": "Local Provider"
+          },
+          "lmstudio_url": {
+            "type": "string",
+            "title": "Lmstudio Url"
+          },
+          "desired_retention": {
+            "type": "number",
+            "title": "Desired Retention"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "explain_model",
+          "gen_model",
+          "diagnose_model",
+          "embed_model",
+          "gen_provider",
+          "cloud_gen_model",
+          "gen_critic_model",
+          "local_provider",
+          "lmstudio_url",
+          "desired_retention"
+        ],
+        "title": "SettingsValuesOut",
+        "description": "Effective model-routing values — the fixed ``settings_store._OVERRIDABLE``\nkey set (settings_store.py). All keys are always emitted; ``extra=\"allow\"``\nkeeps any future additive keys on the wire without a schema edit. Secret\nkeys (e.g. ``cloud_api_key``) are never part of this payload and MUST NOT\nbe declared here."
       },
       "SharedStudyProfileOut": {
         "properties": {
@@ -25808,6 +28795,656 @@
         "title": "SimulateScenario",
         "description": "One side of the comparison (baseline or projected)."
       },
+      "SqliteHealthOut": {
+        "properties": {
+          "pragmas": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Pragmas"
+          },
+          "busy_retries": {
+            "type": "integer",
+            "title": "Busy Retries"
+          },
+          "wal_estimate_if_cheap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wal Estimate If Cheap"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "pragmas",
+          "busy_retries"
+        ],
+        "title": "SqliteHealthOut",
+        "description": "GET /observability/sqlite-health (``observability.sqlite_health``)."
+      },
+      "SrsBlindReviewNoteOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "attempt_id": {
+            "type": "integer",
+            "title": "Attempt Id"
+          },
+          "question_id": {
+            "type": "integer",
+            "title": "Question Id"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "br_note": {
+            "type": "string",
+            "title": "Br Note"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "attempt_id",
+          "question_id",
+          "stage",
+          "br_note",
+          "created_at"
+        ],
+        "title": "SrsBlindReviewNoteOut",
+        "description": "POST /srs/attempts/{attempt_id}/blind-review-note — the persisted\nAttemptRationale row (stage=\"blind_review\") echoed back."
+      },
+      "SrsCardsCreateOut": {
+        "properties": {
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "card_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Card Ids"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "created",
+          "skipped",
+          "card_ids"
+        ],
+        "title": "SrsCardsCreateOut",
+        "description": "POST /srs/cards — bulk-create result: counts + the new card ids."
+      },
+      "SrsChoiceOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "text"
+        ],
+        "title": "SrsChoiceOut",
+        "description": "One answer choice in test mode (no is_correct/trap_type leak)."
+      },
+      "SrsConceptGapCardsOut": {
+        "properties": {
+          "generated": {
+            "type": "integer",
+            "title": "Generated"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "card_type": {
+            "type": "string",
+            "title": "Card Type"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/SrsGapCardOut"
+            },
+            "type": "array",
+            "title": "Cards"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "generated",
+          "skipped",
+          "card_type",
+          "origin",
+          "cards"
+        ],
+        "title": "SrsConceptGapCardsOut",
+        "description": "POST /srs/concept-gap-cards — generation-run summary + card previews."
+      },
+      "SrsConceptGapQueueCardOut": {
+        "properties": {
+          "card_id": {
+            "type": "integer",
+            "title": "Card Id"
+          },
+          "question_id": {
+            "type": "integer",
+            "title": "Question Id"
+          },
+          "q_type": {
+            "type": "string",
+            "title": "Q Type"
+          },
+          "difficulty": {
+            "type": "integer",
+            "title": "Difficulty"
+          },
+          "due_date": {
+            "type": "string",
+            "title": "Due Date"
+          },
+          "lapses": {
+            "type": "integer",
+            "title": "Lapses"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "card_id",
+          "question_id",
+          "q_type",
+          "difficulty",
+          "due_date",
+          "lapses",
+          "origin"
+        ],
+        "title": "SrsConceptGapQueueCardOut",
+        "description": "One LSAT-native concept-gap row (pedagogy.concept_gap_queue) —\nanswer-key-free by design."
+      },
+      "SrsConceptGapQueueOut": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/SrsConceptGapQueueCardOut"
+            },
+            "type": "array",
+            "title": "Cards"
+          },
+          "host_cards": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Cards"
+          },
+          "include_host": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Host"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "count",
+          "cards"
+        ],
+        "title": "SrsConceptGapQueueOut",
+        "description": "GET /srs/concept-gap-queue envelope. ``host_cards``/``include_host`` are\nCONDITIONAL (only with ``?include_host=true``); they are Optional=None and\nthe route uses ``response_model_exclude_unset=True`` so the default response\nkey set stays EXACTLY {count, cards} (test_srs_and_drills pins this).\n``host_cards`` rows are verbatim host CrossDomainReviewCard payloads —\ndynamically keyed, so they stay ``dict[str, Any]``."
+      },
+      "SrsDueCardOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "passage_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passage Id"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "stem": {
+            "type": "string",
+            "title": "Stem"
+          },
+          "q_type": {
+            "type": "string",
+            "title": "Q Type"
+          },
+          "difficulty": {
+            "type": "integer",
+            "title": "Difficulty"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/SrsChoiceOut"
+            },
+            "type": "array",
+            "title": "Choices"
+          },
+          "card_id": {
+            "type": "integer",
+            "title": "Card Id"
+          },
+          "predicted_intervals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Predicted Intervals"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "prompt",
+          "stem",
+          "q_type",
+          "difficulty",
+          "source",
+          "choices",
+          "card_id",
+          "predicted_intervals"
+        ],
+        "title": "SrsDueCardOut",
+        "description": "One due card: serializers.question_test_mode payload (answer-key-free)\nplus the SRS extras the handler attaches (predicted_intervals, origin)."
+      },
+      "SrsDueOut": {
+        "properties": {
+          "due_count": {
+            "type": "integer",
+            "title": "Due Count"
+          },
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/SrsDueCardOut"
+            },
+            "type": "array",
+            "title": "Cards"
+          },
+          "ability_selector": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ability Selector"
+          },
+          "utility_model": {
+            "type": "string",
+            "title": "Utility Model"
+          },
+          "review_strategy": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Review Strategy"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "due_count",
+          "cards",
+          "ability_selector",
+          "utility_model",
+          "review_strategy"
+        ],
+        "title": "SrsDueOut",
+        "description": "GET /srs/due envelope. ``ability_selector`` is the opaque engine-owned\nadaptivity payload and ``review_strategy`` mixes nullable ``.get()`` chains —\nboth stay ``dict[str, Any]`` (same treatment as StudyTodayResponse)."
+      },
+      "SrsGapCardOut": {
+        "properties": {
+          "card_id": {
+            "type": "integer",
+            "title": "Card Id"
+          },
+          "question_id": {
+            "type": "integer",
+            "title": "Question Id"
+          },
+          "q_type": {
+            "type": "string",
+            "title": "Q Type"
+          },
+          "difficulty": {
+            "type": "integer",
+            "title": "Difficulty"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "card_type": {
+            "type": "string",
+            "title": "Card Type"
+          },
+          "is_new": {
+            "type": "boolean",
+            "title": "Is New"
+          },
+          "cloze": {
+            "type": "string",
+            "title": "Cloze"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "pattern": {
+            "type": "string",
+            "title": "Pattern"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "card_id",
+          "question_id",
+          "q_type",
+          "difficulty",
+          "origin",
+          "card_type",
+          "is_new",
+          "cloze",
+          "pattern"
+        ],
+        "title": "SrsGapCardOut",
+        "description": "One generated/promoted Gap card preview (POST /srs/concept-gap-cards).\n``answer`` is null when no cloze target word was found in the stem."
+      },
+      "SrsLeechCardOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "passage_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passage Id"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "stem": {
+            "type": "string",
+            "title": "Stem"
+          },
+          "q_type": {
+            "type": "string",
+            "title": "Q Type"
+          },
+          "difficulty": {
+            "type": "integer",
+            "title": "Difficulty"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/SrsChoiceOut"
+            },
+            "type": "array",
+            "title": "Choices"
+          },
+          "card_id": {
+            "type": "integer",
+            "title": "Card Id"
+          },
+          "lapses": {
+            "type": "integer",
+            "title": "Lapses"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "prompt",
+          "stem",
+          "q_type",
+          "difficulty",
+          "source",
+          "choices",
+          "card_id",
+          "lapses"
+        ],
+        "title": "SrsLeechCardOut",
+        "description": "One leech card: serializers.question_test_mode payload (answer-key-free)\nplus the lapse count the handler attaches."
+      },
+      "SrsLeechesOut": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/SrsLeechCardOut"
+            },
+            "type": "array",
+            "title": "Cards"
+          },
+          "host_cards": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Cards"
+          },
+          "include_host": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Host"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "count",
+          "cards"
+        ],
+        "title": "SrsLeechesOut",
+        "description": "GET /srs/leeches envelope. Same conditional-key contract as\n/srs/concept-gap-queue: ``host_cards``/``include_host`` only appear with\n``?include_host=true`` (Optional=None + ``response_model_exclude_unset=True``\nkeeps the default key set EXACTLY {count, cards}); host rows are verbatim\ndynamically-keyed CrossDomainReviewCard payloads (``dict[str, Any]``)."
+      },
+      "SrsOptimizeOut": {
+        "properties": {
+          "ran": {
+            "type": "boolean",
+            "title": "Ran"
+          },
+          "n_reviews": {
+            "type": "integer",
+            "title": "N Reviews"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "min_reviews": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Reviews"
+          },
+          "n_parameters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Parameters"
+          },
+          "optimizer_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Optimizer Available"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ran",
+          "n_reviews"
+        ],
+        "title": "SrsOptimizeOut",
+        "description": "POST /srs/optimize — srs.optimize_parameters status dict. POLYMORPHIC\nper branch: only ``ran``/``n_reviews`` are guaranteed; ``reason`` (open-ended,\nincl. dynamic \"error:<ExcName>\" strings), ``min_reviews``, ``n_parameters``\nand ``optimizer_available`` appear branch-dependently, so they are\nOptional=None + ``response_model_exclude_unset=True`` (absent keys stay\nabsent — never serialized as nulls)."
+      },
       "SrsParamsOut": {
         "properties": {
           "weights": {
@@ -25833,6 +29470,41 @@
         ],
         "title": "SrsParamsOut",
         "description": "The backend's effective FSRS parameters (py-fsrs). ``weights`` are the\nper-user optimized weights when present, else the empty list (host then keeps\nits ts-fsrs library defaults / local fit). ``source`` always \"backend\" so the\nhost can label where the params came from."
+      },
+      "SrsReviewOut": {
+        "properties": {
+          "next_due": {
+            "type": "string",
+            "title": "Next Due"
+          },
+          "interval_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Interval Days"
+          },
+          "predicted_intervals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Predicted Intervals"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "next_due",
+          "interval_days",
+          "predicted_intervals"
+        ],
+        "title": "SrsReviewOut",
+        "description": "POST /srs/{card_id}/review — the rescheduling result.\n``interval_days`` is numeric (srs.review can yield non-integer intervals);\ntyped int | float so integer intervals keep serializing as ints — smart\nunion preserves the incoming type and the wire bytes stay identical."
       },
       "StudyArtifactCreate": {
         "properties": {
@@ -26847,6 +30519,41 @@
         "title": "StudyTodayTask",
         "description": "One task from ``GET /api/study/today``.\n\nThe task list is intentionally additive: LSAT tasks, host drills, pacing\ndrills, and future planner rows all share the headline fields below while\npreserving their specialized keys."
       },
+      "SyncProgressUpdatesOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "received": {
+            "type": "integer",
+            "title": "Received"
+          },
+          "upserted": {
+            "type": "integer",
+            "title": "Upserted"
+          },
+          "unchanged": {
+            "type": "integer",
+            "title": "Unchanged"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "ok",
+          "received",
+          "upserted",
+          "unchanged",
+          "skipped"
+        ],
+        "title": "SyncProgressUpdatesOut",
+        "description": "Counter envelope for POST /api/sync/progress-updates — fixed 5-key shape\n(``received == upserted + unchanged + skipped``). ``extra=\"allow\"`` keeps any\nfuture additive counters on the wire without a schema bump."
+      },
       "TagBody": {
         "properties": {
           "limit": {
@@ -27060,6 +30767,282 @@
         "type": "object",
         "title": "TransformationBody"
       },
+      "TrustCheckOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "status",
+          "summary",
+          "detail"
+        ],
+        "title": "TrustCheckOut",
+        "description": "One entry of the trust manifest's ``checks`` map (``trust._check``).\n\n``detail`` is heterogeneous per check type and stays ``dict[str, Any]``."
+      },
+      "TrustDiagnosticsOut": {
+        "properties": {
+          "trust": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Trust"
+          },
+          "integrity": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Integrity"
+          },
+          "content": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Content"
+          },
+          "queue": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Queue"
+          },
+          "migrations": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Migrations"
+          },
+          "scheduled_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduledTaskOut"
+            },
+            "type": "array",
+            "title": "Scheduled Tasks"
+          },
+          "scheduler_runs": {
+            "items": {
+              "$ref": "#/components/schemas/SchedulerRunOut"
+            },
+            "type": "array",
+            "title": "Scheduler Runs"
+          },
+          "benchmarks": {
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkRunOut"
+            },
+            "type": "array",
+            "title": "Benchmarks"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "trust",
+          "integrity",
+          "content",
+          "queue",
+          "migrations",
+          "scheduled_tasks",
+          "scheduler_runs",
+          "benchmarks"
+        ],
+        "title": "TrustDiagnosticsOut",
+        "description": "``GET /api/observability/diagnostics`` — shallow envelope only. The\ntrust/integrity/content/queue/migrations sub-reports contain dynamically\nkeyed dicts (by_source, by_q_type, by_status, by_entity, ...) and stay\n``dict[str, Any]``; the scheduler/benchmark lists reuse the typed rows."
+      },
+      "TrustEnvironmentOut": {
+        "properties": {
+          "platform": {
+            "type": "string",
+            "title": "Platform"
+          },
+          "python": {
+            "type": "string",
+            "title": "Python"
+          },
+          "data_dir": {
+            "type": "string",
+            "title": "Data Dir"
+          },
+          "db_path": {
+            "type": "string",
+            "title": "Db Path"
+          },
+          "local_provider": {
+            "type": "string",
+            "title": "Local Provider"
+          },
+          "offline_generation_provider": {
+            "type": "string",
+            "title": "Offline Generation Provider"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "platform",
+          "python",
+          "data_dir",
+          "db_path",
+          "local_provider",
+          "offline_generation_provider"
+        ],
+        "title": "TrustEnvironmentOut",
+        "description": "The manifest's fixed ``environment`` block."
+      },
+      "TrustIssueOut": {
+        "properties": {
+          "check": {
+            "type": "string",
+            "title": "Check"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "check"
+        ],
+        "title": "TrustIssueOut",
+        "description": "One ``blockers``/``warnings`` item (``trust._messages``)."
+      },
+      "TrustManifestOut": {
+        "properties": {
+          "schema": {
+            "type": "string",
+            "title": "Schema"
+          },
+          "tier": {
+            "type": "string",
+            "title": "Tier"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "score": {
+            "type": "integer",
+            "title": "Score"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "app_version": {
+            "type": "string",
+            "title": "App Version"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/TrustEnvironmentOut"
+          },
+          "checks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TrustCheckOut"
+            },
+            "type": "object",
+            "title": "Checks"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/TrustIssueOut"
+            },
+            "type": "array",
+            "title": "Blockers"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/TrustIssueOut"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Next Actions"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "written_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Written To"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "schema",
+          "tier",
+          "status",
+          "score",
+          "generated_at",
+          "app_version",
+          "environment",
+          "checks",
+          "blockers",
+          "warnings",
+          "next_actions"
+        ],
+        "title": "TrustManifestOut",
+        "description": "``trust.build_release_trust_manifest`` payload, shared by\n``GET /api/observability/trust`` and ``GET /api/release/trust``.\n\n``schema`` shadows a deprecated ``BaseModel`` attribute, hence the alias.\n``snapshot_id`` (only with ``?persist=true``) and ``written_to`` (only with\n``?write=true``) are conditionally present — ``exclude_unset`` keeps them\noff the wire when the handler did not set them."
+      },
       "TurnBody": {
         "properties": {
           "role": {
@@ -27123,6 +31106,118 @@
         ],
         "title": "TurnStreamBody",
         "description": "Mirrors ``adaptivity_routes.TurnBody`` so the streaming + sync paths share a\nrequest shape; ``auto_reply`` defaults on (a user turn elicits a Socratic\nnudge). ``role`` is constrained to the two persisted roles."
+      },
+      "UnifiedAbilityEstimate": {
+        "properties": {
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "q_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Type"
+          },
+          "section_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Type"
+          },
+          "ability": {
+            "type": "number",
+            "title": "Ability"
+          },
+          "mastery": {
+            "type": "number",
+            "title": "Mastery"
+          },
+          "uncertainty": {
+            "type": "number",
+            "title": "Uncertainty"
+          },
+          "evidence_n": {
+            "type": "integer",
+            "title": "Evidence N"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "avg_time_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Time Ms"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "learning_velocity": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Learning Velocity"
+          },
+          "plateau": {
+            "type": "boolean",
+            "title": "Plateau"
+          },
+          "mastery_eta_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mastery Eta Days"
+          },
+          "components": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Components"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "domain",
+          "ability",
+          "mastery",
+          "uncertainty",
+          "evidence_n",
+          "model",
+          "learning_velocity",
+          "plateau",
+          "components"
+        ],
+        "title": "UnifiedAbilityEstimate",
+        "description": "LEARN-1 — inline typed shape of a unified cross-domain ability estimate\n(BC2 style; mirrors ``adaptivity.ability_estimate``'s payload + ``domain``).\n\nReturned for the host-plane read (``GET /api/adaptivity/ability?domain=…``).\n``model_config`` allows extra keys so future estimate fields surface without\na contract break, and so the existing LSAT-only matrix/estimate branches keep\nreturning their own (un-narrowed) shapes through this same route."
       },
       "UnifiedDueCard": {
         "properties": {
@@ -27358,6 +31453,56 @@
         },
         "type": "object",
         "title": "ValidatorRunBody"
+      },
+      "VoiceCacheStatusOut": {
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "title": "Model Id"
+          },
+          "cache_dir": {
+            "type": "string",
+            "title": "Cache Dir"
+          },
+          "cache_dir_exists": {
+            "type": "boolean",
+            "title": "Cache Dir Exists"
+          },
+          "downloaded": {
+            "type": "boolean",
+            "title": "Downloaded"
+          },
+          "file_count": {
+            "type": "integer",
+            "title": "File Count"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "browser_cached": {
+            "type": "boolean",
+            "title": "Browser Cached"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "model_id",
+          "cache_dir",
+          "cache_dir_exists",
+          "downloaded",
+          "file_count",
+          "size_bytes",
+          "browser_cached",
+          "note"
+        ],
+        "title": "VoiceCacheStatusOut",
+        "description": "``voice`` block of GET /observability/cloud-budget\n(``observability.whisper_cache_status``)."
       },
       "WeaknessIndexResponse": {
         "properties": {

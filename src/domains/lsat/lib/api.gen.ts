@@ -4738,6 +4738,89 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AbilityMatrixOut
+         * @description Wire shape of ``adaptivity.ability_matrix`` — the default (LSAT-only)
+         *     branch of ``GET /api/adaptivity/ability``. All four keys are always present
+         *     and REQUIRED so the response union discriminates on them; the nested
+         *     estimate/selector payloads are engine-owned dicts and stay opaque.
+         *     ``extra="allow"`` keeps any future additive keys on the wire untouched.
+         */
+        AbilityMatrixOut: {
+            /** Overall */
+            overall: {
+                [key: string]: unknown;
+            };
+            /** By Type */
+            by_type: {
+                [key: string]: unknown;
+            }[];
+            /** Weakest */
+            weakest: {
+                [key: string]: unknown;
+            }[];
+            /** Selector */
+            selector: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * AbilityWithSelectorOut
+         * @description Wire shape of the ``?q_type=``/``?section_type=`` branch of
+         *     ``GET /api/adaptivity/ability`` — a flat ``adaptivity.ability_estimate``
+         *     payload with the handler-attached ``selector``. Only ``selector`` is
+         *     required (it discriminates this branch from the matrix and unified-estimate
+         *     branches); the flat estimate fields are Optional so the model never invents
+         *     keys, and ``snapshot_id``/``created_at`` are only present when
+         *     ``?persist=true`` (excluded when unset). ``extra="allow"`` passes any
+         *     additive keys through unchanged.
+         */
+        AbilityWithSelectorOut: {
+            /** Q Type */
+            q_type?: string | null;
+            /** Section Type */
+            section_type?: string | null;
+            /** Domain */
+            domain?: string | null;
+            /** Ability */
+            ability?: number | null;
+            /** Mastery */
+            mastery?: number | null;
+            /** Uncertainty */
+            uncertainty?: number | null;
+            /** Evidence N */
+            evidence_n?: number | null;
+            /** Accuracy */
+            accuracy?: number | null;
+            /** Avg Time Ms */
+            avg_time_ms?: number | null;
+            /** Model */
+            model?: string | null;
+            /** Learning Velocity */
+            learning_velocity?: {
+                [key: string]: unknown;
+            } | null;
+            /** Plateau */
+            plateau?: boolean | null;
+            /** Mastery Eta Days */
+            mastery_eta_days?: number | null;
+            /** Components */
+            components?: {
+                [key: string]: unknown;
+            } | null;
+            /** Snapshot Id */
+            snapshot_id?: number | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Selector */
+            selector: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * ActivityDay
          * @description One day of ``GET /api/analytics/activity`` (mirrors ``analytics.activity``).
          */
@@ -4831,6 +4914,104 @@ export interface components {
             };
             /** Domain */
             domain?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * AdaptivityDailyPlanOut
+         * @description Wire shape of ``adaptivity.daily_plan`` (``POST /api/adaptivity/plan``).
+         *     Every top-level key is always present; ``ability``/``ability_selector``/
+         *     ``utility``/``guardrails`` are engine-owned dicts kept opaque
+         *     (``utility`` may be None). ``extra="allow"`` keeps additive keys.
+         */
+        AdaptivityDailyPlanOut: {
+            /** Minutes */
+            minutes: number;
+            /** Ability */
+            ability: {
+                [key: string]: unknown;
+            };
+            /** Ability Selector */
+            ability_selector: {
+                [key: string]: unknown;
+            };
+            /** Weakest */
+            weakest: {
+                [key: string]: unknown;
+            }[];
+            /** Tasks */
+            tasks: components["schemas"]["AdaptivityPlanTaskOut"][];
+            /** Utility Model */
+            utility_model: string;
+            /** Utility */
+            utility: {
+                [key: string]: unknown;
+            } | null;
+            /** Concept Gap Count */
+            concept_gap_count: number;
+            /** Leech Count */
+            leech_count: number;
+            /** Guardrails */
+            guardrails: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * AdaptivityPlanTaskOut
+         * @description One task row inside ``adaptivity.daily_plan``'s ``tasks`` list.
+         *     ``kind``/``label``/``minutes``/``utility``/``utility_model``/``why`` appear
+         *     on every task; ``count`` is absent on the blind_review task and
+         *     ``q_type``/``target_difficulty`` only appear on adaptive_drill tasks
+         *     (excluded when unset). ``extra="allow"`` keeps additive keys.
+         */
+        AdaptivityPlanTaskOut: {
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Minutes */
+            minutes: number;
+            /** Count */
+            count?: number | null;
+            /** Q Type */
+            q_type?: string | null;
+            /** Target Difficulty */
+            target_difficulty?: number | null;
+            /** Utility */
+            utility: number;
+            /** Utility Model */
+            utility_model: string;
+            /** Why */
+            why: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * AiHealthOut
+         * @description Typed wire shape of ``ai.health()`` — the six stable headline fields.
+         *
+         *     The handler spreads ``llm.provider_info()`` into the payload
+         *     (``{**info}``), whose key set is config/provider dependent, so this model
+         *     is permissive: ``extra="allow"`` accepts AND serializes those extra keys
+         *     untouched, keeping the wire bytes identical to the untyped response.
+         */
+        AiHealthOut: {
+            /** Ok */
+            ok: boolean;
+            /** Provider */
+            provider: string;
+            /** Models */
+            models: unknown[];
+            /** Ollama */
+            ollama: boolean;
+            /** Missing Models */
+            missing_models: string[];
+            /** Missing Models Recovery */
+            missing_models_recovery: {
+                [key: string]: unknown;
+            }[];
         } & {
             [key: string]: unknown;
         };
@@ -4941,6 +5122,45 @@ export interface components {
             allow_plaintext: boolean;
         };
         /**
+         * BackupNewestOut
+         * @description The ``newest`` snapshot block of ``backup.backup_status``.
+         */
+        BackupNewestOut: {
+            /** Name */
+            name: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Created At */
+            created_at: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * BackupStatusOut
+         * @description ``backup.backup_status`` — ``newest``/``newest_age_seconds`` are null on
+         *     the missing/unavailable branches; ``error`` appears only on the
+         *     ``unavailable`` OSError branch.
+         */
+        BackupStatusOut: {
+            /** Status */
+            status: string;
+            /** Ok */
+            ok: boolean;
+            /** Backup Dir */
+            backup_dir: string;
+            /** Count */
+            count: number;
+            newest?: components["schemas"]["BackupNewestOut"] | null;
+            /** Newest Age Seconds */
+            newest_age_seconds?: number | null;
+            /** Fresh Within Seconds */
+            fresh_within_seconds: number;
+            /** Error */
+            error?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * BankStats
          * @description ``GET /api/bank/stats`` — the Bank UI headline counts.
          *
@@ -4980,6 +5200,71 @@ export interface components {
             };
             /** Notes */
             notes?: string | null;
+        };
+        /**
+         * BenchmarkRunListOut
+         * @description Envelope of ``GET /api/observability/benchmarks``.
+         */
+        BenchmarkRunListOut: {
+            /** Count */
+            count: number;
+            /** Runs */
+            runs: components["schemas"]["BenchmarkRunOut"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * BenchmarkRunOut
+         * @description ``_benchmark_payload`` — one stored ``BenchmarkRun`` row.
+         *     ``metrics``/``environment`` are caller-supplied arbitrary JSON.
+         */
+        BenchmarkRunOut: {
+            /** Id */
+            id?: number | null;
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
+            /** Metrics */
+            metrics: {
+                [key: string]: unknown;
+            };
+            /** Environment */
+            environment: {
+                [key: string]: unknown;
+            };
+            /** Notes */
+            notes?: string | null;
+            /** Created At */
+            created_at: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * BenchmarkSmokeOut
+         * @description ``jobs.run_benchmark_smoke`` — deliberately NOT ``BenchmarkRunOut``:
+         *     the smoke run carries ``evidence`` instead of ``environment``/``notes``,
+         *     and its ``metrics`` values are always floats (timing + quality gauges).
+         */
+        BenchmarkSmokeOut: {
+            /** Id */
+            id?: number | null;
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
+            /** Metrics */
+            metrics: {
+                [key: string]: number;
+            };
+            /** Evidence */
+            evidence: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            created_at: string;
+        } & {
+            [key: string]: unknown;
         };
         /** BlindReview */
         BlindReview: {
@@ -5160,6 +5445,52 @@ export interface components {
             /** Min Attempts */
             min_attempts?: number | null;
         };
+        /**
+         * CalibrationBandOut
+         * @description One confidence band from ``analytics.confidence_calibration`` — all five
+         *     keys are always emitted (``accuracy`` is ``null`` on an empty band).
+         *     ``extra="allow"`` keeps future additive band keys on the wire.
+         */
+        CalibrationBandOut: {
+            /** Confidence */
+            confidence: string;
+            /** Attempts */
+            attempts: number;
+            /** Correct */
+            correct: number;
+            /** Accuracy */
+            accuracy?: number | null;
+            /** Nominal Confidence */
+            nominal_confidence: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CalibrationOut
+         * @description Envelope for GET /api/analytics/calibration. Every key is present on all
+         *     branches; the rate/gap fields are ``null`` (not absent) when there is no
+         *     rated history, so they serialize as explicit nulls unchanged.
+         */
+        CalibrationOut: {
+            /** Bands */
+            bands: components["schemas"]["CalibrationBandOut"][];
+            /** N */
+            n: number;
+            /** Overall Accuracy */
+            overall_accuracy?: number | null;
+            /** Mean Nominal Confidence */
+            mean_nominal_confidence?: number | null;
+            /** Calibration Gap */
+            calibration_gap?: number | null;
+            /** Verdict */
+            verdict: string;
+            /** Sure But Wrong Rate */
+            sure_but_wrong_rate?: number | null;
+            /** Guess But Right Rate */
+            guess_but_right_rate?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
         /** CaptureBody */
         CaptureBody: {
             /** Workspace Id */
@@ -5281,6 +5612,70 @@ export interface components {
             time_ms: number;
             /** Confidence */
             confidence?: string | null;
+        };
+        /**
+         * CloudBudgetDryRunOut
+         * @description ``cloud`` block of GET /observability/cloud-budget.
+         */
+        CloudBudgetDryRunOut: {
+            /** Spend Usd */
+            spend_usd: number;
+            /** Budget Usd */
+            budget_usd?: number | null;
+            /** Within Budget */
+            within_budget: boolean;
+            /** Remaining Usd */
+            remaining_usd?: number | null;
+            /** Cloud Enabled */
+            cloud_enabled: boolean;
+            /** Cloud Configured */
+            cloud_configured: boolean;
+            /** Cloud Egress Allowed */
+            cloud_egress_allowed: boolean;
+            /** Dry Run */
+            dry_run: boolean;
+            pricing: components["schemas"]["CloudBudgetPricingOut"];
+            next_call: components["schemas"]["CloudBudgetNextCallOut"];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CloudBudgetNextCallOut
+         * @description ``next_call`` dry-run forecast of ``llm.cloud_budget_dry_run``.
+         */
+        CloudBudgetNextCallOut: {
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Estimated Cost Usd */
+            estimated_cost_usd: number;
+            /** Would Exceed Budget */
+            would_exceed_budget: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CloudBudgetOut
+         * @description GET /observability/cloud-budget — budget picture + voice cache.
+         */
+        CloudBudgetOut: {
+            cloud: components["schemas"]["CloudBudgetDryRunOut"];
+            voice: components["schemas"]["VoiceCacheStatusOut"];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CloudBudgetPricingOut
+         * @description ``pricing`` block of ``llm.cloud_budget_dry_run``.
+         */
+        CloudBudgetPricingOut: {
+            /** Input Cost Per Mtok Usd */
+            input_cost_per_mtok_usd: number;
+            /** Output Cost Per Mtok Usd */
+            output_cost_per_mtok_usd: number;
+        } & {
+            [key: string]: unknown;
         };
         /** CoachChatBody */
         CoachChatBody: {
@@ -5697,6 +6092,103 @@ export interface components {
                 [key: string]: unknown;
             })[];
         };
+        /**
+         * ExportHistoryItemOut
+         * @description One ExportHistory provenance row (export_backup._history_dict).
+         *
+         *     ``row_counts`` is dynamically keyed (per-table counts plus optional
+         *     ``host_present``) so it stays an open dict.
+         */
+        ExportHistoryItemOut: {
+            /** Export Id */
+            export_id: string;
+            /** Exported At */
+            exported_at: string;
+            /** Schema Version */
+            schema_version: number;
+            /** Host Schema Version */
+            host_schema_version?: number | null;
+            /** Format */
+            format: string;
+            /** Source Host */
+            source_host: boolean;
+            /** Row Counts */
+            row_counts: {
+                [key: string]: unknown;
+            };
+            /** Checksum */
+            checksum: string;
+            /** Restore Count */
+            restore_count: number;
+            /** Last Restored */
+            last_restored?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ExportImportOut
+         * @description ``POST /api/export/import`` — import_unified_export() + handler's
+         *     ``encrypted`` flag. ``counts`` keys are produced dynamically by
+         *     ``bank_export.import_bank`` so they stay an open int map.
+         */
+        ExportImportOut: {
+            /** Ok */
+            ok: boolean;
+            /** Export Id */
+            export_id: string;
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Restore Count */
+            restore_count: number;
+            /** Host Data Present */
+            host_data_present: boolean;
+            /** Encrypted */
+            encrypted: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ExportListOut
+         * @description ``GET /api/export/list`` — pagination envelope from
+         *     export_backup.list_history().
+         */
+        ExportListOut: {
+            /** Total */
+            total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+            /** Has More */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["ExportHistoryItemOut"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ExportValidateOut
+         * @description ``POST /api/export/validate`` — validate_envelope() + handler's
+         *     ``encrypted`` flag.
+         */
+        ExportValidateOut: {
+            /** Ok */
+            ok: boolean;
+            /** Errors */
+            errors: string[];
+            /** Encrypted */
+            encrypted: boolean;
+        } & {
+            [key: string]: unknown;
+        };
         /** FactoryBatch */
         FactoryBatch: {
             /** Batch Id */
@@ -5924,12 +6416,113 @@ export interface components {
             activate: boolean;
         };
         /**
+         * FsrsReconciledEntryOut
+         * @description Per-card reconcile entry echoed by ``POST /api/sync/fsrs-write-back``.
+         *
+         *     Mirrors ``cross_domain_sync._reconciled`` verbatim: literal camelCase keys
+         *     (the source dicts are already camelCase — no aliasing). ``fsrsState`` is the
+         *     host's opaque FSRS scheduling state (host-opaque by contract) and stays
+         *     ``dict[str, Any]``. ``extra="allow"`` keeps future additive keys on the wire.
+         */
+        FsrsReconciledEntryOut: {
+            /** Crossid */
+            crossId: string;
+            /** Fsrsstate */
+            fsrsState: {
+                [key: string]: unknown;
+            };
+            /** Syncrevision */
+            syncRevision: number;
+            /** Resolution */
+            resolution: string;
+            /** Observedat */
+            observedAt?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * FsrsWriteBackBody
          * @description A batch of per-card FSRS write-backs to apply under last-write-wins.
          */
         FsrsWriteBackBody: {
             /** Writes */
             writes?: components["schemas"]["FsrsWriteIn"][];
+        };
+        /**
+         * FsrsWriteBackLogEntryOut
+         * @description One ``CrossDomainSyncLog`` ledger row as serialized by the log route.
+         *
+         *     camelCase keys built inline by ``get_fsrs_write_back_log``. ``fsrsBefore`` /
+         *     ``fsrsAfter`` mirror opaque JSON columns (dynamic host FSRS state) and stay
+         *     ``dict[str, Any]``.
+         */
+        FsrsWriteBackLogEntryOut: {
+            /** Id */
+            id?: number | null;
+            /** Writeid */
+            writeId: string;
+            /** Crossid */
+            crossId: string;
+            /** Sourceplane */
+            sourcePlane: string;
+            /** Targetplane */
+            targetPlane: string;
+            /** Resolution */
+            resolution: string;
+            /** Fsrsbefore */
+            fsrsBefore: {
+                [key: string]: unknown;
+            };
+            /** Fsrsafter */
+            fsrsAfter: {
+                [key: string]: unknown;
+            };
+            /** Observedat */
+            observedAt?: string | null;
+            /** Createdat */
+            createdAt?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * FsrsWriteBackLogOut
+         * @description Envelope returned by ``GET /api/sync/fsrs-write-back/log``.
+         */
+        FsrsWriteBackLogOut: {
+            /** Ok */
+            ok: boolean;
+            /** Count */
+            count: number;
+            /** Entries */
+            entries: components["schemas"]["FsrsWriteBackLogEntryOut"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * FsrsWriteBackOut
+         * @description Envelope returned by ``POST /api/sync/fsrs-write-back``.
+         *
+         *     Note the deliberate key-casing mix mirrored from ``apply_fsrs_write_back``:
+         *     snake_case summary counters (``kept_existing``, ``no_target``) alongside
+         *     camelCase reconciled-entry keys. All keys are always present.
+         */
+        FsrsWriteBackOut: {
+            /** Ok */
+            ok: boolean;
+            /** Received */
+            received: number;
+            /** Applied */
+            applied: number;
+            /** Kept Existing */
+            kept_existing: number;
+            /** Deduped */
+            deduped: number;
+            /** No Target */
+            no_target: number;
+            /** Reconciled */
+            reconciled: components["schemas"]["FsrsReconciledEntryOut"][];
+        } & {
+            [key: string]: unknown;
         };
         /**
          * FsrsWriteIn
@@ -6215,6 +6808,52 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HealthAggregatedOut
+         * @description GET /observability/health-aggregated — consolidated System Health.
+         */
+        HealthAggregatedOut: {
+            /** Status */
+            status: string;
+            /** Ok */
+            ok: boolean;
+            /** Generated At */
+            generated_at: string;
+            /** Reasons */
+            reasons: string[];
+            /** Backend Ready */
+            backend_ready: boolean;
+            /** Db Ready */
+            db_ready: boolean;
+            /** Worker Ready */
+            worker_ready: boolean;
+            /** Backup Status */
+            backup_status: string;
+            /** Gen Queued */
+            gen_queued: number;
+            /** Gen Running */
+            gen_running: number;
+            /** Explain P50 Ms */
+            explain_p50_ms?: number | null;
+            cloud_tokens: components["schemas"]["ObsCloudTokensOut"];
+            /** Cloud Monthly Budget Usd */
+            cloud_monthly_budget_usd?: number | null;
+            /** Cloud Spend Mtd Usd */
+            cloud_spend_mtd_usd: number;
+            /** Cloud Budget Within */
+            cloud_budget_within: boolean;
+            sqlite_health: components["schemas"]["SqliteHealthOut"];
+            /** Provider Capabilities */
+            provider_capabilities: {
+                [key: string]: unknown;
+            };
+            /** Readiness */
+            readiness: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
+        };
         /** HealthResponse */
         HealthResponse: {
             /** Ok */
@@ -6366,6 +7005,112 @@ export interface components {
              */
             note: string;
         };
+        /**
+         * MetricsCloudOut
+         * @description ``cloud`` block of GET /observability/metrics (budget status + pricing).
+         */
+        MetricsCloudOut: {
+            /** Spend Usd */
+            spend_usd: number;
+            /** Budget Usd */
+            budget_usd?: number | null;
+            /** Within Budget */
+            within_budget: boolean;
+            /** Remaining Usd */
+            remaining_usd?: number | null;
+            /** Input Cost Per Mtok Usd */
+            input_cost_per_mtok_usd: number;
+            /** Output Cost Per Mtok Usd */
+            output_cost_per_mtok_usd: number;
+            /** Recent Calls */
+            recent_calls: components["schemas"]["MetricsRecentCallOut"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * MetricsOut
+         * @description GET /observability/metrics — persisted latency + cloud-spend reads.
+         */
+        MetricsOut: {
+            /** Task */
+            task: string;
+            /** Window */
+            window: number;
+            /** Latency P50 Ms */
+            latency_p50_ms?: number | null;
+            cloud: components["schemas"]["MetricsCloudOut"];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * MetricsRecentCallOut
+         * @description One ``UsageLedger`` tail row on GET /observability/metrics.
+         */
+        MetricsRecentCallOut: {
+            /** Model */
+            model?: string | null;
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Created At */
+            created_at?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * MigrationDryRunOut
+         * @description ``migrations.migration_preview`` payload
+         *     (``GET /api/observability/migrations/dry-run``).
+         */
+        MigrationDryRunOut: {
+            /** Latest Expected Version */
+            latest_expected_version: number;
+            /** Pragma User Version */
+            pragma_user_version: number;
+            /** Applied Count */
+            applied_count: number;
+            /** Pending Count */
+            pending_count: number;
+            /** Applied */
+            applied: components["schemas"]["MigrationItemOut"][];
+            /** Pending */
+            pending: components["schemas"]["MigrationItemOut"][];
+            /** Failed */
+            failed: components["schemas"]["MigrationItemOut"][];
+            /** Checksum Mismatches */
+            checksum_mismatches: components["schemas"]["MigrationItemOut"][];
+            /** Pre Migration Backup Required */
+            pre_migration_backup_required: boolean;
+            /** Restore After Upgrade Smoke Required */
+            restore_after_upgrade_smoke_required: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * MigrationItemOut
+         * @description One ``migration_preview`` item. The additive ``error`` key appears only
+         *     on ``failed`` items — one model covers all four lists via
+         *     ``exclude_unset``.
+         */
+        MigrationItemOut: {
+            /** Version */
+            version: number;
+            /** Name */
+            name: string;
+            /** Checksum */
+            checksum: string;
+            /** Recorded Checksum */
+            recorded_checksum?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Error */
+            error?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
         /** NextBody */
         NextBody: {
             /**
@@ -6433,6 +7178,93 @@ export interface components {
              * @default note_update
              */
             reason: string;
+        };
+        /**
+         * ObsCloudTokensOut
+         * @description In-RAM cloud token counters (``observability.cloud_token_totals``).
+         */
+        ObsCloudTokensOut: {
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ObsTrustStatusOut
+         * @description GET /observability/trust-status (``trust.trust_status``).
+         */
+        ObsTrustStatusOut: {
+            /** Status */
+            status: string;
+            /** Tier */
+            tier: string;
+            /** Generated At */
+            generated_at: string;
+            /** Cache Ttl Seconds */
+            cache_ttl_seconds: number;
+            /** Checks */
+            checks: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ObservabilityStatusOut
+         * @description GET /observability/status — live backend health for the trust strip.
+         */
+        ObservabilityStatusOut: {
+            /** Gen Queued */
+            gen_queued: number;
+            /** Gen Running */
+            gen_running: number;
+            /** Worker Alive */
+            worker_alive: boolean;
+            /** Last Coach Refresh Ms */
+            last_coach_refresh_ms?: number | null;
+            /** Explain P50 Ms */
+            explain_p50_ms?: number | null;
+            /** Embed Coverage Pct */
+            embed_coverage_pct: number;
+            /** Models */
+            models: {
+                [key: string]: unknown;
+            };
+            /** Llm Cache */
+            llm_cache: {
+                [key: string]: unknown;
+            };
+            cloud_tokens: components["schemas"]["ObsCloudTokensOut"];
+            /** Cloud Monthly Budget Usd */
+            cloud_monthly_budget_usd?: number | null;
+            /** Cloud Spend Mtd Usd */
+            cloud_spend_mtd_usd: number;
+            /** Cloud Budget Within */
+            cloud_budget_within: boolean;
+            /** Cloud Budget Remaining Usd */
+            cloud_budget_remaining_usd?: number | null;
+            /** Explain P50 Ms Persisted */
+            explain_p50_ms_persisted?: number | null;
+            /** Backend Ready */
+            backend_ready: boolean;
+            /** Db Ready */
+            db_ready: boolean;
+            /** Worker Ready */
+            worker_ready: boolean;
+            /** Backup Status */
+            backup_status: string;
+            /** Readiness */
+            readiness: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
         };
         /** PacingBudgetBody */
         PacingBudgetBody: {
@@ -6574,6 +7406,21 @@ export interface components {
              */
             generate_audio: boolean;
         };
+        /**
+         * PreUpgradeBackupOut
+         * @description ``POST /api/observability/migrations/pre-upgrade-backup`` response.
+         */
+        PreUpgradeBackupOut: {
+            /** Ok */
+            ok: boolean;
+            /** Path */
+            path: string;
+            /** Name */
+            name: string;
+            status: components["schemas"]["BackupStatusOut"];
+        } & {
+            [key: string]: unknown;
+        };
         /** PregenBody */
         PregenBody: {
             /**
@@ -6665,6 +7512,138 @@ export interface components {
             /** Trap Guess */
             trap_guess?: string | null;
         };
+        /**
+         * ReadinessOut
+         * @description Wire shape of ``adaptivity.readiness`` (``GET /api/readiness``).
+         *     Headline scalars are always present (several nullable-valued);
+         *     ``snapshot_id``/``created_at`` only exist when ``?persist=true`` (the
+         *     default), so they are Optional and excluded when unset. The nested
+         *     ``ability``/``ability_selector``/``components``/``exam_simulation``/
+         *     ``utility`` blocks are engine-owned dicts kept opaque. ``extra="allow"``
+         *     keeps additive keys on the wire untouched.
+         */
+        ReadinessOut: {
+            /** Section Type */
+            section_type: string | null;
+            /** Readiness Score */
+            readiness_score: number;
+            /** Status */
+            status: string;
+            /** On Track */
+            on_track: boolean | null;
+            /** Exam Ready */
+            exam_ready: boolean;
+            /** Predicted Scaled Score */
+            predicted_scaled_score: number | null;
+            /** Mastery Eta Days */
+            mastery_eta_days: number | null;
+            /** Plateau */
+            plateau: boolean;
+            /** Required Weekly Slope */
+            required_weekly_slope: number | null;
+            /** Components */
+            components: {
+                [key: string]: unknown;
+            };
+            /** Ability */
+            ability: {
+                [key: string]: unknown;
+            };
+            /** Ability Selector */
+            ability_selector: {
+                [key: string]: unknown;
+            };
+            /** Utility */
+            utility: {
+                [key: string]: unknown;
+            } | null;
+            /** Exam Simulation */
+            exam_simulation: {
+                [key: string]: unknown;
+            };
+            /** Snapshot Id */
+            snapshot_id?: number | null;
+            /** Created At */
+            created_at?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ReadyAiOut
+         * @description AI-provider block of GET /ready (partly provider-dependent).
+         */
+        ReadyAiOut: {
+            /** Ready */
+            ready: boolean;
+            /** Provider Reachable */
+            provider_reachable: boolean;
+            /** Ollama Reachable */
+            ollama_reachable: boolean;
+            /** Models */
+            models: string[];
+            /** Expected Models */
+            expected_models: {
+                [key: string]: string;
+            };
+            /** Model Available */
+            model_available: {
+                [key: string]: boolean;
+            };
+            /** Provider */
+            provider?: string | null;
+            /** Realtime Provider */
+            realtime_provider?: string | null;
+            /** Capabilities */
+            capabilities: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ReadyOut
+         * @description GET /ready — launch readiness for sidecar smoke tests.
+         */
+        ReadyOut: {
+            /** Ok */
+            ok: boolean;
+            /** Status */
+            status: string;
+            /** Generated At */
+            generated_at: string;
+            /** Request Id */
+            request_id?: string | null;
+            /** Db */
+            db: {
+                [key: string]: unknown;
+            };
+            /** Worker */
+            worker: {
+                [key: string]: unknown;
+            };
+            /** Backup */
+            backup: {
+                [key: string]: unknown;
+            };
+            ai: components["schemas"]["ReadyAiOut"];
+            /** Errors */
+            errors: string[];
+            /** Warnings */
+            warnings: string[];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * RecomputeItemStatsOut
+         * @description Wire shape of ``adaptivity.refresh_all_item_stats``
+         *     (``POST /api/adaptivity/recompute-item-stats``): a single counter.
+         */
+        RecomputeItemStatsOut: {
+            /** Updated */
+            updated: number;
+        } & {
+            [key: string]: unknown;
+        };
         /** ReconcileBody */
         ReconcileBody: {
             /** Job Id */
@@ -6693,6 +7672,35 @@ export interface components {
              * @default []
              */
             prompts: string[];
+        };
+        /**
+         * RelocationStatusOut
+         * @description GET /observability/relocation-status (``relocation.relocation_status``).
+         *
+         *     Field names are the HOST-FACING camelCase contract — tests assert exact
+         *     key-SET equality on the wire payload, so never rename/alias these.
+         */
+        RelocationStatusOut: {
+            /** Status */
+            status: string;
+            /** Generated At */
+            generated_at: string;
+            /** Orphaned */
+            orphaned: boolean;
+            /** Oldpath */
+            oldPath?: string | null;
+            /** Newpath */
+            newPath?: string | null;
+            /** Oldexists */
+            oldExists: boolean;
+            /** Newexists */
+            newExists: boolean;
+            /** Sizebytes */
+            sizeBytes?: number | null;
+            /** Samepath */
+            samePath: boolean;
+        } & {
+            [key: string]: unknown;
         };
         /** RestoreBody */
         RestoreBody: {
@@ -6767,6 +7775,55 @@ export interface components {
             /** Rating */
             rating: number;
         };
+        /**
+         * RuntimeEvidenceOut
+         * @description GET /observability/runtime-evidence
+         *     (``observability.runtime_evidence_summary``).
+         */
+        RuntimeEvidenceOut: {
+            /** Ok */
+            ok: boolean;
+            /** Status */
+            status: string;
+            /** Generated At */
+            generated_at: string;
+            /** Log Dir */
+            log_dir: string;
+            /** Log Dir Exists */
+            log_dir_exists: boolean;
+            /** Log Dir Writable */
+            log_dir_writable: boolean;
+            /** Log File Count */
+            log_file_count: number;
+            /** Log Files */
+            log_files: {
+                [key: string]: unknown;
+            }[];
+            /** Recent Error Count */
+            recent_error_count: number;
+            /** Stale Error Count */
+            stale_error_count: number;
+            /** Recent Error Window Hours */
+            recent_error_window_hours: number;
+            /** Recent Errors */
+            recent_errors: {
+                [key: string]: unknown;
+            }[];
+            /** Last Request Error */
+            last_request_error?: {
+                [key: string]: unknown;
+            } | null;
+            /** Metrics */
+            metrics: {
+                [key: string]: unknown;
+            };
+            /** Crash Free Window */
+            crash_free_window: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
+        };
         /** ScaleTableBody */
         ScaleTableBody: {
             /** Raw To Scaled */
@@ -6796,6 +7853,188 @@ export interface components {
             payload?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * ScheduledDefaultsOut
+         * @description ``jobs.ensure_default_schedules`` result.
+         */
+        ScheduledDefaultsOut: {
+            /** Scheduled Tasks */
+            scheduled_tasks: number;
+            /** Keys */
+            keys: string[];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ScheduledTaskListOut
+         * @description Envelope of ``GET /api/observability/scheduled-tasks``.
+         */
+        ScheduledTaskListOut: {
+            /** Count */
+            count: number;
+            /** Tasks */
+            tasks: components["schemas"]["ScheduledTaskOut"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ScheduledTaskOut
+         * @description ``jobs.scheduled_task_payload`` — reused by the list envelope, the
+         *     upsert response, and nested inside run results. ``payload`` is
+         *     user-supplied opaque JSON.
+         */
+        ScheduledTaskOut: {
+            /** Id */
+            id?: number | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Task Type */
+            task_type: string;
+            /** Cadence S */
+            cadence_s: number;
+            /** Status */
+            status: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Last Run At */
+            last_run_at?: string | null;
+            /** Next Run At */
+            next_run_at?: string | null;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Updated At */
+            updated_at: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ScheduledTaskRunDueOut
+         * @description Envelope of ``POST /api/observability/scheduled-tasks/run-due``.
+         */
+        ScheduledTaskRunDueOut: {
+            /** Ran */
+            ran: number;
+            /** Results */
+            results: components["schemas"]["ScheduledTaskRunOut"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ScheduledTaskRunOut
+         * @description One ``jobs.run_scheduled_task`` run result. ``result`` is polymorphic
+         *     per task_type (backup/calibration/embedding/content_audit/...) and stays
+         *     ``dict[str, Any]``. The ``{ok: False, reason: 'task_not_found'}`` variant
+         *     never reaches the wire (converted to HTTPException 404).
+         */
+        ScheduledTaskRunOut: {
+            /** Ok */
+            ok: boolean;
+            /** Run Id */
+            run_id?: number | null;
+            task: components["schemas"]["ScheduledTaskOut"];
+            /** Duration Ms */
+            duration_ms: number;
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            };
+            /** Error */
+            error?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SchedulerRunListOut
+         * @description Envelope of ``GET /api/observability/scheduler-runs``.
+         */
+        SchedulerRunListOut: {
+            /** Count */
+            count: number;
+            /** Runs */
+            runs: components["schemas"]["SchedulerRunOut"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SchedulerRunOut
+         * @description ``jobs.scheduler_run_payload`` — one persisted scheduler run.
+         *     ``result`` mirrors the polymorphic stored ``result_json``.
+         */
+        SchedulerRunOut: {
+            /** Id */
+            id?: number | null;
+            /** Task Key */
+            task_key: string;
+            /** Task Type */
+            task_type: string;
+            /** Status */
+            status: string;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            };
+            /** Error */
+            error?: string | null;
+            /** Created At */
+            created_at: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SchemaVersionsOut
+         * @description GET /observability/schema-versions — cross-domain version handshake.
+         */
+        SchemaVersionsOut: {
+            /** Cross Domain Schema Version */
+            cross_domain_schema_version: number;
+            /** Db User Version */
+            db_user_version: number;
+            /** Latest Migration Version */
+            latest_migration_version: number;
+            /** Host Min Supported */
+            host_min_supported: number;
+            /** Generated At */
+            generated_at: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SearchQuestionsOut
+         * @description Envelope for GET /api/search/questions: the echoed query plus the ranked
+         *     result rows (``[]`` on no match / absent FTS table).
+         */
+        SearchQuestionsOut: {
+            /** Query */
+            query: string;
+            /** Results */
+            results: components["schemas"]["SearchResultRowOut"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SearchResultRowOut
+         * @description One FTS5 hit from ``search.search_questions`` — deliberately answer-key
+         *     free (never includes ``correct_answer``/``is_correct``). ``extra="allow"``
+         *     keeps future additive row keys on the wire without a schema bump.
+         */
+        SearchResultRowOut: {
+            /** Question Id */
+            question_id: number;
+            /** Q Type */
+            q_type: string;
+            /** Source */
+            source: string;
+            /** Stem */
+            stem: string;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * SectionType
@@ -6846,6 +8085,17 @@ export interface components {
          * @enum {string}
          */
         SessionType: "section" | "full_exam" | "drill" | "review";
+        /**
+         * SettingsEnvelopeOut
+         * @description Shared GET/PUT /api/settings envelope: both handlers return the same
+         *     two-key shape built from ``settings_store`` + ``llm.provider_info()``.
+         */
+        SettingsEnvelopeOut: {
+            settings: components["schemas"]["SettingsValuesOut"];
+            provider: components["schemas"]["SettingsProviderInfoOut"];
+        } & {
+            [key: string]: unknown;
+        };
         /** SettingsPatch */
         SettingsPatch: {
             /** Explain Model */
@@ -6868,6 +8118,84 @@ export interface components {
             lmstudio_url?: string | null;
             /** Desired Retention */
             desired_retention?: number | null;
+        };
+        /**
+         * SettingsProviderInfoOut
+         * @description Mirror of ``llm.provider_info()`` (app/llm/__init__.py). ``capabilities``
+         *     stays ``dict[str, Any]`` because its ``matrix`` block is dynamically keyed
+         *     by provider name; ``cloud_gen_model`` is null when cloud is disabled.
+         */
+        SettingsProviderInfoOut: {
+            /** Realtime Provider */
+            realtime_provider: string;
+            /** Local Provider */
+            local_provider: string;
+            /** Lmstudio Url */
+            lmstudio_url: string;
+            /** Offline Provider */
+            offline_provider: string;
+            /** Cloud Configured */
+            cloud_configured: boolean;
+            /** Cloud Egress Allowed */
+            cloud_egress_allowed: boolean;
+            /** Cloud Enabled */
+            cloud_enabled: boolean;
+            /** Capabilities */
+            capabilities: {
+                [key: string]: unknown;
+            };
+            /** Explain Model */
+            explain_model: string;
+            /** Explain Model Configured */
+            explain_model_configured: string;
+            /** Explain Model Fallback */
+            explain_model_fallback: string;
+            /** Tag Model */
+            tag_model: string;
+            /** Gen Model */
+            gen_model: string;
+            /** Critic Model */
+            critic_model: string;
+            /** Diagnose Model */
+            diagnose_model: string;
+            /** Embed Model */
+            embed_model: string;
+            /** Cloud Gen Model */
+            cloud_gen_model?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SettingsValuesOut
+         * @description Effective model-routing values — the fixed ``settings_store._OVERRIDABLE``
+         *     key set (settings_store.py). All keys are always emitted; ``extra="allow"``
+         *     keeps any future additive keys on the wire without a schema edit. Secret
+         *     keys (e.g. ``cloud_api_key``) are never part of this payload and MUST NOT
+         *     be declared here.
+         */
+        SettingsValuesOut: {
+            /** Explain Model */
+            explain_model: string;
+            /** Gen Model */
+            gen_model: string;
+            /** Diagnose Model */
+            diagnose_model: string;
+            /** Embed Model */
+            embed_model: string;
+            /** Gen Provider */
+            gen_provider: string;
+            /** Cloud Gen Model */
+            cloud_gen_model: string;
+            /** Gen Critic Model */
+            gen_critic_model: string;
+            /** Local Provider */
+            local_provider: string;
+            /** Lmstudio Url */
+            lmstudio_url: string;
+            /** Desired Retention */
+            desired_retention: number;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * SharedStudyProfileOut
@@ -7046,6 +8374,301 @@ export interface components {
             method: string;
         };
         /**
+         * SqliteHealthOut
+         * @description GET /observability/sqlite-health (``observability.sqlite_health``).
+         */
+        SqliteHealthOut: {
+            /** Pragmas */
+            pragmas: {
+                [key: string]: unknown;
+            };
+            /** Busy Retries */
+            busy_retries: number;
+            /** Wal Estimate If Cheap */
+            wal_estimate_if_cheap?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsBlindReviewNoteOut
+         * @description POST /srs/attempts/{attempt_id}/blind-review-note — the persisted
+         *     AttemptRationale row (stage="blind_review") echoed back.
+         */
+        SrsBlindReviewNoteOut: {
+            /** Id */
+            id: number;
+            /** Attempt Id */
+            attempt_id: number;
+            /** Question Id */
+            question_id: number;
+            /** Stage */
+            stage: string;
+            /** Br Note */
+            br_note: string;
+            /** Created At */
+            created_at: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsCardsCreateOut
+         * @description POST /srs/cards — bulk-create result: counts + the new card ids.
+         */
+        SrsCardsCreateOut: {
+            /** Created */
+            created: number;
+            /** Skipped */
+            skipped: number;
+            /** Card Ids */
+            card_ids: number[];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsChoiceOut
+         * @description One answer choice in test mode (no is_correct/trap_type leak).
+         */
+        SrsChoiceOut: {
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+            /** Text */
+            text: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsConceptGapCardsOut
+         * @description POST /srs/concept-gap-cards — generation-run summary + card previews.
+         */
+        SrsConceptGapCardsOut: {
+            /** Generated */
+            generated: number;
+            /** Skipped */
+            skipped: number;
+            /** Card Type */
+            card_type: string;
+            /** Origin */
+            origin: string;
+            /** Cards */
+            cards: components["schemas"]["SrsGapCardOut"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsConceptGapQueueCardOut
+         * @description One LSAT-native concept-gap row (pedagogy.concept_gap_queue) —
+         *     answer-key-free by design.
+         */
+        SrsConceptGapQueueCardOut: {
+            /** Card Id */
+            card_id: number;
+            /** Question Id */
+            question_id: number;
+            /** Q Type */
+            q_type: string;
+            /** Difficulty */
+            difficulty: number;
+            /** Due Date */
+            due_date: string;
+            /** Lapses */
+            lapses: number;
+            /** Origin */
+            origin: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsConceptGapQueueOut
+         * @description GET /srs/concept-gap-queue envelope. ``host_cards``/``include_host`` are
+         *     CONDITIONAL (only with ``?include_host=true``); they are Optional=None and
+         *     the route uses ``response_model_exclude_unset=True`` so the default response
+         *     key set stays EXACTLY {count, cards} (test_srs_and_drills pins this).
+         *     ``host_cards`` rows are verbatim host CrossDomainReviewCard payloads —
+         *     dynamically keyed, so they stay ``dict[str, Any]``.
+         */
+        SrsConceptGapQueueOut: {
+            /** Count */
+            count: number;
+            /** Cards */
+            cards: components["schemas"]["SrsConceptGapQueueCardOut"][];
+            /** Host Cards */
+            host_cards?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Include Host */
+            include_host?: boolean | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsDueCardOut
+         * @description One due card: serializers.question_test_mode payload (answer-key-free)
+         *     plus the SRS extras the handler attaches (predicted_intervals, origin).
+         */
+        SrsDueCardOut: {
+            /** Id */
+            id: number;
+            /** Section Id */
+            section_id?: number | null;
+            /** Passage Id */
+            passage_id?: number | null;
+            /** Prompt */
+            prompt: string;
+            /** Stem */
+            stem: string;
+            /** Q Type */
+            q_type: string;
+            /** Difficulty */
+            difficulty: number;
+            /** Source */
+            source: string;
+            /** Choices */
+            choices: components["schemas"]["SrsChoiceOut"][];
+            /** Card Id */
+            card_id: number;
+            /** Predicted Intervals */
+            predicted_intervals: {
+                [key: string]: number;
+            };
+            /** Origin */
+            origin?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsDueOut
+         * @description GET /srs/due envelope. ``ability_selector`` is the opaque engine-owned
+         *     adaptivity payload and ``review_strategy`` mixes nullable ``.get()`` chains —
+         *     both stay ``dict[str, Any]`` (same treatment as StudyTodayResponse).
+         */
+        SrsDueOut: {
+            /** Due Count */
+            due_count: number;
+            /** Cards */
+            cards: components["schemas"]["SrsDueCardOut"][];
+            /** Ability Selector */
+            ability_selector: {
+                [key: string]: unknown;
+            };
+            /** Utility Model */
+            utility_model: string;
+            /** Review Strategy */
+            review_strategy: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsGapCardOut
+         * @description One generated/promoted Gap card preview (POST /srs/concept-gap-cards).
+         *     ``answer`` is null when no cloze target word was found in the stem.
+         */
+        SrsGapCardOut: {
+            /** Card Id */
+            card_id: number;
+            /** Question Id */
+            question_id: number;
+            /** Q Type */
+            q_type: string;
+            /** Difficulty */
+            difficulty: number;
+            /** Origin */
+            origin: string;
+            /** Card Type */
+            card_type: string;
+            /** Is New */
+            is_new: boolean;
+            /** Cloze */
+            cloze: string;
+            /** Answer */
+            answer?: string | null;
+            /** Pattern */
+            pattern: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsLeechCardOut
+         * @description One leech card: serializers.question_test_mode payload (answer-key-free)
+         *     plus the lapse count the handler attaches.
+         */
+        SrsLeechCardOut: {
+            /** Id */
+            id: number;
+            /** Section Id */
+            section_id?: number | null;
+            /** Passage Id */
+            passage_id?: number | null;
+            /** Prompt */
+            prompt: string;
+            /** Stem */
+            stem: string;
+            /** Q Type */
+            q_type: string;
+            /** Difficulty */
+            difficulty: number;
+            /** Source */
+            source: string;
+            /** Choices */
+            choices: components["schemas"]["SrsChoiceOut"][];
+            /** Card Id */
+            card_id: number;
+            /** Lapses */
+            lapses: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsLeechesOut
+         * @description GET /srs/leeches envelope. Same conditional-key contract as
+         *     /srs/concept-gap-queue: ``host_cards``/``include_host`` only appear with
+         *     ``?include_host=true`` (Optional=None + ``response_model_exclude_unset=True``
+         *     keeps the default key set EXACTLY {count, cards}); host rows are verbatim
+         *     dynamically-keyed CrossDomainReviewCard payloads (``dict[str, Any]``).
+         */
+        SrsLeechesOut: {
+            /** Count */
+            count: number;
+            /** Cards */
+            cards: components["schemas"]["SrsLeechCardOut"][];
+            /** Host Cards */
+            host_cards?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Include Host */
+            include_host?: boolean | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SrsOptimizeOut
+         * @description POST /srs/optimize — srs.optimize_parameters status dict. POLYMORPHIC
+         *     per branch: only ``ran``/``n_reviews`` are guaranteed; ``reason`` (open-ended,
+         *     incl. dynamic "error:<ExcName>" strings), ``min_reviews``, ``n_parameters``
+         *     and ``optimizer_available`` appear branch-dependently, so they are
+         *     Optional=None + ``response_model_exclude_unset=True`` (absent keys stay
+         *     absent — never serialized as nulls).
+         */
+        SrsOptimizeOut: {
+            /** Ran */
+            ran: boolean;
+            /** N Reviews */
+            n_reviews: number;
+            /** Reason */
+            reason?: string | null;
+            /** Min Reviews */
+            min_reviews?: number | null;
+            /** N Parameters */
+            n_parameters?: number | null;
+            /** Optimizer Available */
+            optimizer_available?: boolean | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * SrsParamsOut
          * @description The backend's effective FSRS parameters (py-fsrs). ``weights`` are the
          *     per-user optimized weights when present, else the empty list (host then keeps
@@ -7062,6 +8685,25 @@ export interface components {
              * @default backend
              */
             source: string;
+        };
+        /**
+         * SrsReviewOut
+         * @description POST /srs/{card_id}/review — the rescheduling result.
+         *     ``interval_days`` is numeric (srs.review can yield non-integer intervals);
+         *     typed int | float so integer intervals keep serializing as ints — smart
+         *     union preserves the incoming type and the wire bytes stay identical.
+         */
+        SrsReviewOut: {
+            /** Next Due */
+            next_due: string;
+            /** Interval Days */
+            interval_days: number;
+            /** Predicted Intervals */
+            predicted_intervals: {
+                [key: string]: number;
+            };
+        } & {
+            [key: string]: unknown;
         };
         /**
          * StudyArtifactCreate
@@ -7420,6 +9062,26 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * SyncProgressUpdatesOut
+         * @description Counter envelope for POST /api/sync/progress-updates — fixed 5-key shape
+         *     (``received == upserted + unchanged + skipped``). ``extra="allow"`` keeps any
+         *     future additive counters on the wire without a schema bump.
+         */
+        SyncProgressUpdatesOut: {
+            /** Ok */
+            ok: boolean;
+            /** Received */
+            received: number;
+            /** Upserted */
+            upserted: number;
+            /** Unchanged */
+            unchanged: number;
+            /** Skipped */
+            skipped: number;
+        } & {
+            [key: string]: unknown;
+        };
         /** TagBody */
         TagBody: {
             /**
@@ -7506,6 +9168,138 @@ export interface components {
              */
             model: string;
         };
+        /**
+         * TrustCheckOut
+         * @description One entry of the trust manifest's ``checks`` map (``trust._check``).
+         *
+         *     ``detail`` is heterogeneous per check type and stays ``dict[str, Any]``.
+         */
+        TrustCheckOut: {
+            /** Status */
+            status: string;
+            /** Summary */
+            summary: string;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Action */
+            action?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * TrustDiagnosticsOut
+         * @description ``GET /api/observability/diagnostics`` — shallow envelope only. The
+         *     trust/integrity/content/queue/migrations sub-reports contain dynamically
+         *     keyed dicts (by_source, by_q_type, by_status, by_entity, ...) and stay
+         *     ``dict[str, Any]``; the scheduler/benchmark lists reuse the typed rows.
+         */
+        TrustDiagnosticsOut: {
+            /** Trust */
+            trust: {
+                [key: string]: unknown;
+            };
+            /** Integrity */
+            integrity: {
+                [key: string]: unknown;
+            };
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            };
+            /** Queue */
+            queue: {
+                [key: string]: unknown;
+            };
+            /** Migrations */
+            migrations: {
+                [key: string]: unknown;
+            };
+            /** Scheduled Tasks */
+            scheduled_tasks: components["schemas"]["ScheduledTaskOut"][];
+            /** Scheduler Runs */
+            scheduler_runs: components["schemas"]["SchedulerRunOut"][];
+            /** Benchmarks */
+            benchmarks: components["schemas"]["BenchmarkRunOut"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * TrustEnvironmentOut
+         * @description The manifest's fixed ``environment`` block.
+         */
+        TrustEnvironmentOut: {
+            /** Platform */
+            platform: string;
+            /** Python */
+            python: string;
+            /** Data Dir */
+            data_dir: string;
+            /** Db Path */
+            db_path: string;
+            /** Local Provider */
+            local_provider: string;
+            /** Offline Generation Provider */
+            offline_generation_provider: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * TrustIssueOut
+         * @description One ``blockers``/``warnings`` item (``trust._messages``).
+         */
+        TrustIssueOut: {
+            /** Check */
+            check: string;
+            /** Summary */
+            summary?: string | null;
+            /** Action */
+            action?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * TrustManifestOut
+         * @description ``trust.build_release_trust_manifest`` payload, shared by
+         *     ``GET /api/observability/trust`` and ``GET /api/release/trust``.
+         *
+         *     ``schema`` shadows a deprecated ``BaseModel`` attribute, hence the alias.
+         *     ``snapshot_id`` (only with ``?persist=true``) and ``written_to`` (only with
+         *     ``?write=true``) are conditionally present — ``exclude_unset`` keeps them
+         *     off the wire when the handler did not set them.
+         */
+        TrustManifestOut: {
+            /** Schema */
+            schema: string;
+            /** Tier */
+            tier: string;
+            /** Status */
+            status: string;
+            /** Score */
+            score: number;
+            /** Generated At */
+            generated_at: string;
+            /** App Version */
+            app_version: string;
+            environment: components["schemas"]["TrustEnvironmentOut"];
+            /** Checks */
+            checks: {
+                [key: string]: components["schemas"]["TrustCheckOut"];
+            };
+            /** Blockers */
+            blockers: components["schemas"]["TrustIssueOut"][];
+            /** Warnings */
+            warnings: components["schemas"]["TrustIssueOut"][];
+            /** Next Actions */
+            next_actions: string[];
+            /** Snapshot Id */
+            snapshot_id?: number | null;
+            /** Written To */
+            written_to?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
         /** TurnBody */
         TurnBody: {
             /**
@@ -7547,6 +9341,52 @@ export interface components {
              * @default true
              */
             auto_reply: boolean;
+        };
+        /**
+         * UnifiedAbilityEstimate
+         * @description LEARN-1 — inline typed shape of a unified cross-domain ability estimate
+         *     (BC2 style; mirrors ``adaptivity.ability_estimate``'s payload + ``domain``).
+         *
+         *     Returned for the host-plane read (``GET /api/adaptivity/ability?domain=…``).
+         *     ``model_config`` allows extra keys so future estimate fields surface without
+         *     a contract break, and so the existing LSAT-only matrix/estimate branches keep
+         *     returning their own (un-narrowed) shapes through this same route.
+         */
+        UnifiedAbilityEstimate: {
+            /** Domain */
+            domain: string;
+            /** Q Type */
+            q_type?: string | null;
+            /** Section Type */
+            section_type?: string | null;
+            /** Ability */
+            ability: number;
+            /** Mastery */
+            mastery: number;
+            /** Uncertainty */
+            uncertainty: number;
+            /** Evidence N */
+            evidence_n: number;
+            /** Accuracy */
+            accuracy?: number | null;
+            /** Avg Time Ms */
+            avg_time_ms?: number | null;
+            /** Model */
+            model: string;
+            /** Learning Velocity */
+            learning_velocity: {
+                [key: string]: unknown;
+            };
+            /** Plateau */
+            plateau: boolean;
+            /** Mastery Eta Days */
+            mastery_eta_days?: number | null;
+            /** Components */
+            components: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
         };
         /**
          * UnifiedDueCard
@@ -7648,6 +9488,31 @@ export interface components {
             meta?: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * VoiceCacheStatusOut
+         * @description ``voice`` block of GET /observability/cloud-budget
+         *     (``observability.whisper_cache_status``).
+         */
+        VoiceCacheStatusOut: {
+            /** Model Id */
+            model_id: string;
+            /** Cache Dir */
+            cache_dir: string;
+            /** Cache Dir Exists */
+            cache_dir_exists: boolean;
+            /** Downloaded */
+            downloaded: boolean;
+            /** File Count */
+            file_count: number;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Browser Cached */
+            browser_cached: boolean;
+            /** Note */
+            note: string;
+        } & {
+            [key: string]: unknown;
         };
         /** WeaknessIndexResponse */
         WeaknessIndexResponse: {
@@ -7877,9 +9742,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AiHealthOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -10576,7 +12439,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["CalibrationOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -10988,7 +12851,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SrsCardsCreateOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -11047,7 +12910,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SrsConceptGapQueueOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -11109,7 +12972,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SrsBlindReviewNoteOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -11169,7 +13032,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SrsConceptGapCardsOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -11225,7 +13088,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SrsDueOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -11284,7 +13147,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SrsLeechesOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -11340,7 +13203,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SrsOptimizeOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -11402,7 +13265,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SrsReviewOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -14703,9 +16566,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ExportValidateOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -14765,9 +16626,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ExportImportOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -14826,9 +16685,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ExportListOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -14886,9 +16743,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ExportHistoryItemOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -15414,7 +17269,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SyncProgressUpdatesOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -15474,9 +17329,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["FsrsWriteBackOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -15535,9 +17388,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["FsrsWriteBackLogOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -16015,7 +17866,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SettingsEnvelopeOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -16075,7 +17926,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SettingsEnvelopeOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -16848,9 +18699,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ObservabilityStatusOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -16906,9 +18755,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ReadyOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -16967,9 +18814,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["MetricsOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -17028,9 +18873,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CloudBudgetOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -17086,9 +18929,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RuntimeEvidenceOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -17144,9 +18985,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SqliteHealthOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -17205,9 +19044,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ObsTrustStatusOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -17263,9 +19100,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["HealthAggregatedOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -17321,9 +19156,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SchemaVersionsOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -17379,9 +19212,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RelocationStatusOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -18089,7 +19920,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SearchQuestionsOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -18152,7 +19983,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["AbilityMatrixOut"] | components["schemas"]["AbilityWithSelectorOut"] | components["schemas"]["UnifiedAbilityEstimate"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -18272,7 +20103,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["AdaptivityDailyPlanOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -18328,7 +20159,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["RecomputeItemStatsOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -18388,7 +20219,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["ReadinessOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -22878,7 +24709,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["TrustManifestOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -22938,7 +24769,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["TrustManifestOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -22996,7 +24827,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["TrustDiagnosticsOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23052,7 +24883,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["ScheduledTaskListOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23112,7 +24943,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["ScheduledTaskOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23168,7 +24999,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["ScheduledDefaultsOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23224,7 +25055,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["ScheduledTaskRunDueOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23282,7 +25113,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["ScheduledTaskRunOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23338,7 +25169,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["SchedulerRunListOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23394,7 +25225,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["MigrationDryRunOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23450,7 +25281,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["PreUpgradeBackupOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23506,7 +25337,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["BenchmarkRunListOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23566,7 +25397,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["BenchmarkRunOut"];
                 };
             };
             /** @description Uniform backend error envelope */
@@ -23622,7 +25453,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LegacySuccessResponse"];
+                    "application/json": components["schemas"]["BenchmarkSmokeOut"];
                 };
             };
             /** @description Uniform backend error envelope */

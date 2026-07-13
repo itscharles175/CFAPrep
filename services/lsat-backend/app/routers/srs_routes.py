@@ -4,10 +4,10 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
 
 from .. import adaptivity, config, pedagogy, serializers, srs
@@ -77,7 +77,26 @@ class ConceptGapCardsBody(BaseModel):
     limit: int = Field(default=20, ge=1, le=100)
 
 
-@router.post("/cards")
+# Wave 2 (API contract) — endpoint-local response models, following the
+# UnifiedAbilityEstimate convention (adaptivity_routes.py): permissive
+# ``extra="allow"`` at EVERY nesting level so any extra keys in the returned
+# dicts pass through unchanged (accepted AND serialized — the wire payload is
+# byte-identical), and conditionally-present keys are Optional=None combined
+# with ``response_model_exclude_unset=True`` so absent keys stay absent instead
+# of serializing as nulls. Handlers keep returning plain dicts — the models
+# only shape HTTP serialization + OpenAPI (test_r7_scheduling calls due_cards()
+# directly as a function and must keep receiving a dict).
+class SrsCardsCreateOut(BaseModel):
+    """POST /srs/cards — bulk-create result: counts + the new card ids."""
+    model_config = ConfigDict(extra="allow")
+
+    created: int
+    skipped: int
+    card_ids: list[int]
+
+
+@router.post("/cards", response_model=SrsCardsCreateOut,
+             response_model_exclude_unset=True)
 def create_cards(body: BulkCardsBody, session: Session = Depends(get_session)):
     """D5/H2: schedule SRS reviews for a set of questions (e.g. 'add similar to
     SRS'). Idempotent — questions that already have a card are skipped."""
@@ -107,7 +126,37 @@ def create_cards(body: BulkCardsBody, session: Session = Depends(get_session)):
     return {"created": len(created), "skipped": skipped, "card_ids": created}
 
 
-@router.get("/concept-gap-queue")
+class SrsConceptGapQueueCardOut(BaseModel):
+    """One LSAT-native concept-gap row (pedagogy.concept_gap_queue) —
+    answer-key-free by design."""
+    model_config = ConfigDict(extra="allow")
+
+    card_id: int
+    question_id: int
+    q_type: str
+    difficulty: int
+    due_date: str
+    lapses: int
+    origin: str
+
+
+class SrsConceptGapQueueOut(BaseModel):
+    """GET /srs/concept-gap-queue envelope. ``host_cards``/``include_host`` are
+    CONDITIONAL (only with ``?include_host=true``); they are Optional=None and
+    the route uses ``response_model_exclude_unset=True`` so the default response
+    key set stays EXACTLY {count, cards} (test_srs_and_drills pins this).
+    ``host_cards`` rows are verbatim host CrossDomainReviewCard payloads —
+    dynamically keyed, so they stay ``dict[str, Any]``."""
+    model_config = ConfigDict(extra="allow")
+
+    count: int
+    cards: list[SrsConceptGapQueueCardOut]
+    host_cards: list[dict[str, Any]] | None = None
+    include_host: bool | None = None
+
+
+@router.get("/concept-gap-queue", response_model=SrsConceptGapQueueOut,
+            response_model_exclude_unset=True)
 def concept_gap_queue(
     session: Session = Depends(get_session),
     include_host: bool = Query(
@@ -143,7 +192,22 @@ def concept_gap_queue(
     }
 
 
-@router.post("/attempts/{attempt_id}/blind-review-note")
+class SrsBlindReviewNoteOut(BaseModel):
+    """POST /srs/attempts/{attempt_id}/blind-review-note — the persisted
+    AttemptRationale row (stage="blind_review") echoed back."""
+    model_config = ConfigDict(extra="allow")
+
+    id: int
+    attempt_id: int
+    question_id: int
+    stage: str
+    br_note: str
+    created_at: str
+
+
+@router.post("/attempts/{attempt_id}/blind-review-note",
+             response_model=SrsBlindReviewNoteOut,
+             response_model_exclude_unset=True)
 def blind_review_note(attempt_id: int, body: BlindReviewNoteBody,
                       session: Session = Depends(get_session)):
     """LSAT-3 — capture the short "why" the user writes when revealing a Blind
@@ -223,7 +287,36 @@ def _build_cloze(q: Question, br_note: str | None) -> dict:
     return {"cloze": cloze, "answer": target, "pattern": pattern}
 
 
-@router.post("/concept-gap-cards")
+class SrsGapCardOut(BaseModel):
+    """One generated/promoted Gap card preview (POST /srs/concept-gap-cards).
+    ``answer`` is null when no cloze target word was found in the stem."""
+    model_config = ConfigDict(extra="allow")
+
+    card_id: int
+    question_id: int
+    q_type: str
+    difficulty: int
+    origin: str
+    card_type: str
+    is_new: bool
+    cloze: str
+    answer: str | None = None
+    pattern: str
+
+
+class SrsConceptGapCardsOut(BaseModel):
+    """POST /srs/concept-gap-cards — generation-run summary + card previews."""
+    model_config = ConfigDict(extra="allow")
+
+    generated: int
+    skipped: int
+    card_type: str
+    origin: str
+    cards: list[SrsGapCardOut]
+
+
+@router.post("/concept-gap-cards", response_model=SrsConceptGapCardsOut,
+             response_model_exclude_unset=True)
 def concept_gap_cards(body: ConceptGapCardsBody | None = None,
                       session: Session = Depends(get_session)):
     """LSAT-3 — auto-generate cloze/pattern "Gap" SRS cards from the concept-gap
@@ -312,7 +405,48 @@ def _interleave_by_qtype(items: list[tuple[SRSCard, Question]]) -> list[tuple[SR
     return out
 
 
-@router.get("/due")
+class SrsChoiceOut(BaseModel):
+    """One answer choice in test mode (no is_correct/trap_type leak)."""
+    model_config = ConfigDict(extra="allow")
+
+    id: int
+    label: str
+    text: str
+
+
+class SrsDueCardOut(BaseModel):
+    """One due card: serializers.question_test_mode payload (answer-key-free)
+    plus the SRS extras the handler attaches (predicted_intervals, origin)."""
+    model_config = ConfigDict(extra="allow")
+
+    id: int
+    section_id: int | None = None
+    passage_id: int | None = None
+    prompt: str
+    stem: str
+    q_type: str
+    difficulty: int
+    source: str
+    choices: list[SrsChoiceOut]
+    card_id: int
+    predicted_intervals: dict[str, int]
+    origin: str | None = None
+
+
+class SrsDueOut(BaseModel):
+    """GET /srs/due envelope. ``ability_selector`` is the opaque engine-owned
+    adaptivity payload and ``review_strategy`` mixes nullable ``.get()`` chains —
+    both stay ``dict[str, Any]`` (same treatment as StudyTodayResponse)."""
+    model_config = ConfigDict(extra="allow")
+
+    due_count: int
+    cards: list[SrsDueCardOut]
+    ability_selector: dict[str, Any]
+    utility_model: str
+    review_strategy: dict[str, Any]
+
+
+@router.get("/due", response_model=SrsDueOut, response_model_exclude_unset=True)
 def due_cards(session: Session = Depends(get_session)):
     """Due SRS cards, most-overdue-first AND interleaved by q_type so a single
     type never dominates a long review run. Each card additionally carries its
@@ -360,7 +494,40 @@ def due_cards(session: Session = Depends(get_session)):
     }
 
 
-@router.get("/leeches")
+class SrsLeechCardOut(BaseModel):
+    """One leech card: serializers.question_test_mode payload (answer-key-free)
+    plus the lapse count the handler attaches."""
+    model_config = ConfigDict(extra="allow")
+
+    id: int
+    section_id: int | None = None
+    passage_id: int | None = None
+    prompt: str
+    stem: str
+    q_type: str
+    difficulty: int
+    source: str
+    choices: list[SrsChoiceOut]
+    card_id: int
+    lapses: int
+
+
+class SrsLeechesOut(BaseModel):
+    """GET /srs/leeches envelope. Same conditional-key contract as
+    /srs/concept-gap-queue: ``host_cards``/``include_host`` only appear with
+    ``?include_host=true`` (Optional=None + ``response_model_exclude_unset=True``
+    keeps the default key set EXACTLY {count, cards}); host rows are verbatim
+    dynamically-keyed CrossDomainReviewCard payloads (``dict[str, Any]``)."""
+    model_config = ConfigDict(extra="allow")
+
+    count: int
+    cards: list[SrsLeechCardOut]
+    host_cards: list[dict[str, Any]] | None = None
+    include_host: bool | None = None
+
+
+@router.get("/leeches", response_model=SrsLeechesOut,
+            response_model_exclude_unset=True)
 def leeches(
     session: Session = Depends(get_session),
     include_host: bool = Query(
@@ -403,7 +570,25 @@ def leeches(
     }
 
 
-@router.post("/optimize")
+class SrsOptimizeOut(BaseModel):
+    """POST /srs/optimize — srs.optimize_parameters status dict. POLYMORPHIC
+    per branch: only ``ran``/``n_reviews`` are guaranteed; ``reason`` (open-ended,
+    incl. dynamic "error:<ExcName>" strings), ``min_reviews``, ``n_parameters``
+    and ``optimizer_available`` appear branch-dependently, so they are
+    Optional=None + ``response_model_exclude_unset=True`` (absent keys stay
+    absent — never serialized as nulls)."""
+    model_config = ConfigDict(extra="allow")
+
+    ran: bool
+    n_reviews: int
+    reason: str | None = None
+    min_reviews: int | None = None
+    n_parameters: int | None = None
+    optimizer_available: bool | None = None
+
+
+@router.post("/optimize", response_model=SrsOptimizeOut,
+             response_model_exclude_unset=True)
 def optimize(session: Session = Depends(get_session)):
     """3.2 — optimize the FSRS weights from the user's own review history and
     persist them. Returns whether it actually ran + the number of reviews seen;
@@ -412,7 +597,22 @@ def optimize(session: Session = Depends(get_session)):
     return srs.optimize_parameters(session)
 
 
-@router.post("/{card_id}/review")
+class SrsReviewOut(BaseModel):
+    """POST /srs/{card_id}/review — the rescheduling result.
+    ``interval_days`` is numeric (srs.review can yield non-integer intervals);
+    typed int | float so integer intervals keep serializing as ints — smart
+    union preserves the incoming type and the wire bytes stay identical."""
+    model_config = ConfigDict(extra="allow")
+
+    next_due: str
+    interval_days: int | float
+    predicted_intervals: dict[str, int]
+
+
+# NOTE: this path-parameter catch-all route stays declared LAST in the file —
+# new literal /srs/* routes must be added above it or they could be shadowed.
+@router.post("/{card_id}/review", response_model=SrsReviewOut,
+             response_model_exclude_unset=True)
 def review_card(card_id: int, body: ReviewBody,
                 session: Session = Depends(get_session)):
     card = session.get(SRSCard, card_id)

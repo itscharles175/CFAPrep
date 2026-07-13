@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session, select
 
 from ..cross_domain_sync import FsrsWriteBackBody, apply_fsrs_write_back
@@ -32,7 +33,82 @@ from ..models import CrossDomainSyncLog
 router = APIRouter(prefix="/sync")
 
 
-@router.post("/fsrs-write-back")
+class FsrsReconciledEntryOut(BaseModel):
+    """Per-card reconcile entry echoed by ``POST /api/sync/fsrs-write-back``.
+
+    Mirrors ``cross_domain_sync._reconciled`` verbatim: literal camelCase keys
+    (the source dicts are already camelCase — no aliasing). ``fsrsState`` is the
+    host's opaque FSRS scheduling state (host-opaque by contract) and stays
+    ``dict[str, Any]``. ``extra="allow"`` keeps future additive keys on the wire.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    crossId: str
+    fsrsState: dict[str, Any]
+    syncRevision: int
+    # "applied" | "kept_existing" | "noop_dedupe" | "no_target" — kept as plain
+    # str so future resolutions don't fail response validation.
+    resolution: str
+    observedAt: Optional[str] = None
+
+
+class FsrsWriteBackOut(BaseModel):
+    """Envelope returned by ``POST /api/sync/fsrs-write-back``.
+
+    Note the deliberate key-casing mix mirrored from ``apply_fsrs_write_back``:
+    snake_case summary counters (``kept_existing``, ``no_target``) alongside
+    camelCase reconciled-entry keys. All keys are always present.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    received: int
+    applied: int
+    kept_existing: int
+    deduped: int
+    no_target: int
+    reconciled: list[FsrsReconciledEntryOut]
+
+
+class FsrsWriteBackLogEntryOut(BaseModel):
+    """One ``CrossDomainSyncLog`` ledger row as serialized by the log route.
+
+    camelCase keys built inline by ``get_fsrs_write_back_log``. ``fsrsBefore`` /
+    ``fsrsAfter`` mirror opaque JSON columns (dynamic host FSRS state) and stay
+    ``dict[str, Any]``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: Optional[int] = None
+    writeId: str
+    crossId: str
+    sourcePlane: str
+    targetPlane: str
+    resolution: str
+    fsrsBefore: dict[str, Any]
+    fsrsAfter: dict[str, Any]
+    observedAt: Optional[str] = None
+    createdAt: Optional[str] = None
+
+
+class FsrsWriteBackLogOut(BaseModel):
+    """Envelope returned by ``GET /api/sync/fsrs-write-back/log``."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    count: int
+    entries: list[FsrsWriteBackLogEntryOut]
+
+
+@router.post(
+    "/fsrs-write-back",
+    response_model=FsrsWriteBackOut,
+    response_model_exclude_unset=True,
+)
 def post_fsrs_write_back(
     body: FsrsWriteBackBody, session: Session = Depends(get_session)
 ) -> dict[str, Any]:
@@ -48,7 +124,11 @@ def post_fsrs_write_back(
     return apply_fsrs_write_back(session, body)
 
 
-@router.get("/fsrs-write-back/log")
+@router.get(
+    "/fsrs-write-back/log",
+    response_model=FsrsWriteBackLogOut,
+    response_model_exclude_unset=True,
+)
 def get_fsrs_write_back_log(
     cross_id: Optional[str] = Query(default=None, max_length=240),
     limit: int = Query(default=100, ge=1, le=1000),

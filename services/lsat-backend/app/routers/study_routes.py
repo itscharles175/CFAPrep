@@ -17,7 +17,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
 
 from .. import adaptivity, analytics, study_plan
@@ -904,7 +904,25 @@ def _dedupe_key(snap: ProgressSnapshotIn) -> str:
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
 
 
-@sync_router.post("/progress-updates")
+class SyncProgressUpdatesOut(BaseModel):
+    """Counter envelope for POST /api/sync/progress-updates — fixed 5-key shape
+    (``received == upserted + unchanged + skipped``). ``extra="allow"`` keeps any
+    future additive counters on the wire without a schema bump."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    received: int
+    upserted: int
+    unchanged: int
+    skipped: int
+
+
+@sync_router.post(
+    "/progress-updates",
+    response_model=SyncProgressUpdatesOut,
+    response_model_exclude_unset=True,
+)
 def post_progress_updates(body: ProgressUpdatesBody, session: Session = Depends(get_session)):
     """DATA-4a — UPSERT a batch of HOST cross-domain progress snapshots.
 

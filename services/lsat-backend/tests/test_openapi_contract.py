@@ -14,10 +14,14 @@ from pathlib import Path
 # locally before it ever reaches the OpenAPI drift step.
 _SCHEMA_BASELINE = Path(__file__).with_name("schemas-baseline.json")
 
-# The high-traffic, host-consumed routes typed in BC2 (see test_response_models).
-# A field present in the baseline but missing from the live spec is a BREAKING
-# removal for an existing host caller; adding fields is always compatible.
+# Every route that declares a real (non-dict) response model is guarded: typed
+# implies guarded. A field present in the baseline but missing from the live
+# spec is a BREAKING removal for an existing host caller; adding fields is
+# always compatible. When typing a new route, add it here and re-snapshot with
+# UPDATE_SCHEMA_BASELINE=1 in the SAME commit (the baseline-membership assert
+# below fails otherwise).
 _GUARDED_ROUTES: tuple[tuple[str, str], ...] = (
+    # BC2 first floor
     ("/api/health", "get"),
     ("/api/preptests", "get"),
     ("/api/sessions", "get"),
@@ -25,6 +29,86 @@ _GUARDED_ROUTES: tuple[tuple[str, str], ...] = (
     ("/api/bank/stats", "get"),
     ("/api/adaptivity/next", "post"),
     ("/api/study/today", "get"),
+    # Wave 2 — adaptivity + readiness
+    ("/api/adaptivity/ability", "get"),
+    ("/api/adaptivity/plan", "post"),
+    ("/api/adaptivity/recompute-item-stats", "post"),
+    ("/api/readiness", "get"),
+    # Wave 2 — study / sync
+    ("/api/study/profile", "get"),
+    ("/api/study/profile", "put"),
+    ("/api/study/simulate", "post"),
+    ("/api/study/due-unified", "get"),
+    ("/api/sync/progress-updates", "post"),
+    ("/api/sync/fsrs-write-back", "post"),
+    ("/api/sync/fsrs-write-back/log", "get"),
+    # Wave 2 — SRS
+    ("/api/srs/params", "get"),
+    ("/api/srs/due", "get"),
+    ("/api/srs/leeches", "get"),
+    ("/api/srs/concept-gap-queue", "get"),
+    ("/api/srs/cards", "post"),
+    ("/api/srs/concept-gap-cards", "post"),
+    ("/api/srs/optimize", "post"),
+    ("/api/srs/{card_id}/review", "post"),
+    ("/api/srs/attempts/{attempt_id}/blind-review-note", "post"),
+    # Wave 2 — analytics
+    ("/api/analytics/dashboard", "get"),
+    ("/api/analytics/by-type", "get"),
+    ("/api/analytics/activity", "get"),
+    ("/api/analytics/calibration", "get"),
+    ("/api/analytics/cross-domain", "get"),
+    ("/api/analytics/weakness-index", "get"),
+    ("/api/analytics/blind-review-gap", "get"),
+    # Wave 2 — search / settings / AI health
+    ("/api/search/questions", "get"),
+    ("/api/settings", "get"),
+    ("/api/settings", "put"),
+    ("/api/ai/health", "get"),
+    # Wave 2 — trust cockpit + scheduler + benchmarks
+    ("/api/observability/trust", "get"),
+    ("/api/release/trust", "get"),
+    ("/api/observability/diagnostics", "get"),
+    ("/api/observability/scheduled-tasks", "get"),
+    ("/api/observability/scheduled-tasks", "post"),
+    ("/api/observability/scheduled-tasks/defaults", "post"),
+    ("/api/observability/scheduled-tasks/run-due", "post"),
+    ("/api/observability/scheduled-tasks/{key}/run", "post"),
+    ("/api/observability/scheduler-runs", "get"),
+    ("/api/observability/migrations/dry-run", "get"),
+    ("/api/observability/migrations/pre-upgrade-backup", "post"),
+    ("/api/observability/benchmarks", "get"),
+    ("/api/observability/benchmarks", "post"),
+    ("/api/observability/benchmarks/smoke", "post"),
+    # Wave 2 — observability
+    ("/api/observability/status", "get"),
+    ("/api/ready", "get"),
+    ("/api/observability/metrics", "get"),
+    ("/api/observability/cloud-budget", "get"),
+    ("/api/observability/runtime-evidence", "get"),
+    ("/api/observability/sqlite-health", "get"),
+    ("/api/observability/trust-status", "get"),
+    ("/api/observability/health-aggregated", "get"),
+    ("/api/observability/schema-versions", "get"),
+    ("/api/observability/relocation-status", "get"),
+    # Wave 2 — unified export/import (create_backup stays deliberately untyped:
+    # polymorphic encrypted-blob | plaintext-envelope response)
+    ("/api/export/validate", "post"),
+    ("/api/export/import", "post"),
+    ("/api/export/list", "get"),
+    ("/api/export/history", "get"),
+    # Wave 2 — generation quality (typed in an earlier slice, now guarded)
+    ("/api/gen/generation-quality", "post"),
+    ("/api/gen/generation/quality-metrics", "get"),
+    ("/api/gen/generation/audit-log", "get"),
+    # Content factory + study artifacts (typed earlier, now guarded)
+    ("/api/content-factory/plan", "post"),
+    ("/api/content-factory/batches", "get"),
+    ("/api/study-artifacts", "post"),
+    ("/api/study-artifacts", "get"),
+    ("/api/study-artifacts/{artifact_id}", "get"),
+    ("/api/study-artifacts/{artifact_id}", "put"),
+    ("/api/study-artifacts/{artifact_id}", "delete"),
 )
 
 
@@ -114,6 +198,21 @@ def test_typed_route_response_schemas_have_no_silent_field_removals(client):
         return
 
     baseline = json.loads(_SCHEMA_BASELINE.read_text(encoding="utf-8"))
+
+    # Guard-extension completeness: a route added to _GUARDED_ROUTES without a
+    # baseline re-snapshot would be silently unguarded (the removal loop below
+    # iterates baseline entries only). Fail loudly instead.
+    missing_from_baseline = [
+        f"{method.upper()} {path}"
+        for path, method in _GUARDED_ROUTES
+        if f"{method.upper()} {path}" not in baseline
+    ]
+    assert missing_from_baseline == [], (
+        "Guarded route(s) missing from the committed schemas-baseline.json — "
+        "re-snapshot with UPDATE_SCHEMA_BASELINE=1 pytest tests/test_openapi_contract.py "
+        "in the same commit:\n  - " + "\n  - ".join(missing_from_baseline)
+    )
+
     removed: list[str] = []
     for key, fields in baseline.items():
         live_fields = set(live.get(key, []))

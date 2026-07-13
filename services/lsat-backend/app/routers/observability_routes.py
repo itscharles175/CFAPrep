@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session, select
 
 from .. import ai, backup, config, jobs, llm, migrations, observability, relocation, trust
@@ -12,6 +13,297 @@ from ..db import engine, get_session
 from ..models import CoachSnapshot, EmbeddingVector, GenJob, GenStatus, Question
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Response models (wire-exact, permissive) — endpoint-local convention, see
+# UnifiedAbilityEstimate in adaptivity_routes.py. Every model allows extra keys
+# (extra="allow") so additive payload fields keep serializing without a
+# contract break, and every route pairs its model with
+# ``response_model_exclude_unset=True`` so keys a handler didn't set stay
+# absent instead of serializing as ``null``. Dynamically-keyed or
+# provider-dependent sub-shapes (the provider capability matrix, PRAGMA maps,
+# parsed-log-line events, the full readiness tree) deliberately stay
+# ``dict[str, Any]`` — never enumerate their keys.
+# ---------------------------------------------------------------------------
+
+
+class ObsCloudTokensOut(BaseModel):
+    """In-RAM cloud token counters (``observability.cloud_token_totals``)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
+class ObservabilityStatusOut(BaseModel):
+    """GET /observability/status — live backend health for the trust strip."""
+
+    model_config = ConfigDict(extra="allow")
+
+    gen_queued: int
+    gen_running: int
+    worker_alive: bool
+    last_coach_refresh_ms: int | None = None
+    explain_p50_ms: float | None = None
+    embed_coverage_pct: float
+    # llm.provider_info(): capabilities.matrix is dynamically keyed by provider.
+    models: dict[str, Any]
+    llm_cache: dict[str, Any]
+    cloud_tokens: ObsCloudTokensOut
+    cloud_monthly_budget_usd: float | None = None
+    cloud_spend_mtd_usd: float
+    cloud_budget_within: bool
+    cloud_budget_remaining_usd: float | None = None
+    explain_p50_ms_persisted: float | None = None
+    backend_ready: bool
+    db_ready: bool
+    worker_ready: bool
+    backup_status: str
+    # Full observability.backend_readiness() tree (db.pragmas is PRAGMA-keyed).
+    readiness: dict[str, Any]
+
+
+class ReadyAiOut(BaseModel):
+    """AI-provider block of GET /ready (partly provider-dependent)."""
+
+    model_config = ConfigDict(extra="allow", protected_namespaces=())
+
+    ready: bool
+    provider_reachable: bool
+    ollama_reachable: bool
+    models: list[str]
+    expected_models: dict[str, str]
+    model_available: dict[str, bool]
+    provider: str | None = None
+    realtime_provider: str | None = None
+    # {realtime, offline, matrix} — matrix is dynamically keyed by provider.
+    capabilities: dict[str, Any]
+
+
+class ReadyOut(BaseModel):
+    """GET /ready — launch readiness for sidecar smoke tests."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    status: str
+    generated_at: str
+    request_id: str | None = None
+    db: dict[str, Any]
+    worker: dict[str, Any]
+    backup: dict[str, Any]
+    ai: ReadyAiOut
+    errors: list[str]
+    warnings: list[str]
+
+
+class MetricsRecentCallOut(BaseModel):
+    """One ``UsageLedger`` tail row on GET /observability/metrics."""
+
+    model_config = ConfigDict(extra="allow")
+
+    model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float
+    created_at: str | None = None
+
+
+class MetricsCloudOut(BaseModel):
+    """``cloud`` block of GET /observability/metrics (budget status + pricing)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    spend_usd: float
+    budget_usd: float | None = None
+    within_budget: bool
+    remaining_usd: float | None = None
+    input_cost_per_mtok_usd: float
+    output_cost_per_mtok_usd: float
+    recent_calls: list[MetricsRecentCallOut]
+
+
+class MetricsOut(BaseModel):
+    """GET /observability/metrics — persisted latency + cloud-spend reads."""
+
+    model_config = ConfigDict(extra="allow")
+
+    task: str
+    window: int
+    latency_p50_ms: float | None = None
+    cloud: MetricsCloudOut
+
+
+class CloudBudgetPricingOut(BaseModel):
+    """``pricing`` block of ``llm.cloud_budget_dry_run``."""
+
+    model_config = ConfigDict(extra="allow")
+
+    input_cost_per_mtok_usd: float
+    output_cost_per_mtok_usd: float
+
+
+class CloudBudgetNextCallOut(BaseModel):
+    """``next_call`` dry-run forecast of ``llm.cloud_budget_dry_run``."""
+
+    model_config = ConfigDict(extra="allow")
+
+    input_tokens: int
+    output_tokens: int
+    estimated_cost_usd: float
+    would_exceed_budget: bool
+
+
+class CloudBudgetDryRunOut(BaseModel):
+    """``cloud`` block of GET /observability/cloud-budget."""
+
+    model_config = ConfigDict(extra="allow")
+
+    spend_usd: float
+    budget_usd: float | None = None
+    within_budget: bool
+    remaining_usd: float | None = None
+    cloud_enabled: bool
+    cloud_configured: bool
+    cloud_egress_allowed: bool
+    dry_run: bool
+    pricing: CloudBudgetPricingOut
+    next_call: CloudBudgetNextCallOut
+
+
+class VoiceCacheStatusOut(BaseModel):
+    """``voice`` block of GET /observability/cloud-budget
+    (``observability.whisper_cache_status``)."""
+
+    model_config = ConfigDict(extra="allow", protected_namespaces=())
+
+    model_id: str
+    cache_dir: str
+    cache_dir_exists: bool
+    downloaded: bool
+    file_count: int
+    size_bytes: int
+    browser_cached: bool
+    note: str
+
+
+class CloudBudgetOut(BaseModel):
+    """GET /observability/cloud-budget — budget picture + voice cache."""
+
+    model_config = ConfigDict(extra="allow")
+
+    cloud: CloudBudgetDryRunOut
+    voice: VoiceCacheStatusOut
+
+
+class RuntimeEvidenceOut(BaseModel):
+    """GET /observability/runtime-evidence
+    (``observability.runtime_evidence_summary``)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    status: str
+    generated_at: str
+    log_dir: str
+    log_dir_exists: bool
+    log_dir_writable: bool
+    log_file_count: int
+    # Per-file payloads / parsed-log-line events carry variable keys.
+    log_files: list[dict[str, Any]]
+    recent_error_count: int
+    stale_error_count: int
+    recent_error_window_hours: int
+    recent_errors: list[dict[str, Any]]
+    last_request_error: dict[str, Any] | None = None
+    metrics: dict[str, Any]
+    crash_free_window: dict[str, Any]
+
+
+class SqliteHealthOut(BaseModel):
+    """GET /observability/sqlite-health (``observability.sqlite_health``)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    # PRAGMA-name-keyed, mixed str/int values — must stay open.
+    pragmas: dict[str, Any]
+    busy_retries: int
+    wal_estimate_if_cheap: int | None = None
+
+
+class ObsTrustStatusOut(BaseModel):
+    """GET /observability/trust-status (``trust.trust_status``)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    tier: str
+    generated_at: str
+    cache_ttl_seconds: int
+    # Three fixed check keys today, but each check's inner shape is
+    # check-specific (status/summary/detail/action with polymorphic detail).
+    checks: dict[str, dict[str, Any]]
+
+
+class HealthAggregatedOut(BaseModel):
+    """GET /observability/health-aggregated — consolidated System Health."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    ok: bool
+    generated_at: str
+    reasons: list[str]
+    backend_ready: bool
+    db_ready: bool
+    worker_ready: bool
+    backup_status: str
+    gen_queued: int
+    gen_running: int
+    explain_p50_ms: float | None = None
+    cloud_tokens: ObsCloudTokensOut
+    cloud_monthly_budget_usd: float | None = None
+    cloud_spend_mtd_usd: float
+    cloud_budget_within: bool
+    sqlite_health: SqliteHealthOut
+    # {realtime, offline, matrix} — matrix is dynamically keyed by provider.
+    provider_capabilities: dict[str, Any]
+    # Full backend_readiness tree (same shape as /observability/status).
+    readiness: dict[str, Any]
+
+
+class SchemaVersionsOut(BaseModel):
+    """GET /observability/schema-versions — cross-domain version handshake."""
+
+    model_config = ConfigDict(extra="allow")
+
+    cross_domain_schema_version: int
+    db_user_version: int
+    latest_migration_version: int
+    host_min_supported: int
+    generated_at: str
+
+
+class RelocationStatusOut(BaseModel):
+    """GET /observability/relocation-status (``relocation.relocation_status``).
+
+    Field names are the HOST-FACING camelCase contract — tests assert exact
+    key-SET equality on the wire payload, so never rename/alias these."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    generated_at: str
+    orphaned: bool
+    oldPath: str | None = None
+    newPath: str | None = None
+    oldExists: bool
+    newExists: bool
+    sizeBytes: int | None = None
+    samePath: bool
 
 
 def _aware(dt: datetime) -> datetime:
@@ -35,7 +327,11 @@ def _provider_capabilities_from_health(ai_health: dict[str, Any]) -> dict[str, A
     }
 
 
-@router.get("/observability/status", response_model=dict[str, Any])
+@router.get(
+    "/observability/status",
+    response_model=ObservabilityStatusOut,
+    response_model_exclude_unset=True,
+)
 def status(session: Session = Depends(get_session)) -> dict[str, Any]:
     """Live backend health: gen queue depth, worker liveness, coach freshness,
     explain latency p50, and embedding coverage."""
@@ -105,7 +401,7 @@ def status(session: Session = Depends(get_session)) -> dict[str, Any]:
     }
 
 
-@router.get("/ready", response_model=dict[str, Any])
+@router.get("/ready", response_model=ReadyOut, response_model_exclude_unset=True)
 async def ready(session: Session = Depends(get_session)) -> dict[str, Any]:
     """Launch readiness for sidecar smoke tests and operator diagnostics."""
     gen_jobs = session.exec(select(GenJob)).all()
@@ -185,7 +481,11 @@ async def ready(session: Session = Depends(get_session)) -> dict[str, Any]:
     }
 
 
-@router.get("/observability/metrics")
+@router.get(
+    "/observability/metrics",
+    response_model=MetricsOut,
+    response_model_exclude_unset=True,
+)
 def metrics(task: str = "explain_stream", window: int = 200,
             session: Session = Depends(get_session)) -> dict[str, Any]:
     """7.3 — historical/persisted observability reads (survive restarts).
@@ -224,7 +524,11 @@ def metrics(task: str = "explain_stream", window: int = 200,
     }
 
 
-@router.get("/observability/cloud-budget", response_model=dict[str, Any])
+@router.get(
+    "/observability/cloud-budget",
+    response_model=CloudBudgetOut,
+    response_model_exclude_unset=True,
+)
 def cloud_budget(
     input_tokens: int | None = None,
     output_tokens: int | None = None,
@@ -250,13 +554,21 @@ def cloud_budget(
     }
 
 
-@router.get("/observability/runtime-evidence")
+@router.get(
+    "/observability/runtime-evidence",
+    response_model=RuntimeEvidenceOut,
+    response_model_exclude_unset=True,
+)
 def runtime_evidence(session: Session = Depends(get_session)) -> dict[str, Any]:
     """Local log/metric evidence for the native Reliability Console."""
     return observability.runtime_evidence_summary(session)
 
 
-@router.get("/observability/sqlite-health", response_model=dict[str, Any])
+@router.get(
+    "/observability/sqlite-health",
+    response_model=SqliteHealthOut,
+    response_model_exclude_unset=True,
+)
 def sqlite_health() -> dict[str, Any]:
     """BC4 — SQLite contention/PRAGMA snapshot.
 
@@ -267,7 +579,11 @@ def sqlite_health() -> dict[str, Any]:
     return observability.sqlite_health()
 
 
-@router.get("/observability/trust-status", response_model=dict[str, Any])
+@router.get(
+    "/observability/trust-status",
+    response_model=ObsTrustStatusOut,
+    response_model_exclude_unset=True,
+)
 def trust_status(
     tier: Literal["dev", "release", "packaged"] = "dev",
     refresh: bool = False,
@@ -283,7 +599,11 @@ def trust_status(
     return trust.trust_status(session, tier=tier, force_refresh=refresh)
 
 
-@router.get("/observability/health-aggregated", response_model=dict[str, Any])
+@router.get(
+    "/observability/health-aggregated",
+    response_model=HealthAggregatedOut,
+    response_model_exclude_unset=True,
+)
 def health_aggregated(session: Session = Depends(get_session)) -> dict[str, Any]:
     """OPS-3 — one consolidated System-Health roll-up for the host header badge
     and Runtime Metrics tab.
@@ -367,7 +687,11 @@ def health_aggregated(session: Session = Depends(get_session)) -> dict[str, Any]
     }
 
 
-@router.get("/observability/schema-versions", response_model=dict[str, Any])
+@router.get(
+    "/observability/schema-versions",
+    response_model=SchemaVersionsOut,
+    response_model_exclude_unset=True,
+)
 def schema_versions() -> dict[str, Any]:
     """DATA-3 — the cross-domain schema-version handshake.
 
@@ -398,7 +722,11 @@ def schema_versions() -> dict[str, Any]:
     }
 
 
-@router.get("/observability/relocation-status", response_model=dict[str, Any])
+@router.get(
+    "/observability/relocation-status",
+    response_model=RelocationStatusOut,
+    response_model_exclude_unset=True,
+)
 def relocation_status() -> dict[str, Any]:
     """DATA-7 — app-data relocation guard status (read-only).
 

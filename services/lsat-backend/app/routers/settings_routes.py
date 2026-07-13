@@ -1,10 +1,10 @@
 """Settings / model-routing endpoints."""
 from __future__ import annotations
 
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from sqlmodel import Session
 
 from .. import llm, settings_store
@@ -45,7 +45,64 @@ class SettingsPatch(BaseModel):
         return v
 
 
-@router.get("")
+class SettingsValuesOut(BaseModel):
+    """Effective model-routing values — the fixed ``settings_store._OVERRIDABLE``
+    key set (settings_store.py). All keys are always emitted; ``extra="allow"``
+    keeps any future additive keys on the wire without a schema edit. Secret
+    keys (e.g. ``cloud_api_key``) are never part of this payload and MUST NOT
+    be declared here."""
+
+    model_config = ConfigDict(extra="allow")
+
+    explain_model: str
+    gen_model: str
+    diagnose_model: str
+    embed_model: str
+    gen_provider: str
+    cloud_gen_model: str
+    gen_critic_model: str
+    local_provider: str
+    lmstudio_url: str
+    desired_retention: float
+
+
+class SettingsProviderInfoOut(BaseModel):
+    """Mirror of ``llm.provider_info()`` (app/llm/__init__.py). ``capabilities``
+    stays ``dict[str, Any]`` because its ``matrix`` block is dynamically keyed
+    by provider name; ``cloud_gen_model`` is null when cloud is disabled."""
+
+    model_config = ConfigDict(extra="allow")
+
+    realtime_provider: str
+    local_provider: str
+    lmstudio_url: str
+    offline_provider: str
+    cloud_configured: bool
+    cloud_egress_allowed: bool
+    cloud_enabled: bool
+    capabilities: dict[str, Any]
+    explain_model: str
+    explain_model_configured: str
+    explain_model_fallback: str
+    tag_model: str
+    gen_model: str
+    critic_model: str
+    diagnose_model: str
+    embed_model: str
+    cloud_gen_model: Optional[str] = None
+
+
+class SettingsEnvelopeOut(BaseModel):
+    """Shared GET/PUT /api/settings envelope: both handlers return the same
+    two-key shape built from ``settings_store`` + ``llm.provider_info()``."""
+
+    model_config = ConfigDict(extra="allow")
+
+    settings: SettingsValuesOut
+    provider: SettingsProviderInfoOut
+
+
+@router.get("", response_model=SettingsEnvelopeOut, response_model_exclude_unset=True)
 def get_settings(session: Session = Depends(get_session)):
     """Effective model routing + provider status (no secrets)."""
     return {
@@ -54,7 +111,7 @@ def get_settings(session: Session = Depends(get_session)):
     }
 
 
-@router.put("")
+@router.put("", response_model=SettingsEnvelopeOut, response_model_exclude_unset=True)
 def put_settings(body: SettingsPatch, session: Session = Depends(get_session)):
     patch = {k: v for k, v in body.model_dump().items() if v is not None}
     try:

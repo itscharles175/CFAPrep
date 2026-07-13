@@ -441,6 +441,16 @@ jobs:
       - name: Client contract drift check
         run: node scripts/export-lsat-openapi.mjs --client
 
+      # Wave 2 — full regeneration drift gate. The --client step above compares
+      # only top-level path keys, and nothing else verifies api.gen.ts is in sync
+      # with its codegen input. Regenerate both artifacts with the pinned local
+      # openapi-typescript and fail on any diff, so field-level client drift and
+      # a stale api.gen.ts can no longer ship green.
+      - name: Generated client artifacts current (gen:api drift gate)
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/domains/lsat/_meta/openapi.json src/domains/lsat/lib/api.gen.ts
+
       # Per-route response-schema field-removal snapshot (QA-3) runs in the
       # backend's own pytest gate, alongside the launch-readiness contract asserts.
       - name: Backend OpenAPI contract tests

@@ -52,6 +52,63 @@ _PAGINATED_LIST_ROUTES = [
     "/api/bank/sources",
 ]
 
+# Wave 2 — every host-consumed route typed with an inline permissive model
+# (extra="allow" + response_model_exclude_unset). These models live in their
+# router files, so this registry asserts the CONTRACT (a real response_model is
+# declared and the OpenAPI 200 schema is not the LegacySuccessResponse fallback
+# or a bare object) rather than importing each class. Field-removal protection
+# for these routes lives in test_openapi_contract._GUARDED_ROUTES.
+_WAVE2_TYPED_ROUTES: tuple[tuple[str, str], ...] = (
+    ("/api/adaptivity/ability", "GET"),
+    ("/api/adaptivity/plan", "POST"),
+    ("/api/adaptivity/recompute-item-stats", "POST"),
+    ("/api/readiness", "GET"),
+    ("/api/sync/progress-updates", "POST"),
+    ("/api/sync/fsrs-write-back", "POST"),
+    ("/api/sync/fsrs-write-back/log", "GET"),
+    ("/api/srs/due", "GET"),
+    ("/api/srs/leeches", "GET"),
+    ("/api/srs/concept-gap-queue", "GET"),
+    ("/api/srs/cards", "POST"),
+    ("/api/srs/concept-gap-cards", "POST"),
+    ("/api/srs/optimize", "POST"),
+    ("/api/srs/{card_id}/review", "POST"),
+    ("/api/srs/attempts/{attempt_id}/blind-review-note", "POST"),
+    ("/api/analytics/calibration", "GET"),
+    ("/api/search/questions", "GET"),
+    ("/api/settings", "GET"),
+    ("/api/settings", "PUT"),
+    ("/api/ai/health", "GET"),
+    ("/api/observability/trust", "GET"),
+    ("/api/release/trust", "GET"),
+    ("/api/observability/diagnostics", "GET"),
+    ("/api/observability/scheduled-tasks", "GET"),
+    ("/api/observability/scheduled-tasks", "POST"),
+    ("/api/observability/scheduled-tasks/defaults", "POST"),
+    ("/api/observability/scheduled-tasks/run-due", "POST"),
+    ("/api/observability/scheduled-tasks/{key}/run", "POST"),
+    ("/api/observability/scheduler-runs", "GET"),
+    ("/api/observability/migrations/dry-run", "GET"),
+    ("/api/observability/migrations/pre-upgrade-backup", "POST"),
+    ("/api/observability/benchmarks", "GET"),
+    ("/api/observability/benchmarks", "POST"),
+    ("/api/observability/benchmarks/smoke", "POST"),
+    ("/api/observability/status", "GET"),
+    ("/api/ready", "GET"),
+    ("/api/observability/metrics", "GET"),
+    ("/api/observability/cloud-budget", "GET"),
+    ("/api/observability/runtime-evidence", "GET"),
+    ("/api/observability/sqlite-health", "GET"),
+    ("/api/observability/trust-status", "GET"),
+    ("/api/observability/health-aggregated", "GET"),
+    ("/api/observability/schema-versions", "GET"),
+    ("/api/observability/relocation-status", "GET"),
+    ("/api/export/validate", "POST"),
+    ("/api/export/import", "POST"),
+    ("/api/export/list", "GET"),
+    ("/api/export/history", "GET"),
+)
+
 
 def _api_routes() -> list[Any]:
     routes: list[Any] = []
@@ -179,6 +236,33 @@ def test_openapi_uses_typed_models_not_legacy_fallback(client):
         )
     assert "LegacySuccessResponse" not in _ok_schema_ref("/api/adaptivity/next", "post")
     assert "LegacySuccessResponse" not in _ok_schema_ref("/api/study/today", "get")
+
+
+def test_wave2_routes_declare_real_response_models(client):
+    """Wave 2 ratchet: each registered route declares SOME response_model on the
+    live route table, and its OpenAPI 200 schema is a real shape — neither the
+    LegacySuccessResponse fallback nor a bare/schemaless object. Reverting a
+    route to an untyped dict fails here even before the field-removal guard."""
+    spec = client.get("/openapi.json").json()
+
+    for path, method in _WAVE2_TYPED_ROUTES:
+        route = _route_for(path, method)
+        assert route.response_model is not None, (
+            f"{method} {path} lost its response_model"
+        )
+
+        op = spec["paths"][path][method.lower()]
+        schema = op["responses"]["200"]["content"]["application/json"].get("schema")
+        assert schema, f"{method} {path} lacks a 200 response schema"
+        rendered = str(schema)
+        assert "LegacySuccessResponse" not in rendered, (
+            f"{method} {path} regressed to the LegacySuccessResponse fallback"
+        )
+        # A real contract resolves to a named component ($ref, possibly inside
+        # anyOf for union models) — a bare {'type': 'object'} carries no shape.
+        assert "$ref" in rendered, (
+            f"{method} {path} has a schemaless object response: {rendered[:120]}"
+        )
 
 
 def test_remaining_list_endpoints_without_pagination_are_recorded():
