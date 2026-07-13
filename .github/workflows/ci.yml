@@ -219,7 +219,7 @@ jobs:
       # still compare against the previous approved set and fail on drift.
       - name: Restore visual baselines
         id: visual-baselines-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tests/visual-baselines
           key: visual-baselines-v2-${{ runner.os }}-${{ hashFiles('src/routes/routeManifest.ts', 'src/styles/tokens.css', 'src/index.css') }}
@@ -336,7 +336,7 @@ jobs:
 
       - name: Restore LSAT visual baselines
         id: lsat-visual-baselines-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tests/visual-baselines
           key: lsat-visual-baselines-${{ runner.os }}-${{ hashFiles('src/domains/lsat/lib/routeManifest.ts', 'src/routes/routeManifest.ts', 'src/styles/tokens.css', 'src/index.css') }}
