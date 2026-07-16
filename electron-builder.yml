@@ -1,0 +1,67 @@
+appId: com.studyvault.app
+productName: StudyVault
+copyright: Copyright StudyVault contributors. Personal use only.
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+asar: true
+afterPack: scripts/apply-electron-fuses.mjs
+npmRebuild: false
+forceCodeSigning: true
+directories:
+  output: release
+  buildResources: electron/assets
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+  - '!electron/resources/**/*'
+extraResources:
+  - from: electron/resources/services
+    to: services
+    filter:
+      - '**/*'
+protocols:
+  - name: StudyVault
+    schemes:
+      - studyvault
+fileAssociations:
+  - ext:
+      - pdf
+      - txt
+    name: Study document
+    role: Viewer
+win:
+  icon: electron/assets/icon.ico
+  target:
+    - nsis
+    - msi
+  signtoolOptions:
+    signingHashAlgorithms:
+      - sha256
+    publisherName: StudyVault
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: StudyVault
+mac:
+  icon: electron/assets/icon.icns
+  target:
+    - dmg
+  category: public.app-category.education
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: electron/entitlements.mac.plist
+  entitlementsInherit: electron/entitlements.mac.plist
+  notarize: true
+dmg:
+  sign: true
+linux:
+  icon: electron/assets
+  target:
+    - AppImage
+    - deb
+  category: Education
+  maintainer: StudyVault
+publish: null

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import process from 'node:process';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   SIGNING_EVIDENCE_SCHEMA,
@@ -52,9 +53,7 @@ describe('release signing policy', () => {
 
   it('fails closed for absent, partial, or invalid Windows credentials', () => {
     expect(inspectCredentialSet('windows', {}).complete).toBe(false);
-    expect(inspectCredentialSet('windows', { WINDOWS_CERT_BASE64: 'x' }).missing).toContain(
-      'WINDOWS_CERT_PASSWORD',
-    );
+    expect(inspectCredentialSet('windows', { WINDOWS_CERT_BASE64: 'x' }).missing).toContain('WINDOWS_CERT_PASSWORD');
     expect(inspectCredentialSet('windows', { ...WINDOWS_ENV, WINDOWS_CERT_THUMBPRINT: 'bad' }).errors).toHaveLength(1);
     expect(inspectCredentialSet('windows', WINDOWS_ENV)).toMatchObject({ complete: true, required: true });
   });
@@ -65,10 +64,16 @@ describe('release signing policy', () => {
     expect(inspectCredentialSet('linux', {})).toMatchObject({ complete: true, required: false });
   });
 
-  it('creates the Tauri Windows config overlay from the expected signer', () => {
+  it('creates the electron-builder Windows config overlay from the expected signer', () => {
     expect(buildWindowsSigningConfig(WINDOWS_ENV.WINDOWS_CERT_THUMBPRINT)).toEqual({
-      bundle: { windows: { certificateThumbprint: 'A'.repeat(40) } },
+      win: { signtoolOptions: { certificateSha1: 'A'.repeat(40) } },
     });
+  });
+
+  it('wires the Windows signing overlay from release preflight into Electron Builder', async () => {
+    const workflow = await readFile(join(process.cwd(), '.github', 'workflows', 'release.yml'), 'utf8');
+    expect(workflow).toContain('--config-output dist/windows-signing-config.json');
+    expect(workflow).toContain("'--config dist/windows-signing-config.json'");
   });
 
   it('accepts verified Authenticode evidence and rejects unsigned evidence', () => {
@@ -92,8 +97,8 @@ describe('release signing policy', () => {
       status: 'verified',
       artifacts: [
         artifact('app', 'StudyVault.exe', false),
-        artifact('nsis', 'bundle/nsis/StudyVault-setup.exe', true),
-        artifact('msi', 'bundle/msi/StudyVault.msi', true),
+        artifact('nsis', 'release/StudyVault-setup.exe', true),
+        artifact('msi', 'release/StudyVault.msi', true),
       ],
     };
     expect(validateSigningEvidence(verified, { requireSigned: true })).toEqual({ ok: true, errors: [] });
@@ -115,7 +120,7 @@ describe('release signing policy', () => {
 
   it('requires notarized macOS artifacts and labels Linux as not applicable', () => {
     const macArtifact = (kind) => ({
-      path: `bundle/${kind === 'app' ? 'macos/StudyVault.app' : 'dmg/StudyVault.dmg'}`,
+      path: `release/${kind === 'app' ? 'mac/StudyVault.app' : 'StudyVault.dmg'}`,
       kind,
       size: 100,
       sha256: (kind === 'app' ? 'a' : 'd').repeat(64),
@@ -169,37 +174,64 @@ describe('release signing policy', () => {
       status: 'verified',
       artifacts: [
         {
-          path: 'app.exe', kind: 'app', size: 10, sha256: 'a'.repeat(64), published: false,
-          signed: true, verified: true, timestamped: true,
-          signer: { thumbprint: 'C'.repeat(40) }, timestamp: { thumbprint: 'D'.repeat(40) },
+          path: 'app.exe',
+          kind: 'app',
+          size: 10,
+          sha256: 'a'.repeat(64),
+          published: false,
+          signed: true,
+          verified: true,
+          timestamped: true,
+          signer: { thumbprint: 'C'.repeat(40) },
+          timestamp: { thumbprint: 'D'.repeat(40) },
         },
         {
-          path: 'bundle/nsis/app.exe', kind: 'nsis', size: 20, sha256: 'b'.repeat(64), published: true,
-          signed: true, verified: true, timestamped: true,
-          signer: { thumbprint: 'C'.repeat(40) }, timestamp: { thumbprint: 'D'.repeat(40) },
+          path: 'release/app.exe',
+          kind: 'nsis',
+          size: 20,
+          sha256: 'b'.repeat(64),
+          published: true,
+          signed: true,
+          verified: true,
+          timestamped: true,
+          signer: { thumbprint: 'C'.repeat(40) },
+          timestamp: { thumbprint: 'D'.repeat(40) },
         },
         {
-          path: 'bundle/msi/app.msi', kind: 'msi', size: 30, sha256: 'c'.repeat(64), published: true,
-          signed: true, verified: true, timestamped: true,
-          signer: { thumbprint: 'C'.repeat(40) }, timestamp: { thumbprint: 'D'.repeat(40) },
+          path: 'release/app.msi',
+          kind: 'msi',
+          size: 30,
+          sha256: 'c'.repeat(64),
+          published: true,
+          signed: true,
+          verified: true,
+          timestamped: true,
+          signer: { thumbprint: 'C'.repeat(40) },
+          timestamp: { thumbprint: 'D'.repeat(40) },
         },
       ],
     };
-    const assets = signing.artifacts.filter((item) => item.published).map(({ path, size, sha256 }) => ({ path, size, sha256 }));
+    const assets = signing.artifacts
+      .filter((item) => item.published)
+      .map(({ path, size, sha256 }) => ({ path, size, sha256 }));
     expect(validateSigningAssetBindings(signing, assets)).toEqual({ ok: true, errors: [] });
-    expect(validateSigningAssetBindings(signing, assets.map((item) => ({ ...item, sha256: 'f'.repeat(64) }))).ok).toBe(false);
-    expect(validateSigningAssetBindings(signing, [...assets, { ...assets[0], sha256: 'f'.repeat(64) }]).errors).toContain(
-      'bundle asset paths must be present and unique',
-    );
+    expect(
+      validateSigningAssetBindings(
+        signing,
+        assets.map((item) => ({ ...item, sha256: 'f'.repeat(64) })),
+      ).ok,
+    ).toBe(false);
+    expect(
+      validateSigningAssetBindings(signing, [...assets, { ...assets[0], sha256: 'f'.repeat(64) }]).errors,
+    ).toContain('bundle asset paths must be present and unique');
   });
 
   it('discovers and verifies the Windows app, NSIS, and MSI artifacts', async () => {
     const root = await tempDir();
-    await mkdir(join(root, 'bundle', 'nsis'), { recursive: true });
-    await mkdir(join(root, 'bundle', 'msi'), { recursive: true });
-    await writeFile(join(root, 'StudyVault.exe'), 'app');
-    await writeFile(join(root, 'bundle', 'nsis', 'StudyVault-setup.exe'), 'nsis');
-    await writeFile(join(root, 'bundle', 'msi', 'StudyVault.msi'), 'msi');
+    await mkdir(join(root, 'win-unpacked'), { recursive: true });
+    await writeFile(join(root, 'win-unpacked', 'StudyVault.exe'), 'app');
+    await writeFile(join(root, 'StudyVault-setup.exe'), 'nsis');
+    await writeFile(join(root, 'StudyVault.msi'), 'msi');
     const inspected = [];
     const evidence = await verifyWindowsArtifacts({
       bundleRoot: root,
@@ -217,20 +249,21 @@ describe('release signing policy', () => {
 
     expect(inspected).toHaveLength(3);
     expect(new Set(evidence.artifacts.map((item) => item.kind))).toEqual(new Set(['app', 'nsis', 'msi']));
-    expect(evidence.artifacts.filter((item) => item.published).map((item) => item.kind).sort()).toEqual([
-      'msi',
-      'nsis',
-    ]);
+    expect(
+      evidence.artifacts
+        .filter((item) => item.published)
+        .map((item) => item.kind)
+        .sort(),
+    ).toEqual(['msi', 'nsis']);
     expect(validateSigningEvidence(evidence, { requireSigned: true }).ok).toBe(true);
   });
 
   it('verifies and staples the macOS app without requiring a DMG staple', async () => {
     const root = await tempDir();
-    const app = join(root, 'bundle', 'macos', 'StudyVault.app');
+    const app = join(root, 'mac', 'StudyVault.app');
     const appBinary = join(app, 'Contents', 'MacOS', 'StudyVault');
-    const dmg = join(root, 'bundle', 'dmg', 'StudyVault.dmg');
+    const dmg = join(root, 'StudyVault.dmg');
     await mkdir(join(app, 'Contents', 'MacOS'), { recursive: true });
-    await mkdir(join(root, 'bundle', 'dmg'), { recursive: true });
     await writeFile(appBinary, 'app-binary');
     await writeFile(dmg, 'dmg');
     const commands = [];

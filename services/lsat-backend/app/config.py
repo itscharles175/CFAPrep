@@ -22,7 +22,7 @@ def _truthy(value: str | None) -> bool:
 
 
 # Single source of truth for the backend version; kept in sync with the frontend
-# package.json / tauri.conf (0.9.0). FastAPI's version is read from here.
+# package.json (0.9.0). FastAPI's version is read from here.
 APP_VERSION = _env("LSATLAB_APP_VERSION", "0.9.0")
 
 
@@ -30,7 +30,7 @@ APP_VERSION = _env("LSATLAB_APP_VERSION", "0.9.0")
 def _default_data_dir() -> Path:
     """Base dir for the DB, logs, backups, and exports.
 
-    - ``LSATLAB_DATA_DIR`` wins (the Tauri sidecar can point it at the install's
+    - ``LSATLAB_DATA_DIR`` wins (the Electron supervisor points it at the user's
       data dir);
     - a frozen (PyInstaller) build relocates to the OS app-data dir so a packaged
       install never writes into Program Files / the app bundle;
@@ -296,7 +296,7 @@ EMBED_REQUEST_TIMEOUT_S = float(_env("LSATLAB_EMBED_TIMEOUT", "30") or "30")
 
 # B3: CORS origins are validated: '*' is rejected (over-permissive) and each
 # origin must match the expected scheme pattern to prevent misconfiguration.
-_CORS_ORIGIN_RE = re.compile(r"^(https?://|tauri://)[A-Za-z0-9.\-:_/]+$")
+_CORS_ORIGIN_RE = re.compile(r"^(https?://|app://)[A-Za-z0-9.\-:_/]+$")
 
 
 def _parse_cors_origins(raw: str) -> list[str]:
@@ -312,7 +312,7 @@ def _parse_cors_origins(raw: str) -> list[str]:
             continue
         if not _CORS_ORIGIN_RE.match(o):
             _logging.getLogger("lsatlab.config").warning(
-                "Invalid CORS origin %r dropped (must match ^(https?://|tauri://)[...]+$)", o
+                "Invalid CORS origin %r dropped (must match ^(https?://|app://)[...]+$)", o
             )
             continue
         valid.append(o)
@@ -320,11 +320,11 @@ def _parse_cors_origins(raw: str) -> list[str]:
 
 
 CORS_ORIGINS = _parse_cors_origins(
-    _env("LSATLAB_CORS_ORIGINS", "http://localhost:5173,tauri://localhost")
+    _env("LSATLAB_CORS_ORIGINS", "http://localhost:5173,app://studyvault")
 )
 
 # --- Local API token --------------------------------------------------------
-# Optional Wave-3 scaffold: when the Tauri supervisor eventually generates a
+# The Electron supervisor generates a per-run token and passes it here.
 # per-run token and passes it here, every non-health /api route must include it
 # on the request. Empty default keeps existing local/browser/dev calls working
 # until the host-side propagation is wired.

@@ -2,7 +2,7 @@
 /*
  * Generate and verify the bundled-sidecar provenance manifest.
  *
- * The manifest lives under src-tauri/resources/services so Tauri ships it with
+ * The manifest lives under electron/resources/services so Electron ships it with
  * the sidecar resources. Build scripts record entries after copying binaries;
  * release/native checks verify that the recorded size and sha256 still match.
  */
@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(__filename, '..', '..');
-const SERVICES_ROOT = resolve(REPO_ROOT, 'src-tauri', 'resources', 'services');
+const SERVICES_ROOT = resolve(REPO_ROOT, 'electron', 'resources', 'services');
 const DEFAULT_MANIFEST = resolve(SERVICES_ROOT, 'sidecar-provenance.json');
 const SCHEMA = 'studyvault.sidecar-provenance.v1';
 
@@ -44,7 +44,7 @@ async function readManifest(manifestPath = DEFAULT_MANIFEST) {
     return {
       schema: SCHEMA,
       generatedAt: null,
-      servicesRoot: 'src-tauri/resources/services',
+      servicesRoot: 'electron/resources/services',
       entries: [],
     };
   }
@@ -100,10 +100,7 @@ export async function recordSidecarProvenance({
   return entry;
 }
 
-export async function verifySidecarProvenance({
-  manifestPath = DEFAULT_MANIFEST,
-  requireServices = [],
-} = {}) {
+export async function verifySidecarProvenance({ manifestPath = DEFAULT_MANIFEST, requireServices = [] } = {}) {
   const manifest = await readManifest(manifestPath);
   const servicesRoot = manifestServicesRoot(manifestPath);
   const failures = [];

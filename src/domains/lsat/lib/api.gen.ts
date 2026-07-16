@@ -3087,7 +3087,7 @@ export interface paths {
          *     reuses them. The verdict mirrors the readiness convention used by ``/ready``
          *     (``error`` when the backend isn't ready, ``degraded`` when it's ready but has
          *     warnings, ``ok`` otherwise). The host's own sidecar roll-up (the native
-         *     ``get_system_health_aggregated`` Tauri command) layers process supervision on
+         *     Electron sidecar aggregate) layers process supervision on
          *     top of this; this endpoint speaks only for the LSAT backend's own health.
          *
          *     O(1)-ish and never raises: each component read degrades softly on its own, so

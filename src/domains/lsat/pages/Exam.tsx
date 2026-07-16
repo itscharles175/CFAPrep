@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { Keyboard, PlayCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Keyboard, PlayCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -10,47 +10,40 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { LoadingState, ErrorState } from "@lsat/components/states";
-import { PostExamHub } from "@lsat/components/exam/post-exam-hub";
-import { Ceremony } from "@lsat/components/exam/ceremony";
-import { SectionItinerary } from "@lsat/components/exam/section-itinerary";
-import { RestRing } from "@lsat/components/exam/rest-ring";
-import { SealedBeat } from "@lsat/components/exam/sealed-beat";
-import { PreSubmitReview } from "@lsat/components/question/pre-submit-review";
-import type { NavItem } from "@lsat/components/question/navigator-strip";
-import {
-  SectionRunner,
-  blankState,
-  type QState,
-} from "@lsat/components/question/section-runner";
-import { KEYBOARD_HELP_EVENT } from "@lsat/components/keyboard-help";
-import { usePrepTest } from "@lsat/lib/hooks";
-import { api } from "@lsat/lib/api";
-import {
-  enqueueFinishSession,
-  enqueueSectionAttempts,
-} from "@lsat/lib/offlineQueue";
-import { attemptIdFor, clearAttemptIds } from "@lsat/lib/attemptIds";
-import { sampleSection } from "@lsat/lib/sample";
-import { clearSessionDraft, draftKeyForExamSection } from "@lsat/lib/sessionDraft";
-import type { AttemptCreateWire } from "@lsat/lib/apiTypes";
-import { playSectionEndBeep } from "@lsat/lib/examSounds";
-import { formatClock } from "@lsat/lib/utils";
-import { ExamProgressMap } from "@lsat/components/exam/exam-progress-map";
-import { SectionInterstitial } from "@lsat/components/exam/section-interstitial";
-import { getAccommodations, getExamKiosk } from "@lsat/lib/prefs";
-import { setFullscreen, notify } from "@lsat/lib/tauri";
-import { recordPtSectionComplete } from "@lsat/lib/ptProgress";
-import type { SectionDetail, SectionSummary } from "@lsat/lib/types";
+} from '@/components/ui/dialog';
+import { LoadingState, ErrorState } from '@lsat/components/states';
+import { PostExamHub } from '@lsat/components/exam/post-exam-hub';
+import { Ceremony } from '@lsat/components/exam/ceremony';
+import { SectionItinerary } from '@lsat/components/exam/section-itinerary';
+import { RestRing } from '@lsat/components/exam/rest-ring';
+import { SealedBeat } from '@lsat/components/exam/sealed-beat';
+import { PreSubmitReview } from '@lsat/components/question/pre-submit-review';
+import type { NavItem } from '@lsat/components/question/navigator-strip';
+import { SectionRunner, blankState, type QState } from '@lsat/components/question/section-runner';
+import { KEYBOARD_HELP_EVENT } from '@lsat/components/keyboard-help';
+import { usePrepTest } from '@lsat/lib/hooks';
+import { api } from '@lsat/lib/api';
+import { enqueueFinishSession, enqueueSectionAttempts } from '@lsat/lib/offlineQueue';
+import { attemptIdFor, clearAttemptIds } from '@lsat/lib/attemptIds';
+import { sampleSection } from '@lsat/lib/sample';
+import { clearSessionDraft, draftKeyForExamSection } from '@lsat/lib/sessionDraft';
+import type { AttemptCreateWire } from '@lsat/lib/apiTypes';
+import { playSectionEndBeep } from '@lsat/lib/examSounds';
+import { formatClock } from '@lsat/lib/utils';
+import { ExamProgressMap } from '@lsat/components/exam/exam-progress-map';
+import { SectionInterstitial } from '@lsat/components/exam/section-interstitial';
+import { getAccommodations, getExamKiosk } from '@lsat/lib/prefs';
+import { setFullscreen, notify } from '@lsat/lib/electron';
+import { recordPtSectionComplete } from '@lsat/lib/ptProgress';
+import type { SectionDetail, SectionSummary } from '@lsat/lib/types';
 
 type Phase =
-  | { kind: "intro" }
-  | { kind: "section"; i: number }
+  | { kind: 'intro' }
+  | { kind: 'section'; i: number }
   // R9 — a brief "section sealed" closure beat between finish and the next stage.
-  | { kind: "sealed"; finishedI: number; isLast: boolean }
-  | { kind: "break"; nextI: number }
-  | { kind: "done" };
+  | { kind: 'sealed'; finishedI: number; isLast: boolean }
+  | { kind: 'break'; nextI: number }
+  | { kind: 'done' };
 
 export default function Exam() {
   const { preptestId } = useParams();
@@ -64,7 +57,7 @@ export default function Exam() {
     [detail],
   );
 
-  const [phase, setPhase] = useState<Phase>({ kind: "intro" });
+  const [phase, setPhase] = useState<Phase>({ kind: 'intro' });
   const [loaded, setLoaded] = useState<Record<number, SectionDetail>>({});
   const [states, setStates] = useState<Record<number, Record<number, QState>>>({});
   const [sessionIds, setSessionIds] = useState<Record<number, number | null>>({});
@@ -103,7 +96,7 @@ export default function Exam() {
       if (sid == null) {
         // Offline / no exam session — fall back to a per-section session.
         try {
-          const s = await api.createSession("full_exam", {
+          const s = await api.createSession('full_exam', {
             section_id: summary.id,
             preptest_id: ptId,
           });
@@ -121,11 +114,11 @@ export default function Exam() {
 
   async function startSection(i: number) {
     await loadSection(i);
-    setPhase({ kind: "section", i });
+    setPhase({ kind: 'section', i });
   }
 
   async function startExam() {
-    // C7 — enter OS fullscreen for test fidelity when opted in (Tauri only).
+    // C7 - enter OS fullscreen for test fidelity when opted in (Electron only).
     if (getExamKiosk()) void setFullscreen(true);
     try {
       const exam = await api.createExam(ptId);
@@ -150,7 +143,7 @@ export default function Exam() {
           const s = st[qi] ?? blankState();
           return {
             question_id: q.id,
-            mode: "timed",
+            mode: 'timed',
             chosen_answer: s.answer,
             time_ms: Math.round(s.timeMs),
             flagged: s.flagged,
@@ -194,13 +187,13 @@ export default function Exam() {
       }
     }
     // R9 — show the "sealed" closure beat first; it advances to break/done.
-    setPhase({ kind: "sealed", finishedI: i, isLast });
+    setPhase({ kind: 'sealed', finishedI: i, isLast });
   }
 
   /** Advance out of the sealed beat into the break (or the done ceremony). */
   function afterSealed(finishedI: number, isLast: boolean) {
-    if (isLast) setPhase({ kind: "done" });
-    else setPhase({ kind: "break", nextI: finishedI + 1 });
+    if (isLast) setPhase({ kind: 'done' });
+    else setPhase({ kind: 'break', nextI: finishedI + 1 });
   }
 
   function requestFinish(i: number, expired: boolean) {
@@ -217,7 +210,7 @@ export default function Exam() {
       </div>
     );
 
-  if (phase.kind === "intro") {
+  if (phase.kind === 'intro') {
     return (
       <ExamShell>
         <Ceremony
@@ -241,11 +234,7 @@ export default function Exam() {
               <Button size="lg" onClick={() => void startExam()}>
                 <PlayCircle className="h-4 w-4" /> Begin Section 1
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => window.dispatchEvent(new Event(KEYBOARD_HELP_EVENT))}
-              >
+              <Button variant="ghost" size="sm" onClick={() => window.dispatchEvent(new Event(KEYBOARD_HELP_EVENT))}>
                 <Keyboard className="h-4 w-4" />
                 Keyboard map
               </Button>
@@ -255,7 +244,7 @@ export default function Exam() {
             <button
               type="button"
               className="text-xs text-muted-foreground hover:underline"
-              onClick={() => navigate("/practice")}
+              onClick={() => navigate('/practice')}
             >
               Cancel
             </button>
@@ -267,19 +256,19 @@ export default function Exam() {
     );
   }
 
-  if (phase.kind === "sealed") {
+  if (phase.kind === 'sealed') {
     const order = sections[phase.finishedI]?.order ?? phase.finishedI + 1;
     return (
       <ExamShell>
         <SealedBeat
-          label={phase.isLast ? "Exam sealed" : `Section ${order} sealed`}
+          label={phase.isLast ? 'Exam sealed' : `Section ${order} sealed`}
           onDone={() => afterSealed(phase.finishedI, phase.isLast)}
         />
       </ExamShell>
     );
   }
 
-  if (phase.kind === "done") {
+  if (phase.kind === 'done') {
     const lastIdx = sections.length - 1;
     const lastSid = examSessionId ?? sessionIds[lastIdx];
     return (
@@ -289,15 +278,13 @@ export default function Exam() {
           sections={sections}
           sessionIds={sessionIds}
           examSessionId={examSessionId}
-          onBlindReview={() =>
-            navigate(lastSid != null ? `/blind-review/${lastSid}` : "/blind-review/0")
-          }
+          onBlindReview={() => navigate(lastSid != null ? `/blind-review/${lastSid}` : '/blind-review/0')}
         />
       </ExamShell>
     );
   }
 
-  if (phase.kind === "break") {
+  if (phase.kind === 'break') {
     const breakSec = getAccommodations().breakMin * 60;
     const finishedI = phase.nextI - 1;
     const finishedStates = states[finishedI] ?? {};
@@ -337,7 +324,7 @@ export default function Exam() {
     );
   }
 
-  if (phase.kind === "section") {
+  if (phase.kind === 'section') {
     const sd = loaded[phase.i];
     if (loadingSection || !sd) return <LoadingState label="Loading section…" />;
     const sectionStates = states[phase.i] ?? {};
@@ -355,11 +342,7 @@ export default function Exam() {
 
     return (
       <>
-        <ExamProgressMap
-          sections={sections}
-          currentIndex={phase.i}
-          completedThrough={completedThrough}
-        />
+        <ExamProgressMap sections={sections} currentIndex={phase.i} completedThrough={completedThrough} />
         <SectionRunner
           key={phase.i}
           section={sd}
@@ -369,10 +352,8 @@ export default function Exam() {
             setStates((prev) => ({
               ...prev,
               [phase.i]:
-                typeof updater === "function"
-                  ? (updater as (s: Record<number, QState>) => Record<number, QState>)(
-                      prev[phase.i] ?? {},
-                    )
+                typeof updater === 'function'
+                  ? (updater as (s: Record<number, QState>) => Record<number, QState>)(prev[phase.i] ?? {})
                   : updater,
             }))
           }
@@ -380,21 +361,15 @@ export default function Exam() {
           sampleBadge={data.usingSample}
           jumpToIndex={jumpToIndex}
           onJumpConsumed={() => setJumpToIndex(null)}
-          finishLabel={
-            phase.i >= sections.length - 1 ? "Finish exam" : "End section & break"
-          }
+          finishLabel={phase.i >= sections.length - 1 ? 'Finish exam' : 'End section & break'}
           onFinish={(expired) => requestFinish(phase.i, expired)}
         />
         <Dialog open={showFinish} onOpenChange={setShowFinish}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>
-                {phase.i >= sections.length - 1 ? "Finish exam?" : "End this section?"}
-              </DialogTitle>
+              <DialogTitle>{phase.i >= sections.length - 1 ? 'Finish exam?' : 'End this section?'}</DialogTitle>
               <DialogDescription>
-                {timeExpired
-                  ? "Time is up."
-                  : `Review unanswered and flagged questions before continuing.`}
+                {timeExpired ? 'Time is up.' : `Review unanswered and flagged questions before continuing.`}
               </DialogDescription>
             </DialogHeader>
             <PreSubmitReview
@@ -412,7 +387,7 @@ export default function Exam() {
                 </Button>
               )}
               <Button onClick={() => confirmFinishSection(finishIndex)}>
-                {phase.i >= sections.length - 1 ? "Finish exam" : "End section"}
+                {phase.i >= sections.length - 1 ? 'Finish exam' : 'End section'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -463,7 +438,7 @@ function BreakScreen({
   // Desktop notification when the break ends (no-op without permission).
   useEffect(() => {
     if (left === 0 && breakSec > 0) {
-      void notify("Break over", "Time to start your next section.");
+      void notify('Break over', 'Time to start your next section.');
     }
   }, [left, breakSec]);
 
@@ -495,13 +470,8 @@ function BreakScreen({
             <Button size="lg" onClick={onContinue}>
               <PlayCircle className="h-4 w-4" /> Start next section
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setPaused((p) => !p)}
-              disabled={left === 0}
-            >
-              {paused ? "Resume timer" : "Pause timer"}
+            <Button variant="ghost" size="sm" onClick={() => setPaused((p) => !p)} disabled={left === 0}>
+              {paused ? 'Resume timer' : 'Pause timer'}
             </Button>
             <Button variant="outline" onClick={onSkip}>
               Skip break

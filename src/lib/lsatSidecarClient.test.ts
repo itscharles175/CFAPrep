@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { invoke } from '@tauri-apps/api/core';
 import {
   bootstrapLsatSidecarAuthToken,
   buildLsatSidecarUrl,
@@ -9,16 +8,72 @@ import {
   setLsatSidecarAuthToken,
   withLsatSidecarAuthHeaders,
 } from './lsatSidecarClient';
+import type { StudyVaultBridge } from './desktopBridge';
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(),
-}));
+function installElectronBridge(): void {
+  const unsubscribe = () => undefined;
+  window.studyvault = {
+    runtime: {
+      info: async () => ({
+        app_version: 'test',
+        electron_version: 'test',
+        chrome_version: 'test',
+        node_version: 'test',
+        platform: 'win32',
+        arch: 'x64',
+        is_packaged: false,
+      }),
+    },
+    files: {
+      pickFolder: async () => null,
+      pickFiles: async () => [],
+      listPdfs: async () => [],
+      read: async (path) => ({
+        path,
+        name: 'file.pdf',
+        extension: '.pdf',
+        size: 0,
+        data: new Uint8Array(),
+      }),
+    },
+    sidecar: {
+      status: async () => [],
+      logs: async () => [],
+      aggregate: async () => ({
+        status: 'ok',
+        ready: 0,
+        required_down: 0,
+        optional_down: 0,
+        total: 0,
+        required_down_names: [],
+      }),
+    },
+    keychain: {
+      get: async () => null,
+      set: async () => ({ ok: true }),
+      delete: async () => ({ ok: true }),
+    },
+    openPath: async () => ({ opened: true, error: '' }),
+    openExternal: async () => ({ opened: true }),
+    popout: async () => ({ id: 1 }),
+    notification: async () => ({ shown: true }),
+    fullscreen: {
+      get: async () => false,
+      set: async (value) => value,
+    },
+    events: {
+      onBootStatus: () => unsubscribe,
+      onSecondInstance: () => unsubscribe,
+      onOpenFile: () => unsubscribe,
+      onPdfDrop: () => unsubscribe,
+    },
+  } satisfies StudyVaultBridge;
+}
 
 afterEach(() => {
   delete window.__STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__;
   delete window.__LSATLAB_LOCAL_API_TOKEN__;
-  delete window.__TAURI_INTERNALS__;
-  vi.mocked(invoke).mockReset();
+  delete window.studyvault;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -29,9 +84,7 @@ describe('lsatSidecarClient', () => {
   });
 
   it('rejects absolute remote sidecar URLs before fetch', () => {
-    expect(() => buildLsatSidecarUrl('https://api.example.com/api/health')).toThrow(
-      /loopback/i,
-    );
+    expect(() => buildLsatSidecarUrl('https://api.example.com/api/health')).toThrow(/loopback/i);
   });
 
   it('adds the in-memory local API token as a bearer header', async () => {
@@ -67,48 +120,38 @@ describe('lsatSidecarClient', () => {
     expect(window.__LSATLAB_LOCAL_API_TOKEN__).toBeUndefined();
   });
 
-  it('bootstraps the run token from Tauri before sidecar requests start', async () => {
-    window.__TAURI_INTERNALS__ = {};
-    vi.mocked(invoke).mockResolvedValue(' native-token ');
+  it('keeps Electron sidecar authentication main-process-only', async () => {
+    window.__STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__ = 'stale-renderer-token';
+    installElectronBridge();
 
     const result = await bootstrapLsatSidecarAuthToken();
 
-    expect(result).toEqual({ ok: true, skipped: false, tokenInjected: true });
-    expect(invoke).toHaveBeenCalledWith('get_lsat_local_api_token');
-    expect(getLsatSidecarAuthToken()).toBe('native-token');
+    expect(result).toEqual({ ok: true, skipped: true, tokenInjected: false });
+    expect(window.__STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__).toBeUndefined();
+    expect(getLsatSidecarAuthToken()).toBeNull();
+    expect(withLsatSidecarAuthHeaders().has('authorization')).toBe(false);
   });
 
-  it('does not invoke Tauri when a token is already available in memory', async () => {
-    window.__TAURI_INTERNALS__ = {};
+  it('keeps an explicitly supplied token in browser memory', async () => {
     setLsatSidecarAuthToken('existing-token');
 
     const result = await bootstrapLsatSidecarAuthToken();
 
     expect(result).toEqual({ ok: true, skipped: true, tokenInjected: true });
-    expect(invoke).not.toHaveBeenCalled();
     expect(getLsatSidecarAuthToken()).toBe('existing-token');
   });
 
-  it('skips token bootstrap outside the Tauri runtime', async () => {
+  it('skips token bootstrap in browser dev when no explicit token exists', async () => {
     const result = await bootstrapLsatSidecarAuthToken();
 
     expect(result).toEqual({ ok: true, skipped: true, tokenInjected: false });
-    expect(invoke).not.toHaveBeenCalled();
   });
 
-  it('degrades token bootstrap failures without throwing or persisting a value', async () => {
-    window.__TAURI_INTERNALS__ = {};
-    vi.mocked(invoke).mockRejectedValue(new Error('command unavailable'));
-
-    const result = await bootstrapLsatSidecarAuthToken();
-
-    expect(result).toMatchObject({
-      ok: false,
-      skipped: false,
-      tokenInjected: false,
-      error: 'command unavailable',
-    });
+  it('rejects renderer token setters while the Electron bridge is present', () => {
+    installElectronBridge();
+    expect(setLsatSidecarAuthToken('renderer-token')).toBe(false);
     expect(getLsatSidecarAuthToken()).toBeNull();
+    expect(window.__STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__).toBeUndefined();
   });
 
   it('does not overwrite an explicit auth header', () => {

@@ -42,10 +42,7 @@ export interface VisionGenerateResult {
  * Kept local to avoid coupling against the `.js` module beyond what's needed.
  */
 function normalizeBaseUrl(baseUrl: string | undefined): string {
-  return normalizeLoopbackHttpBaseUrl(
-    baseUrl || DEFAULT_LLM_SETTINGS.baseUrl,
-    'Local vision model base URL',
-  );
+  return normalizeLoopbackHttpBaseUrl(baseUrl || DEFAULT_LLM_SETTINGS.baseUrl, 'Local vision model base URL');
 }
 
 /** Build the data URL for an image input, defaulting mime to PNG. */
@@ -61,26 +58,19 @@ function toDataUrl(image: VisionImageInput): string {
  * Errors are wrapped in the same actionable CORS message `generateText` uses
  * so the UI can surface a single consistent fix.
  */
-export async function generateTextWithImages(
-  opts: VisionGenerateOptions,
-): Promise<VisionGenerateResult> {
+export async function generateTextWithImages(opts: VisionGenerateOptions): Promise<VisionGenerateResult> {
   const settings = opts.settings ?? (await getLlmSettings());
   const base = normalizeBaseUrl(settings?.baseUrl);
   const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
 
   const images = Array.isArray(opts.images) ? opts.images : [];
-  const userContent: Array<
-    | { type: 'text'; text: string }
-    | { type: 'image_url'; image_url: { url: string } }
-  > = [];
+  const userContent: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [];
   userContent.push({ type: 'text', text: String(opts.prompt ?? '') });
   for (const image of images) {
     userContent.push({ type: 'image_url', image_url: { url: toDataUrl(image) } });
   }
 
-  const messages: Array<
-    { role: 'system'; content: string } | { role: 'user'; content: typeof userContent }
-  > = [];
+  const messages: Array<{ role: 'system'; content: string } | { role: 'user'; content: typeof userContent }> = [];
   if (opts.system) messages.push({ role: 'system', content: opts.system });
   messages.push({ role: 'user', content: userContent });
 
@@ -104,7 +94,7 @@ export async function generateTextWithImages(
   } catch (error) {
     if ((error as { name?: string } | null)?.name === 'AbortError') throw error;
     throw new Error(
-      `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
+      `Could not reach ${base}. If you are using LM Studio, enable CORS for the StudyVault origin and restart the server. For Ollama, include the StudyVault origin in OLLAMA_ORIGINS.`,
       { cause: error as Error | undefined },
     );
   }

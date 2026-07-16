@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(SCRIPT_DIR, '..');
 const DEFAULT_REPORT = join(REPO_ROOT, 'dist', 'reports', 'stack-doctor.json');
-const SERVICES_ROOT_REL = join('src-tauri', 'resources', 'services');
+const SERVICES_ROOT_REL = join('electron', 'resources', 'services');
 const PROVENANCE_REL = join(SERVICES_ROOT_REL, 'sidecar-provenance.json');
 
 export const DOCTOR_SCHEMA = 'studyvault.stack_doctor.v1';
@@ -42,9 +42,9 @@ export const REQUIRED_FILES = [
   ['package-lock.json', 'Root npm lockfile'],
   [join('services', 'lsat-backend', 'pyproject.toml'), 'LSAT backend Python manifest'],
   [join('services', 'lsat-backend', 'uv.lock'), 'LSAT backend Python lockfile'],
-  [join('src-tauri', 'Cargo.toml'), 'Tauri Cargo manifest'],
-  [join('src-tauri', 'Cargo.lock'), 'Tauri Cargo lockfile'],
-  [join('src-tauri', 'tauri.conf.json'), 'Tauri app manifest'],
+  [join('electron-builder.yml'), 'Electron builder manifest'],
+  [join('electron', 'main.js'), 'Electron main process'],
+  [join('electron', 'preload.cjs'), 'Electron preload bridge'],
 ];
 
 export const ALL_GATES = [
@@ -257,7 +257,12 @@ export function evaluateCommandCheck(
 }
 
 function firstLine(text) {
-  return String(text || '').split(/\r?\n/).find((line) => line.trim())?.trim() || '';
+  return (
+    String(text || '')
+      .split(/\r?\n/)
+      .find((line) => line.trim())
+      ?.trim() || ''
+  );
 }
 
 function readJson(file) {
@@ -401,12 +406,12 @@ export function evaluateSidecarProvenance(root = REPO_ROOT) {
         id,
         label: `${service} artifact`,
         status: hashOk && sizeOk ? 'pass' : optional ? 'warn' : 'fail',
-        details: hashOk && sizeOk
-          ? `${join(SERVICES_ROOT_REL, relEntryPath)} matches recorded SHA-256.`
-          : 'Staged sidecar does not match recorded provenance.',
-        remediation: hashOk && sizeOk
-          ? ''
-          : 'Regenerate the sidecar artifact and provenance manifest before packaging.',
+        details:
+          hashOk && sizeOk
+            ? `${join(SERVICES_ROOT_REL, relEntryPath)} matches recorded SHA-256.`
+            : 'Staged sidecar does not match recorded provenance.',
+        remediation:
+          hashOk && sizeOk ? '' : 'Regenerate the sidecar artifact and provenance manifest before packaging.',
         data: {
           path: rel(abs, root),
           optional,
@@ -566,11 +571,7 @@ function gateChecks(options) {
 }
 
 export async function buildReport(options = {}) {
-  const checks = [
-    ...toolChecks(),
-    ...evaluateRequiredFiles(REPO_ROOT),
-    ...evaluateSidecarProvenance(REPO_ROOT),
-  ];
+  const checks = [...toolChecks(), ...evaluateRequiredFiles(REPO_ROOT), ...evaluateSidecarProvenance(REPO_ROOT)];
 
   for (const spec of PORTS) {
     checks.push(evaluatePortProbe(spec, await probePort(spec)));

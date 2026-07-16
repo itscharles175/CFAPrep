@@ -22,7 +22,7 @@
 //      CACHE_KEY_VERSION and updating the backend.
 //
 // Everything here is pure + offline. sha256 uses Web Crypto `subtle.digest`
-// when available (browser + Tauri webview + jsdom/Node webcrypto) and falls
+// when available (browser + Electron renderer + jsdom/Node webcrypto) and falls
 // back to a tiny self-contained synchronous SHA-256 otherwise, so the helpers
 // work in every host environment and in vitest with no network and no deps.
 
@@ -57,9 +57,7 @@ export const STRUCTURED_SAMPLING = Object.freeze({
  */
 export function withDeterminism(body, opts = {}) {
   const seed = Number.isFinite(opts.seed) ? opts.seed : DEFAULT_SEED;
-  const temperature = Number.isFinite(opts.temperature)
-    ? opts.temperature
-    : STRUCTURED_SAMPLING.temperature;
+  const temperature = Number.isFinite(opts.temperature) ? opts.temperature : STRUCTURED_SAMPLING.temperature;
   const top_p = Number.isFinite(opts.top_p) ? opts.top_p : STRUCTURED_SAMPLING.top_p;
   return {
     ...(body || {}),
@@ -111,26 +109,19 @@ export const CACHE_KEY_VERSION = 2;
  * `prompt=` field and it is LAST, so a prompt containing newlines or `=` cannot
  * be confused with a later field (nothing follows it).
  */
-export async function cacheKey({
-  provider,
-  model,
-  system,
-  format,
-  temperature,
-  top_p,
-  seed,
-  prompt,
-} = {}) {
-  return sha256Hex(cacheKeyPreimage({
-    provider,
-    model,
-    system,
-    format,
-    temperature,
-    top_p,
-    seed,
-    prompt,
-  }));
+export async function cacheKey({ provider, model, system, format, temperature, top_p, seed, prompt } = {}) {
+  return sha256Hex(
+    cacheKeyPreimage({
+      provider,
+      model,
+      system,
+      format,
+      temperature,
+      top_p,
+      seed,
+      prompt,
+    }),
+  );
 }
 
 /**
@@ -138,16 +129,7 @@ export async function cacheKey({
  * the conformance test) so the backend implementer can diff their serialization
  * against this without having to also match a hash.
  */
-export function cacheKeyPreimage({
-  provider,
-  model,
-  system,
-  format,
-  temperature,
-  top_p,
-  seed,
-  prompt,
-} = {}) {
+export function cacheKeyPreimage({ provider, model, system, format, temperature, top_p, seed, prompt } = {}) {
   const fields = [
     'llm-cache',
     `v${CACHE_KEY_VERSION}`,
@@ -198,7 +180,7 @@ function canonicalNumber(v) {
 
 /**
  * SHA-256 of a UTF-8 string -> lowercase hex. Uses `crypto.subtle.digest` when
- * present (the normal path in the browser, Tauri webview, and Node/jsdom under
+ * present (the normal path in the browser, Electron renderer, and Node/jsdom under
  * vitest); otherwise a self-contained synchronous implementation so the helper
  * never depends on a polyfill being installed. Always async for a single,
  * stable call signature.
@@ -249,14 +231,14 @@ function bufToHex(u8) {
 // --- pure-JS SHA-256 (fallback only; standard FIPS-180-4) --------------------
 
 const K = new Uint32Array([
-  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98,
+  0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+  0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8,
+  0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
+  0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+  0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+  0xc67178f2,
 ]);
 
 function sha256Bytes(message) {
@@ -266,7 +248,7 @@ function sha256Bytes(message) {
   const len = message.length;
   const bitLen = len * 8;
   // Padded length: message + 0x80 + zeros + 8-byte length, multiple of 64.
-  const paddedLen = ((len + 8) >> 6 << 6) + 64;
+  const paddedLen = (((len + 8) >> 6) << 6) + 64;
   const buf = new Uint8Array(paddedLen);
   buf.set(message);
   buf[len] = 0x80;

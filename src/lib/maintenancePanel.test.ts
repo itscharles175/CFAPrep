@@ -149,10 +149,10 @@ describe('evaluateGuardrails', () => {
 describe('buildDiagnosticsBundle', () => {
   it('produces a well-formed bundle with empty defaults', () => {
     const now = new Date('2026-06-16T14:30:05.123Z');
-    const bundle = buildDiagnosticsBundle({ now, env: { userAgent: 'test', isTauri: false, href: 'app://x' } });
-    expect(bundle.schema).toBe('studyvault.diagnostics.v1');
+    const bundle = buildDiagnosticsBundle({ now, env: { userAgent: 'test', isElectron: false, href: 'app://x' } });
+    expect(bundle.schema).toBe('studyvault.diagnostics.v2');
     expect(bundle.generated_at).toBe('2026-06-16T14:30:05.123Z');
-    expect(bundle.app).toEqual({ user_agent: 'test', is_tauri: false, href: 'app://x' });
+    expect(bundle.app).toEqual({ user_agent: 'test', is_electron: false, href: 'app://x' });
     expect(bundle.trust_manifest).toBeNull();
     expect(bundle.runtime_evidence).toEqual([]);
     expect(bundle.sidecars).toEqual({ status: null, logs: {} });
@@ -164,12 +164,12 @@ describe('buildDiagnosticsBundle', () => {
     const runtime = [{ t: 1, cloudSpendUsd: 1, llmP50Ms: 2, genQueueDepth: 0, sqliteBusyRetries: 0 }];
     const bundle = buildDiagnosticsBundle({
       now: new Date('2026-06-16T00:00:00.000Z'),
-      env: { userAgent: null, isTauri: true, href: null },
+      env: { userAgent: null, isElectron: true, href: null },
       runtimeEvidence: runtime,
       cloudMetrics: cloudReport(),
       sidecarLogs: { 'LSAT backend': ['line a'] },
     });
-    expect(bundle.app.is_tauri).toBe(true);
+    expect(bundle.app.is_electron).toBe(true);
     expect(bundle.runtime_evidence).toEqual(runtime);
     expect(bundle.runtime_evidence).not.toBe(runtime); // copied, not the same ref
     expect(bundle.cloud_metrics?.cloud?.budget_usd).toBe(10);

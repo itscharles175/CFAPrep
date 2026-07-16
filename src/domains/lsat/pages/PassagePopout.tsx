@@ -1,14 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
-import { useDocumentTitle } from "@lsat/lib/useDocumentTitle";
-import { POPOUT_PASSAGE_KEY, type PopoutPassage } from "@lsat/lib/tauri";
-import { getJSON } from "@lsat/lib/storage";
-import { Logo } from "@lsat/components/logo";
-import {
-  nextReadingSize,
-  prevReadingSize,
-  readingClasses,
-  useReadingPrefs,
-} from "@lsat/lib/prefs";
+import { useEffect, useMemo, useState } from 'react';
+import { useDocumentTitle } from '@lsat/lib/useDocumentTitle';
+import { POPOUT_PASSAGE_KEY, type PopoutPassage } from '@lsat/lib/electron';
+import { getJSON } from '@lsat/lib/storage';
+import { Logo } from '@lsat/components/logo';
+import { nextReadingSize, prevReadingSize, readingClasses, useReadingPrefs } from '@lsat/lib/prefs';
 
 function readPassage(): PopoutPassage | null {
   return getJSON<PopoutPassage | null>(POPOUT_PASSAGE_KEY, null);
@@ -23,7 +18,7 @@ function toParagraphs(text: string): string[] {
 /**
  * C3 — standalone passage window. Reads the popped-out passage from
  * localStorage and live-updates when the main window pops a different one
- * (cross-window `storage` event). Works as a Tauri WebviewWindow or a browser
+ * (cross-window `storage` event). Works as an Electron BrowserWindow or a browser
  * popup.
  */
 export default function PassagePopout() {
@@ -32,23 +27,23 @@ export default function PassagePopout() {
   // typography (size / serif / measure) instead of a bespoke px stepper.
   const [reading, setReading] = useReadingPrefs();
   const rcls = readingClasses(reading);
-  const paragraphs = useMemo(() => toParagraphs(data?.text ?? ""), [data?.text]);
+  const paragraphs = useMemo(() => toParagraphs(data?.text ?? ''), [data?.text]);
 
-  useDocumentTitle("Passage — LSATLab");
+  useDocumentTitle('Passage — LSATLab');
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === POPOUT_PASSAGE_KEY) setData(readPassage());
     };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   if (!data) {
     return (
       // R9 (docs/19 F8): the brand mark makes the second window recognizably
       // part of LSAT Lab. The shared desktop Titlebar (native drag region +
-      // window controls under Tauri) is supplied by GlobalChrome, which wraps
+      // window controls under Electron) is supplied by GlobalChrome, which wraps
       // this route and titles its bar "Passage" — so we don't double it here.
       <div className="flex min-h-screen flex-col bg-background">
         <div className="flex items-center gap-2 border-b px-6 py-2 text-xs text-muted-foreground">
@@ -70,9 +65,7 @@ export default function PassagePopout() {
       <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b bg-background/95 px-6 py-2 text-xs text-muted-foreground backdrop-blur">
         <span className="flex items-center gap-2">
           <Logo className="h-4 w-4" />
-          <span className="font-semibold uppercase tracking-wide">
-            {data.topic ?? "Passage"}
-          </span>
+          <span className="font-semibold uppercase tracking-wide">{data.topic ?? 'Passage'}</span>
         </span>
         <div className="flex items-center gap-1">
           <button

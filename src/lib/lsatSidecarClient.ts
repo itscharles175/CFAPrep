@@ -2,11 +2,12 @@
  * Shared host-side transport for the LSAT backend sidecar.
  *
  * The backend can optionally require a per-run local API token. Browser/dev
- * builds may provide it through `VITE_LSATLAB_LOCAL_API_TOKEN`; the packaged
- * desktop shell is expected to inject a run-scoped value onto `window` in memory
- * only. This module deliberately does not read or write localStorage.
+ * builds may provide it through `VITE_LSATLAB_LOCAL_API_TOKEN`. In Electron the
+ * bearer remains main-process-only and is injected for the exact loopback origin
+ * by the session webRequest hook. This module never persists a token.
  */
 import { buildLoopbackHttpUrl, normalizeLoopbackHttpBaseUrl } from './localUrlPolicy';
+import { getDesktopBridge } from './desktopBridge';
 
 export const DEFAULT_LSAT_SIDECAR_BASE = 'http://127.0.0.1:8100';
 export const LSAT_SIDECAR_AUTH_BOOTSTRAP_TIMEOUT_MS = 2000;
@@ -17,7 +18,6 @@ declare global {
   interface Window {
     __STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__?: string;
     __LSATLAB_LOCAL_API_TOKEN__?: string;
-    __TAURI_INTERNALS__?: unknown;
   }
 }
 
@@ -48,7 +48,7 @@ function cleanToken(value: unknown): string | null {
 
 export function getLsatSidecarBase(): string {
   const base =
-    cleanToken(envValue('VITE_LSAT_API_BASE')) ?? cleanToken(envValue('VITE_API_BASE')) ?? DEFAULT_LSAT_SIDECAR_BASE
+    cleanToken(envValue('VITE_LSAT_API_BASE')) ?? cleanToken(envValue('VITE_API_BASE')) ?? DEFAULT_LSAT_SIDECAR_BASE;
   return normalizeLoopbackHttpBaseUrl(base, 'LSAT sidecar base URL');
 }
 
@@ -63,6 +63,7 @@ function getLsatSidecarInMemoryAuthToken(): string | null {
 }
 
 export function getLsatSidecarAuthToken(): string | null {
+  if (getDesktopBridge()) return null;
   const inMemoryToken = getLsatSidecarInMemoryAuthToken();
   if (inMemoryToken) {
     return inMemoryToken;
@@ -72,6 +73,10 @@ export function getLsatSidecarAuthToken(): string | null {
 
 export function setLsatSidecarAuthToken(value: unknown): boolean {
   if (typeof window === 'undefined') return false;
+  if (getDesktopBridge()) {
+    for (const key of IN_MEMORY_TOKEN_KEYS) delete window[key];
+    return false;
+  }
   const token = cleanToken(value);
   if (!token) {
     for (const key of IN_MEMORY_TOKEN_KEYS) delete window[key];
@@ -81,57 +86,19 @@ export function setLsatSidecarAuthToken(value: unknown): boolean {
   return true;
 }
 
-function isTauriRuntime(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
-
-function timeoutError(timeoutMs: number): Error {
-  return new Error(`Timed out waiting for LSAT local API token after ${timeoutMs}ms`);
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => reject(timeoutError(timeoutMs)), timeoutMs);
-    promise.then(
-      (value) => {
-        clearTimeout(timeoutId);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timeoutId);
-        reject(err);
-      },
-    );
-  });
-}
-
 export async function bootstrapLsatSidecarAuthToken(options?: {
   timeoutMs?: number;
 }): Promise<LsatSidecarAuthBootstrapResult> {
+  const bridge = getDesktopBridge();
+  if (bridge) {
+    for (const key of IN_MEMORY_TOKEN_KEYS) delete window[key];
+    return { ok: true, skipped: true, tokenInjected: false };
+  }
   if (getLsatSidecarInMemoryAuthToken()) {
     return { ok: true, skipped: true, tokenInjected: true };
   }
-  if (!isTauriRuntime()) {
-    return { ok: true, skipped: true, tokenInjected: Boolean(getLsatSidecarAuthToken()) };
-  }
-
-  const timeoutMs = options?.timeoutMs ?? LSAT_SIDECAR_AUTH_BOOTSTRAP_TIMEOUT_MS;
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    const token = await withTimeout(invoke<string>('get_lsat_local_api_token'), timeoutMs);
-    return {
-      ok: true,
-      skipped: false,
-      tokenInjected: setLsatSidecarAuthToken(token),
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      skipped: false,
-      tokenInjected: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
+  void options;
+  return { ok: true, skipped: true, tokenInjected: Boolean(getLsatSidecarAuthToken()) };
 }
 
 export function withLsatSidecarAuthHeaders(headers?: HeadersInit): Headers {

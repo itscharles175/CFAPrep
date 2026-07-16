@@ -3,7 +3,7 @@ Tiny FastAPI stub that proves the PyInstaller bundle path works end-to-end
 without dragging the full open-notebook dep tree into the build.
 
 The stub exposes the same `/health` route the real backend does so the
-Tauri supervisor's readiness probe can `GET /health` and succeed.  Other
+Electron supervisor's readiness probe can `GET /health` and succeed. Other
 routes return 503 with a clear "not bundled" message — the production
 build replaces this file with `spike/open-notebook/api/main.py`.
 

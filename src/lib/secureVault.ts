@@ -5,15 +5,15 @@
  * SurrealDB sidecar DB) sit in plaintext on disk, while the app already encrypts
  * only the EXPORTED backup blob (`encryptedBackup.ts`). This module adds an
  * OPT-IN "secure vault" mode that encrypts data at rest with a 256-bit
- * data-encryption-key (DEK) whose CUSTODY is the OS keychain (Windows Credential
- * Manager via the Tauri `keychain_*` commands) — so the key is OS-protected and
- * NEVER written to app storage or escrowed anywhere.
+ * data-encryption-key (DEK) whose CUSTODY is Electron safeStorage via the preload
+ * bridge. Only safeStorage ciphertext is persisted; the raw key is never written
+ * unprotected or escrowed anywhere.
  *
  * Design:
- *  - The DEK is a random 256-bit AES-GCM key (NOT passphrase-derived — there is
- *    no human secret to stretch; the OS keychain is the trust anchor). Enabling
- *    secure vault generates it once and hands it to the keychain.
- *  - On launch the DEK is fetched from the keychain into memory ("unlock"); on
+ *  - The DEK is a random 256-bit AES-GCM key (NOT passphrase-derived - there is
+ *    no human secret to stretch; safeStorage is the trust anchor). Enabling
+ *    secure vault generates it once and hands it to the preload bridge.
+ *  - On launch the DEK is fetched through the bridge into memory ("unlock"); on
  *    lock it is dropped from memory. Values are encrypted/decrypted with the
  *    in-memory DEK using AES-GCM with a fresh 12-byte IV per encryption.
  *  - Opt-in, not default: the per-record crypto adds cost to the RAG/index hot
@@ -22,15 +22,15 @@
  * SCOPE / runtime-gating: this module is the host-side mechanism — the DEK
  * lifecycle, the AES-GCM primitive, and the keychain bridge — and is fully
  * unit-tested with an injected in-memory key store. The OS-keychain custody
- * (`tauriKeychainKeyStore`) only works inside the packaged desktop shell, so it
+ * (`electronKeychainKeyStore`) only works inside the packaged desktop shell, so it
  * is runtime-verify-gated. Applying {@link SecureVault.encrypt}/`decrypt` to
  * every live row (transparent at-rest encryption of the whole IndexedDB) is the
  * remaining integration step, gated behind {@link SecureVault.isUnlocked} so the
  * default (disabled) path is byte-for-byte unchanged.
  */
 
-const KEYCHAIN_SERVICE = 'studyvault';
-const KEYCHAIN_ACCOUNT = 'vault-dek';
+import { getDesktopBridge, isElectronRuntime } from './desktopBridge';
+
 const ENABLED_FLAG_KEY = 'qv-secure-vault-enabled';
 const DEK_BYTES = 32; // 256-bit
 const IV_BYTES = 12;
@@ -122,10 +122,10 @@ export async function decryptWithDek(cipher: SecureCipher, dekBase64: string): P
 }
 
 // ---------------------------------------------------------------------------
-// Key custody — the DEK lives in the OS keychain, never in app storage.
+// Key custody - the raw DEK is persisted only as safeStorage ciphertext.
 // ---------------------------------------------------------------------------
 
-/** Custodian of the raw DEK. The opt-in secure vault uses the OS keychain. */
+/** Custodian of the raw DEK. Production storage is main-process safeStorage. */
 export interface SecureKeyStore {
   /** Whether this store can be used here (the OS keychain needs the desktop shell). */
   isAvailable(): Promise<boolean>;
@@ -137,20 +137,14 @@ export interface SecureKeyStore {
   clear(): Promise<void>;
 }
 
-/** Whether the host is running inside the Tauri desktop shell. */
-export function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+export function isElectron(): boolean {
+  return isElectronRuntime();
 }
 
 /**
- * Whether the current platform is Windows. The keychain backend
- * (`src-tauri/src/keychain.rs`) only implements credential storage under
- * `#[cfg(windows)]`; on macOS/Linux it returns an "unsupported" error. So the
- * secure vault is a Windows-desktop feature today, and availability must gate on
- * the OS — not mere Tauri presence — otherwise a non-Windows desktop build shows
- * an "Enable" button that fails with a confusing keychain error instead of the
- * clean "unavailable here" state. Prefers the modern userAgentData.platform,
- * falling back to navigator.platform / userAgent.
+ * Synchronous platform diagnostic retained for existing consumers and tests.
+ * Secure-vault availability no longer depends on this check because Electron
+ * safeStorage is exposed cross-platform by the main process.
  */
 export function isWindowsPlatform(): boolean {
   if (typeof navigator === 'undefined') return false;
@@ -160,40 +154,29 @@ export function isWindowsPlatform(): boolean {
 }
 
 /**
- * The production key store: the OS keychain, reached via the Rust `keychain_*`
- * Tauri commands (Windows Credential Manager). Only available in the desktop
- * shell; in browser dev / tests `isAvailable()` is false and the secure vault
- * cannot be enabled.
+ * The production key store: Electron safeStorage, reached only through the
+ * constrained preload bridge. The DEK remains in renderer memory only after a
+ * bridge read and is never persisted by renderer storage or Web Crypto.
  */
-export const tauriKeychainKeyStore: SecureKeyStore = {
+export const electronKeychainKeyStore: SecureKeyStore = {
   async isAvailable(): Promise<boolean> {
-    // Tauri presence AND Windows — the credential backend is Windows-only today.
-    return isTauri() && isWindowsPlatform();
+    return getDesktopBridge() !== null;
   },
   async get(): Promise<string | null> {
-    if (!isTauri()) return null;
-    const { invoke } = await import('@tauri-apps/api/core');
-    const value = await invoke<string | null>('keychain_get', {
-      service: KEYCHAIN_SERVICE,
-      account: KEYCHAIN_ACCOUNT,
-    });
+    const bridge = getDesktopBridge();
+    if (!bridge) return null;
+    const value = await bridge.keychain.get();
     return value ?? null;
   },
   async set(dekBase64: string): Promise<void> {
-    // Short-circuit outside the desktop shell, mirroring get()/clear(), so a
-    // stray call surfaces a clear error rather than an opaque invoke failure.
-    if (!isTauri()) throw new Error('The OS keychain is only available in the desktop app.');
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('keychain_set', {
-      service: KEYCHAIN_SERVICE,
-      account: KEYCHAIN_ACCOUNT,
-      secret: dekBase64,
-    });
+    const bridge = getDesktopBridge();
+    if (!bridge) throw new Error('The OS keychain is only available in the desktop app.');
+    await bridge.keychain.set(dekBase64);
   },
   async clear(): Promise<void> {
-    if (!isTauri()) return;
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('keychain_delete', { service: KEYCHAIN_SERVICE, account: KEYCHAIN_ACCOUNT });
+    const bridge = getDesktopBridge();
+    if (!bridge) return;
+    await bridge.keychain.delete();
   },
 };
 
@@ -260,7 +243,7 @@ export class SecureVault {
   private dek: string | null = null;
 
   constructor(
-    private readonly store: SecureKeyStore = tauriKeychainKeyStore,
+    private readonly store: SecureKeyStore = electronKeychainKeyStore,
     private readonly flag: SecureVaultFlagStore = localStorageFlagStore,
   ) {}
 
@@ -286,7 +269,10 @@ export class SecureVault {
    */
   async enable(): Promise<SecureVaultResult> {
     if (!(await this.store.isAvailable())) {
-      return { ok: false, error: 'The OS keychain is only available in the desktop app, so the secure vault can’t be enabled here.' };
+      return {
+        ok: false,
+        error: 'The OS keychain is only available in the desktop app, so the secure vault can’t be enabled here.',
+      };
     }
     if (this.isEnabled()) {
       // Already enabled — make sure we're unlocked (idempotent).
@@ -402,7 +388,7 @@ export const UNLOCK_LAUNCH_TIMEOUT_MS = 4000;
  * is unchanged.
  *
  * BOUNDED: the keychain read is a synchronous blocking Windows FFI call dispatched
- * over Tauri IPC, which has no built-in timeout — a contended/wedged Credential
+ * over Electron IPC, which has no built-in timeout — a contended/wedged credential
  * Manager (or an AV shim intercepting the cred APIs) could otherwise make unlock
  * neither resolve nor reject, hanging the boot chain that awaits this. We race the
  * unlock against `timeoutMs` so the caller always settles and the data bootstraps

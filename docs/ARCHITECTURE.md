@@ -1,7 +1,7 @@
 # StudyVault — Architecture
 
 StudyVault is a **local-first, fully offline** study OS that bundles two large
-apps into one desktop window (Tauri 2) and one web bundle (Vite):
+apps into one desktop window (Electron) and one web bundle (Vite):
 
 - the **host** — CFA / Quant / Excel prep (the original QuantVault), and
 - the **LSAT domain** — Law School Admission Test prep (vendored from LSAT Lab).
@@ -21,14 +21,14 @@ no account, no API keys.
 
 ## 1. The two apps in one window
 
-| | Host (CFA/Quant/Excel) | LSAT domain |
-|---|---|---|
-| Source | `src/` (top level) | `src/domains/lsat/` (vendored) |
-| Framework | React 19 · Vite 8 (rolldown) · TS 6 (strict) | React-18-era code, runs on the host's hoisted React 19 |
-| Styling | CSS `@layer tokens` + `.qv-*` utilities, raw hex palette (`src/index.css`, `src/styles/tokens.css`) | Tailwind 3 + Radix + HSL CSS-var tokens (`src/domains/lsat/index.css`) |
-| Data | Dexie / IndexedDB (SurrealDB cutover available) | FastAPI + SQLite backend **sidecar** on `127.0.0.1:8100` |
-| Charts | recharts | @visx |
-| Router | `react-router` (`BrowserRouter`) | own `BrowserRouter basename="/lsat"` |
+|           | Host (CFA/Quant/Excel)                                                                              | LSAT domain                                                            |
+| --------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Source    | `src/` (top level)                                                                                  | `src/domains/lsat/` (vendored)                                         |
+| Framework | React 19 · Vite 8 (rolldown) · TS 6 (strict)                                                        | React-18-era code, runs on the host's hoisted React 19                 |
+| Styling   | CSS `@layer tokens` + `.qv-*` utilities, raw hex palette (`src/index.css`, `src/styles/tokens.css`) | Tailwind 3 + Radix + HSL CSS-var tokens (`src/domains/lsat/index.css`) |
+| Data      | Dexie / IndexedDB (SurrealDB cutover available)                                                     | FastAPI + SQLite backend **sidecar** on `127.0.0.1:8100`               |
+| Charts    | recharts                                                                                            | @visx                                                                  |
+| Router    | `react-router` (`BrowserRouter`)                                                                    | own `BrowserRouter basename="/lsat"`                                   |
 
 There is **one Vite build**. The LSAT subtree is aliased (`@lsat/*` →
 `/src/domains/lsat`) and bundled into its own lazy chunks, so a host-only user
@@ -37,7 +37,7 @@ never downloads the LSAT code (and vice-versa).
 ## 2. Top-level routing (one unified root, soft cross-domain nav)
 
 `src/main.jsx` renders a single application root — `src/components/UnifiedRoot.tsx`
-— directly. There is **one** host `<BrowserRouter>` that routes *both* planes; a
+— directly. There is **one** host `<BrowserRouter>` that routes _both_ planes; a
 top-level `<Routes>` selects:
 
 - `/lsat` + `/lsat/*` → `<LsatUnifiedMount>` — the LSAT providers + startup, with the
@@ -53,7 +53,7 @@ host startup (the host CSS world + host bootstrap) is reproduced in `UnifiedRoot
 via the shared `runHostStartupOnce`.
 
 > History: until the **Keystone K4** UI-unification cutover (K4-12/K4-13) the two
-> domains booted as a *split shell* — the entry swapped the host sub-app against a
+> domains booted as a _split shell_ — the entry swapped the host sub-app against a
 > separate LSAT root, each owning its own `<BrowserRouter>`, with a
 > `MutationObserver` keeping only the active domain's stylesheets live so the two
 > design systems' global CSS could not conflict. That split shell, its
@@ -76,20 +76,29 @@ via the shared `runHostStartupOnce`.
 
 ## 4. Desktop shell + sidecars
 
-The Tauri 2 Rust core (`src-tauri/src/lib.rs`) is a **supervisor**:
-`build_sidecar_specs()` returns the local services it launches and health-checks:
+`electron/main.js` creates the hardened desktop process boundary. Renderers run
+with `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false`.
+`electron/preload.cjs` exposes the fixed `window.studyvault` contract; renderer
+code never receives raw Node, filesystem, shell, or `ipcRenderer` access.
 
-| Sidecar | Port | Purpose |
-|---|---|---|
-| SurrealDB | 8000 | the unified local store (cutover target) |
-| open-notebook API + worker | 5055 | notebook + RAG (langchain/langgraph) |
-| LSAT backend | 8100 | LSAT question bank, SRS, AI explanations |
+Production pages are served from the secure, standard `app://studyvault`
+protocol. Navigation, new windows, permissions, external URLs, file paths, and
+every IPC payload are validated in the main process.
+
+The main-process sidecar supervisor launches and health-checks:
+
+| Sidecar                    | Port | Purpose                                  |
+| -------------------------- | ---- | ---------------------------------------- |
+| SurrealDB                  | 8000 | the unified local store (cutover target) |
+| open-notebook API + worker | 5055 | notebook + RAG (langchain/langgraph)     |
+| LSAT backend               | 8100 | LSAT question bank, SRS, AI explanations |
 
 Sidecars ship as **PyInstaller** binaries staged under
-`src-tauri/resources/services/` (gitignored — built at release time). Paths are
-cross-platform (`cfg!(windows)` exe suffix). In dev, open-notebook runs via
-`uv run` and the LSAT backend from source; in a packaged build they're the
-frozen binaries.
+`electron/resources/services/` and copied to `process.resourcesPath/services`
+by electron-builder. The supervisor verifies provenance, blocks unknown port
+occupants without terminating them, injects LSAT authentication in the Electron
+session, captures redacted logs, restarts owned children with bounded backoff,
+and terminates only process trees it launched.
 
 ## 5. Quality gates (CI)
 
@@ -103,7 +112,7 @@ frozen binaries.
   docs drift, RAG retrieval-eval, citation-faithfulness, generated-content gate,
   source-grounded answer benchmark, explanation-golden, prompt-regression
   fixture, dependency-audit, and deterministic generation-quality regression floors before
-  per-OS Tauri bundling, which first
+  per-OS Electron bundling, which first
   **builds + smoke-tests** the LSAT backend sidecar (`scripts/smoke-sidecar.mjs`,
   `/api/health → {ok:true}`) and fails if a required sidecar is missing.
   open-notebook is built only when the
@@ -111,7 +120,7 @@ frozen binaries.
   (it lives in gitignored `spike/`).
 
 Local: `npm run verify` (host lint+test+build) · `npm run test:all` (both vitest
-projects) · `npm run typecheck:lsat` · `cargo test` (in `src-tauri/`).
+projects) · `npm run typecheck:lsat` · `npx vitest run --project host electron`.
 
 ## 6. Source map
 
@@ -125,7 +134,8 @@ src/
   domains/lsat/             vendored LSAT app (@lsat/*), re-based under /lsat + Tailwind
   lib/lsatBackend.ts        host → LSAT sidecar health/model client
   lib/lsatReviewBridge.ts   host Review Inbox ← LSAT due cards
-src-tauri/                  Tauri Rust core + sidecar supervisor
+electron/                   Electron main/preload, IPC policy, supervisor, assets
+electron-builder.yml        installers, resources, signing/notarization config
 services/lsat-backend/      LSAT FastAPI + SQLite backend (committed source)
 scripts/                    build-*-binary.mjs, smoke-sidecar.mjs, …
 docs/                       this doc + integration/packaging/roadmap

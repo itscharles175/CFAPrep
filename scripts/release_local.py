@@ -34,6 +34,8 @@ DEFAULT_REPORT = DIST_DIR / "release_local_report.json"
 DEFAULT_TRUST = DIST_DIR / "release_trust.json"
 PACKAGED_SMOKE_PORTS = (8000, 5055, 8100)
 PACKAGED_SMOKE_HEALTH_URL = "http://127.0.0.1:8100/api/health"
+WINDOWS_SIGNING_CONFIG = DIST_DIR / "windows-signing-config.json"
+SIGNING_EVIDENCE = DIST_DIR / "signing-evidence-local.json"
 
 REQUIRED_RELEASE_LOCAL_LABELS = (
     "backend compile",
@@ -95,6 +97,16 @@ def _npx() -> str:
 
 def _python() -> str:
     return sys.executable
+
+
+def _signing_platform() -> str:
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    if sys.platform.startswith("linux"):
+        return "linux"
+    raise RuntimeError(f"unsupported release signing platform: {sys.platform}")
 
 
 def _backend_env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -263,7 +275,7 @@ def _optional_checks(args: argparse.Namespace, py: str, node: str, npm: str) -> 
     checks: list[Check] = []
     if not args.skip_e2e:
         checks.append(Check("frontend playwright e2e", [Step([node, "scripts/e2e-integration.mjs"])]))
-    if not args.skip_tauri:
+    if not args.skip_electron:
         if not args.skip_sidecar_build:
             checks.append(
                 Check(
@@ -274,11 +286,55 @@ def _optional_checks(args: argparse.Namespace, py: str, node: str, npm: str) -> 
                     ],
                 )
             )
-        tauri_script = "tauri:build:debug" if args.tauri_debug else "tauri:build"
-        checks.append(Check("tauri build", [Step([npm, "run", tauri_script])]))
+        signing_platform = _signing_platform()
+        if not args.electron_debug:
+            checks.append(
+                Check(
+                    "release signing preflight",
+                    [
+                        Step(
+                            [
+                                node,
+                                "scripts/release-signing.mjs",
+                                "preflight",
+                                "--platform",
+                                signing_platform,
+                                "--config-output",
+                                str(WINDOWS_SIGNING_CONFIG),
+                            ]
+                        )
+                    ],
+                )
+            )
+        electron_script = "electron:build:debug" if args.electron_debug else "electron:build"
+        electron_args = [npm, "run", electron_script]
+        if not args.electron_debug and signing_platform == "windows":
+            electron_args.extend(["--", "--config", str(WINDOWS_SIGNING_CONFIG)])
+        checks.append(Check("electron build", [Step(electron_args)]))
         if not args.skip_packaged_smoke:
-            internal = "_packaged_smoke_debug" if args.tauri_debug else "_packaged_smoke"
+            internal = "_packaged_smoke_debug" if args.electron_debug else "_packaged_smoke"
             checks.append(Check("packaged app smoke", [Step([py, str(Path(__file__).resolve()), internal])]))
+        if not args.electron_debug:
+            checks.append(
+                Check(
+                    "release signing evidence",
+                    [
+                        Step(
+                            [
+                                node,
+                                "scripts/release-signing.mjs",
+                                "verify",
+                                "--platform",
+                                signing_platform,
+                                "--bundle-root",
+                                "release",
+                                "--output",
+                                str(SIGNING_EVIDENCE),
+                            ]
+                        )
+                    ],
+                )
+            )
         manifest_args = [
             node,
             "scripts/release-manifest.mjs",
@@ -286,9 +342,10 @@ def _optional_checks(args: argparse.Namespace, py: str, node: str, npm: str) -> 
             "--require-assets",
             "--require-sidecar-provenance",
         ]
-        if args.tauri_debug:
+        if args.electron_debug:
             manifest_args.append("--debug")
-        checks.append(Check("release manifest/SBOM", [Step(manifest_args)]))
+        manifest_env = {} if args.electron_debug else {"STUDYVAULT_SIGNING_EVIDENCE": str(SIGNING_EVIDENCE)}
+        checks.append(Check("release manifest/SBOM", [Step(manifest_args, env=manifest_env)]))
     return checks
 
 
@@ -476,37 +533,46 @@ def _exe(name: str) -> str:
     return f"{name}.exe" if os.name == "nt" else name
 
 
-def _tauri_profile_dir(debug: bool) -> Path:
-    return REPO_ROOT / "src-tauri" / "target" / ("debug" if debug else "release")
+def _electron_output_dir(debug: bool) -> Path:
+    return REPO_ROOT / ("release-debug" if debug else "release")
 
 
-def _tauri_executable_candidates(debug: bool) -> list[Path]:
-    profile_dir = _tauri_profile_dir(debug)
-    explicit = [
-        profile_dir / _exe("StudyVault"),
-        profile_dir / _exe("studyvault"),
-        profile_dir / _exe("app"),
-    ]
+def _electron_executable_candidates(debug: bool) -> list[Path]:
+    output_dir = _electron_output_dir(debug)
     if os.name == "nt":
-        globs = sorted(profile_dir.glob("*.exe"))
-    else:
-        globs = (
-            sorted(path for path in profile_dir.iterdir() if path.is_file() and os.access(path, os.X_OK))
-            if profile_dir.exists()
-            else []
-        )
-    return [*explicit, *[path for path in globs if path not in explicit]]
+        return [
+            output_dir / "win-unpacked" / "StudyVault.exe",
+            output_dir / "win-arm64-unpacked" / "StudyVault.exe",
+        ]
+    if sys.platform == "darwin":
+        candidates = [
+            output_dir / "mac" / "StudyVault.app" / "Contents" / "MacOS" / "StudyVault",
+            output_dir / "mac-arm64" / "StudyVault.app" / "Contents" / "MacOS" / "StudyVault",
+        ]
+        machine = platform.machine().lower()
+        if machine in {"arm64", "aarch64"}:
+            candidates.reverse()
+        return candidates
+    return [
+        output_dir / "linux-unpacked" / "studyvault",
+        output_dir / "linux-arm64-unpacked" / "studyvault",
+    ]
 
 
-def _resolve_tauri_executable(debug: bool) -> Path | None:
-    for path in _tauri_executable_candidates(debug):
+def _resolve_electron_executable(debug: bool) -> Path | None:
+    for path in _electron_executable_candidates(debug):
         if path.is_file() and path.stat().st_size > 0:
             return path
     return None
 
 
 def _packaged_services_dir(debug: bool) -> Path:
-    return _tauri_profile_dir(debug) / "resources" / "services"
+    executable = _resolve_electron_executable(debug)
+    if executable is None:
+        return _electron_output_dir(debug) / "resources" / "services"
+    if sys.platform == "darwin":
+        return executable.parents[1] / "Resources" / "services"
+    return executable.parent / "resources" / "services"
 
 
 def _lsat_sidecar_path(services_dir: Path) -> Path:
@@ -514,14 +580,16 @@ def _lsat_sidecar_path(services_dir: Path) -> Path:
 
 
 def _packaged_bundle_patterns(debug: bool) -> list[str]:
-    profile = "debug" if debug else "release"
+    output = "release-debug" if debug else "release"
     return [
-        f"src-tauri/target/{profile}/bundle/msi/*",
-        f"src-tauri/target/{profile}/bundle/nsis/*",
-        f"src-tauri/target/{profile}/bundle/deb/*",
-        f"src-tauri/target/{profile}/bundle/appimage/*",
-        f"src-tauri/target/universal-apple-darwin/{profile}/bundle/dmg/*",
-        f"src-tauri/target/universal-apple-darwin/{profile}/bundle/macos/*",
+        f"{output}/*.exe",
+        f"{output}/*.msi",
+        f"{output}/*.dmg",
+        f"{output}/*.AppImage",
+        f"{output}/*.deb",
+        f"{output}/win*-unpacked/StudyVault.exe",
+        f"{output}/mac*/StudyVault.app/Contents/MacOS/StudyVault",
+        f"{output}/linux*-unpacked/studyvault",
     ]
 
 
@@ -558,16 +626,35 @@ def _poll_lsat_health(proc: subprocess.Popen[str], timeout: int = 120) -> tuple[
 def _terminate_process_tree(proc: subprocess.Popen[str]) -> None:
     if proc.poll() is not None:
         return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        try:
+            proc.wait(timeout=5)
+            return
+        except subprocess.TimeoutExpired:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            return
     proc.terminate()
     try:
         proc.wait(timeout=5)
         return
     except subprocess.TimeoutExpired:
         pass
-    if os.name == "nt":
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, text=True, timeout=15)
-    else:
-        proc.kill()
+    proc.kill()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
@@ -637,10 +724,10 @@ def _packaged_smoke(debug: bool = False) -> int:
     for item in artifacts[:20]:
         print(f"  - {item.relative_to(REPO_ROOT)} ({item.stat().st_size} bytes)")
 
-    exe_path = _resolve_tauri_executable(debug)
+    exe_path = _resolve_electron_executable(debug)
     if exe_path is None:
-        print("packaged smoke: no unpacked Tauri executable found")
-        for candidate in _tauri_executable_candidates(debug)[:10]:
+        print("packaged smoke: no unpacked Electron executable found")
+        for candidate in _electron_executable_candidates(debug)[:10]:
             print(f"  candidate: {candidate.relative_to(REPO_ROOT)}")
         return 1
 
@@ -670,7 +757,15 @@ def _packaged_smoke(debug: bool = False) -> int:
             print(f"packaged smoke: {detail}")
     finally:
         _terminate_process_tree(proc)
-        stdout, stderr = proc.communicate(timeout=5) if proc.poll() is not None else ("", "")
+        if proc.poll() is not None:
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.stdout and proc.stdout.close()
+                proc.stderr and proc.stderr.close()
+                stdout, stderr = "", "packaged smoke log pipes did not close after process-tree termination"
+        else:
+            stdout, stderr = "", ""
         if stdout.strip():
             print("packaged smoke stdout tail:")
             print(_tail(stdout))
@@ -702,10 +797,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--npx", default=_npx())
     parser.add_argument("--continue-on-failure", action="store_true")
     parser.add_argument("--skip-e2e", action="store_true")
-    parser.add_argument("--skip-tauri", action="store_true")
+    parser.add_argument("--skip-electron", action="store_true")
     parser.add_argument("--skip-sidecar-build", action="store_true")
     parser.add_argument("--skip-packaged-smoke", action="store_true")
-    parser.add_argument("--tauri-debug", action="store_true", help="Use npm run tauri:build:debug for the Tauri leg.")
+    parser.add_argument("--electron-debug", action="store_true", help="Use the unpacked Electron build for the desktop leg.")
     parser.add_argument("--dry-run", action="store_true", help="Print the planned labels and exit without writing reports.")
     return parser.parse_args(argv)
 
@@ -736,7 +831,7 @@ def main(argv: list[str] | None = None) -> int:
 
     options = {
         "skip_e2e": bool(args.skip_e2e),
-        "skip_tauri": bool(args.skip_tauri),
+        "skip_electron": bool(args.skip_electron),
         "skip_sidecar_build": bool(args.skip_sidecar_build),
         "skip_packaged_smoke": bool(args.skip_packaged_smoke),
     }

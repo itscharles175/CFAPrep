@@ -3,17 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { saveLlmSettings } from '../../lib/localLlm';
 import { markOnboardingComplete, setOnboardingStep } from '../../lib/onboardingProgress';
 import { setUnifiedOnboardingDismissed } from '../../lib/unifiedResume';
-import {
-  Dialog,
-  InlineCluster,
-  StatusBadge,
-  Surface,
-} from '../ui/Primitives';
+import { Dialog, InlineCluster, StatusBadge, Surface } from '../ui/Primitives';
 
 const CORS_NOTE_LM_STUDIO =
   'LM Studio: open Developer / Server panel and enable CORS for "*", then restart the server.';
-const CORS_NOTE_OLLAMA =
-  'Ollama: start with OLLAMA_ORIGINS=* set. The Tauri desktop shell does not need this.';
+const CORS_NOTE_OLLAMA = 'Ollama: include the StudyVault origin in OLLAMA_ORIGINS.';
 
 interface StepperProps {
   step: number;
@@ -31,9 +25,7 @@ function Stepper({ step }: StepperProps) {
           {n}
         </span>
       ))}
-      <span className="muted-copy qv-fs-xs">
-        {step} / 3
-      </span>
+      <span className="muted-copy qv-fs-xs">{step} / 3</span>
     </InlineCluster>
   );
 }
@@ -48,8 +40,7 @@ function Step1({ onContinue }: Step1Props) {
       <StatusBadge tone="accent">Welcome</StatusBadge>
       <h3 style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>StudyVault is local-first</h3>
       <p className="qv-m-0">
-        Everything stays on your machine — no cloud, no account, no tracking. Three quick choices
-        and you are set.
+        Everything stays on your machine — no cloud, no account, no tracking. Three quick choices and you are set.
       </p>
       <Surface tone="study" density="compact" style={{ marginTop: 'var(--space-4)' }}>
         <ul className="qv-m-0" style={{ paddingLeft: 'var(--space-4)', lineHeight: 1.7 }}>
@@ -90,17 +81,14 @@ function Step2({ onPresetChosen, onSkip }: Step2Props) {
       <StatusBadge tone="accent">Step 2 — Local model</StatusBadge>
       <h3 style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>Connect a local AI model</h3>
       <p style={{ margin: '0 0 var(--space-4)' }}>
-        Pick a preset to enable AI-generated questions and explanations grounded in your source
-        documents.
+        Pick a preset to enable AI-generated questions and explanations grounded in your source documents.
       </p>
 
       <InlineCluster style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
         <button
           className="btn btn-primary"
           disabled={saving}
-          onClick={() =>
-            handlePreset('http://localhost:1234/v1', 'gemma-4-e4b-it')
-          }
+          onClick={() => handlePreset('http://localhost:1234/v1', 'gemma-4-e4b-it')}
         >
           LM Studio
           <small className="qv-fs-xs" style={{ display: 'block', fontWeight: 400 }}>
@@ -110,9 +98,7 @@ function Step2({ onPresetChosen, onSkip }: Step2Props) {
         <button
           className="btn btn-secondary"
           disabled={saving}
-          onClick={() =>
-            handlePreset('http://localhost:11434/v1', 'llama3.1')
-          }
+          onClick={() => handlePreset('http://localhost:11434/v1', 'llama3.1')}
         >
           Ollama
           <small className="qv-fs-xs" style={{ display: 'block', fontWeight: 400 }}>
@@ -121,7 +107,13 @@ function Step2({ onPresetChosen, onSkip }: Step2Props) {
         </button>
       </InlineCluster>
 
-      <Surface tone="study" density="compact" status="warning" className="qv-fs-xs" style={{ marginTop: 'var(--space-4)' }}>
+      <Surface
+        tone="study"
+        density="compact"
+        status="warning"
+        className="qv-fs-xs"
+        style={{ marginTop: 'var(--space-4)' }}
+      >
         <strong>CORS note:</strong>
         <br />
         {CORS_NOTE_LM_STUDIO}
@@ -166,7 +158,7 @@ function Step3({ onDone }: Step3Props) {
         >
           <strong>Pick a folder of PDFs</strong>
           <small className="qv-fs-xs" style={{ display: 'block', fontWeight: 400 }}>
-            Desktop (Tauri) shell only
+            Desktop Electron app only
           </small>
         </button>
         <button
@@ -243,30 +235,17 @@ export function OnboardingWizard({ open, onClose }: OnboardingWizardProps) {
     <Dialog
       title={null}
       onClose={handleClose}
-      actions={
-        <small className="muted-copy qv-fs-xs">
-          Enter to advance · Esc to dismiss
-        </small>
-      }
+      actions={<small className="muted-copy qv-fs-xs">Enter to advance · Esc to dismiss</small>}
     >
       <InlineCluster className="qv-mb-3" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <Stepper step={step} />
-        <button
-          className="btn btn-ghost qv-fs-xs qv-text-muted"
-          onClick={handleClose}
-          aria-label="Skip onboarding"
-        >
+        <button className="btn btn-ghost qv-fs-xs qv-text-muted" onClick={handleClose} aria-label="Skip onboarding">
           Skip onboarding ✕
         </button>
       </InlineCluster>
 
       {step === 1 && <Step1 onContinue={() => goToStep(2)} />}
-      {step === 2 && (
-        <Step2
-          onPresetChosen={() => goToStep(3)}
-          onSkip={() => goToStep(3)}
-        />
-      )}
+      {step === 2 && <Step2 onPresetChosen={() => goToStep(3)} onSkip={() => goToStep(3)} />}
       {step === 3 && <Step3 onDone={handleFinish} />}
     </Dialog>
   );

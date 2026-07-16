@@ -22,10 +22,10 @@ def _load_release_local():
 def _args(**overrides):
     base = {
         "skip_e2e": False,
-        "skip_tauri": False,
+        "skip_electron": False,
         "skip_sidecar_build": False,
         "skip_packaged_smoke": False,
-        "tauri_debug": False,
+        "electron_debug": False,
     }
     base.update(overrides)
     return Namespace(**base)
@@ -79,9 +79,21 @@ def test_release_local_full_plan_matches_trust_required_labels():
     )
     assert "frontend playwright e2e" in labels
     assert "backend sidecar build" in labels
-    assert "tauri build" in labels
+    assert "release signing preflight" in labels
+    assert "electron build" in labels
     assert "packaged app smoke" in labels
+    assert "release signing evidence" in labels
     assert "release manifest/SBOM" in labels
+    assert labels.index("release signing preflight") < labels.index("electron build")
+    assert labels.index("electron build") < labels.index("release signing evidence")
+    signing_preflight = next(check for check in checks if check.label == "release signing preflight")
+    assert "--config-output" in signing_preflight.steps[0].args
+    signing_evidence = next(check for check in checks if check.label == "release signing evidence")
+    assert "--bundle-root" in signing_evidence.steps[0].args
+    manifest = next(check for check in checks if check.label == "release manifest/SBOM")
+    assert manifest.steps[0].env["STUDYVAULT_SIGNING_EVIDENCE"] == str(
+        release_local.SIGNING_EVIDENCE
+    )
     for label in (
         "version sync",
         "frontend typecheck",
@@ -123,7 +135,7 @@ def test_release_local_skip_flags_omit_only_optional_heavy_legs():
     labels = [
         check.label
         for check in release_local.planned_checks(
-            _args(skip_e2e=True, skip_tauri=True, skip_sidecar_build=True, skip_packaged_smoke=True),
+            _args(skip_e2e=True, skip_electron=True, skip_sidecar_build=True, skip_packaged_smoke=True),
             py="python",
             node="node",
             npm="npm",
@@ -135,8 +147,10 @@ def test_release_local_skip_flags_omit_only_optional_heavy_legs():
     )
     assert "frontend playwright e2e" not in labels
     assert "backend sidecar build" not in labels
-    assert "tauri build" not in labels
+    assert "release signing preflight" not in labels
+    assert "electron build" not in labels
     assert "packaged app smoke" not in labels
+    assert "release signing evidence" not in labels
     assert "release manifest/SBOM" not in labels
     assert "dependency audit" in labels
     assert "generation quality regression floor" in labels
@@ -178,7 +192,7 @@ def test_release_local_report_payload_records_summary_and_options(monkeypatch):
         ],
         options={
             "skip_e2e": True,
-            "skip_tauri": True,
+            "skip_electron": True,
             "skip_sidecar_build": True,
             "skip_packaged_smoke": True,
         },
@@ -234,14 +248,14 @@ def test_release_local_run_check_records_spawn_failure():
     assert result["steps"][0]["stderr_tail"]
 
 
-def test_packaged_smoke_uses_tauri_resources_layout():
+def test_packaged_smoke_uses_electron_resources_layout():
     release_local = _load_release_local()
 
     services_dir = release_local._packaged_services_dir(False)
 
-    assert services_dir == release_local.REPO_ROOT / "src-tauri" / "target" / "release" / "resources" / "services"
+    assert services_dir == release_local.REPO_ROOT / "release" / "resources" / "services"
     assert release_local._lsat_sidecar_path(services_dir).parent.name == "lsat-backend"
-    assert "src-tauri/target/release/bundle/msi/*" in release_local._packaged_bundle_patterns(False)
+    assert "release/*.msi" in release_local._packaged_bundle_patterns(False)
 
 
 def test_packaged_smoke_log_failure_catches_startup_errors():

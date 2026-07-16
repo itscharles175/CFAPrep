@@ -7,11 +7,11 @@ Build (from backend/):
 Produces a single-file executable in ``dist/`` named ``lsatlab-backend`` (with
 the platform's executable suffix, e.g. ``lsatlab-backend.exe`` on Windows). The
 ``build-sidecar.ps1`` helper then copies it into
-``../frontend/src-tauri/binaries/`` with the Tauri target-triple suffix that
-``externalBin`` requires.
+``../../electron/resources/services/lsat-backend/`` where electron-builder
+stages it as an ``extraResource``.
 
 Why one-file: the desktop app ships a single sidecar; one-file keeps the bundle
-layout simple (Tauri copies one binary). On startup PyInstaller's bootloader
+layout simple. On startup PyInstaller's bootloader
 unpacks to a temp dir, which costs ~1s — acceptable for a long-lived local
 server. Switch ``ONE_FILE = False`` below for a faster-starting one-dir build if
 you'd rather ship a folder.
@@ -83,13 +83,13 @@ for pkg in ("fastapi", "sqlmodel", "pymupdf", "fsrs", "mcp", "sqlite_vec", "text
         # A package without data files (or not installed in this env) is fine.
         pass
 
-# Release-trust checks must still work inside the frozen sidecar, where the
-# source checkout's frontend/openapi.json and tauri.conf.json are not present.
+# Frozen sidecars embed only immutable, pre-sign build contracts. Final release
+# reports and signatures are generated after packaging and remain external
+# GitHub Release evidence, avoiding a circular trust chain.
+repo_root = Path.cwd().parents[1]
 release_contracts = [
-    (Path("..") / "frontend" / "openapi.json", "release_contracts"),
-    (Path("..") / "frontend" / "src-tauri" / "tauri.conf.json", "release_contracts"),
-    (Path("..") / "dist" / "release_local_report.json", "release_contracts"),
-    (Path("..") / "dist" / "release_trust.json", "release_contracts"),
+    (repo_root / "openapi.json", "release_contracts"),
+    (repo_root / "electron" / "resources" / "services" / "sidecar-provenance.json", "release_contracts"),
 ]
 for source, dest in release_contracts:
     if source.exists():

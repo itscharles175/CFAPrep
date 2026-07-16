@@ -2,5 +2,9 @@
 # Don't commit them — they're large and platform-specific.
 *.exe
 open-notebook/
+lsat-backend/
+bin/
 surreal
 surreal.exe
+surreal2
+surreal2.exe

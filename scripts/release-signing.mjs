@@ -29,7 +29,9 @@ const CREDENTIALS = Object.freeze({
 });
 
 export function normalizePlatform(value = process.platform) {
-  const normalized = String(value || '').trim().toLowerCase();
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
   if (['win32', 'windows', 'windows-latest'].includes(normalized)) return 'windows';
   if (['darwin', 'macos', 'macos-latest'].includes(normalized)) return 'macos';
   if (['linux', 'ubuntu', 'ubuntu-latest'].includes(normalized)) return 'linux';
@@ -37,7 +39,9 @@ export function normalizePlatform(value = process.platform) {
 }
 
 export function normalizeThumbprint(value) {
-  return String(value || '').replace(/\s+/g, '').toUpperCase();
+  return String(value || '')
+    .replace(/\s+/g, '')
+    .toUpperCase();
 }
 
 export function inspectCredentialSet(platformValue, env = process.env) {
@@ -66,9 +70,9 @@ export function buildWindowsSigningConfig(thumbprint) {
     throw new Error('cannot build Windows signing config without a valid certificate thumbprint');
   }
   return {
-    bundle: {
-      windows: {
-        certificateThumbprint: normalized,
+    win: {
+      signtoolOptions: {
+        certificateSha1: normalized,
       },
     },
   };
@@ -80,7 +84,9 @@ function evidencePath(path) {
 }
 
 async function sha256File(path) {
-  return createHash('sha256').update(await readFile(path)).digest('hex');
+  return createHash('sha256')
+    .update(await readFile(path))
+    .digest('hex');
 }
 
 async function nonEmptyFile(path) {
@@ -92,9 +98,7 @@ async function nonEmptyFile(path) {
 async function filesIn(path, predicate) {
   if (!existsSync(path)) return [];
   const entries = await readdir(path, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && predicate(entry.name))
-    .map((entry) => join(path, entry.name));
+  return entries.filter((entry) => entry.isFile() && predicate(entry.name)).map((entry) => join(path, entry.name));
 }
 
 async function hashDirectory(path) {
@@ -127,9 +131,7 @@ async function hashDirectory(path) {
 async function directoriesIn(path, predicate) {
   if (!existsSync(path)) return [];
   const entries = await readdir(path, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isDirectory() && predicate(entry.name))
-    .map((entry) => join(path, entry.name));
+  return entries.filter((entry) => entry.isDirectory() && predicate(entry.name)).map((entry) => join(path, entry.name));
 }
 
 function run(command, args, options = {}) {
@@ -147,22 +149,33 @@ function run(command, args, options = {}) {
 
 async function collectWindowsArtifacts(bundleRoot) {
   const root = resolve(bundleRoot);
-  const directExecutables = await filesIn(root, (name) => extname(name).toLowerCase() === '.exe');
-  const nsis = await filesIn(join(root, 'bundle', 'nsis'), (name) => extname(name).toLowerCase() === '.exe');
-  const msi = await filesIn(join(root, 'bundle', 'msi'), (name) => extname(name).toLowerCase() === '.msi');
-  const artifacts = [...new Set([...directExecutables, ...nsis, ...msi])];
-  if (!directExecutables.length || !nsis.length || !msi.length) {
+  const entries = await readdir(root, { withFileTypes: true });
+  const nsis = entries
+    .filter((entry) => entry.isFile() && extname(entry.name).toLowerCase() === '.exe')
+    .map((entry) => join(root, entry.name));
+  const msi = entries
+    .filter((entry) => entry.isFile() && extname(entry.name).toLowerCase() === '.msi')
+    .map((entry) => join(root, entry.name));
+  const unpackedDirs = entries
+    .filter((entry) => entry.isDirectory() && /^win(?:-[^-]+)?-unpacked$/i.test(entry.name))
+    .map((entry) => join(root, entry.name));
+  const apps = [];
+  for (const dir of unpackedDirs) {
+    apps.push(...(await filesIn(dir, (name) => /^StudyVault\.exe$/i.test(name))));
+  }
+  const artifacts = [...new Set([...apps, ...nsis, ...msi])];
+  if (!apps.length || !nsis.length || !msi.length) {
     throw new Error('Windows signing verification requires the app executable plus non-empty NSIS and MSI artifacts');
   }
-  return artifacts;
+  return { apps: new Set(apps), nsis: new Set(nsis), msi: new Set(msi), artifacts };
 }
 
 function windowsSignature(path) {
   const script = [
-    "$signature = Get-AuthenticodeSignature -LiteralPath $env:STUDYVAULT_SIGN_TARGET",
-    "$cert = $signature.SignerCertificate",
-    "$timestamp = $signature.TimeStamperCertificate",
-    "[ordered]@{ status = [string]$signature.Status; thumbprint = if ($cert) { $cert.Thumbprint } else { $null }; subject = if ($cert) { $cert.Subject } else { $null }; timestampThumbprint = if ($timestamp) { $timestamp.Thumbprint } else { $null } } | ConvertTo-Json -Compress",
+    '$signature = Get-AuthenticodeSignature -LiteralPath $env:STUDYVAULT_SIGN_TARGET',
+    '$cert = $signature.SignerCertificate',
+    '$timestamp = $signature.TimeStamperCertificate',
+    '[ordered]@{ status = [string]$signature.Status; thumbprint = if ($cert) { $cert.Thumbprint } else { $null }; subject = if ($cert) { $cert.Subject } else { $null }; timestampThumbprint = if ($timestamp) { $timestamp.Thumbprint } else { $null } } | ConvertTo-Json -Compress',
   ].join('; ');
   const env = { ...process.env, STUDYVAULT_SIGN_TARGET: resolve(path) };
   let result;
@@ -186,7 +199,8 @@ export async function verifyWindowsArtifacts({
     throw new Error('Windows verification requires WINDOWS_CERT_THUMBPRINT');
   }
   const artifacts = [];
-  for (const path of await collectWindowsArtifacts(bundleRoot)) {
+  const collected = await collectWindowsArtifacts(bundleRoot);
+  for (const path of collected.artifacts) {
     if (!(await nonEmptyFile(path))) throw new Error(`empty Windows release artifact: ${path}`);
     const signature = signatureInspector(path);
     const actual = normalizeThumbprint(signature.thumbprint);
@@ -199,10 +213,10 @@ export async function verifyWindowsArtifacts({
     const info = await stat(path);
     artifacts.push({
       path: evidencePath(path),
-      kind: extname(path).toLowerCase() === '.msi' ? 'msi' : path.includes(`${join('bundle', 'nsis')}`) ? 'nsis' : 'app',
+      kind: collected.msi.has(path) ? 'msi' : collected.nsis.has(path) ? 'nsis' : 'app',
       size: info.size,
       sha256: await sha256File(path),
-      published: path.includes(`${join('bundle', 'nsis')}`) || extname(path).toLowerCase() === '.msi',
+      published: collected.nsis.has(path) || collected.msi.has(path),
       signed: true,
       verified: true,
       timestamped: true,
@@ -217,8 +231,14 @@ export async function verifyWindowsArtifacts({
 
 async function collectMacArtifacts(bundleRoot) {
   const root = resolve(bundleRoot);
-  const apps = await directoriesIn(join(root, 'bundle', 'macos'), (name) => name.endsWith('.app'));
-  const dmgs = await filesIn(join(root, 'bundle', 'dmg'), (name) => name.endsWith('.dmg'));
+  const entries = await readdir(root, { withFileTypes: true });
+  const apps = [];
+  for (const entry of entries.filter((item) => item.isDirectory() && /^mac(?:-[^-]+)?$/i.test(item.name))) {
+    apps.push(...(await directoriesIn(join(root, entry.name), (name) => name.endsWith('.app'))));
+  }
+  const dmgs = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.dmg'))
+    .map((entry) => join(root, entry.name));
   if (!apps.length || !dmgs.length) {
     throw new Error('macOS signing verification requires both a .app bundle and a non-empty DMG');
   }
@@ -281,7 +301,15 @@ export async function verifyMacArtifacts({
   for (const path of dmgs) {
     if (!(await nonEmptyFile(path))) throw new Error(`empty macOS release artifact: ${path}`);
     commandRunner('codesign', ['--verify', '--strict', '--verbose=2', path]);
-    commandRunner('spctl', ['--assess', '--type', 'open', '--context', 'context:primary-signature', '--verbose=4', path]);
+    commandRunner('spctl', [
+      '--assess',
+      '--type',
+      'open',
+      '--context',
+      'context:primary-signature',
+      '--verbose=4',
+      path,
+    ]);
     const signer = codeSignInspector(path);
     if (
       signer.authority !== identity ||
@@ -346,9 +374,7 @@ export function validateSigningEvidence(evidence, { requireSigned = false } = {}
     if (
       artifacts.some(
         (item) =>
-          !Number.isInteger(item?.size) ||
-          item.size <= 0 ||
-          !/^[a-f0-9]{64}$/i.test(String(item?.sha256 || '')),
+          !Number.isInteger(item?.size) || item.size <= 0 || !/^[a-f0-9]{64}$/i.test(String(item?.sha256 || '')),
       )
     ) {
       errors.push('one or more signing artifacts lack size or SHA-256 evidence');
@@ -356,10 +382,16 @@ export function validateSigningEvidence(evidence, { requireSigned = false } = {}
     if (platform === 'windows' && artifacts.some((item) => !item?.signer?.thumbprint)) {
       errors.push('one or more Windows artifacts lack signer thumbprint evidence');
     }
-    if (platform === 'windows' && artifacts.some((item) => item?.timestamped !== true || !item?.timestamp?.thumbprint)) {
+    if (
+      platform === 'windows' &&
+      artifacts.some((item) => item?.timestamped !== true || !item?.timestamp?.thumbprint)
+    ) {
       errors.push('one or more Windows artifacts lack trusted timestamp evidence');
     }
-    if (platform === 'windows' && !['app', 'nsis', 'msi'].every((kind) => artifacts.some((item) => item?.kind === kind))) {
+    if (
+      platform === 'windows' &&
+      !['app', 'nsis', 'msi'].every((kind) => artifacts.some((item) => item?.kind === kind))
+    ) {
       errors.push('Windows signing evidence must include app, NSIS, and MSI artifacts');
     }
     if (platform === 'windows' && new Set(artifacts.map((item) => item?.signer?.thumbprint)).size !== 1) {
@@ -367,18 +399,14 @@ export function validateSigningEvidence(evidence, { requireSigned = false } = {}
     }
     if (
       platform === 'macos' &&
-      artifacts.some(
-        (item) =>
-          item?.timestamped !== true ||
-          !item?.signer?.authority ||
-          !item?.signer?.teamIdentifier,
-      )
+      artifacts.some((item) => item?.timestamped !== true || !item?.signer?.authority || !item?.signer?.teamIdentifier)
     ) {
       errors.push('one or more macOS artifacts lack timestamp or signer evidence');
     }
     if (
       platform === 'macos' &&
-      new Set(artifacts.map((item) => `${item?.signer?.authority || ''}\0${item?.signer?.teamIdentifier || ''}`)).size !== 1
+      new Set(artifacts.map((item) => `${item?.signer?.authority || ''}\0${item?.signer?.teamIdentifier || ''}`))
+        .size !== 1
     ) {
       errors.push('macOS artifacts do not share one signer identity');
     }
@@ -429,9 +457,10 @@ export function validateSigningAssetBindings(evidence, bundleAssets) {
 
   const exactAssets = new Map(assets.map((item) => [item?.path, item]));
   for (const artifact of artifacts.filter((item) => item?.published === true)) {
-    const bound = platform === 'macos' && artifact.kind === 'app'
-      ? directoryDigestFromAssets(assets, artifact.path)
-      : exactAssets.get(artifact.path);
+    const bound =
+      platform === 'macos' && artifact.kind === 'app'
+        ? directoryDigestFromAssets(assets, artifact.path)
+        : exactAssets.get(artifact.path);
     if (!bound || bound.sha256 !== artifact.sha256 || Number(bound.size) !== Number(artifact.size)) {
       errors.push(`signing evidence is not bound to bundle asset: ${artifact.path || '<missing>'}`);
     }
@@ -440,13 +469,16 @@ export function validateSigningAssetBindings(evidence, bundleAssets) {
   const uncovered = assets.filter((asset) => {
     const path = String(asset?.path || '');
     if (platform === 'windows') {
-      const required = path.endsWith('.msi') || (/\/bundle\/nsis\//.test(path) && path.endsWith('.exe'));
+      const required = path.endsWith('.msi') || /^release\/[^/]+\.exe$/i.test(path);
       return required && !artifacts.some((item) => item?.published === true && item.path === path);
     }
     const app = artifacts.find((item) => item?.kind === 'app' && item?.published === true);
     const required = path.endsWith('.dmg') || path.includes('.app/');
-    return required && !artifacts.some((item) => item?.published === true && item.path === path) &&
-      !(app && path.startsWith(`${app.path}/`));
+    return (
+      required &&
+      !artifacts.some((item) => item?.published === true && item.path === path) &&
+      !(app && path.startsWith(`${app.path}/`))
+    );
   });
   if (uncovered.length) errors.push('one or more published bundle assets lack signing evidence');
   return { ok: errors.length === 0, errors };
@@ -490,18 +522,19 @@ async function main() {
   }
   if (opts.command === 'verify') {
     if (!opts.bundleRoot || !opts.output) throw new Error('verify requires --bundle-root and --output');
-    const evidence = platform === 'windows'
-      ? await verifyWindowsArtifacts({
-          bundleRoot: opts.bundleRoot,
-          expectedThumbprint: process.env.WINDOWS_CERT_THUMBPRINT,
-        })
-      : platform === 'macos'
-        ? await verifyMacArtifacts({
+    const evidence =
+      platform === 'windows'
+        ? await verifyWindowsArtifacts({
             bundleRoot: opts.bundleRoot,
-            expectedIdentity: process.env.APPLE_SIGNING_IDENTITY,
-            expectedTeamId: process.env.APPLE_TEAM_ID,
+            expectedThumbprint: process.env.WINDOWS_CERT_THUMBPRINT,
           })
-        : signingEvidence('linux', []);
+        : platform === 'macos'
+          ? await verifyMacArtifacts({
+              bundleRoot: opts.bundleRoot,
+              expectedIdentity: process.env.APPLE_SIGNING_IDENTITY,
+              expectedTeamId: process.env.APPLE_TEAM_ID,
+            })
+          : signingEvidence('linux', []);
     const validation = validateSigningEvidence(evidence, { requireSigned: platform !== 'linux' });
     if (!validation.ok) throw new Error(validation.errors.join('; '));
     await writeJson(resolve(opts.output), evidence);

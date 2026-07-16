@@ -198,7 +198,11 @@ export function packCurriculumChunks(settings, chunks, opts = {}) {
   // themselves; the rest stays available for the question / topic text.
   const groundingTokens = Math.max(512, Math.floor(budget.forUserAndGrounding * 0.75));
   const packed = packExcerpts(chunks || [], groundingTokens, (c) => c?.text || '');
-  const rendered = renderExcerpts(packed.kept, (c) => c?.locator || (opts.defaultLocator ?? 'excerpt'), (c) => c?.text || '');
+  const rendered = renderExcerpts(
+    packed.kept,
+    (c) => c?.locator || (opts.defaultLocator ?? 'excerpt'),
+    (c) => c?.text || '',
+  );
   return {
     text: rendered,
     keptCount: packed.kept.length,
@@ -235,10 +239,7 @@ function normalizeBaseUrl(baseUrl) {
   // text — to a REMOTE endpoint, silently breaking the offline/no-cloud promise.
   // Runtime model endpoints must be loopback-only; remote/LAN model servers need
   // an explicit backend-side opt-out, not a browser fetch of study material.
-  return normalizeLoopbackHttpBaseUrl(
-    baseUrl || DEFAULT_LLM_SETTINGS.baseUrl,
-    'Local model base URL',
-  );
+  return normalizeLoopbackHttpBaseUrl(baseUrl || DEFAULT_LLM_SETTINGS.baseUrl, 'Local model base URL');
 }
 
 export async function checkLlmConnection(settings) {
@@ -294,13 +295,11 @@ function structuredCompletion({ settings, messages, responseFormat, systemSuffix
 
   // Determinism contract: fixed seed + pinned temperature/top_p. response_format
   // is part of the body so identical structured calls share a dedup signature.
-  const body = withDeterminism(
-    {
-      model,
-      messages: withSuffix,
-      ...(responseFormat ? { response_format: responseFormat } : {}),
-    },
-  );
+  const body = withDeterminism({
+    model,
+    messages: withSuffix,
+    ...(responseFormat ? { response_format: responseFormat } : {}),
+  });
 
   const signature = requestSignature(endpoint, body);
 
@@ -320,7 +319,7 @@ function structuredCompletion({ settings, messages, responseFormat, systemSuffix
       if (error?.isLlmTimeout) throw error;
       if (error?.name === 'AbortError') throw error;
       throw new Error(
-        `Could not reach ${base} from the browser. If you are using LM Studio, open its Developer / Server panel and enable CORS for "*" (then restart the server). For Ollama, start it with OLLAMA_ORIGINS=* set. The desktop (Tauri) shell does not need this — it calls the model natively.`,
+        `Could not reach ${base}. If you are using LM Studio, enable CORS for the StudyVault origin and restart the server. For Ollama, include the StudyVault origin in OLLAMA_ORIGINS.`,
         { cause: error },
       );
     }
@@ -362,7 +361,9 @@ export async function generateQuestionsFromCurriculum({ settings, topicTitle, ch
     // error-matching keeps working; only schema failure maps to the legacy
     // "parseable" message the UI + tests expect.
     if (error?.isStructuredOutputError || error instanceof StructuredOutputError) {
-      throw new Error('The model did not return parseable questions. Try a more capable local model.', { cause: error });
+      throw new Error('The model did not return parseable questions. Try a more capable local model.', {
+        cause: error,
+      });
     }
     throw error;
   }
@@ -396,14 +397,22 @@ export async function generateQuestionsFromCurriculum({ settings, topicTitle, ch
  * user's choice is wrong — grounded by the question's existing explanation
  * (when present) so the model has something to anchor on.
  */
-export async function explainWrongAnswer({ settings, question, options, correctIndex, userIndex, baseExplanation, signal }) {
+export async function explainWrongAnswer({
+  settings,
+  question,
+  options,
+  correctIndex,
+  userIndex,
+  baseExplanation,
+  signal,
+}) {
   const base = normalizeBaseUrl(settings?.baseUrl);
   const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
   const letters = ['A', 'B', 'C', 'D', 'E'];
   const lines = options.map((option, index) => `${letters[index] || index + 1}. ${option}`).join('\n');
   const system =
     'You are a patient CFA tutor. The student picked the wrong option on a multiple-choice question. ' +
-    'Explain in 3-5 sentences why the correct option is right, then briefly why the student\'s choice is a common trap. ' +
+    "Explain in 3-5 sentences why the correct option is right, then briefly why the student's choice is a common trap. " +
     'Be concrete and quantitative where it helps. Do not restate the question text.';
   const user = `Question: ${question}\n\nOptions:\n${lines}\n\nCorrect answer: ${letters[correctIndex] || correctIndex + 1}\nStudent picked: ${letters[userIndex] || userIndex + 1}${baseExplanation ? `\n\nProvided explanation context:\n${baseExplanation}` : ''}`;
 
@@ -434,7 +443,7 @@ export async function explainWrongAnswer({ settings, question, options, correctI
       if (error?.isLlmTimeout) throw error;
       if (error?.name === 'AbortError') throw error;
       throw new Error(
-        `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+        `Could not reach ${base}. Enable CORS in LM Studio (Developer/Server panel) or include the StudyVault origin in OLLAMA_ORIGINS.`,
         { cause: error },
       );
     }
@@ -464,16 +473,18 @@ export async function critiqueConstructedResponse({ settings, prompt, response, 
   const model = (settings?.model || DEFAULT_LLM_SETTINGS.model).trim();
 
   const system =
-    'You are a CFA Level III rubric grader. Score the candidate\'s response against EACH rubric criterion. ' +
-    'For every criterion output: a short verdict (Met / Partial / Missed), 1-2 sentences of evidence-based feedback grounded in the candidate\'s actual words, ' +
+    "You are a CFA Level III rubric grader. Score the candidate's response against EACH rubric criterion. " +
+    "For every criterion output: a short verdict (Met / Partial / Missed), 1-2 sentences of evidence-based feedback grounded in the candidate's actual words, " +
     'and 1 concrete improvement suggestion. Do NOT inflate scores — be exam-realistic.';
 
   const criteriaBlock = (rubric || [])
-    .map((criterion) => `Criterion [${criterion.id}] "${criterion.label}" — max ${criterion.maxPoints} pt${criterion.maxPoints !== 1 ? 's' : ''}${criterion.description ? `: ${criterion.description}` : ''}`)
+    .map(
+      (criterion) =>
+        `Criterion [${criterion.id}] "${criterion.label}" — max ${criterion.maxPoints} pt${criterion.maxPoints !== 1 ? 's' : ''}${criterion.description ? `: ${criterion.description}` : ''}`,
+    )
     .join('\n');
 
-  const user =
-    `Prompt:\n${prompt}\n\nRubric criteria:\n${criteriaBlock}\n\nCandidate response:\n${response}`;
+  const user = `Prompt:\n${prompt}\n\nRubric criteria:\n${criteriaBlock}\n\nCandidate response:\n${response}`;
 
   const endpoint = `${base}/chat/completions`;
   const body = {
@@ -502,7 +513,7 @@ export async function critiqueConstructedResponse({ settings, prompt, response, 
       if (error?.isLlmTimeout) throw error;
       if (error?.name === 'AbortError') throw error;
       throw new Error(
-        `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+        `Could not reach ${base}. Enable CORS in LM Studio (Developer/Server panel) or include the StudyVault origin in OLLAMA_ORIGINS.`,
         { cause: error },
       );
     }
@@ -548,7 +559,10 @@ export async function gradeConstructedResponseStructured({ settings, prompt, res
   }
 
   const criteriaBlock = safeRubric
-    .map((c) => `  - id: "${c.id}", label: "${c.label}", max ${c.maxPoints} pt${c.maxPoints !== 1 ? 's' : ''}${c.description ? `, guidance: ${c.description}` : ''}`)
+    .map(
+      (c) =>
+        `  - id: "${c.id}", label: "${c.label}", max ${c.maxPoints} pt${c.maxPoints !== 1 ? 's' : ''}${c.description ? `, guidance: ${c.description}` : ''}`,
+    )
     .join('\n');
 
   // AI-3 — system/user prompt + schema from the versioned registry.
@@ -640,13 +654,14 @@ export async function gradeConstructedResponseStructured({ settings, prompt, res
   if (percent >= 70) verdict = 'PASS';
   else if (percent >= 50) verdict = 'BORDERLINE';
 
-  const summary = typeof parsed?.summary === 'string' && parsed.summary.trim()
-    ? parsed.summary.trim()
-    : verdict === 'PASS'
-      ? 'Solid Level-III answer overall — minor gaps remain.'
-      : verdict === 'BORDERLINE'
-        ? 'On the edge — the response addresses most criteria but has notable gaps.'
-        : 'Substantial gaps against the rubric — revisit the underlying concept and try again.';
+  const summary =
+    typeof parsed?.summary === 'string' && parsed.summary.trim()
+      ? parsed.summary.trim()
+      : verdict === 'PASS'
+        ? 'Solid Level-III answer overall — minor gaps remain.'
+        : verdict === 'BORDERLINE'
+          ? 'On the edge — the response addresses most criteria but has notable gaps.'
+          : 'Substantial gaps against the rubric — revisit the underlying concept and try again.';
 
   return {
     overall: { verdict, percent, total, max, summary },
@@ -702,7 +717,7 @@ export async function narrateStudyPlan({ settings, plan, signal }) {
       if (error?.isLlmTimeout) throw error;
       if (error?.name === 'AbortError') throw error;
       throw new Error(
-        `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+        `Could not reach ${base}. Enable CORS in LM Studio (Developer/Server panel) or include the StudyVault origin in OLLAMA_ORIGINS.`,
         { cause: error },
       );
     }
@@ -761,7 +776,7 @@ export async function summarizeTopicFromCurriculum({ settings, topicTitle, chunk
       if (error?.isLlmTimeout) throw error;
       if (error?.name === 'AbortError') throw error;
       throw new Error(
-        `Could not reach ${base} from the browser. Enable CORS in LM Studio (Developer/Server panel) or start Ollama with OLLAMA_ORIGINS=* set. The Tauri shell does not need this.`,
+        `Could not reach ${base}. Enable CORS in LM Studio (Developer/Server panel) or include the StudyVault origin in OLLAMA_ORIGINS.`,
         { cause: error },
       );
     }
@@ -784,7 +799,11 @@ export async function getCachedGeneratedQuestions(level, topic) {
 
 export async function saveCachedGeneratedQuestions(level, topic, questions) {
   const payload = { questions, generatedAt: new Date().toISOString() };
-  await getStorage().settings.put({ key: `ai-questions:${level}:${topic}`, value: payload, updatedAt: payload.generatedAt });
+  await getStorage().settings.put({
+    key: `ai-questions:${level}:${topic}`,
+    value: payload,
+    updatedAt: payload.generatedAt,
+  });
   return payload;
 }
 
@@ -799,7 +818,11 @@ export async function getCachedGeneratedFlashcards(level, topic) {
 
 export async function saveCachedGeneratedFlashcards(level, topic, flashcards) {
   const payload = { flashcards, generatedAt: new Date().toISOString() };
-  await getStorage().settings.put({ key: `flash-cards:${level}:${topic}`, value: payload, updatedAt: payload.generatedAt });
+  await getStorage().settings.put({
+    key: `flash-cards:${level}:${topic}`,
+    value: payload,
+    updatedAt: payload.generatedAt,
+  });
   return payload;
 }
 
@@ -814,7 +837,11 @@ export async function getCachedTopicSummary(level, topic) {
 
 export async function saveCachedTopicSummary(level, topic, summary) {
   const payload = { summary, generatedAt: new Date().toISOString() };
-  await getStorage().settings.put({ key: `topic-summary:${level}:${topic}`, value: payload, updatedAt: payload.generatedAt });
+  await getStorage().settings.put({
+    key: `topic-summary:${level}:${topic}`,
+    value: payload,
+    updatedAt: payload.generatedAt,
+  });
   return payload;
 }
 
@@ -858,7 +885,9 @@ export async function generateFlashcardsFromCurriculum({ settings, topicTitle, c
     });
   } catch (error) {
     if (error?.isStructuredOutputError || error instanceof StructuredOutputError) {
-      throw new Error('The model did not return parseable flashcards. Try a more capable local model.', { cause: error });
+      throw new Error('The model did not return parseable flashcards. Try a more capable local model.', {
+        cause: error,
+      });
     }
     throw error;
   }
@@ -1057,8 +1086,8 @@ export async function streamText({
           const wrapped =
             typeof error?.status === 'number'
               ? new Error(`Local model server responded ${error.status}.`, { cause: error })
-              // Genuine connection failures (TypeError) → the CORS-actionable hint.
-              : isStreamTimeout(error)
+              : // Genuine connection failures (TypeError) → the CORS-actionable hint.
+                isStreamTimeout(error)
                 ? error
                 : wrapConnectError(error);
           onError?.(wrapped);

@@ -2,7 +2,7 @@ import { getStorage } from './storage';
 import { normalizeLoopbackHttpBaseUrl } from './localUrlPolicy';
 import { secureVault, type SecureCipher, type SecureVault } from './secureVault';
 
-// Embedded open-notebook integration. open-notebook runs as a local Tauri
+// Embedded open-notebook integration. open-notebook runs as a local Electron
 // sidecar (FastAPI on :5055, backed by SurrealDB and a surreal-commands job
 // worker). It gives QuantVault a real RAG pipeline — notebooks, embedded
 // sources, and grounded "ask" answers — over the user's own CFA curriculum.
@@ -79,10 +79,7 @@ export interface OnbConnection {
 }
 
 function normalizeBaseUrl(baseUrl?: string): string {
-  return normalizeLoopbackHttpBaseUrl(
-    baseUrl || DEFAULT_OPEN_NOTEBOOK_SETTINGS.baseUrl,
-    'open-notebook base URL',
-  );
+  return normalizeLoopbackHttpBaseUrl(baseUrl || DEFAULT_OPEN_NOTEBOOK_SETTINGS.baseUrl, 'open-notebook base URL');
 }
 
 export async function getOpenNotebookSettings(): Promise<OpenNotebookSettings> {
@@ -95,9 +92,7 @@ export async function getOpenNotebookSettings(): Promise<OpenNotebookSettings> {
   }
 }
 
-export async function saveOpenNotebookSettings(
-  settings: Partial<OpenNotebookSettings>,
-): Promise<OpenNotebookSettings> {
+export async function saveOpenNotebookSettings(settings: Partial<OpenNotebookSettings>): Promise<OpenNotebookSettings> {
   const merged = {
     ...DEFAULT_OPEN_NOTEBOOK_SETTINGS,
     ...settings,
@@ -137,7 +132,9 @@ async function request<T>(baseUrl: string, path: string, opts: RequestOptions = 
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      throw new Error(`open-notebook ${method} ${path} -> ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+      throw new Error(
+        `open-notebook ${method} ${path} -> ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`,
+      );
     }
     const text = await response.text();
     return (text ? JSON.parse(text) : null) as T;
@@ -168,7 +165,9 @@ export async function listModels(settings?: Pick<OpenNotebookSettings, 'baseUrl'
 }
 
 export async function listNotebooks(settings?: Pick<OpenNotebookSettings, 'baseUrl'>): Promise<OnbNotebook[]> {
-  const list = await request<OnbNotebook[]>(normalizeBaseUrl(settings?.baseUrl), '/api/notebooks', { timeoutMs: 10_000 });
+  const list = await request<OnbNotebook[]>(normalizeBaseUrl(settings?.baseUrl), '/api/notebooks', {
+    timeoutMs: 10_000,
+  });
   return Array.isArray(list) ? list : [];
 }
 
@@ -231,9 +230,7 @@ interface SearchNotebookSourcesParams {
 
 /** Tokenise a query into lowercase word stems for lexical overlap scoring. */
 function queryTokens(query: string): string[] {
-  return (query.toLowerCase().match(/[a-z0-9]{3,}/g) || []).filter(
-    (token, i, all) => all.indexOf(token) === i,
-  );
+  return (query.toLowerCase().match(/[a-z0-9]{3,}/g) || []).filter((token, i, all) => all.indexOf(token) === i);
 }
 
 /**
@@ -267,9 +264,7 @@ function lexicalOverlap(tokens: string[], haystack: string): number {
  * It deliberately does NOT run open-notebook's heavy `ask/simple` synthesis —
  * that stays the explicit, user-initiated path in `askGrounded`.
  */
-export async function searchNotebookSources(
-  params: SearchNotebookSourcesParams,
-): Promise<NotebookSourceHit[]> {
+export async function searchNotebookSources(params: SearchNotebookSourcesParams): Promise<NotebookSourceHit[]> {
   const query = (params.query || '').trim();
   if (!query) return [];
   const tokens = queryTokens(query);
@@ -310,11 +305,7 @@ export async function notebookSourcesAvailable(
   return Boolean(conn?.ok);
 }
 
-export async function createNotebook(
-  baseUrl: string,
-  name: string,
-  description = '',
-): Promise<OnbNotebook> {
+export async function createNotebook(baseUrl: string, name: string, description = ''): Promise<OnbNotebook> {
   return request<OnbNotebook>(baseUrl, '/api/notebooks', {
     method: 'POST',
     body: { name, description },
@@ -435,8 +426,7 @@ export async function ensureTopicNotebook(params: {
   const existing = map[params.topicKey];
 
   const existingNotebooks = await listNotebooks({ baseUrl: base });
-  const existingNotebook =
-    existing?.notebookId && existingNotebooks.some((n) => n.id === existing.notebookId);
+  const existingNotebook = existing?.notebookId && existingNotebooks.some((n) => n.id === existing.notebookId);
 
   if (existing?.notebookId && existingNotebook) {
     if (existing.sourceId) return existing;
@@ -521,7 +511,11 @@ export async function chatWithSource(params: {
     `/api/sources/${encodeURIComponent(params.sourceId)}/chat/sessions`,
     {
       method: 'POST',
-      body: { source_id: params.sourceId, title: 'QuantVault ask', ...(params.model ? { model_override: params.model } : {}) },
+      body: {
+        source_id: params.sourceId,
+        title: 'QuantVault ask',
+        ...(params.model ? { model_override: params.model } : {}),
+      },
       timeoutMs: 15_000,
       signal: params.signal,
     },
@@ -553,11 +547,9 @@ export interface OnbTransformation {
 export async function listTransformations(
   settings?: Pick<OpenNotebookSettings, 'baseUrl'>,
 ): Promise<OnbTransformation[]> {
-  const list = await request<OnbTransformation[]>(
-    normalizeBaseUrl(settings?.baseUrl),
-    '/api/transformations',
-    { timeoutMs: 10_000 },
-  );
+  const list = await request<OnbTransformation[]>(normalizeBaseUrl(settings?.baseUrl), '/api/transformations', {
+    timeoutMs: 10_000,
+  });
   return Array.isArray(list) ? list : [];
 }
 
@@ -568,10 +560,7 @@ export interface OnbSourceInsight {
   created?: string;
 }
 
-export async function listSourceInsights(
-  baseUrl: string,
-  sourceId: string,
-): Promise<OnbSourceInsight[]> {
+export async function listSourceInsights(baseUrl: string, sourceId: string): Promise<OnbSourceInsight[]> {
   const list = await request<OnbSourceInsight[]>(
     normalizeBaseUrl(baseUrl),
     `/api/sources/${encodeURIComponent(sourceId)}/insights`,
@@ -697,7 +686,11 @@ function answerCacheKey(level: string, topic: string): string {
 }
 
 function isAnswerCacheKey(key: string): boolean {
-  return key === NOTEBOOK_MAP_KEY || key.startsWith('open-notebook:answer:') || key.startsWith('open-notebook:answer-history:');
+  return (
+    key === NOTEBOOK_MAP_KEY ||
+    key.startsWith('open-notebook:answer:') ||
+    key.startsWith('open-notebook:answer-history:')
+  );
 }
 
 function isSecureOpenNotebookCacheValue(value: unknown): value is SecureOpenNotebookCacheValue {
@@ -713,7 +706,9 @@ function isSecureOpenNotebookCacheValue(value: unknown): value is SecureOpenNote
 
 function assertOpenNotebookCacheUnlocked(vault: SecureVault = openNotebookSecureVault) {
   if (!vault.isUnlocked()) {
-    throw new Error('Secure Vault is enabled but locked. Unlock it before reading or writing encrypted open-notebook settings rows.');
+    throw new Error(
+      'Secure Vault is enabled but locked. Unlock it before reading or writing encrypted open-notebook settings rows.',
+    );
   }
 }
 
@@ -742,7 +737,9 @@ async function decodeOpenNotebookCacheValue<T>(
   return JSON.parse(await vault.decrypt(value.payload)) as T;
 }
 
-export async function encryptExistingOpenNotebookAnswerCacheForSecureVault(vault: SecureVault = openNotebookSecureVault) {
+export async function encryptExistingOpenNotebookAnswerCacheForSecureVault(
+  vault: SecureVault = openNotebookSecureVault,
+) {
   if (!vault.isEnabled()) return { encrypted: 0, alreadyEncrypted: 0 };
   assertOpenNotebookCacheUnlocked(vault);
   const settings = getStorage().settings;
@@ -764,7 +761,9 @@ export async function encryptExistingOpenNotebookAnswerCacheForSecureVault(vault
   return { encrypted, alreadyEncrypted };
 }
 
-export async function decryptEncryptedOpenNotebookAnswerCacheForSecureVault(vault: SecureVault = openNotebookSecureVault) {
+export async function decryptEncryptedOpenNotebookAnswerCacheForSecureVault(
+  vault: SecureVault = openNotebookSecureVault,
+) {
   assertOpenNotebookCacheUnlocked(vault);
   const settings = getStorage().settings;
   const rows = (await settings.toArray()).filter(
@@ -783,10 +782,7 @@ export async function decryptEncryptedOpenNotebookAnswerCacheForSecureVault(vaul
 }
 
 /** Last grounded Q&A for a topic, so it survives navigation/reload. */
-export async function getCachedGroundedAnswer(
-  level: string,
-  topic: string,
-): Promise<CachedGroundedAnswer | null> {
+export async function getCachedGroundedAnswer(level: string, topic: string): Promise<CachedGroundedAnswer | null> {
   try {
     const key = answerCacheKey(level, topic);
     const row = await getStorage().settings.get(key);
@@ -820,10 +816,7 @@ function answerHistoryCacheKey(level: string, topic: string): string {
 }
 
 /** Last N grounded answers for a topic (newest first). */
-export async function getCachedGroundedAnswerHistory(
-  level: string,
-  topic: string,
-): Promise<CachedGroundedAnswer[]> {
+export async function getCachedGroundedAnswerHistory(level: string, topic: string): Promise<CachedGroundedAnswer[]> {
   try {
     const key = answerHistoryCacheKey(level, topic);
     const row = await getStorage().settings.get(key);
@@ -843,9 +836,7 @@ async function appendCachedGroundedAnswerHistory(
     const prior = await getCachedGroundedAnswerHistory(level, topic);
     // Dedupe: skip if the previous head matches this question+answer exactly.
     const filtered =
-      prior[0] && prior[0].question === entry.question && prior[0].answer === entry.answer
-        ? prior.slice(1)
-        : prior;
+      prior[0] && prior[0].question === entry.question && prior[0].answer === entry.answer ? prior.slice(1) : prior;
     const next = [entry, ...filtered].slice(0, ANSWER_HISTORY_MAX);
     const key = answerHistoryCacheKey(level, topic);
     await getStorage().settings.put({

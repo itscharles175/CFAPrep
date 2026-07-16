@@ -1,7 +1,7 @@
 # Testing & type-checking
 
-StudyVault is one repo with two TypeScript projects, a Python backend, and a
-Rust supervisor. Run the gate below before committing.
+StudyVault is one repo with two TypeScript projects, a Python backend, and an
+Electron main process. Run the gate below before committing.
 
 ## Frontend (host + vendored LSAT subtree)
 
@@ -9,10 +9,10 @@ The host app (`src/`, React 19) and the vendored LSAT domain
 (`src/domains/lsat/`) are **two TypeScript projects** that share one
 `node_modules` and one Vite build:
 
-| Project | Config | Scope | Command |
-|---|---|---|---|
-| Host | `tsconfig.json` | `src/` (excludes `src/domains/lsat` as root files) | `npx tsc --noEmit` |
-| LSAT subtree | `tsconfig.lsat.json` | `src/domains/lsat/` | `npx tsc -p tsconfig.lsat.json` |
+| Project      | Config               | Scope                                              | Command                         |
+| ------------ | -------------------- | -------------------------------------------------- | ------------------------------- |
+| Host         | `tsconfig.json`      | `src/` (excludes `src/domains/lsat` as root files) | `npx tsc --noEmit`              |
+| LSAT subtree | `tsconfig.lsat.json` | `src/domains/lsat/`                                | `npx tsc -p tsconfig.lsat.json` |
 
 Both are `strict: true`.
 
@@ -41,7 +41,7 @@ are equivalent — `tsconfig.lsat.json` remains the subtree's dedicated validato
 ```sh
 npm run doctor       # local toolchain/manifests/sidecar provenance/ports report
 npm run doctor -- --all # doctor plus version/OpenAPI/no-egress/docs/baseline gates
-npm run check:versions # package.json, Tauri, Cargo, optional .env, backend APP_VERSION
+npm run check:versions # package.json, optional .env, backend APP_VERSION
 npx eslint .          # 0 errors (a few pre-existing react-refresh warnings in main.jsx are accepted)
 npx vitest run        # unit + component tests (jsdom)
 npm run test:ci -- --coverage # host coverage floor + JUnit/JSON-summary artifacts
@@ -337,28 +337,29 @@ baseline so the schema-snapshot drift gate passes:
 node scripts/export-lsat-openapi.mjs --write   # writes services/lsat-backend/openapi-baseline.json
 ```
 
-## Tauri supervisor (Rust)
-
-From `src-tauri`:
+## Electron Runtime
 
 ```sh
-cargo fmt --all --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
+npx vitest run --project host electron
+npm run electron:build:dir
 ```
+
+Runtime tests cover the custom protocol, IPC contracts, file grants, secure
+storage, navigation policy, sidecar provenance, port conflicts, status
+aggregation, and LSAT request-header injection.
 
 ## Sidecar provenance
 
-After building packaged sidecars, verify the manifest that Tauri will bundle:
+After building packaged sidecars, verify the manifest Electron will bundle:
 
 ```sh
 npm run build:lsat-binary
 npm run check:sidecar-provenance
 ```
 
-The release workflow runs the same provenance check before `tauri build`. A
+The release workflow runs the same provenance check before `electron-builder`. A
 matching manifest lets startup proceed; a present manifest with a changed binary
-is refused by the Rust supervisor before launch.
+is refused by the Electron supervisor before launch.
 
 ## Local release gate
 
@@ -371,7 +372,7 @@ python scripts/release_local.py --timeout 3600
 
 It writes `dist/release_local_report.json`, `dist/release_trust.json`, and
 `dist/studyvault-release-manifest.json`. A release-ready run must finish with
-`release_trust.status == "ok"` and no blockers; skipped Tauri, e2e,
+`release_trust.status == "ok"` and no blockers; skipped Electron, e2e,
 sidecar-build, packaged-smoke, or release-manifest legs block at the release
 tier. Release trust also requires the always-on static/eval labels from the
 machine-readable report, including content validation, no-egress, direct
@@ -415,7 +416,7 @@ cd services/lsat-backend && python -m app.prompt_contracts --check
 6. `npm run bundle:report`
 7. `npm run check:no-egress`
 8. backend `pytest` with the 85% coverage floor (above)
-9. Rust gate when `src-tauri/` changed: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test --all-features`
+9. Electron runtime tests and unpacked-package validation when `electron/` changes
 10. `npm run check:sidecar-provenance` (when packaged sidecars changed)
 11. `node --import ./scripts/register-ts-loader.mjs scripts/rag-eval.mjs`
 12. `node --import ./scripts/register-ts-loader.mjs scripts/citation-faithfulness-eval.mjs`

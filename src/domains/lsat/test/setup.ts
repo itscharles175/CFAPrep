@@ -1,6 +1,6 @@
-import "@testing-library/jest-dom/vitest";
-import { QueryClient } from "@tanstack/react-query";
-import { beforeEach, vi } from "vitest";
+import '@testing-library/jest-dom/vitest';
+import { QueryClient } from '@tanstack/react-query';
+import { beforeEach, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // localStorage stub — isolate tests from real browser storage.
@@ -8,14 +8,22 @@ import { beforeEach, vi } from "vitest";
 const _storage: Record<string, string> = {};
 const localStorageMock: Storage = {
   getItem: (k) => _storage[k] ?? null,
-  setItem: (k, v) => { _storage[k] = String(v); },
-  removeItem: (k) => { delete _storage[k]; },
-  clear: () => { Object.keys(_storage).forEach((k) => delete _storage[k]); },
+  setItem: (k, v) => {
+    _storage[k] = String(v);
+  },
+  removeItem: (k) => {
+    delete _storage[k];
+  },
+  clear: () => {
+    Object.keys(_storage).forEach((k) => delete _storage[k]);
+  },
   key: (i) => Object.keys(_storage)[i] ?? null,
-  get length() { return Object.keys(_storage).length; },
+  get length() {
+    return Object.keys(_storage).length;
+  },
 };
 
-Object.defineProperty(globalThis, "localStorage", {
+Object.defineProperty(globalThis, 'localStorage', {
   value: localStorageMock,
   writable: true,
 });
@@ -37,14 +45,14 @@ export function createTestQueryClient() {
 }
 
 // ---------------------------------------------------------------------------
-// isTauri stub — always return false in tests so Tauri-gated paths are skipped.
+// Electron runtime stub - native-only paths stay disabled in LSAT unit tests.
 // ---------------------------------------------------------------------------
-vi.mock("@lsat/lib/tauri", async () => {
-  const actual = await vi.importActual<typeof import("@lsat/lib/tauri")>("@lsat/lib/tauri");
-  return { ...actual, isTauri: () => false };
+vi.mock('@lsat/lib/electron', async () => {
+  const actual = await vi.importActual<typeof import('@lsat/lib/electron')>('@lsat/lib/electron');
+  return { ...actual, isElectron: () => false };
 });
 
 // ---------------------------------------------------------------------------
 // fetch mock — point at nowhere so accidental real requests fail fast.
 // ---------------------------------------------------------------------------
-globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("fetch is not available in tests"));
+globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('fetch is not available in tests'));

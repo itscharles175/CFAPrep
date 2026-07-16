@@ -32,7 +32,7 @@ const BULK_CHUNK_SIZE = 500;
 
 /**
  * SurrealDriver — connects to the open-notebook SurrealDB sidecar (supervised
- * by the Tauri shell at localhost:8000).
+ * by the Electron supervisor at localhost:8000).
  *
  * DISABLED BY DEFAULT: `ready()` returns false when the sidecar is unreachable,
  * and the registry will not switch to this driver in that case.
@@ -51,7 +51,10 @@ async function getClient(): Promise<Surreal> {
       await client.use({ namespace: SIDECAR_NAMESPACE, database: SIDECAR_DATABASE });
     })(),
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`SurrealDB connect timed out after ${CONNECT_TIMEOUT_MS}ms`)), CONNECT_TIMEOUT_MS),
+      setTimeout(
+        () => reject(new Error(`SurrealDB connect timed out after ${CONNECT_TIMEOUT_MS}ms`)),
+        CONNECT_TIMEOUT_MS,
+      ),
     ),
   ]);
 
@@ -285,10 +288,7 @@ const chunks: ChunkStore = {
         // FOR loop can build the record reference deterministically.
         _id: sanitiseId(c.id),
       }));
-      await client.query(
-        `FOR $c IN $chunks { UPSERT type::thing('chunks', $c._id) MERGE $c; };`,
-        { chunks: batch },
-      );
+      await client.query(`FOR $c IN $chunks { UPSERT type::thing('chunks', $c._id) MERGE $c; };`, { chunks: batch });
     }
   },
 
@@ -415,7 +415,9 @@ const reviewItems: ReviewItemStore = {
   async put(item: ReviewItem): Promise<void> {
     const client = await getClient();
     await ensureSchema(client);
-    await client.upsert(new StringRecordId(`review_items:${sanitiseId(item.id)}`), { ...item } as unknown as SurrealRecord);
+    await client.upsert(new StringRecordId(`review_items:${sanitiseId(item.id)}`), {
+      ...item,
+    } as unknown as SurrealRecord);
   },
 
   async bulkPut(items: ReviewItem[]): Promise<void> {
@@ -424,7 +426,7 @@ const reviewItems: ReviewItemStore = {
     await ensureSchema(client);
     for (let i = 0; i < items.length; i += BULK_CHUNK_SIZE) {
       const batch = items.slice(i, i + BULK_CHUNK_SIZE).map((item) => ({ ...item, _id: sanitiseId(item.id) }));
-      await client.query('FOR $r IN $rows { UPSERT type::thing(\'review_items\', $r._id) MERGE $r; };', { rows: batch });
+      await client.query("FOR $r IN $rows { UPSERT type::thing('review_items', $r._id) MERGE $r; };", { rows: batch });
     }
   },
 
@@ -505,7 +507,9 @@ const masterySnapshots: MasterySnapshotStore = {
   async put(snap: MasterySnapshot): Promise<void> {
     const client = await getClient();
     await ensureSchema(client);
-    await client.upsert(new StringRecordId(`mastery_snapshots:${sanitiseId(snap.id)}`), { ...snap } as unknown as SurrealRecord);
+    await client.upsert(new StringRecordId(`mastery_snapshots:${sanitiseId(snap.id)}`), {
+      ...snap,
+    } as unknown as SurrealRecord);
   },
 
   async toArray(): Promise<MasterySnapshot[]> {
@@ -621,9 +625,7 @@ function createSurrealTable<T>(name: string): KeyedTable<T> {
     async count() {
       const client = await getClient();
       await ensureSchema(client);
-      const result = await client.query<[Array<{ count: number }>]>(
-        `SELECT count() AS count FROM ${name} GROUP ALL;`,
-      );
+      const result = await client.query<[Array<{ count: number }>]>(`SELECT count() AS count FROM ${name} GROUP ALL;`);
       const rows = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : [];
       return rows.length > 0 ? Number(rows[0]?.count ?? 0) : 0;
     },
@@ -637,10 +639,7 @@ function createSurrealTable<T>(name: string): KeyedTable<T> {
     async whereEquals(field, value) {
       const client = await getClient();
       await ensureSchema(client);
-      const result = await client.query<[SurrealRecord[]]>(
-        `SELECT * FROM ${name} WHERE ${field} = $value;`,
-        { value },
-      );
+      const result = await client.query<[SurrealRecord[]]>(`SELECT * FROM ${name} WHERE ${field} = $value;`, { value });
       const rows = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : [];
       return rows as unknown as T[];
     },
@@ -648,10 +647,9 @@ function createSurrealTable<T>(name: string): KeyedTable<T> {
     async whereAnyOf(field, values) {
       const client = await getClient();
       await ensureSchema(client);
-      const result = await client.query<[SurrealRecord[]]>(
-        `SELECT * FROM ${name} WHERE ${field} IN $values;`,
-        { values },
-      );
+      const result = await client.query<[SurrealRecord[]]>(`SELECT * FROM ${name} WHERE ${field} IN $values;`, {
+        values,
+      });
       const rows = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : [];
       return rows as unknown as T[];
     },
@@ -704,11 +702,7 @@ export const surrealDriver: StorageDriver = {
     return createSurrealTable<T>(name);
   },
 
-  async transaction<T>(
-    _tables: string[],
-    _mode: 'rw',
-    fn: (tx: StorageTransactionScope) => Promise<T>,
-  ): Promise<T> {
+  async transaction<T>(_tables: string[], _mode: 'rw', fn: (tx: StorageTransactionScope) => Promise<T>): Promise<T> {
     // runtime-verify-gated best-effort (see block comment above): sequential,
     // order-preserving, no cross-table rollback. Open the connection up front so
     // a connect failure surfaces before any partial write (mirrors the named

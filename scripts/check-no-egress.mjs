@@ -7,7 +7,8 @@
  * `fetch('https://…')` in shipped source would compile, build, and ship green,
  * silently breaking offline-only operation. This is the gate that makes the
  * invariant real: a conservative static scan of the SHIPPED runtime source —
- * the host app (`src/`) and the LSAT backend (`services/lsat-backend/app/`) —
+ * the renderer (`src/`), Electron host (`electron/`), and LSAT backend
+ * (`services/lsat-backend/app/`) —
  * that FAILS the build when it finds non-loopback network egress OUTSIDE an
  * explicit, documented allowlist.
  *
@@ -58,17 +59,23 @@ const REPO_ROOT = resolve(SCRIPT_DIR, '..');
 // vendored test suites are intentionally out of scope: a build script fetching a
 // dataset at dev time is not a shipped-runtime egress, and this very file plus
 // the docs name plenty of hosts in prose.
-const ROOTS = [
-  join(REPO_ROOT, 'src'),
-  join(REPO_ROOT, 'services', 'lsat-backend', 'app'),
-];
+const ROOTS = [join(REPO_ROOT, 'src'), join(REPO_ROOT, 'electron'), join(REPO_ROOT, 'services', 'lsat-backend', 'app')];
 
 const SCAN_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py']);
 
 // Directories never worth scanning (build output, deps, caches, generated meta).
 const SKIP_DIRS = new Set([
-  'node_modules', '.git', 'dist', 'build', '__pycache__', '.venv', '.venv-lsat',
-  'coverage', '.pytest_cache', '.mypy_cache', '_meta',
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  '__pycache__',
+  '.venv',
+  '.venv-lsat',
+  'coverage',
+  '.pytest_cache',
+  '.mypy_cache',
+  '_meta',
 ]);
 
 // File-name patterns that DESCRIBE or TEST egress rather than perform it at
@@ -163,12 +170,7 @@ function isAllowlisted(relFile, host) {
  * seen. */
 function isCommentOnlyLine(line) {
   const t = line.trim();
-  return (
-    t.startsWith('//') ||
-    t.startsWith('#') ||
-    t.startsWith('*') ||
-    t.startsWith('/*')
-  );
+  return t.startsWith('//') || t.startsWith('#') || t.startsWith('*') || t.startsWith('/*');
 }
 
 /** Is this non-loopback URL actually used as a network endpoint on this line?
@@ -271,14 +273,14 @@ function main() {
   if (allFindings.length === 0) {
     console.log(
       `check-no-egress: OK — scanned ${scanned} shipped source files; ` +
-      `no non-loopback egress outside the allowlist (${ALLOWLIST.length} entries).`,
+        `no non-loopback egress outside the allowlist (${ALLOWLIST.length} entries).`,
     );
     process.exit(0);
   }
 
   console.error(
     `\ncheck-no-egress: FAIL — found ${allFindings.length} non-loopback egress ` +
-    `point(s) in shipped source outside the allowlist:\n`,
+      `point(s) in shipped source outside the allowlist:\n`,
   );
   for (const f of allFindings) {
     console.error(`  ${f.file}:${f.line}  ->  ${f.host}`);
@@ -286,8 +288,8 @@ function main() {
   }
   console.error(
     '\nStudyVault ships offline-only ("works on a plane"). If this egress is a ' +
-    'NEW, intentional, opt-in path, add it to ALLOWLIST in scripts/check-no-egress.mjs ' +
-    'with a justification. Otherwise remove it or route it through a loopback sidecar.\n',
+      'NEW, intentional, opt-in path, add it to ALLOWLIST in scripts/check-no-egress.mjs ' +
+      'with a justification. Otherwise remove it or route it through a loopback sidecar.\n',
   );
   process.exit(1);
 }

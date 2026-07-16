@@ -22,7 +22,7 @@ const __filename = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = dirname(__filename);
 export const REPO_ROOT = resolve(SCRIPT_DIR, '..');
 export const DEFAULT_OUTPUT = resolve(REPO_ROOT, 'dist', 'studyvault-release-manifest.json');
-export const SCHEMA = 'studyvault.release-manifest.v1';
+export const SCHEMA = 'studyvault.release-manifest.v2';
 
 function repoPath(...parts) {
   return resolve(REPO_ROOT, ...parts);
@@ -147,12 +147,7 @@ async function walkFiles(root) {
 }
 
 export async function collectBundleAssets({ debug = false } = {}) {
-  const roots = debug
-    ? [repoPath('src-tauri', 'target', 'debug', 'bundle')]
-    : [
-        repoPath('src-tauri', 'target', 'release', 'bundle'),
-        repoPath('src-tauri', 'target', 'universal-apple-darwin', 'release', 'bundle'),
-      ];
+  const roots = [repoPath(debug ? 'release-debug' : 'release')];
   const files = [];
   for (const root of roots) {
     files.push(...(await walkFiles(root)));
@@ -173,37 +168,33 @@ export async function collectBundleAssets({ debug = false } = {}) {
 async function buildLockEvidence() {
   const entries = [
     ['package-lock.json', true],
-    [join('src-tauri', 'Cargo.lock'), true],
     [join('services', 'lsat-backend', 'uv.lock'), true],
     [join('services', 'lsat-backend', 'pyproject.toml'), true],
-    [join('src-tauri', 'Cargo.toml'), true],
-    [join('src-tauri', 'tauri.conf.json'), true],
+    ['electron-builder.yml', true],
+    [join('electron', 'main.js'), true],
+    [join('electron', 'preload.cjs'), true],
   ];
   return Promise.all(entries.map(([path, required]) => hashFileEntry(repoPath(path), { required })));
 }
 
 async function buildComponentEvidence() {
   const packageLockPath = repoPath('package-lock.json');
-  const cargoLockPath = repoPath('src-tauri', 'Cargo.lock');
   const uvLockPath = repoPath('services', 'lsat-backend', 'uv.lock');
   const npm = existsSync(packageLockPath) ? parseNpmLock(await readJson(packageLockPath)) : [];
-  const cargo = existsSync(cargoLockPath) ? parseCargoLock(await readText(cargoLockPath)) : [];
   const pypi = existsSync(uvLockPath) ? parseUvLock(await readText(uvLockPath)) : [];
   return {
     counts: {
       npm: npm.length,
-      cargo: cargo.length,
       pypi: pypi.length,
-      total: npm.length + cargo.length + pypi.length,
+      total: npm.length + pypi.length,
     },
     npm,
-    cargo,
     pypi,
   };
 }
 
 async function sidecarProvenanceEvidence() {
-  const path = repoPath('src-tauri', 'resources', 'services', 'sidecar-provenance.json');
+  const path = repoPath('electron', 'resources', 'services', 'sidecar-provenance.json');
   if (!existsSync(path)) {
     return {
       present: false,
@@ -233,14 +224,10 @@ async function sidecarProvenanceEvidence() {
 
 async function versionEvidence() {
   const packageJson = await readJson(repoPath('package.json'));
-  const tauriConf = await readJson(repoPath('src-tauri', 'tauri.conf.json'));
-  const cargoToml = await readText(repoPath('src-tauri', 'Cargo.toml'));
-  const cargoVersion = firstTomlString(cargoToml, 'version');
   return {
     package: packageJson.version || null,
-    tauri: tauriConf.version || null,
-    cargo: cargoVersion,
-    consistent: Boolean(packageJson.version && packageJson.version === tauriConf.version && packageJson.version === cargoVersion),
+    electron: packageJson.devDependencies?.electron || null,
+    consistent: Boolean(packageJson.version),
   };
 }
 
@@ -310,7 +297,7 @@ export function validateReleaseManifest(
     errors.push(`unsupported schema: ${manifest?.schema || '<missing>'}`);
   }
   if (!manifest?.versions?.consistent) {
-    errors.push('package, Tauri, and Cargo versions are not consistent');
+    errors.push('package version evidence is missing or inconsistent');
   }
   for (const entry of manifest?.lockfiles || []) {
     if (entry.required && (!entry.present || !entry.sha256 || entry.size <= 0)) {
@@ -318,7 +305,7 @@ export function validateReleaseManifest(
     }
   }
   const counts = manifest?.sbom?.counts || {};
-  for (const key of ['npm', 'cargo', 'pypi']) {
+  for (const key of ['npm', 'pypi']) {
     if (!Number.isInteger(counts[key]) || counts[key] <= 0) {
       errors.push(`SBOM has no ${key} components`);
     }
@@ -326,7 +313,10 @@ export function validateReleaseManifest(
   if (requireSidecarProvenance && !manifest?.sidecarProvenance?.present) {
     errors.push('sidecar provenance manifest is required but missing');
   }
-  if (requireSidecarProvenance && !manifest?.sidecarProvenance?.entries?.some((entry) => entry.service === 'LSAT backend')) {
+  if (
+    requireSidecarProvenance &&
+    !manifest?.sidecarProvenance?.entries?.some((entry) => entry.service === 'LSAT backend')
+  ) {
     errors.push('sidecar provenance is missing the required LSAT backend entry');
   }
   if (requireAssets && !manifest?.bundleAssets?.length) {
@@ -406,7 +396,9 @@ async function main() {
     );
     return;
   }
-  throw new Error('usage: release-manifest.mjs write|check [--output path] [--debug] [--require-assets] [--require-sidecar-provenance] [--require-signing]');
+  throw new Error(
+    'usage: release-manifest.mjs write|check [--output path] [--debug] [--require-assets] [--require-sidecar-provenance] [--require-signing]',
+  );
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === __filename) {
