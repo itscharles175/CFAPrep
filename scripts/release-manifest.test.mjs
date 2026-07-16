@@ -6,6 +6,34 @@ import {
   parseUvLock,
   validateReleaseManifest,
 } from './release-manifest.mjs';
+import { SIGNING_EVIDENCE_SCHEMA } from './release-signing.mjs';
+
+function verifiedWindowsSigning() {
+  const artifact = (kind, path, published) => ({
+    path,
+    kind,
+    size: 100,
+    sha256: (kind === 'app' ? 'a' : kind === 'nsis' ? 'b' : 'c').repeat(64),
+    published,
+    signed: true,
+    verified: true,
+    timestamped: true,
+    notarized: null,
+    signer: { thumbprint: 'A'.repeat(40) },
+    timestamp: { thumbprint: 'B'.repeat(40) },
+  });
+  return {
+    schema: SIGNING_EVIDENCE_SCHEMA,
+    platform: 'windows',
+    required: true,
+    status: 'verified',
+    artifacts: [
+      artifact('app', 'StudyVault.exe', false),
+      artifact('nsis', 'src-tauri/target/release/bundle/nsis/StudyVault-setup.exe', true),
+      artifact('msi', 'src-tauri/target/release/bundle/msi/StudyVault.msi', true),
+    ],
+  };
+}
 
 describe('release manifest evidence', () => {
   it('parses npm, Cargo, and uv lock components', () => {
@@ -87,5 +115,38 @@ source = { registry = "https://pypi.org/simple" }
 
     expect(validateReleaseManifest(manifest, { requireAssets: true }).ok).toBe(false);
     expect(validateReleaseManifest(manifest, { requireSidecarProvenance: true }).ok).toBe(false);
+  });
+
+  it('requires artifact-level signing evidence for strict release manifests', () => {
+    const manifest = {
+      schema: 'studyvault.release-manifest.v1',
+      versions: { consistent: true },
+      lockfiles: [],
+      sbom: { counts: { npm: 1, cargo: 1, pypi: 1 } },
+      sidecarProvenance: { present: true, entries: [{ service: 'LSAT backend' }] },
+      bundleAssets: [
+        {
+          path: 'src-tauri/target/release/bundle/nsis/StudyVault-setup.exe',
+          sha256: 'b'.repeat(64),
+          size: 100,
+        },
+        {
+          path: 'src-tauri/target/release/bundle/msi/StudyVault.msi',
+          sha256: 'c'.repeat(64),
+          size: 100,
+        },
+      ],
+      signing: verifiedWindowsSigning(),
+    };
+    expect(validateReleaseManifest(manifest, { requireSigning: true, signingPlatform: 'windows' })).toEqual({
+      ok: true,
+      errors: [],
+    });
+    expect(
+      validateReleaseManifest(
+        { ...manifest, signing: { ...verifiedWindowsSigning(), status: 'configured', artifacts: [] } },
+        { requireSigning: true, signingPlatform: 'windows' },
+      ).ok,
+    ).toBe(false);
   });
 });

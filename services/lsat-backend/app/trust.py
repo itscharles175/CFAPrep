@@ -37,6 +37,7 @@ RELEASE_MANIFEST = REPO_ROOT / "dist" / "studyvault-release-manifest.json"
 PACKAGED_CONTRACTS = Path(getattr(sys, "_MEIPASS", config.BASE_DIR)) / "release_contracts"
 RELEASE_LOCAL_REPORT_SCHEMA = "lsatlab.release_local_report.v1"
 RELEASE_MANIFEST_SCHEMA = "studyvault.release-manifest.v1"
+SIGNING_EVIDENCE_SCHEMA = "studyvault.signing-evidence.v1"
 SIDECAR_PROVENANCE_SCHEMA = "studyvault.sidecar-provenance.v1"
 REQUIRED_SIDECAR_PROVENANCE_SERVICES = ("LSAT backend",)
 
@@ -534,6 +535,10 @@ def _release_manifest_check(tier: TrustTier) -> dict[str, Any]:
     if strict and not assets:
         errors.append("bundle_assets_missing")
 
+    signing = payload.get("signing") if isinstance(payload.get("signing"), dict) else {}
+    if strict:
+        errors.extend(_signing_evidence_errors(signing, assets))
+
     recorded_sha = str(payload.get("manifestSha256") or "")
     actual_sha = _sha256_file(path)
     if recorded_sha and recorded_sha != actual_sha:
@@ -557,11 +562,208 @@ def _release_manifest_check(tier: TrustTier) -> dict[str, Any]:
             "bundle_asset_count": len(assets),
             "sidecar_provenance_present": sidecar.get("present") is True,
             "has_lsat_sidecar": has_lsat_sidecar,
-            "signing": payload.get("signing") if isinstance(payload, dict) else {},
+            "signing": signing,
             "tier": tier,
         },
-        action=None if level == "ok" else "Regenerate the release manifest after building sidecars and Tauri bundles.",
+        action=None
+        if level == "ok"
+        else "Regenerate the release manifest after building sidecars, Tauri bundles, and verified platform-signing evidence.",
     )
+
+
+def _current_signing_platform() -> str:
+    name = platform.system().lower()
+    if name == "windows":
+        return "windows"
+    if name == "darwin":
+        return "macos"
+    return "linux"
+
+
+def _evidence_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _signing_directory_digest(assets: list[dict[str, Any]], directory_path: str) -> tuple[str, int] | None:
+    prefix = f"{directory_path.rstrip('/')}/"
+    children = sorted(
+        (
+            item for item in assets
+            if isinstance(item, dict) and str(item.get("path") or "").startswith(prefix)
+        ),
+        key=lambda item: str(item.get("path") or ""),
+    )
+    if not children:
+        return None
+    digest = hashlib.sha256()
+    total_size = 0
+    for child in children:
+        relative_path = str(child.get("path") or "")[len(prefix):]
+        child_hash = str(child.get("sha256") or "")
+        child_size = _evidence_int(child.get("size"), -1)
+        if child_size < 0:
+            return None
+        digest.update(f"{relative_path}\0{child_hash}\0{child_size}\n".encode())
+        total_size += child_size
+    return digest.hexdigest(), total_size
+
+
+def _signing_asset_binding_errors(
+    platform_name: str,
+    artifacts: list[dict[str, Any]],
+    assets: list[dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    if not assets:
+        return errors
+    asset_paths = [str(item.get("path") or "") if isinstance(item, dict) else "" for item in assets]
+    if any(not path for path in asset_paths) or len(set(asset_paths)) != len(asset_paths):
+        errors.append("bundle_asset_paths_invalid")
+    exact_assets = {
+        str(item.get("path") or ""): item
+        for item in assets
+        if isinstance(item, dict) and item.get("path")
+    }
+    published = [item for item in artifacts if item.get("published") is True]
+    for artifact in published:
+        if platform_name == "macos" and artifact.get("kind") == "app":
+            bound = _signing_directory_digest(assets, str(artifact.get("path") or ""))
+            if bound is None:
+                errors.append("signing_asset_binding_missing")
+                continue
+            actual_hash, actual_size = bound
+        else:
+            asset = exact_assets.get(str(artifact.get("path") or ""))
+            if asset is None:
+                errors.append("signing_asset_binding_missing")
+                continue
+            actual_hash = str(asset.get("sha256") or "")
+            actual_size = _evidence_int(asset.get("size"), -1)
+        expected_size = _evidence_int(artifact.get("size"), -2)
+        if actual_hash != str(artifact.get("sha256") or "") or actual_size != expected_size:
+            errors.append("signing_asset_digest_mismatch")
+
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        path = str(asset.get("path") or "")
+        if platform_name == "windows":
+            required = path.endswith(".msi") or ("/bundle/nsis/" in path and path.endswith(".exe"))
+            covered = any(item.get("published") is True and item.get("path") == path for item in artifacts)
+        else:
+            required = path.endswith(".dmg") or ".app/" in path
+            app = next(
+                (item for item in artifacts if item.get("kind") == "app" and item.get("published") is True),
+                None,
+            )
+            covered = any(item.get("published") is True and item.get("path") == path for item in artifacts) or bool(
+                app and path.startswith(f"{app.get('path')}/")
+            )
+        if required and not covered:
+            errors.append("bundle_asset_signing_evidence_missing")
+    return list(dict.fromkeys(errors))
+
+
+def _signing_evidence_errors(signing: dict[str, Any], assets: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    if signing.get("schema") != SIGNING_EVIDENCE_SCHEMA:
+        return ["signing_evidence_missing"]
+
+    platform_name = str(signing.get("platform") or "")
+    if platform_name != _current_signing_platform():
+        errors.append("signing_platform_mismatch")
+    artifacts = signing.get("artifacts") if isinstance(signing.get("artifacts"), list) else []
+    if platform_name == "linux":
+        if signing.get("required") is not False or signing.get("status") != "not_applicable":
+            errors.append("linux_signing_policy_invalid")
+        return errors
+    if platform_name not in {"windows", "macos"}:
+        return ["signing_platform_invalid"]
+    if signing.get("required") is not True or signing.get("status") != "verified":
+        errors.append("platform_signature_unverified")
+    if not artifacts:
+        errors.append("signing_artifacts_missing")
+        return errors
+    if any(
+        not isinstance(item, dict)
+        or item.get("signed") is not True
+        or item.get("verified") is not True
+        for item in artifacts
+    ):
+        errors.append("platform_signature_unverified")
+    paths = [str(item.get("path") or "") if isinstance(item, dict) else "" for item in artifacts]
+    if any(not path for path in paths) or len(set(paths)) != len(paths):
+        errors.append("signing_artifact_paths_invalid")
+    if any(
+        not isinstance(item, dict)
+        or _evidence_int(item.get("size"), 0) <= 0
+        or len(str(item.get("sha256") or "")) != 64
+        or any(character not in "0123456789abcdefABCDEF" for character in str(item.get("sha256") or ""))
+        for item in artifacts
+    ):
+        errors.append("signing_artifact_digest_missing")
+
+    kinds = {
+        str(item.get("kind"))
+        for item in artifacts
+        if isinstance(item, dict) and item.get("kind")
+    }
+    if platform_name == "windows":
+        if not {"app", "nsis", "msi"}.issubset(kinds):
+            errors.append("windows_signing_artifacts_incomplete")
+        thumbprints = [
+            str(item.get("signer", {}).get("thumbprint") or "")
+            if isinstance(item, dict) and isinstance(item.get("signer"), dict)
+            else ""
+            for item in artifacts
+        ]
+        if any(not thumbprint for thumbprint in thumbprints) or len(set(thumbprints)) != 1:
+            errors.append("windows_signer_mismatch")
+        if any(
+            not isinstance(item, dict)
+            or item.get("timestamped") is not True
+            or not isinstance(item.get("timestamp"), dict)
+            or not item["timestamp"].get("thumbprint")
+            for item in artifacts
+        ):
+            errors.append("windows_timestamp_missing")
+    else:
+        if not {"app", "dmg"}.issubset(kinds):
+            errors.append("macos_signing_artifacts_incomplete")
+        signer_pairs = [
+            (
+                str(item.get("signer", {}).get("authority") or ""),
+                str(item.get("signer", {}).get("teamIdentifier") or ""),
+            )
+            for item in artifacts
+            if isinstance(item, dict) and isinstance(item.get("signer"), dict)
+        ]
+        if (
+            len(signer_pairs) != len(artifacts)
+            or any(not authority or not team for authority, team in signer_pairs)
+            or len(set(signer_pairs)) != 1
+        ):
+            errors.append("macos_signer_mismatch")
+        if any(
+            not isinstance(item, dict)
+            or item.get("notarized") is not True
+            or item.get("stapled") is not True
+            for item in artifacts
+            if isinstance(item, dict) and item.get("kind") == "app"
+        ):
+            errors.append("macos_notarization_missing")
+        if any(
+            not isinstance(item, dict) or item.get("timestamped") is not True
+            for item in artifacts
+        ):
+            errors.append("macos_timestamp_missing")
+    errors.extend(_signing_asset_binding_errors(platform_name, artifacts, assets))
+    return list(dict.fromkeys(errors))
 
 
 def _release_freshness_contract(

@@ -11,6 +11,12 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  SIGNING_EVIDENCE_SCHEMA,
+  normalizePlatform,
+  validateSigningAssetBindings,
+  validateSigningEvidence,
+} from './release-signing.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = dirname(__filename);
@@ -239,23 +245,23 @@ async function versionEvidence() {
 }
 
 async function signingEvidence() {
-  const tauriConf = await readJson(repoPath('src-tauri', 'tauri.conf.json'));
-  const windows = tauriConf.bundle?.windows || {};
-  const macos = tauriConf.bundle?.macOS || {};
+  const evidencePath = String(process.env.STUDYVAULT_SIGNING_EVIDENCE || '').trim();
+  if (evidencePath) {
+    const evidence = await readJson(resolve(evidencePath));
+    const validation = validateSigningEvidence(evidence);
+    if (!validation.ok) {
+      throw new Error(`invalid signing evidence: ${validation.errors.join('; ')}`);
+    }
+    return evidence;
+  }
+  const platform = normalizePlatform(process.platform);
   return {
-    windows: {
-      configured: Boolean(windows.certificateThumbprint || process.env.TAURI_WINDOWS_CERT_THUMBPRINT || process.env.WINDOWS_CERT_BASE64),
-      certificateThumbprintConfigured: Boolean(windows.certificateThumbprint || process.env.TAURI_WINDOWS_CERT_THUMBPRINT),
-      certificateSecretPresent: Boolean(process.env.WINDOWS_CERT_BASE64),
-      digestAlgorithm: windows.digestAlgorithm || null,
-      timestampUrl: windows.timestampUrl || null,
-    },
-    macos: {
-      configured: Boolean(macos.signingIdentity || process.env.APPLE_SIGNING_IDENTITY || process.env.APPLE_CERTIFICATE_BASE64),
-      signingIdentityConfigured: Boolean(macos.signingIdentity || process.env.APPLE_SIGNING_IDENTITY),
-      certificateSecretPresent: Boolean(process.env.APPLE_CERTIFICATE_BASE64),
-      providerShortNameConfigured: Boolean(macos.providerShortName || process.env.APPLE_TEAM_ID),
-    },
+    schema: SIGNING_EVIDENCE_SCHEMA,
+    generatedAt: new Date().toISOString(),
+    platform,
+    required: platform !== 'linux',
+    status: platform === 'linux' ? 'not_applicable' : 'unverified',
+    artifacts: [],
   };
 }
 
@@ -292,7 +298,12 @@ export async function buildReleaseManifest({ debug = false } = {}) {
 
 export function validateReleaseManifest(
   manifest,
-  { requireAssets = false, requireSidecarProvenance = false } = {},
+  {
+    requireAssets = false,
+    requireSidecarProvenance = false,
+    requireSigning = false,
+    signingPlatform = process.platform,
+  } = {},
 ) {
   const errors = [];
   if (manifest?.schema !== SCHEMA) {
@@ -321,12 +332,23 @@ export function validateReleaseManifest(
   if (requireAssets && !manifest?.bundleAssets?.length) {
     errors.push('release bundle assets are required but none were found');
   }
+  if (requireSigning) {
+    const signing = validateSigningEvidence(manifest?.signing, { requireSigned: true });
+    errors.push(...signing.errors.map((error) => `signing: ${error}`));
+    if (signing.ok) {
+      if (normalizePlatform(manifest.signing.platform) !== normalizePlatform(signingPlatform)) {
+        errors.push('signing: evidence platform does not match the current release platform');
+      }
+      const bindings = validateSigningAssetBindings(manifest.signing, manifest.bundleAssets);
+      errors.push(...bindings.errors.map((error) => `signing: ${error}`));
+    }
+  }
   return { ok: errors.length === 0, errors };
 }
 
-async function writeReleaseManifest({ output, debug, requireAssets, requireSidecarProvenance }) {
+async function writeReleaseManifest({ output, debug, requireAssets, requireSidecarProvenance, requireSigning }) {
   const manifest = await buildReleaseManifest({ debug });
-  const validation = validateReleaseManifest(manifest, { requireAssets, requireSidecarProvenance });
+  const validation = validateReleaseManifest(manifest, { requireAssets, requireSidecarProvenance, requireSigning });
   if (!validation.ok) {
     throw new Error(`release manifest validation failed: ${validation.errors.join('; ')}`);
   }
@@ -335,9 +357,9 @@ async function writeReleaseManifest({ output, debug, requireAssets, requireSidec
   return manifest;
 }
 
-async function checkReleaseManifest({ output, requireAssets, requireSidecarProvenance }) {
+async function checkReleaseManifest({ output, requireAssets, requireSidecarProvenance, requireSigning }) {
   const manifest = await readJson(output);
-  const validation = validateReleaseManifest(manifest, { requireAssets, requireSidecarProvenance });
+  const validation = validateReleaseManifest(manifest, { requireAssets, requireSidecarProvenance, requireSigning });
   if (!validation.ok) {
     throw new Error(`release manifest validation failed: ${validation.errors.join('; ')}`);
   }
@@ -352,6 +374,7 @@ function parseArgs(argv) {
     debug: false,
     requireAssets: false,
     requireSidecarProvenance: false,
+    requireSigning: false,
   };
   while (rest.length) {
     const arg = rest.shift();
@@ -359,6 +382,7 @@ function parseArgs(argv) {
     else if (arg === '--debug') opts.debug = true;
     else if (arg === '--require-assets') opts.requireAssets = true;
     else if (arg === '--require-sidecar-provenance') opts.requireSidecarProvenance = true;
+    else if (arg === '--require-signing') opts.requireSigning = true;
     else throw new Error(`unknown release-manifest arg: ${arg}`);
   }
   return opts;
@@ -382,7 +406,7 @@ async function main() {
     );
     return;
   }
-  throw new Error('usage: release-manifest.mjs write|check [--output path] [--debug] [--require-assets] [--require-sidecar-provenance]');
+  throw new Error('usage: release-manifest.mjs write|check [--output path] [--debug] [--require-assets] [--require-sidecar-provenance] [--require-signing]');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === __filename) {

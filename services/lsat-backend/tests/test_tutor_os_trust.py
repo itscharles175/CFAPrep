@@ -50,7 +50,36 @@ def _write_sidecar_provenance(tmp_path, payload: bytes = b"lsat-sidecar"):
     return manifest, binary
 
 
-def _write_release_manifest(tmp_path, *, assets: bool = True, sidecar: bool = True):
+def _write_release_manifest(
+    tmp_path,
+    *,
+    assets: bool = True,
+    sidecar: bool = True,
+    signing: dict | None = None,
+):
+    if signing is None:
+        signing = {
+            "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+            "platform": "windows",
+            "required": True,
+            "status": "verified",
+            "artifacts": [
+                {
+                    "path": f"bundle/{kind}",
+                    "kind": kind,
+                    "size": 100,
+                    "sha256": ("a" if kind == "app" else "b" if kind == "nsis" else "d") * 64,
+                    "published": kind != "app",
+                    "signed": True,
+                    "verified": True,
+                    "timestamped": True,
+                    "notarized": None,
+                    "signer": {"subject": "StudyVault Test", "thumbprint": "a" * 40},
+                    "timestamp": {"thumbprint": "b" * 40},
+                }
+                for kind in ("app", "nsis", "msi")
+            ],
+        }
     manifest = tmp_path / "studyvault-release-manifest.json"
     manifest.write_text(
         json.dumps(
@@ -78,13 +107,21 @@ def _write_release_manifest(tmp_path, *, assets: bool = True, sidecar: bool = Tr
                     "present": sidecar,
                     "entries": [{"service": "LSAT backend", "path": "lsat-backend/lsatlab-backend"}] if sidecar else [],
                 },
-                "bundleAssets": [{"path": "src-tauri/target/release/bundle/msi/app.msi", "sha256": "d" * 64, "size": 100}]
+                "bundleAssets": [
+                    {
+                        "path": "bundle/nsis",
+                        "sha256": "b" * 64,
+                        "size": 100,
+                    },
+                    {
+                        "path": "bundle/msi",
+                        "sha256": "d" * 64,
+                        "size": 100,
+                    },
+                ]
                 if assets
                 else [],
-                "signing": {
-                    "windows": {"configured": False, "digestAlgorithm": "sha256"},
-                    "macos": {"configured": False},
-                },
+                "signing": signing,
             }
         ),
         encoding="utf-8",
@@ -131,6 +168,7 @@ def test_release_trust_blocks_invalid_release_local_schema(db_session, monkeypat
 
 
 def test_release_manifest_trust_accepts_complete_manifest(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
     manifest = _write_release_manifest(tmp_path)
     monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
 
@@ -138,11 +176,12 @@ def test_release_manifest_trust_accepts_complete_manifest(monkeypatch, tmp_path)
 
     assert check["status"] == "ok"
     assert check["detail"]["component_counts"] == {"npm": 10, "cargo": 11, "pypi": 12}
-    assert check["detail"]["bundle_asset_count"] == 1
+    assert check["detail"]["bundle_asset_count"] == 2
     assert check["detail"]["has_lsat_sidecar"] is True
 
 
 def test_release_manifest_trust_blocks_missing_release_assets(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
     manifest = _write_release_manifest(tmp_path, assets=False, sidecar=False)
     monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
 
@@ -155,6 +194,158 @@ def test_release_manifest_trust_blocks_missing_release_assets(monkeypatch, tmp_p
         "sidecar_provenance_missing",
     }
     assert dev_check["status"] == "ok"
+
+
+def test_release_manifest_trust_blocks_unverified_signing(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(
+        tmp_path,
+        signing={
+            "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+            "platform": "windows",
+            "required": True,
+            "status": "configured",
+            "artifacts": [],
+        },
+    )
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    release_check = trust_mod._release_manifest_check("release")
+    packaged_check = trust_mod._release_manifest_check("packaged")
+    dev_check = trust_mod._release_manifest_check("dev")
+
+    assert release_check["status"] == "block"
+    assert packaged_check["status"] == "block"
+    assert set(release_check["detail"]["errors"]) == {
+        "platform_signature_unverified",
+        "signing_artifacts_missing",
+    }
+    assert dev_check["status"] == "ok"
+
+
+def test_release_manifest_trust_accepts_linux_signing_not_applicable(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Linux")
+    manifest = _write_release_manifest(
+        tmp_path,
+        signing={
+            "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+            "platform": "linux",
+            "required": False,
+            "status": "not_applicable",
+            "artifacts": [],
+        },
+    )
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    assert trust_mod._release_manifest_check("release")["status"] == "ok"
+
+
+def test_release_manifest_trust_rejects_linux_evidence_on_windows(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(
+        tmp_path,
+        signing={
+            "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+            "platform": "linux",
+            "required": False,
+            "status": "not_applicable",
+            "artifacts": [],
+        },
+    )
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    check = trust_mod._release_manifest_check("packaged")
+    assert check["status"] == "block"
+    assert "signing_platform_mismatch" in check["detail"]["errors"]
+
+
+def test_release_manifest_trust_rejects_inconsistent_windows_signers(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    signing = {
+        "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+        "platform": "windows",
+        "required": True,
+        "status": "verified",
+        "artifacts": [
+            {
+                "kind": kind,
+                "path": f"bundle/{kind}",
+                "size": 100,
+                "sha256": ("a" if kind == "app" else "b" if kind == "nsis" else "d") * 64,
+                "published": kind != "app",
+                "signed": True,
+                "verified": True,
+                "timestamped": True,
+                "signer": {"thumbprint": ("a" if kind != "msi" else "c") * 40},
+                "timestamp": {"thumbprint": "b" * 40},
+            }
+            for kind in ("app", "nsis", "msi")
+        ],
+    }
+    manifest = _write_release_manifest(tmp_path, signing=signing)
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    assert "windows_signer_mismatch" in trust_mod._release_manifest_check("release")["detail"]["errors"]
+
+
+def test_release_manifest_trust_blocks_duplicate_assets_and_bad_sizes(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(tmp_path)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["bundleAssets"].append({**payload["bundleAssets"][0], "sha256": "f" * 64})
+    payload["signing"]["artifacts"][0]["size"] = "bad"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    check = trust_mod._release_manifest_check("release")
+    assert check["status"] == "block"
+    assert "bundle_asset_paths_invalid" in check["detail"]["errors"]
+    assert "signing_artifact_digest_missing" in check["detail"]["errors"]
+
+
+def test_release_manifest_trust_accepts_complete_macos_evidence(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Darwin")
+    app_child_path = "bundle/macos/StudyVault.app/Contents/MacOS/StudyVault"
+    app_child_hash = "e" * 64
+    app_child_size = 50
+    digest = trust_mod.hashlib.sha256()
+    digest.update(f"Contents/MacOS/StudyVault\0{app_child_hash}\0{app_child_size}\n".encode())
+    app_hash = digest.hexdigest()
+    signing = {
+        "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+        "platform": "macos",
+        "required": True,
+        "status": "verified",
+        "artifacts": [
+            {
+                "kind": kind,
+                "path": "bundle/macos/StudyVault.app" if kind == "app" else "bundle/dmg/StudyVault.dmg",
+                "size": app_child_size if kind == "app" else 100,
+                "sha256": app_hash if kind == "app" else "f" * 64,
+                "published": True,
+                "signed": True,
+                "verified": True,
+                "timestamped": True,
+                "notarized": True if kind == "app" else None,
+                "stapled": True if kind == "app" else None,
+                "signer": {
+                    "authority": "Developer ID Application: StudyVault (TEAM123456)",
+                    "teamIdentifier": "TEAM123456",
+                },
+            }
+            for kind in ("app", "dmg")
+        ],
+    }
+    manifest = _write_release_manifest(tmp_path, signing=signing)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["bundleAssets"] = [
+        {"path": app_child_path, "sha256": app_child_hash, "size": app_child_size},
+        {"path": "bundle/dmg/StudyVault.dmg", "sha256": "f" * 64, "size": 100},
+    ]
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    assert trust_mod._release_manifest_check("release")["status"] == "ok"
 
 
 def test_release_trust_manifest_and_diagnostics(client):

@@ -13,7 +13,8 @@ npm run tauri:dev
 # Debug build (faster compile, larger binary, no signing):
 npm run tauri:build:debug
 
-# Production build (optimized, signed if signing env vars are present):
+# Production build (optimized; local builds do not satisfy release trust unless
+# signing evidence is generated and verified separately):
 npm run tauri:build
 ```
 
@@ -30,14 +31,19 @@ so a release can't ship if the web build is broken.
 
 ### Windows
 
-Set these env vars at build time:
+For a local signed build, place the certificate in the current-user certificate
+store and pass its SHA-1 thumbprint through Tauri configuration. The tagged
+release workflow creates a runner-local config overlay automatically; it does
+not commit certificate-specific configuration.
 
-```bash
-# SHA-1 thumbprint of the code-signing cert in your local cert store
-export TAURI_WINDOWS_CERT_THUMBPRINT="ABCD1234..."
-
-# Optional — only if the cert is in a non-standard store
-export TAURI_WINDOWS_CERT_STORE="My"
+```json
+{
+  "bundle": {
+    "windows": {
+      "certificateThumbprint": "ABCD1234..."
+    }
+  }
+}
 ```
 
 Get the thumbprint via PowerShell:
@@ -46,8 +52,10 @@ Get the thumbprint via PowerShell:
 Get-ChildItem -Path Cert:\CurrentUser\My | Select Thumbprint, Subject
 ```
 
-The signed binary uses SHA-256 with timestamping via DigiCert. Configured in
-`src-tauri/tauri.conf.json` (`bundle.windows`).
+The signed binary uses SHA-256 and the timestamp URL configured in
+`src-tauri/tauri.conf.json` (`bundle.windows`). Release verification requires a
+valid Authenticode signature from the expected thumbprint and a timestamp on
+the app executable, NSIS installer, and MSI installer.
 
 ### macOS
 
@@ -61,8 +69,8 @@ export APPLE_PASSWORD="app-specific-password"
 export APPLE_TEAM_ID="TEAMID"
 ```
 
-Tauri will codesign the .app, build the .dmg, then submit it to Apple for
-notarization. The first notarization on a fresh CI runner can take 10-15
+Tauri codesigns and notarizes the `.app`, staples its ticket, then creates and
+signs the `.dmg`. The first notarization on a fresh CI runner can take 10-15
 minutes; subsequent ones are usually < 2 minutes.
 
 Set `bundle.macOS.signingIdentity` in `tauri.conf.json` to the identity name
@@ -70,10 +78,9 @@ when running outside CI (it overrides the env var).
 
 ### Linux
 
-`.deb` and `.appimage` outputs are unsigned by convention. For Debian
-packages you can sign the `.deb` with `dpkg-sig --sign builder <file>` after
-the Tauri build completes; for AppImage you can append a detached signature
-with `gpg --detach-sign`. Both are handled in the release workflow below.
+`.deb` and `.appimage` platform signing is explicitly `not_applicable` in the
+current release policy. Their SHA-256 hashes remain covered by the release
+manifest; detached package signatures are not currently produced.
 
 ## GitHub Actions release workflow
 
@@ -82,22 +89,37 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`. The workflow:
 1. Runs the full verify gate (`npm run verify` → lint + test + build).
 2. Builds the Tauri bundles for `windows-latest`, `macos-latest`, and
    `ubuntu-latest` matrix entries in parallel.
-3. On platforms with signing env vars present (via repository secrets), the
-   bundles are signed automatically.
-4. Uploads every bundle as a GitHub Release asset.
+3. Fails Windows and macOS jobs before sidecar compilation unless every required
+   signing and notarization secret is present.
+4. Imports the expected certificate, builds with platform signing enabled, and
+   verifies every produced Windows/macOS artifact after the build.
+5. Generates `studyvault.signing-evidence.v1`, embeds it in the release
+   manifest, and rejects configuration-only or unsigned evidence.
+6. Uploads bundles, signing evidence, and the release manifest as GitHub Release
+   assets only after every matrix job passes.
 
 Required GitHub Actions secrets for signed builds:
 
 - `WINDOWS_CERT_BASE64` — the `.pfx` cert encoded with `base64 -w 0`
 - `WINDOWS_CERT_PASSWORD`
+- `WINDOWS_CERT_THUMBPRINT` — 40-character SHA-1 signer thumbprint
 - `APPLE_CERTIFICATE_BASE64` — the `Developer ID Application` `.p12` encoded
 - `APPLE_CERTIFICATE_PASSWORD`
 - `APPLE_SIGNING_IDENTITY` (e.g. `Developer ID Application: Your Name (TEAMID)`)
 - `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`
 
-Without these secrets the workflow still runs and produces unsigned
-binaries; consumers will see SmartScreen / Gatekeeper warnings until you
-add them.
+The tagged workflow has no unsigned fallback. Missing, partial, mismatched, or
+unverifiable signing credentials fail the affected matrix job, so the GitHub
+Release job cannot run. Ordinary local `tauri build` output may remain unsigned,
+but it cannot satisfy `release` or `packaged` trust tiers.
+
+Windows verification uses `Get-AuthenticodeSignature` to require `Valid`
+status, the configured signer thumbprint, and timestamp-certificate evidence.
+macOS verification requires strict `codesign` validation, Gatekeeper assessment,
+and the configured Developer ID and Team ID for both artifacts. It requires the
+stapled notarization ticket on the `.app`; Tauri creates and signs the DMG after
+that app notarization step, so the DMG is signature- and timestamp-verified but
+is not falsely required to carry a separate staple.
 
 ## Auto-update
 
@@ -257,8 +279,8 @@ checks. It writes repo-root
 the built desktop app, verifies LSAT sidecar identity, terminates the app, and
 fails if any owned sidecar port (`8000`, `5055`, or `8100`) remains open after
 cleanup. The release manifest records Node/Rust/Python dependency evidence,
-lockfile hashes, sidecar provenance, bundle SHA-256 hashes, and signing
-configuration status. Tagged-release verification mirrors the always-on static
+lockfile hashes, sidecar provenance, bundle SHA-256 hashes, and verified
+platform-signing evidence. Tagged-release verification mirrors the always-on static
 and eval floors before building bundles, including LSAT typecheck/tests,
 no-egress, sidecar-fetch inventory, docs drift, baseline catalog, RAG retrieval eval,
 citation-faithfulness, source-grounded answer benchmark, generated-content gate,

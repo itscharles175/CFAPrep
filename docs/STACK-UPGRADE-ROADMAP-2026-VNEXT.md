@@ -111,9 +111,16 @@ guardrails:
 - Wave 4 release manifest/SBOM evidence: `scripts/release-manifest.mjs` now emits
   a dependency-and-asset manifest with Node, Rust, and Python component counts,
   lockfile hashes, sidecar provenance digest, bundle asset hashes, and captured
-  signing configuration status; local and GitHub release gates require it after
+  platform-signing evidence; local and GitHub release gates require it after
   Tauri bundle creation, and backend release trust surfaces the manifest as a
   first-class check.
+- Wave 4 signing enforcement: tagged Windows/macOS builds now fail before
+  sidecar compilation when credentials are incomplete, Windows receives its
+  signer thumbprint through a runner-local Tauri config overlay, and post-build
+  verification requires the expected signer plus timestamp or notarization
+  evidence for every published desktop artifact. Backend `release` and
+  `packaged` trust tiers reject missing or configuration-only evidence; Linux is
+  explicitly recorded as not applicable.
 - Wave 4 version/tag sync: package, Tauri, Cargo, and backend `APP_VERSION`
   now agree on `0.9.0`; PR CI runs `npm run check:versions`; release
   verification runs the same gate with `--git-tag` so a `vX.Y.Z` tag cannot
@@ -651,6 +658,10 @@ Workstreams:
   detached, and is verified before the PyInstaller sidecar build.
 - Verify sidecar hashes before Tauri bundling and again at startup.
 - Add signed/attested release artifacts.
+  **Signing done; attestations remain:** Windows and macOS release artifacts now
+  fail closed on credential import, signer verification, timestamping, and
+  notarization evidence. Cryptographic build provenance/hosted artifact
+  attestations remain a separate workstream.
 - Add packaged-app smoke after installer/bundle creation.
 - Commit or formalize visual baselines so visual regression fails closed.
   Evidence: `scripts/visual-baseline-policy.mjs` now computes the required

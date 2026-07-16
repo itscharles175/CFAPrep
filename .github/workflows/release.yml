@@ -129,12 +129,18 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            signing-platform: linux
+            bundle-root: src-tauri/target/release
             target-args: ''
             artifact-glob: 'src-tauri/target/release/bundle/{deb,appimage}/*'
           - os: windows-latest
+            signing-platform: windows
+            bundle-root: src-tauri/target/release
             target-args: ''
             artifact-glob: 'src-tauri/target/release/bundle/{msi,nsis}/*'
           - os: macos-latest
+            signing-platform: macos
+            bundle-root: src-tauri/target/universal-apple-darwin/release
             target-args: '--target universal-apple-darwin'
             artifact-glob: 'src-tauri/target/universal-apple-darwin/release/bundle/{dmg,macos}/*'
 
@@ -173,6 +179,32 @@ jobs:
           rustup target add x86_64-apple-darwin
 
       - run: npm ci --legacy-peer-deps
+
+      - name: Validate Linux signing policy
+        if: matrix.signing-platform == 'linux'
+        run: node scripts/release-signing.mjs preflight --platform linux
+
+      - name: Validate Windows signing credentials
+        if: matrix.signing-platform == 'windows'
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
+        run: >
+          node scripts/release-signing.mjs preflight
+          --platform windows
+          --config-output "${{ runner.temp }}/tauri-signing.json"
+
+      - name: Validate macOS signing and notarization credentials
+        if: matrix.signing-platform == 'macos'
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node scripts/release-signing.mjs preflight --platform macos
 
       # --- Backend sidecars (Plan P3 / P4) -----------------------------------
       # PyInstaller binaries are platform-native, so each must be frozen on the
@@ -295,47 +327,116 @@ jobs:
 
       # Decode signing certs from base64 secrets into the runner's cert store.
       - name: Import Windows signing cert
-        if: matrix.os == 'windows-latest' && env.WINDOWS_CERT_BASE64 != ''
+        if: matrix.signing-platform == 'windows'
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
         shell: pwsh
         run: |
-          $bytes = [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64)
-          Set-Content -Path cert.pfx -Value $bytes -AsByteStream
-          $pw = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -AsPlainText -Force
-          Import-PfxCertificate -FilePath cert.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
-          Remove-Item cert.pfx
+          $certPath = Join-Path $env:RUNNER_TEMP 'studyvault-release.pfx'
+          try {
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+            $password = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -AsPlainText -Force
+            $imported = @(Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password)
+            $expected = $env:WINDOWS_CERT_THUMBPRINT.Replace(' ', '').ToUpperInvariant()
+            if (-not ($imported | Where-Object { $_.Thumbprint -eq $expected })) {
+              throw "Imported PFX does not contain expected certificate thumbprint $expected"
+            }
+          } finally {
+            Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Import macOS signing cert
-        if: matrix.os == 'macos-latest' && env.APPLE_CERTIFICATE_BASE64 != ''
+        if: matrix.signing-platform == 'macos'
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > cert.p12
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security import cert.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          rm cert.p12
+          cert_path="${RUNNER_TEMP}/studyvault-release.p12"
+          keychain_path="${RUNNER_TEMP}/studyvault-build.keychain-db"
+          keychain_password="$(openssl rand -base64 32)"
+          trap 'rm -f "$cert_path"' EXIT
+          printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$cert_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security default-keychain -s "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$cert_path" -k "$keychain_path" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path" | grep -F "$APPLE_SIGNING_IDENTITY"
 
-      - name: Build Tauri bundle
+      - name: Build Windows Tauri bundle
+        if: matrix.signing-platform == 'windows'
+        run: npx tauri build --config "${{ runner.temp }}/tauri-signing.json"
+
+      - name: Build macOS Tauri bundle
+        if: matrix.signing-platform == 'macos'
         env:
-          TAURI_WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx tauri build ${{ matrix.target-args }}
 
+      - name: Build Linux Tauri bundle
+        if: matrix.signing-platform == 'linux'
+        run: npx tauri build
+
+      - name: Verify Windows Authenticode signatures
+        if: matrix.signing-platform == 'windows'
+        env:
+          WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
+        run: >
+          node scripts/release-signing.mjs verify
+          --platform windows
+          --bundle-root "${{ matrix.bundle-root }}"
+          --output "dist/signing-evidence-${{ matrix.os }}.json"
+
+      - name: Verify macOS signatures and notarization
+        if: matrix.signing-platform == 'macos'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: >
+          node scripts/release-signing.mjs verify
+          --platform macos
+          --bundle-root "${{ matrix.bundle-root }}"
+          --output "dist/signing-evidence-${{ matrix.os }}.json"
+
+      - name: Record Linux signing policy
+        if: matrix.signing-platform == 'linux'
+        run: >
+          node scripts/release-signing.mjs verify
+          --platform linux
+          --bundle-root "${{ matrix.bundle-root }}"
+          --output "dist/signing-evidence-${{ matrix.os }}.json"
+
+      - name: Remove imported Windows certificate
+        if: always() && matrix.signing-platform == 'windows'
+        env:
+          WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
+        shell: pwsh
+        run: |
+          $expected = $env:WINDOWS_CERT_THUMBPRINT.Replace(' ', '').ToUpperInvariant()
+          Get-ChildItem Cert:\CurrentUser\My |
+            Where-Object { $_.Thumbprint -eq $expected } |
+            Remove-Item -Force
+
+      - name: Remove temporary macOS keychain
+        if: always() && matrix.signing-platform == 'macos'
+        run: |
+          security default-keychain -s "$HOME/Library/Keychains/login.keychain-db" || true
+          security delete-keychain "${RUNNER_TEMP}/studyvault-build.keychain-db" || true
+
       - name: Generate release manifest and SBOM evidence
+        env:
+          STUDYVAULT_SIGNING_EVIDENCE: ${{ github.workspace }}/dist/signing-evidence-${{ matrix.os }}.json
         run: >
           node scripts/release-manifest.mjs write
           --require-assets
           --require-sidecar-provenance
+          ${{ matrix.signing-platform != 'linux' && '--require-signing' || '' }}
           --output dist/studyvault-release-manifest-${{ matrix.os }}.json
 
       # OPS-5: a RAG-less build is labelled `-norag` so the artifact (and the
@@ -347,6 +448,7 @@ jobs:
           name: studyvault-${{ matrix.os }}${{ steps.onb.outputs.rag_enabled == 'true' && '' || '-norag' }}
           path: |
             ${{ matrix.artifact-glob }}
+            dist/signing-evidence-${{ matrix.os }}.json
             dist/studyvault-release-manifest-${{ matrix.os }}.json
           # audit M20 — fail the build if the installer glob matched nothing
           # (a bad glob / empty Tauri bundle dir) instead of publishing a release
