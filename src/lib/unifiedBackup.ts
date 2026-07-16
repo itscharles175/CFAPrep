@@ -16,6 +16,7 @@
 // down sidecar throws a clear `UnifiedBackupError` the UI surfaces, rather than a
 // silent no-op, because the LSAT half genuinely needs the backend.
 
+import type { paths } from '../domains/lsat/lib/api.gen';
 import { exportVaultData, importVaultData } from './progressStore';
 import { decryptVaultBackup, encryptVaultBackup, isEncryptedBackupBlob } from './encryptedBackup';
 import {
@@ -25,8 +26,8 @@ import {
 } from './unifiedExportEnvelope';
 import { fetchLsatSidecar } from './lsatSidecarClient';
 
-const EXPORT_BACKUP_PATH = '/api/export/backup';
-const EXPORT_IMPORT_PATH = '/api/export/import';
+const EXPORT_BACKUP_PATH = '/api/export/backup' satisfies keyof paths;
+const EXPORT_IMPORT_PATH = '/api/export/import' satisfies keyof paths;
 
 /** Raised for any user-surfaced unified-backup failure (down sidecar, bad file,
  *  invalid envelope). Carries a human-readable message for a toast. */

@@ -23,10 +23,11 @@
  * machine and nothing is written back.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { paths } from '../domains/lsat/lib/api.gen';
 import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 
-const QUALITY_METRICS_PATH = '/api/gen/generation/quality-metrics';
-const AUDIT_LOG_PATH = '/api/gen/generation/audit-log';
+const QUALITY_METRICS_PATH = '/api/gen/generation/quality-metrics' satisfies keyof paths;
+const AUDIT_LOG_PATH = '/api/gen/generation/audit-log' satisfies keyof paths;
 
 /** Read-only aggregation; a couple of seconds is plenty. */
 const DEFAULT_TIMEOUT_MS = 5000;

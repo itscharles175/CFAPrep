@@ -13,11 +13,10 @@
  * the host's local Dexie profile; a failed remote write still persists locally so
  * the user's edit is never lost — the next successful sync reconciles it.
  *
- * DATA-1: the `/api/study/profile` route ships ahead of the next `api.gen.ts`
- * regeneration, so it's a string literal for now (same as LEARN-2's
- * `/api/study/due-unified` in `lsatReviewBridge.ts`). Swap to `keyof paths` once
- * the contract is regenerated with this path.
+ * DATA-1: the `/api/study/profile` route is anchored to the generated OpenAPI
+ * client so a route rename/removal fails host typecheck.
  */
+import type { paths } from '../domains/lsat/lib/api.gen';
 import {
   DEFAULT_SHARED_STUDY_PROFILE,
   studyProfileFromRaw,
@@ -34,8 +33,7 @@ import {
 } from './progressStore';
 import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
-// Not yet bound to `keyof paths` — the contract is regenerated a batch later.
-const STUDY_PROFILE_PATH = '/api/study/profile';
+const STUDY_PROFILE_PATH = '/api/study/profile' satisfies keyof paths;
 
 /** Result of a profile read/write through the bridge. */
 export interface StudyProfileResult {

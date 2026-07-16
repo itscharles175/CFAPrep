@@ -24,9 +24,10 @@
  * contract — this hook is self-contained and owns its wire shapes.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { paths } from '../domains/lsat/lib/api.gen';
 import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 
-const WEAKNESS_INDEX_PATH = '/api/analytics/weakness-index';
+const WEAKNESS_INDEX_PATH = '/api/analytics/weakness-index' satisfies keyof paths;
 
 /** Read path is cheap server-side but still off the render path; modest timeout. */
 const DEFAULT_TIMEOUT_MS = 4000;

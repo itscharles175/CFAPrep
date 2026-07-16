@@ -278,7 +278,7 @@ def ability(
             persist=persist,
         )
         payload["selector"] = adaptivity.selector_from_ability(
-            session, payload, days=days,
+            session, dict(payload), days=days,
         )
         return payload
     return adaptivity.ability_matrix(session, days=days, persist=persist)

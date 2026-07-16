@@ -21,6 +21,7 @@
  * handshake fetch in §5) — it imports only TYPES from `learningTypes`, so it is
  * safe to use from any layer without pulling Dexie / drivers into the bundle.
  */
+import type { paths } from '../domains/lsat/lib/api.gen';
 import type {
   Confidence,
   Difficulty,
@@ -431,7 +432,7 @@ export function createCrossDomainBridge(stores: CrossDomainSourceStores): {
 // §5 — Schema-version handshake (DATA-3)
 // ---------------------------------------------------------------------------
 
-const SCHEMA_VERSIONS_PATH = '/api/observability/schema-versions';
+const SCHEMA_VERSIONS_PATH = '/api/observability/schema-versions' satisfies keyof paths;
 
 /** The backend `GET /api/observability/schema-versions` body (read defensively). */
 export interface RawSchemaVersionsResponse {

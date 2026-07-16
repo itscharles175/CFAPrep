@@ -20,9 +20,19 @@
  * across both domains. The host keeps its own degrading-fetch transport; only
  * the typed boundary is shared.
  */
-import type { components, operations } from '@/domains/lsat/lib/api.gen';
+import type { components, operations, paths } from '@/domains/lsat/lib/api.gen';
 import { fetchLsatSidecarJson } from './lsatSidecarClient';
 import { normalizeLoopbackHttpBaseUrl } from './localUrlPolicy';
+
+const HEALTH_PATH = '/api/health' satisfies keyof paths;
+const AI_HEALTH_PATH = '/api/ai/health' satisfies keyof paths;
+const CLOUD_BUDGET_PATH = '/api/observability/cloud-budget' satisfies keyof paths;
+const SETTINGS_PATH = '/api/settings' satisfies keyof paths;
+const SCHEDULED_TASKS_PATH = '/api/observability/scheduled-tasks' satisfies keyof paths;
+const SCHEDULER_RUNS_PATH = '/api/observability/scheduler-runs' satisfies keyof paths;
+const SCHEDULED_TASK_RUN_PATH = '/api/observability/scheduled-tasks/{key}/run' satisfies keyof paths;
+const SCHEDULED_TASKS_RUN_DUE_PATH = '/api/observability/scheduled-tasks/run-due' satisfies keyof paths;
+const SCHEDULED_TASK_DEFAULTS_PATH = '/api/observability/scheduled-tasks/defaults' satisfies keyof paths;
 
 /** Request body for `PUT /api/settings` (generated from the backend contract). */
 type SettingsPatch = components['schemas']['SettingsPatch'];
@@ -78,7 +88,7 @@ async function fetchJson(
  */
 export async function checkLsatBackendHealth(timeoutMs = 2500): Promise<LsatBackendHealth> {
   const started = typeof performance !== 'undefined' ? performance.now() : 0;
-  const health = await fetchJson('/api/health', timeoutMs);
+  const health = await fetchJson(HEALTH_PATH, timeoutMs);
 
   if (!('ok' in health) || !health.ok) {
     const reason = 'error' in health ? health.error : `responded ${('status' in health ? health.status : 0)}`;
@@ -94,7 +104,7 @@ export async function checkLsatBackendHealth(timeoutMs = 2500): Promise<LsatBack
   // Best-effort AI/provider health (don't fail the card if this endpoint 404s
   // on an older backend build).
   let ai: LsatBackendHealth['ai'];
-  const aiRes = await fetchJson('/api/ai/health', timeoutMs);
+  const aiRes = await fetchJson(AI_HEALTH_PATH, timeoutMs);
   if ('ok' in aiRes && aiRes.ok && aiRes.data && typeof aiRes.data === 'object') {
     // The contract types this body as an open record (`{ [key: string]: unknown }`),
     // so read each field defensively rather than trusting a fixed shape.
@@ -203,7 +213,7 @@ export async function getLsatCloudBudget(
   if (typeof opts.outputTokens === 'number') params.set('output_tokens', String(opts.outputTokens));
   const query = params.toString();
   const res = await fetchJson(
-    `/api/observability/cloud-budget${query ? `?${query}` : ''}`,
+    `${CLOUD_BUDGET_PATH}${query ? `?${query}` : ''}`,
     timeoutMs,
   );
 
@@ -274,7 +284,7 @@ export async function syncProviderToLsat(
     ...(isOllama ? {} : { lmstudio_url: base }),
   };
 
-  const res = await fetchJson('/api/settings', timeoutMs, {
+  const res = await fetchJson(SETTINGS_PATH, timeoutMs, {
     method: 'PUT',
     body: JSON.stringify(settingsPatch),
   });
@@ -376,7 +386,7 @@ export async function pushModelRoutingToLsat(
     return { ok: false, detail: 'No model-routing fields to update.' };
   }
 
-  const res = await fetchJson('/api/settings', timeoutMs, {
+  const res = await fetchJson(SETTINGS_PATH, timeoutMs, {
     method: 'PUT',
     body: JSON.stringify(settingsPatch),
   });
@@ -505,7 +515,7 @@ function readSchedulerRun(raw: unknown): LsatSchedulerRun {
 
 /** OPS-4: list the local maintenance task registry. Never throws. */
 export async function getLsatScheduledTasks(timeoutMs = 3000): Promise<LsatScheduledTasksReport> {
-  const res = await fetchJson('/api/observability/scheduled-tasks', timeoutMs);
+  const res = await fetchJson(SCHEDULED_TASKS_PATH, timeoutMs);
   if (!('ok' in res) || !res.ok || !isRecord(res.data)) {
     const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
     return {
@@ -521,7 +531,7 @@ export async function getLsatScheduledTasks(timeoutMs = 3000): Promise<LsatSched
 
 /** OPS-4: recent maintenance run history (newest first). Never throws. */
 export async function getLsatSchedulerRuns(timeoutMs = 3000): Promise<LsatSchedulerRunsReport> {
-  const res = await fetchJson('/api/observability/scheduler-runs', timeoutMs);
+  const res = await fetchJson(SCHEDULER_RUNS_PATH, timeoutMs);
   if (!('ok' in res) || !res.ok || !isRecord(res.data)) {
     const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
     return {
@@ -541,7 +551,7 @@ export async function runLsatScheduledTask(
   timeoutMs = 30000,
 ): Promise<LsatMaintenanceActionResult> {
   const safeKey = encodeURIComponent(key);
-  const res = await fetchJson(`/api/observability/scheduled-tasks/${safeKey}/run`, timeoutMs, {
+  const res = await fetchJson(SCHEDULED_TASK_RUN_PATH.replace('{key}', safeKey), timeoutMs, {
     method: 'POST',
   });
   if (!('ok' in res) || !res.ok) {
@@ -563,7 +573,7 @@ export async function runLsatScheduledTask(
 export async function runDueLsatScheduledTasks(
   timeoutMs = 60000,
 ): Promise<LsatMaintenanceActionResult> {
-  const res = await fetchJson('/api/observability/scheduled-tasks/run-due', timeoutMs, {
+  const res = await fetchJson(SCHEDULED_TASKS_RUN_DUE_PATH, timeoutMs, {
     method: 'POST',
   });
   if (!('ok' in res) || !res.ok) {
@@ -583,7 +593,7 @@ export async function runDueLsatScheduledTasks(
 export async function ensureLsatScheduledDefaults(
   timeoutMs = 10000,
 ): Promise<LsatMaintenanceActionResult> {
-  const res = await fetchJson('/api/observability/scheduled-tasks/defaults', timeoutMs, {
+  const res = await fetchJson(SCHEDULED_TASK_DEFAULTS_PATH, timeoutMs, {
     method: 'POST',
   });
   if (!('ok' in res) || !res.ok) {
@@ -618,7 +628,7 @@ export async function upsertLsatScheduledTask(
     enabled: task.enabled,
     payload: task.payload ?? {},
   });
-  const res = await fetchJson('/api/observability/scheduled-tasks', timeoutMs, { method: 'POST', body });
+  const res = await fetchJson(SCHEDULED_TASKS_PATH, timeoutMs, { method: 'POST', body });
   if (!('ok' in res) || !res.ok) {
     const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
     return { ok: false, reachable: 'error' in res ? false : true, detail: `Could not update "${task.key}" — ${reason}.` };

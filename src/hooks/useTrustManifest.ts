@@ -20,9 +20,10 @@
  * `response_model`, regenerate `api.gen.ts` and anchor the path here.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { paths } from '../domains/lsat/lib/api.gen';
 import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 
-const TRUST_PATH = '/api/observability/trust';
+const TRUST_PATH = '/api/observability/trust' satisfies keyof paths;
 
 /** Generous since this can shell out to git/rustc server-side; never on a render path. */
 const DEFAULT_TIMEOUT_MS = 6000;

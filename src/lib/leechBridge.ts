@@ -26,6 +26,7 @@
  * state rather than erroring. LSAT rows deep-link to `/lsat/srs`; host rows are
  * shown inline (no deep link — the host owns its own review surface).
  */
+import type { paths } from '../domains/lsat/lib/api.gen';
 import {
   lsatSrsCardToCanonical,
   type CrossDomainReviewCard,
@@ -33,8 +34,8 @@ import {
 } from './dataDictionary';
 import { fetchLsatSidecar } from './lsatSidecarClient';
 
-const LEECHES_PATH = '/api/srs/leeches';
-const CONCEPT_GAP_PATH = '/api/srs/concept-gap-queue';
+const LEECHES_PATH = '/api/srs/leeches' satisfies keyof paths;
+const CONCEPT_GAP_PATH = '/api/srs/concept-gap-queue' satisfies keyof paths;
 
 /** Deep-link path into the LSAT SRS review flow (host hard-navigates here). */
 export const LSAT_SRS_PATH = '/lsat/srs';

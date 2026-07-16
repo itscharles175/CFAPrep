@@ -28,6 +28,7 @@
  * regenerate `api.gen.ts` and anchor the path here like `lsatReviewBridge.ts`.
  */
 import { useCallback, useEffect, useRef } from 'react';
+import type { paths } from '../domains/lsat/lib/api.gen';
 import type {
   CrossDomainAttempt,
   CrossDomainMastery,
@@ -36,7 +37,7 @@ import type {
 import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 import { getStorage } from '../lib/storage';
 
-const PROGRESS_UPDATES_PATH = '/api/sync/progress-updates';
+const PROGRESS_UPDATES_PATH = '/api/sync/progress-updates' satisfies keyof paths;
 
 /** ~5 minutes between background catch-up pushes. */
 export const SYNC_PROGRESS_INTERVAL_MS = 5 * 60 * 1000;

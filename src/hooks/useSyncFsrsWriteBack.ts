@@ -22,11 +22,12 @@
  * backend dedupes it; a reschedule yields a new id and is applied.
  */
 import { useCallback, useEffect, useRef } from 'react';
+import type { paths } from '../domains/lsat/lib/api.gen';
 import type { CrossDomainReviewCard } from '../lib/dataDictionary';
 import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 import { getStorage } from '../lib/storage';
 
-const FSRS_WRITE_BACK_PATH = '/api/sync/fsrs-write-back';
+const FSRS_WRITE_BACK_PATH = '/api/sync/fsrs-write-back' satisfies keyof paths;
 
 /** ~5 minutes between background write-back pushes (matches the DATA-4a feed). */
 export const SYNC_FSRS_INTERVAL_MS = 5 * 60 * 1000;
