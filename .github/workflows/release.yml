@@ -286,7 +286,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: bundles
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: bundles/**/*
           generate_release_notes: true
