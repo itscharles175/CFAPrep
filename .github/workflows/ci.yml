@@ -127,7 +127,7 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: |
@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports
           path: |
@@ -189,7 +189,7 @@ jobs:
 
       - name: Upload a11y report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports-a11y
           path: |
@@ -263,7 +263,7 @@ jobs:
 
       - name: Upload visual report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports-visual
           path: |
@@ -305,7 +305,7 @@ jobs:
 
       - name: Upload performance report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports-perf
           path: |
@@ -375,7 +375,7 @@ jobs:
 
       - name: Upload LSAT QA reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports-lsat-qa
           path: |
@@ -521,7 +521,7 @@ jobs:
 
       - name: Upload LSAT reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports-lsat
           path: |
@@ -625,7 +625,7 @@ jobs:
 
       - name: Upload backend coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports-lsat-backend-coverage
           path: |
