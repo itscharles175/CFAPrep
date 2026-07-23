@@ -15,7 +15,7 @@
 // an explicit string for per-id keys) rather than re-typing the literal.
 
 /** Common namespace prefix for every LSATLab storage key. */
-export const NS = "lsatlab.";
+export const NS = 'lsatlab.';
 
 /**
  * Registry of fixed (non-parameterized) storage keys. Per-entity keys that are
@@ -54,7 +54,7 @@ export const STORAGE_KEYS = {
   srsQueue: `${NS}srsQueue`,
   // NOTE: the former `window: "lsatlab.window"` key (the old JS window-state
   // shim) was retired in W8 — window geometry is now persisted natively by
-  // tauri-plugin-window-state. Any stale `lsatlab.window` entry is simply
+  // the retired desktop window-state plugin. Any stale `lsatlab.window` entry is simply
   // ignored. The key string is intentionally not reused.
   resume: `${NS}resume`,
   recommendationInbox: `${NS}recommendationInbox`,
@@ -68,12 +68,12 @@ export const STORAGE_KEYS = {
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
 
 /** Storage areas we use. `local` survives reloads; `session` is per-tab. */
-export type StorageArea = "local" | "session";
+export type StorageArea = 'local' | 'session';
 
 function area(which: StorageArea): Storage | undefined {
   try {
-    if (typeof window === "undefined") return undefined;
-    return which === "session" ? window.sessionStorage : window.localStorage;
+    if (typeof window === 'undefined') return undefined;
+    return which === 'session' ? window.sessionStorage : window.localStorage;
   } catch {
     // Accessing the property can throw in some sandboxed iframes.
     return undefined;
@@ -83,7 +83,7 @@ function area(which: StorageArea): Storage | undefined {
 // ---------------------------------------------------------------------------
 // Raw string access
 // ---------------------------------------------------------------------------
-export function getRaw(key: string, which: StorageArea = "local"): string | null {
+export function getRaw(key: string, which: StorageArea = 'local'): string | null {
   try {
     return area(which)?.getItem(key) ?? null;
   } catch {
@@ -91,7 +91,7 @@ export function getRaw(key: string, which: StorageArea = "local"): string | null
   }
 }
 
-export function setRaw(key: string, value: string, which: StorageArea = "local"): void {
+export function setRaw(key: string, value: string, which: StorageArea = 'local'): void {
   try {
     area(which)?.setItem(key, value);
   } catch {
@@ -99,7 +99,7 @@ export function setRaw(key: string, value: string, which: StorageArea = "local")
   }
 }
 
-export function remove(key: string, which: StorageArea = "local"): void {
+export function remove(key: string, which: StorageArea = 'local'): void {
   try {
     area(which)?.removeItem(key);
   } catch {
@@ -110,7 +110,7 @@ export function remove(key: string, which: StorageArea = "local"): void {
 // ---------------------------------------------------------------------------
 // JSON access — the common case (parse failures fall back to `fallback`)
 // ---------------------------------------------------------------------------
-export function getJSON<T>(key: string, fallback: T, which: StorageArea = "local"): T {
+export function getJSON<T>(key: string, fallback: T, which: StorageArea = 'local'): T {
   const raw = getRaw(key, which);
   if (raw == null) return fallback;
   try {
@@ -120,7 +120,7 @@ export function getJSON<T>(key: string, fallback: T, which: StorageArea = "local
   }
 }
 
-export function setJSON<T>(key: string, value: T, which: StorageArea = "local"): void {
+export function setJSON<T>(key: string, value: T, which: StorageArea = 'local'): void {
   try {
     setRaw(key, JSON.stringify(value), which);
   } catch {
@@ -139,17 +139,12 @@ interface Versioned<T> {
   data: T;
 }
 
-export function getVersioned<T>(
-  key: string,
-  version: number,
-  fallback: T,
-  which: StorageArea = "local",
-): T {
+export function getVersioned<T>(key: string, version: number, fallback: T, which: StorageArea = 'local'): T {
   const raw = getRaw(key, which);
   if (raw == null) return fallback;
   try {
     const parsed = JSON.parse(raw) as Partial<Versioned<T>>;
-    if (parsed == null || typeof parsed !== "object" || parsed.v !== version) {
+    if (parsed == null || typeof parsed !== 'object' || parsed.v !== version) {
       return fallback;
     }
     return (parsed.data ?? fallback) as T;
@@ -158,11 +153,6 @@ export function getVersioned<T>(
   }
 }
 
-export function setVersioned<T>(
-  key: string,
-  version: number,
-  value: T,
-  which: StorageArea = "local",
-): void {
+export function setVersioned<T>(key: string, version: number, value: T, which: StorageArea = 'local'): void {
   setJSON<Versioned<T>>(key, { v: version, data: value }, which);
 }

@@ -7,7 +7,7 @@
 
 import { stripThink } from './stripThink';
 
-/** Detect whether the browser supports SpeechRecognition (Chrome/Edge/Safari/Tauri webview). */
+/** Detect whether the runtime supports SpeechRecognition (Chrome/Edge/Safari/Electron). */
 export function hasSpeechRecognition() {
   return typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 }
@@ -31,7 +31,7 @@ export function hasSpeechSynthesis() {
  */
 export function recognizeOnce({ lang = 'en-US', signal } = {}) {
   return new Promise((resolve, reject) => {
-    const Ctor = (typeof window !== 'undefined') && (window.SpeechRecognition || window.webkitSpeechRecognition);
+    const Ctor = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
     if (!Ctor) {
       reject(new Error('Speech recognition is not supported'));
       return;
@@ -68,12 +68,16 @@ export function recognizeOnce({ lang = 'en-US', signal } = {}) {
         reject(new DOMException('Aborted', 'AbortError'));
         return;
       }
-      signal.addEventListener('abort', () => {
-        settle(() => {
-          recognition.abort();
-          reject(new DOMException('Aborted', 'AbortError'));
-        });
-      }, { once: true });
+      signal.addEventListener(
+        'abort',
+        () => {
+          settle(() => {
+            recognition.abort();
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        },
+        { once: true },
+      );
     }
 
     recognition.start();
@@ -113,10 +117,14 @@ export function speak(text, { lang = 'en-US', rate = 1.05, voice, signal } = {})
         reject(new DOMException('Aborted', 'AbortError'));
         return;
       }
-      signal.addEventListener('abort', () => {
-        window.speechSynthesis.cancel();
-        reject(new DOMException('Aborted', 'AbortError'));
-      }, { once: true });
+      signal.addEventListener(
+        'abort',
+        () => {
+          window.speechSynthesis.cancel();
+          reject(new DOMException('Aborted', 'AbortError'));
+        },
+        { once: true },
+      );
     }
 
     window.speechSynthesis.speak(utterance);

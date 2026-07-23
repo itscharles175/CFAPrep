@@ -1,7 +1,7 @@
-import { Component, type ReactNode } from "react";
-import { AlertTriangle, RotateCcw } from "lucide-react";
-import { ErrorState } from "@lsat/components/states";
-import { Button } from "@lsat/components/ui/button";
+import { Component, type ReactNode } from 'react';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { ErrorState } from '@lsat/components/states';
+import { Button } from '@lsat/components/ui/button';
 
 interface Props {
   children: ReactNode;
@@ -10,7 +10,7 @@ interface Props {
    * isolated inline fallback so a crash in one panel does not blank the page
    * (5.7). `label` names the widget in the fallback copy.
    */
-  variant?: "page" | "widget";
+  variant?: 'page' | 'widget';
   label?: string;
   /**
    * Optional reset key: when it changes, the boundary clears its error so the
@@ -48,8 +48,8 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // Local-only: surface in console (and Tauri file logs in a packaged build).
-    const where = this.props.label ? ` in ${this.props.label}` : "";
+    // Local-only: surface in console (and Electron file logs in a packaged build).
+    const where = this.props.label ? ` in ${this.props.label}` : '';
     console.error(`Unhandled render error${where}:`, error);
 
     // G6 — persist the last crash locally so the Diagnostics panel can surface
@@ -57,16 +57,15 @@ export class ErrorBoundary extends Component<Props, State> {
     // original error. Stack is truncated to ~4000 chars to stay well under the
     // typical 5 MB per-key quota.
     try {
-      const route =
-        typeof window !== "undefined" ? window.location.pathname : "";
+      const route = typeof window !== 'undefined' ? window.location.pathname : '';
       const entry = {
         message: error.message,
-        stack: (error.stack ?? "").slice(0, 4000),
-        componentStack: (errorInfo.componentStack ?? "").slice(0, 4000),
+        stack: (error.stack ?? '').slice(0, 4000),
+        componentStack: (errorInfo.componentStack ?? '').slice(0, 4000),
         route,
         ts: Date.now(),
       };
-      localStorage.setItem("lsatlab.lastCrash", JSON.stringify(entry));
+      localStorage.setItem('lsatlab.lastCrash', JSON.stringify(entry));
     } catch {
       /* ignore write errors */
     }
@@ -79,25 +78,16 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) {
         return this.props.fallback(this.state.error, this.reset);
       }
-      if (this.props.variant === "widget") {
+      if (this.props.variant === 'widget') {
         return (
           <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm">
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
               <div className="flex-1">
-                <p className="font-medium">
-                  {this.props.label ?? "This panel"} hit an error.
-                </p>
-                <p className="mt-0.5 text-muted-foreground">
-                  The rest of the page is unaffected.
-                </p>
+                <p className="font-medium">{this.props.label ?? 'This panel'} hit an error.</p>
+                <p className="mt-0.5 text-muted-foreground">The rest of the page is unaffected.</p>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 gap-1 text-xs"
-                onClick={this.reset}
-              >
+              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={this.reset}>
                 <RotateCcw className="h-3.5 w-3.5" /> Retry
               </Button>
             </div>

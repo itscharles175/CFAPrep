@@ -3,6 +3,69 @@
 All notable changes to StudyVault (formerly QuantVault). Dates use
 `YYYY-MM-DD`. See `git log` for the full per-commit detail.
 
+## [Unreleased]
+
+### Changed
+- **Desktop runtime: Tauri 2 → Electron** (`264fe5e`, 2026-07-16). The Rust
+  crate `src-tauri/` was deleted; `package.json main` is now `electron/main.js`
+  and packaging runs through `electron-builder.yml`. Renderers run with
+  `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, and reach
+  the main process only through the fixed `window.studyvault` contract in
+  `electron/preload.cjs` with per-channel request/response validation
+  (`electron/contracts.js`). Production pages are served from the secure
+  standard `app://studyvault` protocol. Sidecar supervision, provenance
+  verification, port-conflict blocking, and LSAT token injection moved to
+  `electron/sidecar-manager.js`. On the frontend,
+  `src/domains/lsat/lib/tauri.ts` became `src/domains/lsat/lib/electron.ts` plus
+  the host-side `src/lib/desktopBridge.ts`. Offline invariants are unchanged:
+  sidecars stay on loopback, `crashReporter` runs with `uploadToServer: false`,
+  and automatic updates remain disabled. Rationale, tradeoffs, and open debt are
+  recorded in
+  `docs/decisions/2026-07-23-electron-desktop-runtime.md`.
+- Packaging hardening is now declarative: `scripts/apply-electron-fuses.mjs`
+  runs as electron-builder's `afterPack` hook and demands an explicit value for
+  every Electron fuse, so an Electron upgrade that adds an unreviewed option
+  fails the build.
+- Version sync narrowed to `package.json` (canonical), optional `.env`
+  `VITE_APP_VERSION`, and backend `APP_VERSION` — `tauri.conf.json` and
+  `Cargo.toml` no longer exist.
+- No Rust toolchain is required to build, test, or package. `npm run doctor`
+  replaced its `cargo`/`rustc` probes with a non-blocking `electron-builder` one.
+- `npm run verify` now includes `npm run test:electron`, so the desktop shell is
+  covered by the default local gate.
+
+### Removed
+- The Tauri Rust supervisor and its test suite (~137 `#[test]`/`#[tokio::test]`
+  functions across `src-tauri/src/`), including the explicit Windows Job Object
+  with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and `PR_SET_PDEATHSIG = SIGKILL` on
+  Linux children.
+- The `tauri-rust` CI job. The desktop shell is now gated by `electron-runtime`
+  on `windows-latest`: `npm run test:electron`, sidecar build + provenance +
+  smoke, and an unpacked `electron-builder --dir` package check.
+
+### Restored after the migration
+- The relocation guard (`electron/relocation.js`, ported from
+  `src-tauri/src/relocation.rs`), the owned-port sweep
+  (`electron/port-sweep.js`), and the one-time import of the legacy Tauri
+  keychain credential — each with Electron runtime coverage.
+- An unhealthy crash guard degrades the boot (banner +
+  `crash_guard_unavailable`) instead of blocking sidecar launch, so an EDR or
+  WMI hiccup cannot make the app unusable.
+
+### Known gaps
+- Crash-safe sidecar cleanup is now userspace: `electron/watchdog.js` +
+  `electron/child-watchdog.cjs` poll the parent PID every 1500 ms and reap owned
+  children; on Windows, non-detached spawning also puts sidecars in libuv's job
+  object. **No test kills the main process abruptly and asserts the sidecars
+  die**, and nothing pins `detached: false` on win32. With the guard degraded on
+  Linux/macOS there is no crash cleanup at all. Tracked in the decision record
+  and in both 2026 stack-upgrade roadmaps (TEST-2 / NATIVE-1 / NATIVE-7).
+
+### Verification gates
+- `npm run test:electron` — 53 tests / 53 pass (2026-07-23)
+- `npm run check:docs` — passes
+- `npm run check:baselines` — passes
+
 ## [0.9.0] — 2026-06-13
 
 **StudyVault** — merged LSAT Lab in as a fourth domain and rebranded the

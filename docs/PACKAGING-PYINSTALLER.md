@@ -1,87 +1,81 @@
-# Bundling the open-notebook backend via PyInstaller
+# Freezing Python Sidecars With PyInstaller
 
-The Tauri production install needs the FastAPI backend shipped inside
-`resources/services/open-notebook/`. We use PyInstaller to produce a
-single-file native binary so the user doesn't need a Python install at
-runtime.
+Electron production installs carry native Python sidecars under
+`resources/services/`; users do not need Python, `uv`, or source checkouts at
+runtime. Every release target builds its own binaries with Python 3.12 and
+PyInstaller 6.20.0.
 
-## What ships now (proven end-to-end against Python 3.12 + PyInstaller 6.20)
+## Packaged Inventory
 
-- `scripts/onb-minimal-requirements.txt` — focused pin set that
-  excludes the heavy provider SDKs (anthropic, google-genai, groq,
-  mistralai, sentence-transformers, torch). Keeps the binary near
-  ~100 MB instead of 500+ MB.
-- `scripts/onb-stub-main.py` — a tiny stub FastAPI that exposes the
-  same `/health` route the real backend does, plus a 503 catch-all so
-  the Tauri supervisor can probe readiness end-to-end without
-  installing the full open-notebook tree. Used as a smoke build target.
-- `scripts/build-onb-binary.mjs` — Node CLI driving PyInstaller against
-  whichever entry point you point it at:
-  - Full backend: `spike/open-notebook/api/main.py` (~150 MB)
-  - Stub: `scripts/onb-stub-main.py` (~36 MB)
+```text
+services/
+  lsat-backend/
+    lsatlab-backend(.exe)
+  open-notebook/
+    open-notebook(.exe)
+    open-notebook-worker(.exe)
+  bin/
+    surreal2(.exe)
+  sidecar-provenance.json
+```
 
-## Smoke test: build the stub binary and confirm `/health`
+The LSAT backend is required. SurrealDB, the Open Notebook API, and the Open
+Notebook worker form one optional RAG feature set. The release workflow does
+not mark RAG enabled unless all three optional executables are staged and pass
+provenance checks.
+
+## LSAT Backend
+
+`scripts/build-lsat-binary.mjs` creates an isolated `.venv-lsat`, installs the
+vendored backend from `services/lsat-backend/pyproject.toml`, and runs the
+maintained `services/lsat-backend/lsatlab.spec`. The result is staged at
+`electron/resources/services/lsat-backend/lsatlab-backend(.exe)`.
 
 ```powershell
-# 1. install the trivially-small stub deps
-python -m pip install fastapi==0.115.0 "uvicorn[standard]==0.30.6" pyinstaller==6.20.0
-
-# 2. build (~36 MB exe)
-python -m PyInstaller --onefile --name open-notebook-stub `
-       --distpath .pyinstaller-dist --workpath .pyinstaller-build `
-       scripts/onb-stub-main.py
-
-# 3. boot on a free port and probe
-$env:ONB_PORT='5056'
-Start-Process -FilePath '.\.pyinstaller-dist\open-notebook-stub.exe' -PassThru
-Start-Sleep -Seconds 4
-(Invoke-WebRequest 'http://127.0.0.1:5056/health' -UseBasicParsing).Content
-# → {"status":"ok","build":"pyinstaller-stub", ...}
+npm run build:lsat-binary
+npm run check:sidecar-provenance
 ```
 
-Verified output on Windows 11 / Python 3.12.10 / PyInstaller 6.20.0:
+## Open Notebook API And Worker
 
-```
-{"status":"ok","build":"pyinstaller-stub","message":"QuantVault open-notebook stub — replace with full backend for production."}
-```
-
-## Building the full backend
+Release builds require a pinned Open Notebook checkout at
+`spike/open-notebook`. `ONB_GIT_REF` must be the full commit SHA validated by
+`npm run check:onb-source`. `scripts/build-onb-binary.mjs` installs that source
+into an isolated `.venv-onb`, freezes `api/main.py`, resolves the installed
+`surreal-commands-worker` console entry point, and freezes both entry points.
 
 ```powershell
-python -m venv .venv-onb
-.\.venv-onb\Scripts\Activate.ps1
-python -m pip install --upgrade pip wheel
-python -m pip install -r scripts/onb-minimal-requirements.txt
-python -m pip install pyinstaller==6.20.0
+$env:ONB_GIT_REF='<40-character-commit-sha>'
+npm run check:onb-source -- --dir spike/open-notebook --expected $env:ONB_GIT_REF
+npm run stage:surreal-binary
 npm run build:onb-binary
+npm run check:sidecar-provenance -- --require "SurrealDB" --require "open-notebook binary" --require "open-notebook worker binary"
 ```
 
-The script writes the binary to
-`src-tauri/resources/services/open-notebook/open-notebook(.exe)`.
-`tauri.conf.json`'s `bundle.resources` ships everything under
-`resources/services/` into the installer; `services_dir()` in
-`src-tauri/src/lib.rs` discovers and supervises it at runtime.
+`npm run stage:surreal-binary` downloads the target-specific SurrealDB 2.6.5
+release asset, validates its pinned SHA-256, renames it to
+`bin/surreal2(.exe)`, and records provenance. The Open Notebook build writes
+both executables under `electron/resources/services/open-notebook/` and records
+their independent hashes.
 
-## When to bump the pinned versions
+`scripts/onb-stub-main.py` remains a narrow diagnostic fixture. It is not used
+by production packaging and cannot satisfy the RAG-enabled release gate.
 
-Re-pin when:
-- open-notebook (upstream) ships a version with security fixes against
-  one of our pinned packages
-- PyInstaller releases a fix for a bootloader bug on a target platform
-- Python itself ships a new minor (3.12 → 3.13) — confirm langchain +
-  langgraph still publish wheels for that version before bumping the
-  base interpreter
+## Verification
 
-After bumping, re-run the smoke test above. Then run the full
-`npm run build:onb-binary` against the real entry point and tail
-`pyinstaller --log-level WARNING` to confirm no missing hidden
-imports.
+Before packaging, run the frozen binaries and verify the loopback health
+contracts. Tagged CI performs this for the required LSAT backend and validates
+the full optional inventory whenever RAG is enabled. electron-builder then
+copies the staged service root through `extraResources`.
 
-## What the supervisor sees
+After any Python, PyInstaller, Open Notebook, or SurrealDB pin change:
 
-`src-tauri/src/lib.rs:spawn_sidecars_with` spawns the binary via
-`SidecarLauncher` with `ONB_HOST` and `ONB_PORT` set to `127.0.0.1`
-and `5055`. The supervisor exits cleanly on app teardown by stopping
-the child process (see `Drop` impl on the supervisor struct).
-Integration tests in the same file exercise the supervisor with a
-`MockLauncher` so no actual binary is required for CI.
+1. rebuild on every target OS and architecture;
+2. run provenance validation;
+3. smoke the frozen API endpoints and worker startup;
+4. package the Electron app with the real resources; and
+5. run packaged startup and process-cleanup smoke tests.
+
+`electron/sidecar-manager.js` owns dependency order, readiness, redacted logs,
+bounded restart, and teardown. The crash watchdog tracks only process trees
+launched by the current Electron instance.

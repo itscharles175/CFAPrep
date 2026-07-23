@@ -1,14 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { getDesktopBridge, isElectronRuntime } from '../lib/desktopBridge';
 
 /**
  * BA3 — RAG/sidecar-aware offline status (StudyVault host).
@@ -16,14 +8,14 @@ import {
  * The TopBar already tracks `navigator.onLine` for a simple browser-online pill
  * (handleOnline/handleOffline). This context is the *richer* layer: it answers
  * "can the RAG stack actually serve a request right now?" by probing the
- * supervised sidecars via the BA2 `get_sidecar_status` Tauri command, on top of
+ * supervised sidecars via the Electron preload bridge, on top of
  * the browser-online signal.
  *
  * Because the existing Dexie fallback silently hides a sidecar outage, this is
  * the surface that makes the degradation *visible* (see OfflineBanner) so a
  * user knows RAG answers are unavailable rather than silently empty.
  *
- * Fully degrading: under a non-Tauri/dev build (no `__TAURI_INTERNALS__`) we
+ * Fully degrading: when the Electron preload bridge is absent we
  * fall back to `navigator.onLine` only — there are no managed sidecars to probe,
  * so we never claim "sidecars down" in the browser.
  */
@@ -67,10 +59,6 @@ const PROBE_INTERVAL_MS = 10_000;
  */
 const RAG_SIDECAR_HINTS = ['surreal', 'notebook', 'open-notebook'];
 
-function isTauriRuntime(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
-
 function browserOnline(): boolean {
   return typeof navigator === 'undefined' ? true : navigator.onLine;
 }
@@ -82,14 +70,15 @@ function isRagSidecar(name: string): boolean {
 
 /**
  * Probe the supervised sidecars and decide whether the RAG pair is reachable.
- * Never throws: any failure (command missing on an older shell, invoke reject,
+ * Never throws: any failure (method missing on an older preload, IPC rejection,
  * shape drift) resolves to `false` so the caller can fall back to last-known-good
  * rather than crash the provider.
  */
 async function probeSidecarsReachable(): Promise<boolean> {
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    const rows = await invoke<SidecarStatusRow[]>('get_sidecar_status');
+    const bridge = getDesktopBridge();
+    if (!bridge) return false;
+    const rows: SidecarStatusRow[] = await bridge.sidecar.status();
     if (!Array.isArray(rows) || rows.length === 0) return false;
     const ragRows = rows.filter((row) => row && typeof row.name === 'string' && isRagSidecar(row.name));
     // If the shell reports no RAG sidecars at all, treat RAG as unavailable
@@ -108,10 +97,10 @@ interface OfflineProviderProps {
 }
 
 export function OfflineProvider({ children }: OfflineProviderProps) {
-  const tauri = isTauriRuntime();
+  const electron = isElectronRuntime();
   const [online, setOnline] = useState<boolean>(() => browserOnline());
   // Default to reachable so a fresh mount doesn't flash the banner before the
-  // first probe resolves; non-Tauri builds keep this `true` permanently.
+  // first probe resolves; browser builds keep this `true` permanently.
   const [sidecarsReachable, setSidecarsReachable] = useState<boolean>(true);
   // Last-known-good cache: a single failed probe shouldn't alarm the user (a
   // transient blip during a sidecar respawn is common), so we only flip to
@@ -136,8 +125,8 @@ export function OfflineProvider({ children }: OfflineProviderProps) {
   }, []);
 
   const runProbe = useCallback(async () => {
-    // Non-Tauri/dev: no sidecars to probe — reachability tracks nothing extra.
-    if (!tauri) {
+    // Browser dev: no sidecars to probe, so reachability tracks nothing extra.
+    if (!electron) {
       setSidecarsReachable(true);
       return;
     }
@@ -156,13 +145,13 @@ export function OfflineProvider({ children }: OfflineProviderProps) {
       // Last-known-good: only surface "down" once a second probe also fails.
       if (failureStreak.current >= 2) setSidecarsReachable(false);
     }
-  }, [tauri]);
+  }, [electron]);
 
   // Periodic probe + an immediate one on mount, plus a re-probe whenever the
   // window regains focus or comes back online (the moments most likely to have
   // changed the sidecar picture).
   useEffect(() => {
-    if (!tauri) {
+    if (!electron) {
       setSidecarsReachable(true);
       return undefined;
     }
@@ -181,7 +170,7 @@ export function OfflineProvider({ children }: OfflineProviderProps) {
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('online', handleFocus);
     };
-  }, [tauri, runProbe]);
+  }, [electron, runProbe]);
 
   const retry = useCallback(() => {
     // Retry is an explicit user action: clear the streak so a single fresh
@@ -194,14 +183,14 @@ export function OfflineProvider({ children }: OfflineProviderProps) {
   const value = useMemo<OfflineStatus>(() => {
     let reason: OfflineReason = 'ok';
     if (!online) reason = 'browser-offline';
-    else if (tauri && !sidecarsReachable) reason = 'sidecars-down';
+    else if (electron && !sidecarsReachable) reason = 'sidecars-down';
     return {
       isOffline: reason !== 'ok',
       reason,
       sidecarsReachable,
       retry,
     };
-  }, [online, sidecarsReachable, tauri, retry]);
+  }, [online, sidecarsReachable, electron, retry]);
 
   return <OfflineContext.Provider value={value}>{children}</OfflineContext.Provider>;
 }

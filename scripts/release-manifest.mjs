@@ -7,16 +7,23 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  SIGNING_EVIDENCE_SCHEMA,
+  normalizePlatform,
+  validateSigningAssetBindings,
+  validateSigningEvidence,
+  walkBundleFiles,
+} from './release-signing.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = dirname(__filename);
 export const REPO_ROOT = resolve(SCRIPT_DIR, '..');
 export const DEFAULT_OUTPUT = resolve(REPO_ROOT, 'dist', 'studyvault-release-manifest.json');
-export const SCHEMA = 'studyvault.release-manifest.v1';
+export const SCHEMA = 'studyvault.release-manifest.v2';
 
 function repoPath(...parts) {
   return resolve(REPO_ROOT, ...parts);
@@ -120,41 +127,15 @@ export function parseNpmLock(lock) {
     .sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
 }
 
-async function walkFiles(root) {
-  if (!existsSync(root)) return [];
-  const out = [];
-  async function visit(path) {
-    const info = await stat(path);
-    if (info.isDirectory()) {
-      const entries = await readdir(path);
-      for (const entry of entries) {
-        await visit(join(path, entry));
-      }
-      return;
-    }
-    if (info.isFile() && info.size > 0) {
-      out.push(path);
-    }
-  }
-  await visit(root);
-  return out;
-}
-
-export async function collectBundleAssets({ debug = false } = {}) {
-  const roots = debug
-    ? [repoPath('src-tauri', 'target', 'debug', 'bundle')]
-    : [
-        repoPath('src-tauri', 'target', 'release', 'bundle'),
-        repoPath('src-tauri', 'target', 'universal-apple-darwin', 'release', 'bundle'),
-      ];
-  const files = [];
-  for (const root of roots) {
-    files.push(...(await walkFiles(root)));
-  }
+// `root` is an override for fixtures only; releases always walk the bundle dir
+// electron-builder wrote. The walker and its lstat sizing are shared with
+// release-signing.mjs so a .app digest can bind to these assets.
+export async function collectBundleAssets({ debug = false, root } = {}) {
+  const files = await walkBundleFiles(root ? resolve(root) : repoPath(debug ? 'release-debug' : 'release'));
   files.sort((a, b) => normalizePath(a).localeCompare(normalizePath(b)));
   return Promise.all(
     files.map(async (path) => {
-      const info = await stat(path);
+      const info = await lstat(path);
       return {
         path: normalizePath(path),
         sha256: await sha256File(path),
@@ -167,37 +148,33 @@ export async function collectBundleAssets({ debug = false } = {}) {
 async function buildLockEvidence() {
   const entries = [
     ['package-lock.json', true],
-    [join('src-tauri', 'Cargo.lock'), true],
     [join('services', 'lsat-backend', 'uv.lock'), true],
     [join('services', 'lsat-backend', 'pyproject.toml'), true],
-    [join('src-tauri', 'Cargo.toml'), true],
-    [join('src-tauri', 'tauri.conf.json'), true],
+    ['electron-builder.yml', true],
+    [join('electron', 'main.js'), true],
+    [join('electron', 'preload.cjs'), true],
   ];
   return Promise.all(entries.map(([path, required]) => hashFileEntry(repoPath(path), { required })));
 }
 
 async function buildComponentEvidence() {
   const packageLockPath = repoPath('package-lock.json');
-  const cargoLockPath = repoPath('src-tauri', 'Cargo.lock');
   const uvLockPath = repoPath('services', 'lsat-backend', 'uv.lock');
   const npm = existsSync(packageLockPath) ? parseNpmLock(await readJson(packageLockPath)) : [];
-  const cargo = existsSync(cargoLockPath) ? parseCargoLock(await readText(cargoLockPath)) : [];
   const pypi = existsSync(uvLockPath) ? parseUvLock(await readText(uvLockPath)) : [];
   return {
     counts: {
       npm: npm.length,
-      cargo: cargo.length,
       pypi: pypi.length,
-      total: npm.length + cargo.length + pypi.length,
+      total: npm.length + pypi.length,
     },
     npm,
-    cargo,
     pypi,
   };
 }
 
 async function sidecarProvenanceEvidence() {
-  const path = repoPath('src-tauri', 'resources', 'services', 'sidecar-provenance.json');
+  const path = repoPath('electron', 'resources', 'services', 'sidecar-provenance.json');
   if (!existsSync(path)) {
     return {
       present: false,
@@ -227,35 +204,31 @@ async function sidecarProvenanceEvidence() {
 
 async function versionEvidence() {
   const packageJson = await readJson(repoPath('package.json'));
-  const tauriConf = await readJson(repoPath('src-tauri', 'tauri.conf.json'));
-  const cargoToml = await readText(repoPath('src-tauri', 'Cargo.toml'));
-  const cargoVersion = firstTomlString(cargoToml, 'version');
   return {
     package: packageJson.version || null,
-    tauri: tauriConf.version || null,
-    cargo: cargoVersion,
-    consistent: Boolean(packageJson.version && packageJson.version === tauriConf.version && packageJson.version === cargoVersion),
+    electron: packageJson.devDependencies?.electron || null,
+    consistent: Boolean(packageJson.version),
   };
 }
 
 async function signingEvidence() {
-  const tauriConf = await readJson(repoPath('src-tauri', 'tauri.conf.json'));
-  const windows = tauriConf.bundle?.windows || {};
-  const macos = tauriConf.bundle?.macOS || {};
+  const evidencePath = String(process.env.STUDYVAULT_SIGNING_EVIDENCE || '').trim();
+  if (evidencePath) {
+    const evidence = await readJson(resolve(evidencePath));
+    const validation = validateSigningEvidence(evidence);
+    if (!validation.ok) {
+      throw new Error(`invalid signing evidence: ${validation.errors.join('; ')}`);
+    }
+    return evidence;
+  }
+  const platform = normalizePlatform(process.platform);
   return {
-    windows: {
-      configured: Boolean(windows.certificateThumbprint || process.env.TAURI_WINDOWS_CERT_THUMBPRINT || process.env.WINDOWS_CERT_BASE64),
-      certificateThumbprintConfigured: Boolean(windows.certificateThumbprint || process.env.TAURI_WINDOWS_CERT_THUMBPRINT),
-      certificateSecretPresent: Boolean(process.env.WINDOWS_CERT_BASE64),
-      digestAlgorithm: windows.digestAlgorithm || null,
-      timestampUrl: windows.timestampUrl || null,
-    },
-    macos: {
-      configured: Boolean(macos.signingIdentity || process.env.APPLE_SIGNING_IDENTITY || process.env.APPLE_CERTIFICATE_BASE64),
-      signingIdentityConfigured: Boolean(macos.signingIdentity || process.env.APPLE_SIGNING_IDENTITY),
-      certificateSecretPresent: Boolean(process.env.APPLE_CERTIFICATE_BASE64),
-      providerShortNameConfigured: Boolean(macos.providerShortName || process.env.APPLE_TEAM_ID),
-    },
+    schema: SIGNING_EVIDENCE_SCHEMA,
+    generatedAt: new Date().toISOString(),
+    platform,
+    required: platform !== 'linux',
+    status: platform === 'linux' ? 'not_applicable' : 'unverified',
+    artifacts: [],
   };
 }
 
@@ -292,14 +265,19 @@ export async function buildReleaseManifest({ debug = false } = {}) {
 
 export function validateReleaseManifest(
   manifest,
-  { requireAssets = false, requireSidecarProvenance = false } = {},
+  {
+    requireAssets = false,
+    requireSidecarProvenance = false,
+    requireSigning = false,
+    signingPlatform = process.platform,
+  } = {},
 ) {
   const errors = [];
   if (manifest?.schema !== SCHEMA) {
     errors.push(`unsupported schema: ${manifest?.schema || '<missing>'}`);
   }
   if (!manifest?.versions?.consistent) {
-    errors.push('package, Tauri, and Cargo versions are not consistent');
+    errors.push('package version evidence is missing or inconsistent');
   }
   for (const entry of manifest?.lockfiles || []) {
     if (entry.required && (!entry.present || !entry.sha256 || entry.size <= 0)) {
@@ -307,7 +285,7 @@ export function validateReleaseManifest(
     }
   }
   const counts = manifest?.sbom?.counts || {};
-  for (const key of ['npm', 'cargo', 'pypi']) {
+  for (const key of ['npm', 'pypi']) {
     if (!Number.isInteger(counts[key]) || counts[key] <= 0) {
       errors.push(`SBOM has no ${key} components`);
     }
@@ -315,18 +293,32 @@ export function validateReleaseManifest(
   if (requireSidecarProvenance && !manifest?.sidecarProvenance?.present) {
     errors.push('sidecar provenance manifest is required but missing');
   }
-  if (requireSidecarProvenance && !manifest?.sidecarProvenance?.entries?.some((entry) => entry.service === 'LSAT backend')) {
+  if (
+    requireSidecarProvenance &&
+    !manifest?.sidecarProvenance?.entries?.some((entry) => entry.service === 'LSAT backend')
+  ) {
     errors.push('sidecar provenance is missing the required LSAT backend entry');
   }
   if (requireAssets && !manifest?.bundleAssets?.length) {
     errors.push('release bundle assets are required but none were found');
   }
+  if (requireSigning) {
+    const signing = validateSigningEvidence(manifest?.signing, { requireSigned: true });
+    errors.push(...signing.errors.map((error) => `signing: ${error}`));
+    if (signing.ok) {
+      if (normalizePlatform(manifest.signing.platform) !== normalizePlatform(signingPlatform)) {
+        errors.push('signing: evidence platform does not match the current release platform');
+      }
+      const bindings = validateSigningAssetBindings(manifest.signing, manifest.bundleAssets);
+      errors.push(...bindings.errors.map((error) => `signing: ${error}`));
+    }
+  }
   return { ok: errors.length === 0, errors };
 }
 
-async function writeReleaseManifest({ output, debug, requireAssets, requireSidecarProvenance }) {
+async function writeReleaseManifest({ output, debug, requireAssets, requireSidecarProvenance, requireSigning }) {
   const manifest = await buildReleaseManifest({ debug });
-  const validation = validateReleaseManifest(manifest, { requireAssets, requireSidecarProvenance });
+  const validation = validateReleaseManifest(manifest, { requireAssets, requireSidecarProvenance, requireSigning });
   if (!validation.ok) {
     throw new Error(`release manifest validation failed: ${validation.errors.join('; ')}`);
   }
@@ -335,9 +327,9 @@ async function writeReleaseManifest({ output, debug, requireAssets, requireSidec
   return manifest;
 }
 
-async function checkReleaseManifest({ output, requireAssets, requireSidecarProvenance }) {
+async function checkReleaseManifest({ output, requireAssets, requireSidecarProvenance, requireSigning }) {
   const manifest = await readJson(output);
-  const validation = validateReleaseManifest(manifest, { requireAssets, requireSidecarProvenance });
+  const validation = validateReleaseManifest(manifest, { requireAssets, requireSidecarProvenance, requireSigning });
   if (!validation.ok) {
     throw new Error(`release manifest validation failed: ${validation.errors.join('; ')}`);
   }
@@ -352,6 +344,7 @@ function parseArgs(argv) {
     debug: false,
     requireAssets: false,
     requireSidecarProvenance: false,
+    requireSigning: false,
   };
   while (rest.length) {
     const arg = rest.shift();
@@ -359,6 +352,7 @@ function parseArgs(argv) {
     else if (arg === '--debug') opts.debug = true;
     else if (arg === '--require-assets') opts.requireAssets = true;
     else if (arg === '--require-sidecar-provenance') opts.requireSidecarProvenance = true;
+    else if (arg === '--require-signing') opts.requireSigning = true;
     else throw new Error(`unknown release-manifest arg: ${arg}`);
   }
   return opts;
@@ -382,7 +376,9 @@ async function main() {
     );
     return;
   }
-  throw new Error('usage: release-manifest.mjs write|check [--output path] [--debug] [--require-assets] [--require-sidecar-provenance]');
+  throw new Error(
+    'usage: release-manifest.mjs write|check [--output path] [--debug] [--require-assets] [--require-sidecar-provenance] [--require-signing]',
+  );
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === __filename) {

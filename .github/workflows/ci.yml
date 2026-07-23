@@ -29,7 +29,7 @@ jobs:
         run: npm ci --legacy-peer-deps
 
       # DX-2 — single version source-of-truth gate. Fails PRs when package.json,
-      # Tauri, Cargo, optional .env, or the backend APP_VERSION default drift.
+      # optional .env, or the backend APP_VERSION default drift.
       - name: Version sync gate
         run: npm run check:versions
 
@@ -57,6 +57,14 @@ jobs:
 
       - name: Content validation
         run: npm run content:validate
+
+      # CONTENT-3 — the step above proves every objective has questions attached;
+      # this one proves those questions are worth answering. A template-derived
+      # bank passes coverage perfectly while being trivially gameable, so the
+      # exploitability metrics get their own named check rather than hiding
+      # inside another step's output.
+      - name: Content exploitability gate
+        run: node --import ./scripts/register-ts-loader.mjs scripts/check-content-integrity.mjs
 
       # GAP-EGRESS-1 — build-time "no-cloud" gate. StudyVault's central invariant
       # is offline-only ("works on a plane"); today that's convention, not a build
@@ -625,39 +633,46 @@ jobs:
             dist/reports/lsat-backend-coverage.json
           retention-days: 14
 
-  # TEST-2: the Tauri Rust core (src-tauri/) — compile, test, lint, format. The
-  # Rust supervisor (sidecar lifecycle, Job-Object cleanup, data relocation) had
-  # NO CI: `cargo test` only ran inside the tagged release bundle, so a broken
-  # supervisor surfaced at release, not on the PR. This job is WINDOWS-primary —
-  # the desktop app's main target, where the Job-Object + path logic is
-  # platform-specific — and runs the standard Rust gate: fmt --check, clippy
-  # (warnings = errors), and the unit tests in lib.rs + relocation.rs. WebView2
-  # is preinstalled on the windows runner, so the `tauri` crate links. Runs in
-  # parallel with `quality` — no host slowdown. (Plan TEST-2.)
-  tauri-rust:
-    name: Tauri Rust core — fmt + clippy + test (Windows)
+  electron-runtime:
+    name: Electron Runtime - Test And Package (Windows)
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
         with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
         with:
-          workspaces: src-tauri
-
-      - name: Rust format check
-        working-directory: src-tauri
-        run: cargo fmt --all --check
-
-      - name: Clippy (warnings as errors)
-        working-directory: src-tauri
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Cargo test
-        working-directory: src-tauri
-        run: cargo test --all-features
+          python-version: '3.12'
+      - run: npm ci --legacy-peer-deps
+      - name: Electron Runtime Tests
+        run: npm run test:electron
+      - run: npm run build
+      - name: Build Required LSAT Sidecar
+        run: npm run build:lsat-binary
+      - name: Verify Required Sidecar Provenance
+        run: npm run check:sidecar-provenance
+      - name: Smoke Test Required LSAT Sidecar
+        shell: pwsh
+        env:
+          LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-smoke
+        run: |
+          node scripts/smoke-sidecar.mjs `
+            --bin electron/resources/services/lsat-backend/lsatlab-backend.exe `
+            --url http://127.0.0.1:8123/api/health `
+            --expect-ok --timeout 90000 --label lsat-backend `
+            -- --host 127.0.0.1 --port 8123
+      - name: Package Unpacked Electron App
+        run: npx electron-builder --dir --config.directories.output=release-ci --config.forceCodeSigning=false
+      - name: Verify Packaged Executable
+        shell: pwsh
+        run: |
+          $exe = 'release-ci/win-unpacked/StudyVault.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Missing $exe" }
+          if ((Get-Item -LiteralPath $exe).Length -le 0) { throw "Empty $exe" }
+          $sidecar = 'release-ci/win-unpacked/resources/services/lsat-backend/lsatlab-backend.exe'
+          if (-not (Test-Path -LiteralPath $sidecar -PathType Leaf)) { throw "Missing $sidecar" }
+          if ((Get-Item -LiteralPath $sidecar).Length -le 0) { throw "Empty $sidecar" }

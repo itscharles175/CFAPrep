@@ -31,7 +31,7 @@ def _write_sidecar_provenance(tmp_path, payload: bytes = b"lsat-sidecar"):
             {
                 "schema": trust_mod.SIDECAR_PROVENANCE_SCHEMA,
                 "generatedAt": "2026-07-05T00:00:00.000Z",
-                "servicesRoot": "src-tauri/resources/services",
+                "servicesRoot": "electron/resources/services",
                 "entries": [
                     {
                         "service": "LSAT backend",
@@ -50,7 +50,36 @@ def _write_sidecar_provenance(tmp_path, payload: bytes = b"lsat-sidecar"):
     return manifest, binary
 
 
-def _write_release_manifest(tmp_path, *, assets: bool = True, sidecar: bool = True):
+def _write_release_manifest(
+    tmp_path,
+    *,
+    assets: bool = True,
+    sidecar: bool = True,
+    signing: dict | None = None,
+):
+    if signing is None:
+        signing = {
+            "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+            "platform": "windows",
+            "required": True,
+            "status": "verified",
+            "artifacts": [
+                {
+                    "path": f"bundle/{kind}",
+                    "kind": kind,
+                    "size": 100,
+                    "sha256": ("a" if kind == "app" else "b" if kind == "nsis" else "d") * 64,
+                    "published": kind != "app",
+                    "signed": True,
+                    "verified": True,
+                    "timestamped": True,
+                    "notarized": None,
+                    "signer": {"subject": "StudyVault Test", "thumbprint": "a" * 40},
+                    "timestamp": {"thumbprint": "b" * 40},
+                }
+                for kind in ("app", "nsis", "msi")
+            ],
+        }
     manifest = tmp_path / "studyvault-release-manifest.json"
     manifest.write_text(
         json.dumps(
@@ -58,13 +87,12 @@ def _write_release_manifest(tmp_path, *, assets: bool = True, sidecar: bool = Tr
                 "schema": trust_mod.RELEASE_MANIFEST_SCHEMA,
                 "versions": {
                     "package": "0.9.0",
-                    "tauri": "0.9.0",
-                    "cargo": "0.9.0",
+                    "electron": "^43.1.1",
                     "consistent": True,
                 },
                 "lockfiles": [
                     {"path": "package-lock.json", "present": True, "required": True, "sha256": "a" * 64, "size": 100},
-                    {"path": "src-tauri/Cargo.lock", "present": True, "required": True, "sha256": "b" * 64, "size": 100},
+                    {"path": "electron-builder.yml", "present": True, "required": True, "sha256": "b" * 64, "size": 100},
                     {
                         "path": "services/lsat-backend/uv.lock",
                         "present": True,
@@ -73,18 +101,26 @@ def _write_release_manifest(tmp_path, *, assets: bool = True, sidecar: bool = Tr
                         "size": 100,
                     },
                 ],
-                "sbom": {"counts": {"npm": 10, "cargo": 11, "pypi": 12, "total": 33}},
+                "sbom": {"counts": {"npm": 10, "pypi": 12, "total": 22}},
                 "sidecarProvenance": {
                     "present": sidecar,
                     "entries": [{"service": "LSAT backend", "path": "lsat-backend/lsatlab-backend"}] if sidecar else [],
                 },
-                "bundleAssets": [{"path": "src-tauri/target/release/bundle/msi/app.msi", "sha256": "d" * 64, "size": 100}]
+                "bundleAssets": [
+                    {
+                        "path": "bundle/nsis",
+                        "sha256": "b" * 64,
+                        "size": 100,
+                    },
+                    {
+                        "path": "bundle/msi",
+                        "sha256": "d" * 64,
+                        "size": 100,
+                    },
+                ]
                 if assets
                 else [],
-                "signing": {
-                    "windows": {"configured": False, "digestAlgorithm": "sha256"},
-                    "macos": {"configured": False},
-                },
+                "signing": signing,
             }
         ),
         encoding="utf-8",
@@ -131,18 +167,20 @@ def test_release_trust_blocks_invalid_release_local_schema(db_session, monkeypat
 
 
 def test_release_manifest_trust_accepts_complete_manifest(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
     manifest = _write_release_manifest(tmp_path)
     monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
 
     check = trust_mod._release_manifest_check("release")
 
     assert check["status"] == "ok"
-    assert check["detail"]["component_counts"] == {"npm": 10, "cargo": 11, "pypi": 12}
-    assert check["detail"]["bundle_asset_count"] == 1
+    assert check["detail"]["component_counts"] == {"npm": 10, "pypi": 12}
+    assert check["detail"]["bundle_asset_count"] == 2
     assert check["detail"]["has_lsat_sidecar"] is True
 
 
 def test_release_manifest_trust_blocks_missing_release_assets(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
     manifest = _write_release_manifest(tmp_path, assets=False, sidecar=False)
     monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
 
@@ -155,6 +193,244 @@ def test_release_manifest_trust_blocks_missing_release_assets(monkeypatch, tmp_p
         "sidecar_provenance_missing",
     }
     assert dev_check["status"] == "ok"
+
+
+def test_release_manifest_trust_blocks_unverified_signing(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(
+        tmp_path,
+        signing={
+            "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+            "platform": "windows",
+            "required": True,
+            "status": "configured",
+            "artifacts": [],
+        },
+    )
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    release_check = trust_mod._release_manifest_check("release")
+    packaged_check = trust_mod._release_manifest_check("packaged")
+    dev_check = trust_mod._release_manifest_check("dev")
+
+    assert release_check["status"] == "block"
+    assert packaged_check["status"] == "block"
+    assert set(release_check["detail"]["errors"]) == {
+        "platform_signature_unverified",
+        "signing_artifacts_missing",
+    }
+    assert dev_check["status"] == "ok"
+
+
+@pytest.mark.parametrize("evidence", ["absent", "empty", "null", "not_a_dict"])
+@pytest.mark.parametrize("tier", ["release", "packaged"])
+def test_release_manifest_trust_blocks_missing_signing_evidence(monkeypatch, tmp_path, evidence, tier):
+    """The signing gate exists for exactly these shapes: a manifest that carries
+    no signing evidence at all must BLOCK, not pass for lack of anything to check."""
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(tmp_path)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    if evidence == "absent":
+        payload.pop("signing")
+    elif evidence == "empty":
+        payload["signing"] = {}
+    elif evidence == "null":
+        payload["signing"] = None
+    else:
+        payload["signing"] = "verified"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    check = trust_mod._release_manifest_check(tier)
+
+    assert check["status"] == "block"
+    assert "signing_evidence_missing" in check["detail"]["errors"]
+    assert check["detail"]["signing"] == {}
+
+
+def test_release_manifest_trust_blocks_mutated_bundle_asset_digest(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(tmp_path)
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+    assert trust_mod._release_manifest_check("release")["status"] == "ok"
+
+    # Swap the shipped artifact after signing evidence was recorded: the signed
+    # digest no longer describes the asset the bundle would actually install.
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["bundleAssets"][0]["sha256"] = "9" * 64
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    check = trust_mod._release_manifest_check("release")
+
+    assert check["status"] == "block"
+    assert "signing_asset_digest_mismatch" in check["detail"]["errors"]
+
+
+def test_packaged_backend_floors_dev_tier_requests(monkeypatch, tmp_path):
+    monkeypatch.delenv(trust_mod.TRUST_TIER_ENV, raising=False)
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(tmp_path)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload.pop("signing")
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    # Source checkout: the "dev" tier every UI surface asks for skips the signing
+    # check entirely, so an unsigned manifest still reports ok — which is exactly
+    # why the tier a real user gets must not be derived from the request alone.
+    monkeypatch.delattr(trust_mod.sys, "frozen", raising=False)
+    assert trust_mod._default_tier() == "dev"
+    assert trust_mod._normalize_tier("dev") == "dev"
+    assert trust_mod._release_manifest_check(trust_mod._normalize_tier("dev"))["status"] == "ok"
+
+    # Packaged sidecar: the same request must land on the strict signing path.
+    monkeypatch.setattr(trust_mod.sys, "frozen", True, raising=False)
+    assert trust_mod._default_tier() == "packaged"
+    assert trust_mod._normalize_tier("dev") == "packaged"
+    assert trust_mod._normalize_tier("garbage") == "packaged"
+    assert trust_mod._normalize_tier("release") == "release"
+    strict = trust_mod._release_manifest_check(trust_mod._normalize_tier("dev"))
+    assert strict["status"] == "block"
+    assert "signing_evidence_missing" in strict["detail"]["errors"]
+
+    # Development keeps an explicit override out of the strict path.
+    monkeypatch.setenv(trust_mod.TRUST_TIER_ENV, "dev")
+    assert trust_mod._normalize_tier("dev") == "dev"
+
+
+def test_release_trust_manifest_reports_packaged_tier_when_frozen(db_session, monkeypatch):
+    monkeypatch.delenv(trust_mod.TRUST_TIER_ENV, raising=False)
+    monkeypatch.setattr(trust_mod.sys, "frozen", True, raising=False)
+
+    manifest = trust_mod.build_release_trust_manifest(db_session, tier="dev")
+
+    assert manifest["tier"] == "packaged"
+    assert manifest["checks"]["privacy_firewall"]["detail"]["tier"] == "packaged"
+
+
+def test_release_manifest_trust_accepts_linux_signing_not_applicable(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Linux")
+    manifest = _write_release_manifest(
+        tmp_path,
+        signing={
+            "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+            "platform": "linux",
+            "required": False,
+            "status": "not_applicable",
+            "artifacts": [],
+        },
+    )
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    assert trust_mod._release_manifest_check("release")["status"] == "ok"
+
+
+def test_release_manifest_trust_rejects_linux_evidence_on_windows(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(
+        tmp_path,
+        signing={
+            "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+            "platform": "linux",
+            "required": False,
+            "status": "not_applicable",
+            "artifacts": [],
+        },
+    )
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    check = trust_mod._release_manifest_check("packaged")
+    assert check["status"] == "block"
+    assert "signing_platform_mismatch" in check["detail"]["errors"]
+
+
+def test_release_manifest_trust_rejects_inconsistent_windows_signers(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    signing = {
+        "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+        "platform": "windows",
+        "required": True,
+        "status": "verified",
+        "artifacts": [
+            {
+                "kind": kind,
+                "path": f"bundle/{kind}",
+                "size": 100,
+                "sha256": ("a" if kind == "app" else "b" if kind == "nsis" else "d") * 64,
+                "published": kind != "app",
+                "signed": True,
+                "verified": True,
+                "timestamped": True,
+                "signer": {"thumbprint": ("a" if kind != "msi" else "c") * 40},
+                "timestamp": {"thumbprint": "b" * 40},
+            }
+            for kind in ("app", "nsis", "msi")
+        ],
+    }
+    manifest = _write_release_manifest(tmp_path, signing=signing)
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    assert "windows_signer_mismatch" in trust_mod._release_manifest_check("release")["detail"]["errors"]
+
+
+def test_release_manifest_trust_blocks_duplicate_assets_and_bad_sizes(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(tmp_path)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["bundleAssets"].append({**payload["bundleAssets"][0], "sha256": "f" * 64})
+    payload["signing"]["artifacts"][0]["size"] = "bad"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    check = trust_mod._release_manifest_check("release")
+    assert check["status"] == "block"
+    assert "bundle_asset_paths_invalid" in check["detail"]["errors"]
+    assert "signing_artifact_digest_missing" in check["detail"]["errors"]
+
+
+def test_release_manifest_trust_accepts_complete_macos_evidence(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Darwin")
+    app_child_path = "release/mac/StudyVault.app/Contents/MacOS/StudyVault"
+    app_child_hash = "e" * 64
+    app_child_size = 50
+    digest = trust_mod.hashlib.sha256()
+    digest.update(f"Contents/MacOS/StudyVault\0{app_child_hash}\0{app_child_size}\n".encode())
+    app_hash = digest.hexdigest()
+    signing = {
+        "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA,
+        "platform": "macos",
+        "required": True,
+        "status": "verified",
+        "artifacts": [
+            {
+                "kind": kind,
+                "path": "release/mac/StudyVault.app" if kind == "app" else "release/StudyVault.dmg",
+                "size": app_child_size if kind == "app" else 100,
+                "sha256": app_hash if kind == "app" else "f" * 64,
+                "published": True,
+                "signed": True,
+                "verified": True,
+                "timestamped": True,
+                "notarized": True if kind == "app" else None,
+                "stapled": True if kind == "app" else None,
+                "signer": {
+                    "authority": "Developer ID Application: StudyVault (TEAM123456)",
+                    "teamIdentifier": "TEAM123456",
+                },
+            }
+            for kind in ("app", "dmg")
+        ],
+    }
+    manifest = _write_release_manifest(tmp_path, signing=signing)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["bundleAssets"] = [
+        {"path": app_child_path, "sha256": app_child_hash, "size": app_child_size},
+        {"path": "release/StudyVault.dmg", "sha256": "f" * 64, "size": 100},
+    ]
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    assert trust_mod._release_manifest_check("release")["status"] == "ok"
 
 
 def test_release_trust_manifest_and_diagnostics(client):
@@ -179,7 +455,7 @@ def test_release_trust_reads_release_local_report(db_session, monkeypatch, tmp_p
         *trust_mod.REQUIRED_RELEASE_LOCAL_LABELS,
         "frontend playwright e2e",
         "backend sidecar build",
-        "tauri build",
+        "electron build",
         "packaged app smoke",
         "release manifest/SBOM",
     ]
@@ -202,7 +478,7 @@ def test_release_trust_reads_release_local_report(db_session, monkeypatch, tmp_p
                 },
                 "options": {
                     "skip_e2e": False,
-                    "skip_tauri": False,
+                    "skip_electron": False,
                     "skip_sidecar_build": False,
                     "skip_packaged_smoke": False,
                 },
@@ -260,7 +536,7 @@ def test_release_trust_blocks_missing_eval_release_label(
                 "git": {"head": "unit", "branch": "test", "dirty": False, "status_lines": []},
                 "options": {
                     "skip_e2e": True,
-                    "skip_tauri": True,
+                    "skip_electron": True,
                     "skip_sidecar_build": True,
                     "skip_packaged_smoke": True,
                 },
@@ -287,12 +563,12 @@ def test_release_trust_blocks_missing_eval_release_label(
 
 def test_release_trust_blocks_skipped_critical_steps(db_session, monkeypatch, tmp_path):
     """Hardening (Codex prod-readiness P1): a release:local report that SKIPPED
-    tauri/packaged/e2e must BLOCK at the release tier — a release-tier "ok" while
+    Electron/packaged/e2e must BLOCK at the release tier — a release-tier "ok" while
     the build was never exercised is self-certifying theatre. Lower tiers keep
     skips at warn for fast iteration."""
     report = tmp_path / "release_local_report.json"
     # Only the always-required checks ran; the skipped steps are absent, exactly
-    # what release_local.py writes when --skip-tauri / --skip-e2e are passed.
+    # what release_local.py writes when --skip-electron / --skip-e2e are passed.
     checks = [
         {"label": label, "status": "passed", "exit_code": 0, "duration_s": 0.1}
         for label in trust_mod.REQUIRED_RELEASE_LOCAL_LABELS
@@ -307,7 +583,7 @@ def test_release_trust_blocks_skipped_critical_steps(db_session, monkeypatch, tm
                 "git": {"head": "unit", "branch": "test", "dirty": False, "status_lines": []},
                 "options": {
                     "skip_e2e": True,
-                    "skip_tauri": True,
+                    "skip_electron": True,
                     "skip_sidecar_build": True,
                     "skip_packaged_smoke": True,
                 },
@@ -327,7 +603,7 @@ def test_release_trust_blocks_skipped_critical_steps(db_session, monkeypatch, tm
     assert rel["status"] == "block"
     assert set(rel["detail"]["skipped"]) == {
         "skip_e2e",
-        "skip_tauri",
+        "skip_electron",
         "skip_sidecar_build",
         "skip_packaged_smoke",
     }
@@ -345,7 +621,7 @@ def test_release_trust_blocks_stale_release_local_report(db_session, monkeypatch
         *trust_mod.REQUIRED_RELEASE_LOCAL_LABELS,
         "frontend playwright e2e",
         "backend sidecar build",
-        "tauri build",
+        "electron build",
         "packaged app smoke",
         "release manifest/SBOM",
     ]
@@ -368,7 +644,7 @@ def test_release_trust_blocks_stale_release_local_report(db_session, monkeypatch
                 },
                 "options": {
                     "skip_e2e": False,
-                    "skip_tauri": False,
+                    "skip_electron": False,
                     "skip_sidecar_build": False,
                     "skip_packaged_smoke": False,
                 },
@@ -398,7 +674,7 @@ def test_packaged_trust_allows_packaged_smoke_in_progress(db_session, monkeypatc
         *trust_mod.REQUIRED_RELEASE_LOCAL_LABELS,
         "frontend playwright e2e",
         "backend sidecar build",
-        "tauri build",
+        "electron build",
     ]
     checks = [
         {"label": label, "status": "passed", "exit_code": 0, "duration_s": 0.1}
@@ -419,7 +695,7 @@ def test_packaged_trust_allows_packaged_smoke_in_progress(db_session, monkeypatc
                 },
                 "options": {
                     "skip_e2e": False,
-                    "skip_tauri": False,
+                    "skip_electron": False,
                     "skip_sidecar_build": False,
                     "skip_packaged_smoke": False,
                 },
@@ -449,7 +725,7 @@ def test_release_trust_blocks_real_dirty_release_local_report(db_session, monkey
         *trust_mod.REQUIRED_RELEASE_LOCAL_LABELS,
         "frontend playwright e2e",
         "backend sidecar build",
-        "tauri build",
+        "electron build",
         "packaged app smoke",
         "release manifest/SBOM",
     ]
@@ -472,7 +748,7 @@ def test_release_trust_blocks_real_dirty_release_local_report(db_session, monkey
                 },
                 "options": {
                     "skip_e2e": False,
-                    "skip_tauri": False,
+                    "skip_electron": False,
                     "skip_sidecar_build": False,
                     "skip_packaged_smoke": False,
                 },
@@ -503,7 +779,7 @@ def test_release_trust_blocks_head_mismatch(db_session, monkeypatch, tmp_path):
         *trust_mod.REQUIRED_RELEASE_LOCAL_LABELS,
         "frontend playwright e2e",
         "backend sidecar build",
-        "tauri build",
+        "electron build",
         "packaged app smoke",
         "release manifest/SBOM",
     ]
@@ -526,7 +802,7 @@ def test_release_trust_blocks_head_mismatch(db_session, monkeypatch, tmp_path):
                 },
                 "options": {
                     "skip_e2e": False,
-                    "skip_tauri": False,
+                    "skip_electron": False,
                     "skip_sidecar_build": False,
                     "skip_packaged_smoke": False,
                 },
@@ -555,7 +831,7 @@ def test_release_trust_blocks_live_dirty_tree(db_session, monkeypatch, tmp_path)
         *trust_mod.REQUIRED_RELEASE_LOCAL_LABELS,
         "frontend playwright e2e",
         "backend sidecar build",
-        "tauri build",
+        "electron build",
         "packaged app smoke",
         "release manifest/SBOM",
     ]
@@ -578,7 +854,7 @@ def test_release_trust_blocks_live_dirty_tree(db_session, monkeypatch, tmp_path)
                 },
                 "options": {
                     "skip_e2e": False,
-                    "skip_tauri": False,
+                    "skip_electron": False,
                     "skip_sidecar_build": False,
                     "skip_packaged_smoke": False,
                 },
@@ -741,6 +1017,23 @@ def test_sidecar_trust_rejects_manifest_path_escape(monkeypatch, tmp_path):
     assert check["status"] == "block"
     failures = check["detail"]["provenance"]["failures"]
     assert failures[0]["reason"] == "invalid_entry"
+
+
+def test_frozen_sidecar_uses_external_provenance_and_its_own_executable(monkeypatch, tmp_path):
+    executable = tmp_path / "lsatlab-backend.exe"
+    executable.write_bytes(b"frozen-sidecar")
+    embedded_contracts = tmp_path / "_MEIPASS" / "release_contracts"
+    embedded_contracts.mkdir(parents=True)
+    embedded_manifest = embedded_contracts / "sidecar-provenance.json"
+    embedded_manifest.write_text("{}", encoding="utf-8")
+
+    monkeypatch.delenv("STUDYVAULT_SIDECAR_PROVENANCE", raising=False)
+    monkeypatch.setattr(trust_mod.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(trust_mod.sys, "executable", str(executable))
+    monkeypatch.setattr(trust_mod, "PACKAGED_CONTRACTS", embedded_contracts)
+
+    assert trust_mod._sidecar_binary_candidates()[0] == executable
+    assert embedded_manifest not in trust_mod._sidecar_provenance_candidates()
 
 
 def test_scheduled_defaults_and_benchmark_recording(client):

@@ -1,56 +1,30 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink,
-  Flag,
-  LayoutGrid,
-  Minimize2,
-  Maximize2,
-} from "lucide-react";
-import { Logo } from "@lsat/components/logo";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import HandsFreeController from "@/components/a11y/HandsFreeController";
-import { ChoiceList } from "@lsat/components/question/choice-list";
-import {
-  LineReferenceChips,
-  PassageScrollPane,
-  usePassageScroll,
-} from "@lsat/components/question/line-reference";
-import {
-  NavigatorStrip,
-  ProgressDots,
-  type NavItem,
-} from "@lsat/components/question/navigator-strip";
-import { QuestionOverview } from "@lsat/components/question/question-overview";
-import { HighlighterToolbar } from "@lsat/components/question/highlighter-toolbar";
-import { AnnotatedText } from "@lsat/components/question/annotated-text";
-import { ReadingControls } from "@lsat/components/question/reading-controls";
-import { ExamTimer, PaceBar, ResizableSplit } from "@lsat/components/question/exam-chrome";
-import { ClockStore, useClockTime } from "@lsat/components/question/section-clock";
-import { LiveRegion } from "@lsat/components/question/live-region";
-import type { AnnotationStyle, Highlight } from "@lsat/components/question/highlightable-text";
-import { TypeBadge } from "@lsat/components/viz";
-import {
-  answerLabelFromAction,
-  getKeyboardMap,
-  resolveExamKey,
-} from "@lsat/lib/keyboardMap";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, ExternalLink, Flag, LayoutGrid, Minimize2, Maximize2 } from 'lucide-react';
+import { Logo } from '@lsat/components/logo';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import HandsFreeController from '@/components/a11y/HandsFreeController';
+import { ChoiceList } from '@lsat/components/question/choice-list';
+import { LineReferenceChips, PassageScrollPane, usePassageScroll } from '@lsat/components/question/line-reference';
+import { NavigatorStrip, ProgressDots, type NavItem } from '@lsat/components/question/navigator-strip';
+import { QuestionOverview } from '@lsat/components/question/question-overview';
+import { HighlighterToolbar } from '@lsat/components/question/highlighter-toolbar';
+import { AnnotatedText } from '@lsat/components/question/annotated-text';
+import { ReadingControls } from '@lsat/components/question/reading-controls';
+import { ExamTimer, PaceBar, ResizableSplit } from '@lsat/components/question/exam-chrome';
+import { ClockStore, useClockTime } from '@lsat/components/question/section-clock';
+import { LiveRegion } from '@lsat/components/question/live-region';
+import type { AnnotationStyle, Highlight } from '@lsat/components/question/highlightable-text';
+import { TypeBadge } from '@lsat/components/viz';
+import { answerLabelFromAction, getKeyboardMap, resolveExamKey } from '@lsat/lib/keyboardMap';
 // K4-cmd — the runner no longer depends on the LSAT palette's
 // `useCommandPalette`; it registers its exam affordances through a neutral seam
 // (`useExamCommands`) its own domain owns, so the palette can be deleted (K4-13)
 // without breaking the runner. The runner's exam timing / focus / keyboard
 // behavior is unchanged — it is driven by the local keydown handler, not the
 // palette.
-import { useExamCommands } from "@lsat/lib/examCommands";
-import { cn } from "@lsat/lib/utils";
+import { useExamCommands } from '@lsat/lib/examCommands';
+import { cn } from '@lsat/lib/utils';
 import {
   adjustedTimeLimitSec,
   getAccommodations,
@@ -62,28 +36,17 @@ import {
   nextReadingSize,
   prevReadingSize,
   type MarginNote,
-} from "@lsat/lib/prefs";
-import { api } from "@lsat/lib/api";
-import {
-  getQuestionAnnotations,
-  setQuestionAnnotations,
-} from "@lsat/lib/annotationPrefs";
-import { ScratchPad } from "@lsat/components/exam/scratch-pad";
-import { RcLineRuler } from "@lsat/components/question/rc-line-ruler";
-import { getDrillTimeCapMin } from "@lsat/lib/drillPrefs";
-import { setResume } from "@lsat/lib/resume";
-import {
-  blankState,
-  type ChoiceEventRecord,
-  type QState,
-} from "@lsat/components/question/section-state";
-import {
-  draftKeyForSection,
-  loadSessionDraft,
-  saveSessionDraft,
-} from "@lsat/lib/sessionDraft";
-import { openPassagePopout } from "@lsat/lib/tauri";
-import type { SectionDetail } from "@lsat/lib/types";
+} from '@lsat/lib/prefs';
+import { api } from '@lsat/lib/api';
+import { getQuestionAnnotations, setQuestionAnnotations } from '@lsat/lib/annotationPrefs';
+import { ScratchPad } from '@lsat/components/exam/scratch-pad';
+import { RcLineRuler } from '@lsat/components/question/rc-line-ruler';
+import { getDrillTimeCapMin } from '@lsat/lib/drillPrefs';
+import { setResume } from '@lsat/lib/resume';
+import { blankState, type ChoiceEventRecord, type QState } from '@lsat/components/question/section-state';
+import { draftKeyForSection, loadSessionDraft, saveSessionDraft } from '@lsat/lib/sessionDraft';
+import { openPassagePopout } from '@lsat/lib/electron';
+import type { SectionDetail } from '@lsat/lib/types';
 
 export { blankState };
 export type { ChoiceEventRecord, QState };
@@ -103,7 +66,7 @@ export function buildSectionHandsFreeQuestion({
   if (isRc && passageText) parts.push(`Passage. ${passageText}`);
   if (!isRc && stem) parts.push(`Stimulus. ${stem}`);
   parts.push(`Question. ${prompt}`);
-  return parts.filter((part) => part.trim()).join("\n\n");
+  return parts.filter((part) => part.trim()).join('\n\n');
 }
 
 /**
@@ -122,7 +85,7 @@ export function SectionRunner({
   headerLabel,
   sampleBadge,
   onFinish,
-  finishLabel = "Finish section",
+  finishLabel = 'Finish section',
   jumpToIndex,
   onJumpConsumed,
   resumePath,
@@ -159,22 +122,18 @@ export function SectionRunner({
   draftKey?: string | null;
 }) {
   const questions = useMemo(() => section.questions ?? [], [section]);
-  const isRC = section.type === "RC";
+  const isRC = section.type === 'RC';
   const acc = getAccommodations();
   const capMin = timeCapMin ?? getDrillTimeCapMin();
   const baseLimit = adjustedTimeLimitSec(section.time_limit_sec, section.type);
-  const limitSec =
-    capMin != null ? capMin * 60 : timed ? baseLimit : baseLimit * 4;
+  const limitSec = capMin != null ? capMin * 60 : timed ? baseLimit : baseLimit * 4;
 
   // 1.5 — crash-safe draft scope. `null` disables persistence; `undefined`
   // falls back to a section-derived scope so even ad-hoc runs survive a refresh.
-  const draftScope =
-    draftKey === null ? null : (draftKey ?? draftKeyForSection(section.id));
+  const draftScope = draftKey === null ? null : (draftKey ?? draftKeyForSection(section.id));
   // Read the persisted draft exactly once for the initial render so the
   // question index and remaining time restore in step with the answers.
-  const initialDraft = useRef(
-    draftScope ? loadSessionDraft(draftScope) : null,
-  ).current;
+  const initialDraft = useRef(draftScope ? loadSessionDraft(draftScope) : null).current;
 
   const [index, setIndex] = useState(initialDraft?.index ?? 0);
   // A2.1 — the 1-second countdown lives in an external store, NOT React state, so
@@ -183,10 +142,9 @@ export function SectionRunner({
   // (lazy ref init), seeded from the draft's remaining time when resuming.
   const clockRef = useRef<ClockStore | null>(null);
   if (clockRef.current === null) {
-    clockRef.current = new ClockStore(
-      initialDraft?.timeLeft != null ? initialDraft.timeLeft : limitSec,
-      { deadlineMs: initialDraft?.deadlineMs ?? null },
-    );
+    clockRef.current = new ClockStore(initialDraft?.timeLeft != null ? initialDraft.timeLeft : limitSec, {
+      deadlineMs: initialDraft?.deadlineMs ?? null,
+    });
   }
   const clock = clockRef.current;
   const [timerHidden, setTimerHidden] = useState(acc.hideTimerDefault);
@@ -212,9 +170,7 @@ export function SectionRunner({
     if (rehydratedRef.current) return;
     rehydratedRef.current = true;
     if (!initialDraft) return;
-    setStates((prev) =>
-      Object.keys(prev).length > 0 ? prev : initialDraft.states,
-    );
+    setStates((prev) => (Object.keys(prev).length > 0 ? prev : initialDraft.states));
   }, [initialDraft, setStates]);
 
   useEffect(() => {
@@ -226,7 +182,7 @@ export function SectionRunner({
   useEffect(() => {
     if (!resumePath) return;
     setResume({
-      kind: "section",
+      kind: 'section',
       label: resumeLabel ?? headerLabel,
       path: resumePath,
       index,
@@ -255,7 +211,7 @@ export function SectionRunner({
     let cancelled = false;
     void (async () => {
       let highlights = getQuestionAnnotations(noteKey);
-      if (typeof navigator !== "undefined" && navigator.onLine) {
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
         const remote = await api.listAnnotations(noteKey, attemptId ?? undefined);
         if (remote && remote.length > 0) {
           highlights = remote as Highlight[];
@@ -389,9 +345,9 @@ export function SectionRunner({
   useEffect(() => {
     if (!draftScope) return;
     const flush = saveDraftNow;
-    window.addEventListener("beforeunload", flush);
+    window.addEventListener('beforeunload', flush);
     return () => {
-      window.removeEventListener("beforeunload", flush);
+      window.removeEventListener('beforeunload', flush);
       flush();
     };
   }, [draftScope, saveDraftNow]);
@@ -412,7 +368,7 @@ export function SectionRunner({
       setCur({ highlights });
       if (noteKey == null) return;
       setQuestionAnnotations(noteKey, highlights);
-      if (typeof navigator !== "undefined" && !navigator.onLine) return;
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       if (syncTimer.current) clearTimeout(syncTimer.current);
       syncTimer.current = setTimeout(() => {
         void api.saveAnnotations(noteKey, highlights, attemptId ?? undefined);
@@ -428,10 +384,7 @@ export function SectionRunner({
   const jumpToLineRange = useCallback(
     (start: number, end: number) => {
       scrollToRange(start, end);
-      setHighlights([
-        ...cur.highlights.filter((h) => h.color !== "yellow"),
-        { start, end, color: "yellow" as const },
-      ]);
+      setHighlights([...cur.highlights.filter((h) => h.color !== 'yellow'), { start, end, color: 'yellow' as const }]);
     },
     [scrollToRange, setHighlights, cur.highlights],
   );
@@ -440,7 +393,7 @@ export function SectionRunner({
   // trace. `order_index` is the running length; `time_ms` is since open. Cheap:
   // one state update piggy-backed on the existing answer/eliminate write.
   const recordChoiceEvent = useCallback(
-    (label: string, action: ChoiceEventRecord["action"]) => {
+    (label: string, action: ChoiceEventRecord['action']) => {
       setStates((prev) => {
         const c = prev[index] ?? blankState();
         const event: ChoiceEventRecord = {
@@ -461,7 +414,7 @@ export function SectionRunner({
   const select = useCallback(
     (label: string) => {
       setCur({ answer: label });
-      recordChoiceEvent(label, "select");
+      recordChoiceEvent(label, 'select');
     },
     [setCur, recordChoiceEvent],
   );
@@ -473,7 +426,7 @@ export function SectionRunner({
       if (removing) next.delete(label);
       else next.add(label);
       setCur({ eliminated: next });
-      recordChoiceEvent(label, removing ? "restore" : "eliminate");
+      recordChoiceEvent(label, removing ? 'restore' : 'eliminate');
     },
     [cur.eliminated, setCur, recordChoiceEvent],
   );
@@ -491,18 +444,18 @@ export function SectionRunner({
     function onKey(e: KeyboardEvent) {
       if (e.defaultPrevented) return;
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       const qq = questions[index];
       if (!qq) return;
 
       // R9 — `o` summons the question overview panorama (progress-only map).
-      if ((e.key === "o" || e.key === "O") && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if ((e.key === 'o' || e.key === 'O') && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         setOverviewOpen((v) => !v);
         return;
       }
 
-      if (e.key >= "1" && e.key <= "9") {
+      if (e.key >= '1' && e.key <= '9') {
         const target = Number(e.key) - 1;
         if (target < questions.length) {
           e.preventDefault();
@@ -515,37 +468,37 @@ export function SectionRunner({
       const resolved = resolveExamKey(e, map);
       if (!resolved) return;
 
-      if (resolved === "eliminate") {
+      if (resolved === 'eliminate') {
         if (cur.answer) {
           e.preventDefault();
           toggleEliminate(cur.answer);
         }
         return;
       }
-      if (resolved === "flag") {
+      if (resolved === 'flag') {
         e.preventDefault();
         setCur({ flagged: !cur.flagged });
         return;
       }
-      if (resolved === "prev") {
+      if (resolved === 'prev') {
         e.preventDefault();
         go(index - 1);
         return;
       }
-      if (resolved === "next") {
+      if (resolved === 'next') {
         e.preventDefault();
         go(index + 1);
         return;
       }
       const label = answerLabelFromAction(resolved);
       if (label) {
-        if (label === "E" && !qq.choices.some((c) => c.label === "E")) return;
+        if (label === 'E' && !qq.choices.some((c) => c.label === 'E')) return;
         e.preventDefault();
         select(label);
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [index, questions, cur.answer, cur.flagged, select, toggleEliminate, setCur, go]);
 
   // Command-palette actions (docs prompt §4.2 / §4.5 / §4.3). Registered via the
@@ -555,36 +508,36 @@ export function SectionRunner({
   useEffect(() => {
     return register([
       {
-        id: "exam-focus",
-        group: "Exam",
-        label: "Toggle focus mode",
-        keywords: ["distraction", "calm", "zen", "immersive"],
+        id: 'exam-focus',
+        group: 'Exam',
+        label: 'Toggle focus mode',
+        keywords: ['distraction', 'calm', 'zen', 'immersive'],
         perform: () => setFocusMode((f) => !f),
       },
       {
-        id: "exam-overview",
-        group: "Exam",
-        label: "Question overview map",
-        keywords: ["panorama", "all questions", "grid", "map", "jump"],
+        id: 'exam-overview',
+        group: 'Exam',
+        label: 'Question overview map',
+        keywords: ['panorama', 'all questions', 'grid', 'map', 'jump'],
         perform: () => setOverviewOpen(true),
       },
       {
-        id: "exam-reading-up",
-        group: "Exam",
-        label: "Increase reading size",
+        id: 'exam-reading-up',
+        group: 'Exam',
+        label: 'Increase reading size',
         perform: () => setReading({ size: nextReadingSize(reading.size) }),
       },
       {
-        id: "exam-reading-down",
-        group: "Exam",
-        label: "Decrease reading size",
+        id: 'exam-reading-down',
+        group: 'Exam',
+        label: 'Decrease reading size',
         perform: () => setReading({ size: prevReadingSize(reading.size) }),
       },
       {
-        id: "exam-flag",
-        group: "Exam",
-        label: "Flag this question",
-        keywords: ["mark"],
+        id: 'exam-flag',
+        group: 'Exam',
+        label: 'Flag this question',
+        keywords: ['mark'],
         perform: () => setCur({ flagged: !cur.flagged }),
       },
     ]);
@@ -609,13 +562,7 @@ export function SectionRunner({
     };
     // Arm immediately so it dims even if the user never moves.
     wake();
-    const events: (keyof WindowEventMap)[] = [
-      "mousemove",
-      "mousedown",
-      "keydown",
-      "wheel",
-      "touchstart",
-    ];
+    const events: (keyof WindowEventMap)[] = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'];
     for (const e of events) window.addEventListener(e, wake, { passive: true });
     return () => {
       if (timer) clearTimeout(timer);
@@ -627,10 +574,7 @@ export function SectionRunner({
   // Inside focus mode: only while awake (or the overview is open).
   const chromeVisible = !focusMode || chromeAwake || overviewOpen;
 
-  const answeredCount = useMemo(
-    () => Object.values(states).filter((s) => s.answer).length,
-    [states],
-  );
+  const answeredCount = useMemo(() => Object.values(states).filter((s) => s.answer).length, [states]);
 
   const navItems: NavItem[] = useMemo(
     () =>
@@ -648,10 +592,7 @@ export function SectionRunner({
     [questions, states],
   );
 
-  const passage =
-    q?.passage_id != null
-      ? section.passages.find((p) => p.id === q.passage_id)
-      : undefined;
+  const passage = q?.passage_id != null ? section.passages.find((p) => p.id === q.passage_id) : undefined;
 
   const rcls = readingClasses(reading);
   const handsFreeQuestion = q
@@ -661,7 +602,7 @@ export function SectionRunner({
         stem: q.stem,
         prompt: q.prompt,
       })
-    : "";
+    : '';
   const handsFreeOptions = useMemo(
     () => (q ? q.choices.map((choice) => ({ letter: choice.label, text: choice.text })) : []),
     [q],
@@ -677,43 +618,26 @@ export function SectionRunner({
 
   const stimulusBlock = (
     <PassageScrollPane scrollRef={passageScrollRef}>
-    <div ref={passagePaneRef} className="relative p-8">
-      <div className="type-overline mb-2 flex items-center justify-between gap-2 text-muted-foreground">
-        <span>
-          {isRC ? `Passage${passage?.topic ? ` · ${passage.topic}` : ""}` : "Stimulus"}
-        </span>
-        <div className="flex items-center gap-2">
-          {isRC && passage && (
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 normal-case tracking-normal hover:bg-accent hover:text-foreground"
-              title="Open passage in a separate window"
-              onClick={() =>
-                void openPassagePopout({ topic: passage.topic, text: passage.text })
-              }
-            >
-              <ExternalLink className="h-3.5 w-3.5" /> Pop out
-            </button>
-          )}
-          {isRC && <RcLineRuler containerRef={passagePaneRef} />}
+      <div ref={passagePaneRef} className="relative p-8">
+        <div className="type-overline mb-2 flex items-center justify-between gap-2 text-muted-foreground">
+          <span>{isRC ? `Passage${passage?.topic ? ` · ${passage.topic}` : ''}` : 'Stimulus'}</span>
+          <div className="flex items-center gap-2">
+            {isRC && passage && (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 normal-case tracking-normal hover:bg-accent hover:text-foreground"
+                title="Open passage in a separate window"
+                onClick={() => void openPassagePopout({ topic: passage.topic, text: passage.text })}
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> Pop out
+              </button>
+            )}
+            {isRC && <RcLineRuler containerRef={passagePaneRef} />}
+          </div>
         </div>
-      </div>
-      {isRC && passage ? (
-        <AnnotatedText
-          text={passage.text}
-          highlights={cur.highlights}
-          onHighlightsChange={setHighlights}
-          activeColor={activeColor}
-          noteMode={noteMode}
-          notes={notes}
-          onNotesChange={updateNotes}
-          className={rcls}
-        />
-      ) : (
-        !isRC &&
-        q?.stem && (
+        {isRC && passage ? (
           <AnnotatedText
-            text={q.stem}
+            text={passage.text}
             highlights={cur.highlights}
             onHighlightsChange={setHighlights}
             activeColor={activeColor}
@@ -722,14 +646,27 @@ export function SectionRunner({
             onNotesChange={updateNotes}
             className={rcls}
           />
-        )
-      )}
-    </div>
+        ) : (
+          !isRC &&
+          q?.stem && (
+            <AnnotatedText
+              text={q.stem}
+              highlights={cur.highlights}
+              onHighlightsChange={setHighlights}
+              activeColor={activeColor}
+              noteMode={noteMode}
+              notes={notes}
+              onNotesChange={updateNotes}
+              className={rcls}
+            />
+          )
+        )}
+      </div>
     </PassageScrollPane>
   );
 
   const questionBlock = (
-    <div className={cn("p-8", isRC && "sticky top-0")}>
+    <div className={cn('p-8', isRC && 'sticky top-0')}>
       <div className="mx-auto max-w-2xl space-y-5">
         {q && (
           <>
@@ -740,11 +677,7 @@ export function SectionRunner({
               {/* C5 — wrap long unbroken tokens in the prompt (offset-safe). */}
               <p className="flex-1 break-words font-medium leading-relaxed">{q.prompt}</p>
               {isRC && passage && (
-                <LineReferenceChips
-                  prompt={q.prompt}
-                  passageText={passage.text}
-                  onHighlightRange={jumpToLineRange}
-                />
+                <LineReferenceChips prompt={q.prompt} passageText={passage.text} onHighlightRange={jumpToLineRange} />
               )}
             </div>
             <HandsFreeController
@@ -787,12 +720,7 @@ export function SectionRunner({
   );
 
   return (
-    <div
-      className={cn(
-        "flex h-screen flex-col bg-background",
-        reading.focusTheme && "theme-focus",
-      )}
-    >
+    <div className={cn('flex h-screen flex-col bg-background', reading.focusTheme && 'theme-focus')}>
       {/* 5.6 — polite announcement of the current question for screen readers. */}
       <LiveRegion message={`Question ${index + 1} of ${questions.length}`} />
       {/* Calm Test-Mode header: NO correctness/analytics while the clock runs.
@@ -801,8 +729,8 @@ export function SectionRunner({
           screen; any input wakes it. The reduced-motion net flattens the fade. */}
       <header
         className={cn(
-          "flex h-14 items-center justify-between border-b px-6 transition-opacity duration-500",
-          focusMode && !chromeVisible && "pointer-events-none opacity-0",
+          'flex h-14 items-center justify-between border-b px-6 transition-opacity duration-500',
+          focusMode && !chromeVisible && 'pointer-events-none opacity-0',
         )}
       >
         <div className="flex items-center gap-2 text-sm font-medium">
@@ -818,12 +746,7 @@ export function SectionRunner({
         </div>
         <div className="flex items-center gap-3">
           {!focusMode && (
-            <ClockPaceBar
-              clock={clock}
-              total={questions.length}
-              answered={answeredCount}
-              totalSec={limitSec}
-            />
+            <ClockPaceBar clock={clock} total={questions.length} answered={answeredCount} totalSec={limitSec} />
           )}
           <HighlighterToolbar
             active={activeColor}
@@ -847,12 +770,12 @@ export function SectionRunner({
             <span className="text-xs text-muted-foreground">Untimed</span>
           )}
           <Button
-            variant={cur.flagged ? "default" : "outline"}
+            variant={cur.flagged ? 'default' : 'outline'}
             size="sm"
             onClick={() => setCur({ flagged: !cur.flagged })}
           >
             <Flag className="h-4 w-4" />
-            {cur.flagged ? "Flagged" : "Flag"}
+            {cur.flagged ? 'Flagged' : 'Flag'}
           </Button>
           <Button
             variant="ghost"
@@ -866,8 +789,8 @@ export function SectionRunner({
           <Button
             variant="ghost"
             size="icon"
-            title={focusMode ? "Exit focus mode" : "Focus mode"}
-            aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
+            title={focusMode ? 'Exit focus mode' : 'Focus mode'}
+            aria-label={focusMode ? 'Exit focus mode' : 'Enter focus mode'}
             onClick={() => setFocusMode((f) => !f)}
           >
             {focusMode ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -893,8 +816,8 @@ export function SectionRunner({
             <div
               aria-hidden
               className={cn(
-                "fixed right-4 top-3 z-40 transition-opacity duration-500",
-                chromeVisible ? "opacity-100" : "pointer-events-none opacity-0",
+                'fixed right-4 top-3 z-40 transition-opacity duration-500',
+                chromeVisible ? 'opacity-100' : 'pointer-events-none opacity-0',
               )}
             >
               <div className="rounded-full bg-surface-1/80 px-2 py-0.5 shadow-e1 backdrop-blur">
@@ -914,20 +837,13 @@ export function SectionRunner({
           R9 zen mode (LR) — the single question is generously centered with
           breathing vertical whitespace so it owns the screen. */}
       {isRC ? (
-        <ResizableSplit
-          fraction={split}
-          onChange={setSplit}
-          left={stimulusBlock}
-          right={questionBlock}
-        />
+        <ResizableSplit fraction={split} onChange={setSplit} left={stimulusBlock} right={questionBlock} />
       ) : (
         <div className="flex-1 overflow-y-auto">
           <div
             className={cn(
-              "mx-auto",
-              focusMode
-                ? "flex min-h-full max-w-2xl flex-col justify-center py-[10vh]"
-                : "max-w-3xl",
+              'mx-auto',
+              focusMode ? 'flex min-h-full max-w-2xl flex-col justify-center py-[10vh]' : 'max-w-3xl',
             )}
           >
             {q?.stem && stimulusBlock}
@@ -946,8 +862,8 @@ export function SectionRunner({
           page except the question and the ambient hairline. */}
       <footer
         className={cn(
-          "flex items-center gap-4 border-t px-6 py-3 transition-opacity duration-500",
-          focusMode && !chromeVisible && "pointer-events-none opacity-0",
+          'flex items-center gap-4 border-t px-6 py-3 transition-opacity duration-500',
+          focusMode && !chromeVisible && 'pointer-events-none opacity-0',
         )}
       >
         <Button variant="outline" size="sm" onClick={() => go(index - 1)} disabled={index === 0}>
@@ -955,12 +871,7 @@ export function SectionRunner({
         </Button>
         <div className="flex-1 overflow-x-auto">
           {focusMode ? (
-            <ProgressDots
-              count={questions.length}
-              current={index}
-              items={navItems}
-              onJump={go}
-            />
+            <ProgressDots count={questions.length} current={index} items={navItems} onJump={go} />
           ) : (
             <NavigatorStrip count={questions.length} current={index} items={navItems} onJump={go} />
           )}
@@ -1053,39 +964,19 @@ function ClockPaceBar({
   totalSec: number;
 }) {
   const timeLeft = useClockTime(clock);
-  return (
-    <PaceBar
-      total={total}
-      answered={answered}
-      elapsedSec={totalSec - timeLeft}
-      totalSec={totalSec}
-    />
-  );
+  return <PaceBar total={total} answered={answered} elapsedSec={totalSec - timeLeft} totalSec={totalSec} />;
 }
 
 /** The focus-mode ambient hairline pinned to the top edge. Decorative
  * (`aria-hidden`); warms toward amber as time runs low, identical thresholds. */
-function FocusHairline({
-  clock,
-  limitSec,
-}: {
-  clock: ClockStore;
-  limitSec: number;
-}) {
+function FocusHairline({ clock, limitSec }: { clock: ClockStore; limitSec: number }) {
   const timeLeft = useClockTime(clock);
   return (
-    <div
-      aria-hidden
-      className="pointer-events-none fixed inset-x-0 top-0 z-40 h-0.5 bg-transparent"
-    >
+    <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 z-40 h-0.5 bg-transparent">
       <div
         className={cn(
-          "h-full transition-[width,background-color] duration-500",
-          timeLeft <= 120
-            ? "bg-warning"
-            : timeLeft <= 300
-              ? "bg-warning/55"
-              : "bg-primary/45",
+          'h-full transition-[width,background-color] duration-500',
+          timeLeft <= 120 ? 'bg-warning' : timeLeft <= 300 ? 'bg-warning/55' : 'bg-primary/45',
         )}
         style={{
           width: `${limitSec > 0 ? Math.max(0, Math.min(1, timeLeft / limitSec)) * 100 : 100}%`,

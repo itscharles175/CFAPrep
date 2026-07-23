@@ -17,7 +17,7 @@ DESIGN — PURE & IMPORT-SAFE:
     best-effort reads.
   - The migrate helper is conservative: it refuses to overwrite a NON-EMPTY new
     store, only copies when the new store is absent/empty, and is a clean no-op on
-    a second call. The Tauri supervisor prefers detect+set-env over a destructive
+    a second call. The Electron supervisor prefers detect+set-env over a destructive
     move; this helper exists for the rare case where copying the file once is the
     right call, and stays opt-in.
 

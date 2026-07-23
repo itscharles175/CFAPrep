@@ -1,8 +1,8 @@
 /**
  * Host-side client for the LSAT backend sidecar (StudyVault).
  *
- * The LSAT FastAPI sidecar runs on 127.0.0.1:8100 (supervised by the Tauri
- * shell; see build_sidecar_specs in src-tauri/src/lib.rs). The host can't reach
+ * The LSAT FastAPI sidecar runs on 127.0.0.1:8100 (supervised by Electron's
+ * main process). The host can't reach
  * the LSAT React app (separate top-level branch) but it CAN reach the sidecar
  * over HTTP — so System Health surfaces its liveness alongside the SurrealDB +
  * open-notebook sidecars.
@@ -91,7 +91,7 @@ export async function checkLsatBackendHealth(timeoutMs = 2500): Promise<LsatBack
   const health = await fetchJson(HEALTH_PATH, timeoutMs);
 
   if (!('ok' in health) || !health.ok) {
-    const reason = 'error' in health ? health.error : `responded ${('status' in health ? health.status : 0)}`;
+    const reason = 'error' in health ? health.error : `responded ${'status' in health ? health.status : 0}`;
     return {
       ok: false,
       reachable: false,
@@ -212,13 +212,10 @@ export async function getLsatCloudBudget(
   if (typeof opts.inputTokens === 'number') params.set('input_tokens', String(opts.inputTokens));
   if (typeof opts.outputTokens === 'number') params.set('output_tokens', String(opts.outputTokens));
   const query = params.toString();
-  const res = await fetchJson(
-    `${CLOUD_BUDGET_PATH}${query ? `?${query}` : ''}`,
-    timeoutMs,
-  );
+  const res = await fetchJson(`${CLOUD_BUDGET_PATH}${query ? `?${query}` : ''}`, timeoutMs);
 
   if (!('ok' in res) || !res.ok || !res.data || typeof res.data !== 'object') {
-    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    const reason = 'error' in res ? res.error : `responded ${'status' in res ? res.status : 0}`;
     return {
       ok: false,
       reachable: 'error' in res ? false : true,
@@ -254,10 +251,7 @@ export interface LsatSyncResult {
  * :1234). For Ollama there is no URL field in the backend's settings patch, so
  * only the provider is set.
  */
-export async function syncProviderToLsat(
-  host: { baseUrl?: string },
-  timeoutMs = 4000,
-): Promise<LsatSyncResult> {
+export async function syncProviderToLsat(host: { baseUrl?: string }, timeoutMs = 4000): Promise<LsatSyncResult> {
   const rawBase = (host.baseUrl || '').trim();
   if (!rawBase) return { ok: false, detail: 'No host model server URL is configured to sync.' };
 
@@ -290,7 +284,7 @@ export async function syncProviderToLsat(
   });
 
   if (!('ok' in res) || !res.ok) {
-    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    const reason = 'error' in res ? res.error : `responded ${'status' in res ? res.status : 0}`;
     return { ok: false, detail: `Could not update LSAT settings — ${reason}.` };
   }
   return {
@@ -357,10 +351,7 @@ export async function pushModelRoutingToLsat(
   };
   if (candidate.lmstudio_url) {
     try {
-      candidate.lmstudio_url = normalizeLoopbackHttpBaseUrl(
-        candidate.lmstudio_url,
-        'LM Studio URL',
-      );
+      candidate.lmstudio_url = normalizeLoopbackHttpBaseUrl(candidate.lmstudio_url, 'LM Studio URL');
     } catch (error) {
       return {
         ok: false,
@@ -392,7 +383,7 @@ export async function pushModelRoutingToLsat(
   });
 
   if (!('ok' in res) || !res.ok) {
-    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    const reason = 'error' in res ? res.error : `responded ${'status' in res ? res.status : 0}`;
     return { ok: false, detail: `Could not update LSAT model routing — ${reason}.` };
   }
   return { ok: true, applied, detail: 'LSAT model routing updated.' };
@@ -473,12 +464,10 @@ export interface LsatMaintenanceActionResult {
   data?: unknown;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
-const num = (v: unknown): number | null =>
-  typeof v === 'number' && Number.isFinite(v) ? v : null;
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /** Coerce one raw scheduled-task row into {@link LsatScheduledTask}, defensively. */
 function readScheduledTask(raw: unknown): LsatScheduledTask {
@@ -517,7 +506,7 @@ function readSchedulerRun(raw: unknown): LsatSchedulerRun {
 export async function getLsatScheduledTasks(timeoutMs = 3000): Promise<LsatScheduledTasksReport> {
   const res = await fetchJson(SCHEDULED_TASKS_PATH, timeoutMs);
   if (!('ok' in res) || !res.ok || !isRecord(res.data)) {
-    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    const reason = 'error' in res ? res.error : `responded ${'status' in res ? res.status : 0}`;
     return {
       ok: false,
       reachable: 'error' in res ? false : true,
@@ -533,7 +522,7 @@ export async function getLsatScheduledTasks(timeoutMs = 3000): Promise<LsatSched
 export async function getLsatSchedulerRuns(timeoutMs = 3000): Promise<LsatSchedulerRunsReport> {
   const res = await fetchJson(SCHEDULER_RUNS_PATH, timeoutMs);
   if (!('ok' in res) || !res.ok || !isRecord(res.data)) {
-    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    const reason = 'error' in res ? res.error : `responded ${'status' in res ? res.status : 0}`;
     return {
       ok: false,
       reachable: 'error' in res ? false : true,
@@ -546,16 +535,13 @@ export async function getLsatSchedulerRuns(timeoutMs = 3000): Promise<LsatSchedu
 }
 
 /** OPS-4: run one registered maintenance task now (`POST .../{key}/run`). Never throws. */
-export async function runLsatScheduledTask(
-  key: string,
-  timeoutMs = 30000,
-): Promise<LsatMaintenanceActionResult> {
+export async function runLsatScheduledTask(key: string, timeoutMs = 30000): Promise<LsatMaintenanceActionResult> {
   const safeKey = encodeURIComponent(key);
   const res = await fetchJson(SCHEDULED_TASK_RUN_PATH.replace('{key}', safeKey), timeoutMs, {
     method: 'POST',
   });
   if (!('ok' in res) || !res.ok) {
-    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    const reason = 'error' in res ? res.error : `responded ${'status' in res ? res.status : 0}`;
     return { ok: false, reachable: 'error' in res ? false : true, detail: `Could not run "${key}" — ${reason}.` };
   }
   // The backend returns { ok, run_id, ... } even for a task that failed to
@@ -570,14 +556,12 @@ export async function runLsatScheduledTask(
 }
 
 /** OPS-4: run every due maintenance task now (`POST .../run-due`). Never throws. */
-export async function runDueLsatScheduledTasks(
-  timeoutMs = 60000,
-): Promise<LsatMaintenanceActionResult> {
+export async function runDueLsatScheduledTasks(timeoutMs = 60000): Promise<LsatMaintenanceActionResult> {
   const res = await fetchJson(SCHEDULED_TASKS_RUN_DUE_PATH, timeoutMs, {
     method: 'POST',
   });
   if (!('ok' in res) || !res.ok) {
-    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    const reason = 'error' in res ? res.error : `responded ${'status' in res ? res.status : 0}`;
     return { ok: false, reachable: 'error' in res ? false : true, detail: `Could not run due tasks — ${reason}.` };
   }
   const ran = isRecord(res.data) ? (num(res.data.ran) ?? 0) : 0;
@@ -590,14 +574,12 @@ export async function runDueLsatScheduledTasks(
 }
 
 /** OPS-4: seed the default maintenance registry (`POST .../defaults`). Never throws. */
-export async function ensureLsatScheduledDefaults(
-  timeoutMs = 10000,
-): Promise<LsatMaintenanceActionResult> {
+export async function ensureLsatScheduledDefaults(timeoutMs = 10000): Promise<LsatMaintenanceActionResult> {
   const res = await fetchJson(SCHEDULED_TASK_DEFAULTS_PATH, timeoutMs, {
     method: 'POST',
   });
   if (!('ok' in res) || !res.ok) {
-    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
+    const reason = 'error' in res ? res.error : `responded ${'status' in res ? res.status : 0}`;
     return { ok: false, reachable: 'error' in res ? false : true, detail: `Could not seed defaults — ${reason}.` };
   }
   const count = isRecord(res.data) ? (num(res.data.scheduled_tasks) ?? 0) : 0;
@@ -617,7 +599,14 @@ export async function ensureLsatScheduledDefaults(
  * field is never zeroed. Never throws.
  */
 export async function upsertLsatScheduledTask(
-  task: { key: string; label: string; task_type: string; cadence_s: number; enabled: boolean; payload?: Record<string, unknown> },
+  task: {
+    key: string;
+    label: string;
+    task_type: string;
+    cadence_s: number;
+    enabled: boolean;
+    payload?: Record<string, unknown>;
+  },
   timeoutMs = 6000,
 ): Promise<LsatMaintenanceActionResult> {
   const body = JSON.stringify({
@@ -630,8 +619,12 @@ export async function upsertLsatScheduledTask(
   });
   const res = await fetchJson(SCHEDULED_TASKS_PATH, timeoutMs, { method: 'POST', body });
   if (!('ok' in res) || !res.ok) {
-    const reason = 'error' in res ? res.error : `responded ${('status' in res ? res.status : 0)}`;
-    return { ok: false, reachable: 'error' in res ? false : true, detail: `Could not update "${task.key}" — ${reason}.` };
+    const reason = 'error' in res ? res.error : `responded ${'status' in res ? res.status : 0}`;
+    return {
+      ok: false,
+      reachable: 'error' in res ? false : true,
+      detail: `Could not update "${task.key}" — ${reason}.`,
+    };
   }
   return { ok: true, reachable: true, detail: `Updated "${task.key}".`, data: res.data };
 }

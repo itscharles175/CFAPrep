@@ -3,5 +3,9 @@ node_modules
 coverage
 spike
 .claude
-src-tauri/target
+.gitnexus
+release
+release-debug
+release-ci
+release-config-check
 **/*.qvsource

@@ -6,12 +6,12 @@
  * endpoint until it answers (or a timeout elapses), then kills it. This is the
  * cheapest catch for the failure mode PyInstaller is prone to: a binary that
  * *builds* fine but dies at boot with a runtime `ModuleNotFoundError` (a missed
- * hidden-import) or a frozen-only import error. `tauri build` happily bundles
+ * hidden-import) or a frozen-only import error. A package build can still bundle
  * such a binary; only actually running it surfaces the break.
  *
  * Usage:
  *   node scripts/smoke-sidecar.mjs \
- *     --bin src-tauri/resources/services/lsat-backend/lsatlab-backend \
+ *     --bin electron/resources/services/lsat-backend/lsatlab-backend \
  *     --url http://127.0.0.1:8123/api/health \
  *     --expect-ok --timeout 60000 \
  *     -- --host 127.0.0.1 --port 8123
@@ -27,14 +27,19 @@ function parseArgs(argv) {
   const rest = [...argv];
   while (rest.length) {
     const a = rest.shift();
-    if (a === '--') { out.child = rest.splice(0); break; }
-    else if (a === '--bin') out.bin = rest.shift();
+    if (a === '--') {
+      out.child = rest.splice(0);
+      break;
+    } else if (a === '--bin') out.bin = rest.shift();
     else if (a === '--url') out.url = rest.shift();
     else if (a === '--expect-ok') out.healthExpectOk = true;
     else if (a === '--timeout') out.timeout = Number(rest.shift());
     else if (a === '--interval') out.interval = Number(rest.shift());
     else if (a === '--label') out.label = rest.shift();
-    else { console.error(`smoke-sidecar: unknown arg ${a}`); process.exit(2); }
+    else {
+      console.error(`smoke-sidecar: unknown arg ${a}`);
+      process.exit(2);
+    }
   }
   if (!out.bin || !out.url) {
     console.error('smoke-sidecar: --bin and --url are required.');
@@ -76,12 +81,16 @@ async function main() {
 
   // Buffer the tail of stderr/stdout so a boot failure is diagnosable.
   let logTail = '';
-  const capture = (buf) => { logTail = (logTail + buf.toString()).slice(-4000); };
+  const capture = (buf) => {
+    logTail = (logTail + buf.toString()).slice(-4000);
+  };
   child.stdout.on('data', capture);
   child.stderr.on('data', capture);
 
   let exited = null;
-  child.on('exit', (code, sig) => { exited = { code, sig }; });
+  child.on('exit', (code, sig) => {
+    exited = { code, sig };
+  });
 
   const deadline = Date.now() + opts.timeout;
   let result = { ok: false, detail: 'timed out before first probe' };

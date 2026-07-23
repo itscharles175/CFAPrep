@@ -65,8 +65,7 @@ function makeQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        retry: (failureCount, error) =>
-          !(error instanceof ApiValidationError) && failureCount < 1,
+        retry: (failureCount, error) => !(error instanceof ApiValidationError) && failureCount < 1,
         refetchOnWindowFocus: false,
         throwOnError: (error) => error instanceof ApiValidationError,
       },
@@ -96,34 +95,20 @@ export default function LsatUnifiedMount() {
     applyHighContrast();
     applyMeasureCh();
 
-    // 4. Windows 11 Mica/vibrancy opt-in, Tauri-gated + best-effort. Fire-and-
-    //    forget dynamic import; guarded so a late resolve after unmount is inert.
-    let disposed = false;
-    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-      void import('@tauri-apps/api/core')
-        .then(({ invoke }) => invoke<boolean>('mica_active'))
-        .then((on) => {
-          if (!disposed && on) document.documentElement.classList.add('mica');
-        })
-        .catch(() => {});
-    }
-
-    // 5. Pause the hero aurora's infinite animation while the window is hidden.
+    // 4. Pause the hero aurora's infinite animation while the window is hidden.
     //    PERSISTENT-MOUNT TEARDOWN: the visibilitychange listener is removed on
     //    unmount (returned below), unlike before where domain-swap unmount did it.
-    const syncIdle = () =>
-      document.documentElement.classList.toggle('is-idle', document.hidden);
+    const syncIdle = () => document.documentElement.classList.toggle('is-idle', document.hidden);
     document.addEventListener('visibilitychange', syncIdle);
     syncIdle();
 
-    // 6. Drain queued offline writes on reconnect + a slow periodic tick.
+    // 5. Drain queued offline writes on reconnect + a slow periodic tick.
     //    PERSISTENT-MOUNT TEARDOWN: startAutoFlush is internally idempotent AND
     //    returns a disposer that removes the `online` listener and clears the
     //    periodic interval — we call it on unmount so the timer can't outlive us.
     const stopAutoFlush = startAutoFlush();
 
     return () => {
-      disposed = true;
       document.removeEventListener('visibilitychange', syncIdle);
       stopAutoFlush();
     };

@@ -9,7 +9,7 @@
  *    timestamped JSON object for a one-click download.
  *
  * Everything here is synchronous and side-effect-free so it can be unit-tested
- * without a DOM, a backend, or Tauri. The panel component does the fetching and
+ * without a DOM, a backend, or Electron. The panel component does the fetching and
  * the actual file download; this module decides *what* to show and *what* to
  * bundle. No data ever leaves the device — the export is a local download the
  * user initiates.
@@ -62,9 +62,7 @@ export function cloudBudgetUsedPct(report: LsatCloudBudgetReport | null | undefi
 }
 
 /** Percent of the IndexedDB/storage quota in use (0–100), or null when unknown. */
-export function storageUsedPct(
-  estimate: { usage?: number; quota?: number } | null | undefined,
-): number | null {
+export function storageUsedPct(estimate: { usage?: number; quota?: number } | null | undefined): number | null {
   const usage = typeof estimate?.usage === 'number' ? estimate.usage : null;
   const quota = typeof estimate?.quota === 'number' ? estimate.quota : null;
   if (usage == null || quota == null || quota <= 0) return null;
@@ -81,9 +79,7 @@ export function storageUsedPct(
 export function detectModelOutage(health: AggregatedSystemHealth | null | undefined): string | null {
   if (!health) return null;
   const reasons = health.backend?.reasons ?? [];
-  const outage = reasons.find(
-    (r) => r === 'ai_not_ready' || /unreachable$/.test(r) || r.startsWith('model_missing'),
-  );
+  const outage = reasons.find((r) => r === 'ai_not_ready' || /unreachable$/.test(r) || r.startsWith('model_missing'));
   if (outage) return outage;
   // A hard error verdict means a required local service is down — surface it
   // even when we couldn't pin a specific AI reason.
@@ -144,13 +140,13 @@ export function evaluateGuardrails(inputs: GuardrailInputs): GuardrailBanner[] {
   return banners;
 }
 
-/** The bundled diagnostics export shape (`studyvault.diagnostics.v1`). */
+/** The bundled diagnostics export shape (`studyvault.diagnostics.v2`). */
 export interface DiagnosticsBundle {
-  schema: 'studyvault.diagnostics.v1';
+  schema: 'studyvault.diagnostics.v2';
   generated_at: string;
   app: {
     user_agent: string | null;
-    is_tauri: boolean;
+    is_electron: boolean;
     href: string | null;
   };
   /** The release-trust manifest (OPS-2 / useTrustManifest), or null when offline. */
@@ -192,22 +188,22 @@ export interface DiagnosticsBundleInputs {
   /** Injected clock for deterministic tests. */
   now?: Date;
   /** Injected env for tests (defaults to the real `navigator` / `window`). */
-  env?: { userAgent?: string | null; isTauri?: boolean; href?: string | null };
+  env?: { userAgent?: string | null; isElectron?: boolean; href?: string | null };
 }
 
 function readEnv(env: DiagnosticsBundleInputs['env']): DiagnosticsBundle['app'] {
   if (env) {
     return {
       user_agent: env.userAgent ?? null,
-      is_tauri: Boolean(env.isTauri),
+      is_electron: Boolean(env.isElectron),
       href: env.href ?? null,
     };
   }
   const nav = typeof navigator !== 'undefined' ? navigator : null;
-  const win = typeof window !== 'undefined' ? (window as Window & { __TAURI_INTERNALS__?: unknown }) : null;
+  const win = typeof window !== 'undefined' ? window : null;
   return {
     user_agent: nav?.userAgent ?? null,
-    is_tauri: Boolean(win && '__TAURI_INTERNALS__' in win),
+    is_electron: Boolean(win?.studyvault),
     href: win?.location?.href ?? null,
   };
 }
@@ -221,7 +217,7 @@ function readEnv(env: DiagnosticsBundleInputs['env']): DiagnosticsBundle['app'] 
 export function buildDiagnosticsBundle(inputs: DiagnosticsBundleInputs = {}): DiagnosticsBundle {
   const now = inputs.now ?? new Date();
   return {
-    schema: 'studyvault.diagnostics.v1',
+    schema: 'studyvault.diagnostics.v2',
     generated_at: now.toISOString(),
     app: readEnv(inputs.env),
     trust_manifest: inputs.trustManifest ?? null,
@@ -245,7 +241,10 @@ export function buildDiagnosticsBundle(inputs: DiagnosticsBundleInputs = {}): Di
 export function diagnosticsFilename(now: Date = new Date()): string {
   // e.g. studyvault-diagnostics-2026-06-16T14-30-05.json — colons are illegal
   // on Windows filenames, so flatten the time portion.
-  const stamp = now.toISOString().replace(/:/g, '-').replace(/\.\d+Z$/, 'Z');
+  const stamp = now
+    .toISOString()
+    .replace(/:/g, '-')
+    .replace(/\.\d+Z$/, 'Z');
   return `studyvault-diagnostics-${stamp}.json`;
 }
 

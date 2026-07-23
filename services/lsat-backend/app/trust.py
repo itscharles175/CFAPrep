@@ -30,13 +30,13 @@ TrustTier = Literal["dev", "release", "packaged"]
 ROOT = config.BASE_DIR.parent
 REPO_ROOT = config.BASE_DIR.parent.parent
 FRONTEND = ROOT / "frontend"
-TAURI_CONF = FRONTEND / "src-tauri" / "tauri.conf.json"
 OPENAPI_SNAPSHOT = FRONTEND / "openapi.json"
 RELEASE_LOCAL_REPORT = REPO_ROOT / "dist" / "release_local_report.json"
 RELEASE_MANIFEST = REPO_ROOT / "dist" / "studyvault-release-manifest.json"
 PACKAGED_CONTRACTS = Path(getattr(sys, "_MEIPASS", config.BASE_DIR)) / "release_contracts"
 RELEASE_LOCAL_REPORT_SCHEMA = "lsatlab.release_local_report.v1"
-RELEASE_MANIFEST_SCHEMA = "studyvault.release-manifest.v1"
+RELEASE_MANIFEST_SCHEMA = "studyvault.release-manifest.v2"
+SIGNING_EVIDENCE_SCHEMA = "studyvault.signing-evidence.v1"
 SIDECAR_PROVENANCE_SCHEMA = "studyvault.sidecar-provenance.v1"
 REQUIRED_SIDECAR_PROVENANCE_SERVICES = ("LSAT backend",)
 
@@ -77,6 +77,7 @@ REQUIRED_RELEASE_LOCAL_LABELS = (
 )
 
 PACKAGED_SMOKE_IN_PROGRESS_ENV = "LSATLAB_RELEASE_LOCAL_PACKAGED_SMOKE_IN_PROGRESS"
+TRUST_TIER_ENV = "STUDYVAULT_TRUST_TIER"
 
 REQUIRED_OPENAPI_PATHS = (
     "/api/ready",
@@ -248,9 +249,28 @@ def trust_status(
     return payload
 
 
+def _default_tier() -> TrustTier:
+    """Tier a caller falls back to when it does not (or must not) pin one.
+
+    Every shipped UI surface asks for ``dev``, where the strict gates — signing
+    evidence above all — are skipped outright. Deriving the floor from
+    ``sys.frozen`` means a packaged sidecar evaluates the release-grade path for
+    real users; ``STUDYVAULT_TRUST_TIER`` is the explicit development override.
+    """
+    override = (os.getenv(TRUST_TIER_ENV) or "").strip().lower()
+    if override in {"dev", "release", "packaged"}:
+        return override  # type: ignore[return-value]
+    return "packaged" if getattr(sys, "frozen", False) else "dev"
+
+
 def _normalize_tier(tier: str) -> TrustTier:
+    default = _default_tier()
     if tier not in {"dev", "release", "packaged"}:
-        return "dev"
+        return default
+    # A packaged build must not be able to self-downgrade into the lenient dev
+    # path just because the requesting surface asked for it.
+    if tier == "dev" and default != "dev":
+        return default
     return tier  # type: ignore[return-value]
 
 
@@ -396,10 +416,10 @@ def _release_local_check(tier: TrustTier) -> dict[str, Any]:
     required_labels = list(REQUIRED_RELEASE_LOCAL_LABELS)
     if not bool(options.get("skip_e2e")):
         required_labels.append("frontend playwright e2e")
-    if not bool(options.get("skip_tauri")):
+    if not bool(options.get("skip_electron")):
         if not bool(options.get("skip_sidecar_build")):
             required_labels.append("backend sidecar build")
-        required_labels.append("tauri build")
+        required_labels.append("electron build")
         if not bool(options.get("skip_packaged_smoke")) and not packaged_smoke_in_progress:
             required_labels.append("packaged app smoke")
         if not packaged_smoke_in_progress:
@@ -416,7 +436,7 @@ def _release_local_check(tier: TrustTier) -> dict[str, Any]:
     ]
     skipped = [
         name
-        for name in ("skip_e2e", "skip_tauri", "skip_sidecar_build", "skip_packaged_smoke")
+        for name in ("skip_e2e", "skip_electron", "skip_sidecar_build", "skip_packaged_smoke")
         if bool(options.get(name))
     ]
     generated_at = _parse_timestamp(str(payload.get("generated_at") or ""))
@@ -445,7 +465,7 @@ def _release_local_check(tier: TrustTier) -> dict[str, Any]:
         or freshness_contract["head_mismatch"]
     )
     # At release/packaged tiers a release-critical SKIP is a BLOCKER, not a
-    # warning: a release-tier "ok" emitted while the packaged smoke / tauri build
+    # warning: a release-tier "ok" emitted while the packaged smoke / Electron build
     # / e2e were skipped would let the gate self-certify a build it never actually
     # exercised. Lower tiers (dev/canary) keep skips at warn for fast iteration.
     skipped_blocks = bool(skipped) and tier in {"release", "packaged"}
@@ -487,7 +507,7 @@ def _release_manifest_check(tier: TrustTier) -> dict[str, Any]:
             status=level,
             summary="release manifest/SBOM evidence is missing",
             detail={"candidate_paths": [str(p) for p in _release_manifest_candidates()]},
-            action="Run `node scripts/release-manifest.mjs write --require-assets --require-sidecar-provenance` after building the Tauri bundle.",
+            action="Run `node scripts/release-manifest.mjs write --require-assets --require-sidecar-provenance` after building the Electron bundle.",
         )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -496,7 +516,7 @@ def _release_manifest_check(tier: TrustTier) -> dict[str, Any]:
             status="block" if strict else "warn",
             summary="release manifest/SBOM evidence cannot be read",
             detail={"path": str(path), "error": str(exc)},
-            action="Regenerate the release manifest after the Tauri bundle is built.",
+            action="Regenerate the release manifest after the Electron bundle is built.",
         )
 
     errors: list[str] = []
@@ -517,7 +537,7 @@ def _release_manifest_check(tier: TrustTier) -> dict[str, Any]:
         errors.append("required_inputs_missing")
     sbom = payload.get("sbom") if isinstance(payload.get("sbom"), dict) else {}
     counts = sbom.get("counts") if isinstance(sbom.get("counts"), dict) else {}
-    component_counts = {name: int(counts.get(name) or 0) for name in ("npm", "cargo", "pypi")}
+    component_counts = {name: int(counts.get(name) or 0) for name in ("npm", "pypi")}
     if any(value <= 0 for value in component_counts.values()):
         errors.append("sbom_component_gap")
 
@@ -533,6 +553,10 @@ def _release_manifest_check(tier: TrustTier) -> dict[str, Any]:
     assets = payload.get("bundleAssets") if isinstance(payload.get("bundleAssets"), list) else []
     if strict and not assets:
         errors.append("bundle_assets_missing")
+
+    signing = payload.get("signing") if isinstance(payload.get("signing"), dict) else {}
+    if strict:
+        errors.extend(_signing_evidence_errors(signing, assets))
 
     recorded_sha = str(payload.get("manifestSha256") or "")
     actual_sha = _sha256_file(path)
@@ -557,11 +581,213 @@ def _release_manifest_check(tier: TrustTier) -> dict[str, Any]:
             "bundle_asset_count": len(assets),
             "sidecar_provenance_present": sidecar.get("present") is True,
             "has_lsat_sidecar": has_lsat_sidecar,
-            "signing": payload.get("signing") if isinstance(payload, dict) else {},
+            "signing": signing,
             "tier": tier,
         },
-        action=None if level == "ok" else "Regenerate the release manifest after building sidecars and Tauri bundles.",
+        action=None
+        if level == "ok"
+        else "Regenerate the release manifest after building sidecars, Electron bundles, and verified platform-signing evidence.",
     )
+
+
+def _current_signing_platform() -> str:
+    name = platform.system().lower()
+    if name == "windows":
+        return "windows"
+    if name == "darwin":
+        return "macos"
+    return "linux"
+
+
+def _evidence_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _signing_directory_digest(assets: list[dict[str, Any]], directory_path: str) -> tuple[str, int] | None:
+    prefix = f"{directory_path.rstrip('/')}/"
+    children = sorted(
+        (
+            item for item in assets
+            if isinstance(item, dict) and str(item.get("path") or "").startswith(prefix)
+        ),
+        key=lambda item: str(item.get("path") or ""),
+    )
+    if not children:
+        return None
+    digest = hashlib.sha256()
+    total_size = 0
+    for child in children:
+        relative_path = str(child.get("path") or "")[len(prefix):]
+        child_hash = str(child.get("sha256") or "")
+        child_size = _evidence_int(child.get("size"), -1)
+        if child_size < 0:
+            return None
+        digest.update(f"{relative_path}\0{child_hash}\0{child_size}\n".encode())
+        total_size += child_size
+    return digest.hexdigest(), total_size
+
+
+def _signing_asset_binding_errors(
+    platform_name: str,
+    artifacts: list[dict[str, Any]],
+    assets: list[dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    if not assets:
+        return errors
+    asset_paths = [str(item.get("path") or "") if isinstance(item, dict) else "" for item in assets]
+    if any(not path for path in asset_paths) or len(set(asset_paths)) != len(asset_paths):
+        errors.append("bundle_asset_paths_invalid")
+    exact_assets = {
+        str(item.get("path") or ""): item
+        for item in assets
+        if isinstance(item, dict) and item.get("path")
+    }
+    published = [item for item in artifacts if item.get("published") is True]
+    for artifact in published:
+        if platform_name == "macos" and artifact.get("kind") == "app":
+            bound = _signing_directory_digest(assets, str(artifact.get("path") or ""))
+            if bound is None:
+                errors.append("signing_asset_binding_missing")
+                continue
+            actual_hash, actual_size = bound
+        else:
+            asset = exact_assets.get(str(artifact.get("path") or ""))
+            if asset is None:
+                errors.append("signing_asset_binding_missing")
+                continue
+            actual_hash = str(asset.get("sha256") or "")
+            actual_size = _evidence_int(asset.get("size"), -1)
+        expected_size = _evidence_int(artifact.get("size"), -2)
+        if actual_hash != str(artifact.get("sha256") or "") or actual_size != expected_size:
+            errors.append("signing_asset_digest_mismatch")
+
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        path = str(asset.get("path") or "")
+        if platform_name == "windows":
+            normalized = path.replace("\\", "/")
+            required = path.endswith(".msi") or (
+                normalized.startswith("release/")
+                and "/" not in normalized[len("release/"):]
+                and normalized.endswith(".exe")
+            )
+            covered = any(item.get("published") is True and item.get("path") == path for item in artifacts)
+        else:
+            required = path.endswith(".dmg") or ".app/" in path
+            app = next(
+                (item for item in artifacts if item.get("kind") == "app" and item.get("published") is True),
+                None,
+            )
+            covered = any(item.get("published") is True and item.get("path") == path for item in artifacts) or bool(
+                app and path.startswith(f"{app.get('path')}/")
+            )
+        if required and not covered:
+            errors.append("bundle_asset_signing_evidence_missing")
+    return list(dict.fromkeys(errors))
+
+
+def _signing_evidence_errors(signing: dict[str, Any], assets: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    if signing.get("schema") != SIGNING_EVIDENCE_SCHEMA:
+        return ["signing_evidence_missing"]
+
+    platform_name = str(signing.get("platform") or "")
+    if platform_name != _current_signing_platform():
+        errors.append("signing_platform_mismatch")
+    artifacts = signing.get("artifacts") if isinstance(signing.get("artifacts"), list) else []
+    if platform_name == "linux":
+        if signing.get("required") is not False or signing.get("status") != "not_applicable":
+            errors.append("linux_signing_policy_invalid")
+        return errors
+    if platform_name not in {"windows", "macos"}:
+        return ["signing_platform_invalid"]
+    if signing.get("required") is not True or signing.get("status") != "verified":
+        errors.append("platform_signature_unverified")
+    if not artifacts:
+        errors.append("signing_artifacts_missing")
+        return errors
+    if any(
+        not isinstance(item, dict)
+        or item.get("signed") is not True
+        or item.get("verified") is not True
+        for item in artifacts
+    ):
+        errors.append("platform_signature_unverified")
+    paths = [str(item.get("path") or "") if isinstance(item, dict) else "" for item in artifacts]
+    if any(not path for path in paths) or len(set(paths)) != len(paths):
+        errors.append("signing_artifact_paths_invalid")
+    if any(
+        not isinstance(item, dict)
+        or _evidence_int(item.get("size"), 0) <= 0
+        or len(str(item.get("sha256") or "")) != 64
+        or any(character not in "0123456789abcdefABCDEF" for character in str(item.get("sha256") or ""))
+        for item in artifacts
+    ):
+        errors.append("signing_artifact_digest_missing")
+
+    kinds = {
+        str(item.get("kind"))
+        for item in artifacts
+        if isinstance(item, dict) and item.get("kind")
+    }
+    if platform_name == "windows":
+        if not {"app", "nsis", "msi"}.issubset(kinds):
+            errors.append("windows_signing_artifacts_incomplete")
+        thumbprints = [
+            str(item.get("signer", {}).get("thumbprint") or "")
+            if isinstance(item, dict) and isinstance(item.get("signer"), dict)
+            else ""
+            for item in artifacts
+        ]
+        if any(not thumbprint for thumbprint in thumbprints) or len(set(thumbprints)) != 1:
+            errors.append("windows_signer_mismatch")
+        if any(
+            not isinstance(item, dict)
+            or item.get("timestamped") is not True
+            or not isinstance(item.get("timestamp"), dict)
+            or not item["timestamp"].get("thumbprint")
+            for item in artifacts
+        ):
+            errors.append("windows_timestamp_missing")
+    else:
+        if not {"app", "dmg"}.issubset(kinds):
+            errors.append("macos_signing_artifacts_incomplete")
+        signer_pairs = [
+            (
+                str(item.get("signer", {}).get("authority") or ""),
+                str(item.get("signer", {}).get("teamIdentifier") or ""),
+            )
+            for item in artifacts
+            if isinstance(item, dict) and isinstance(item.get("signer"), dict)
+        ]
+        if (
+            len(signer_pairs) != len(artifacts)
+            or any(not authority or not team for authority, team in signer_pairs)
+            or len(set(signer_pairs)) != 1
+        ):
+            errors.append("macos_signer_mismatch")
+        if any(
+            not isinstance(item, dict)
+            or item.get("notarized") is not True
+            or item.get("stapled") is not True
+            for item in artifacts
+            if isinstance(item, dict) and item.get("kind") == "app"
+        ):
+            errors.append("macos_notarization_missing")
+        if any(
+            not isinstance(item, dict) or item.get("timestamped") is not True
+            for item in artifacts
+        ):
+            errors.append("macos_timestamp_missing")
+    errors.extend(_signing_asset_binding_errors(platform_name, artifacts, assets))
+    return list(dict.fromkeys(errors))
 
 
 def _release_freshness_contract(
@@ -894,22 +1120,17 @@ def _knowledge_index_check(session: Session, tier: TrustTier) -> dict[str, Any]:
 
 
 def _sidecar_check(tier: TrustTier) -> dict[str, Any]:
-    conf = _tauri_conf()
-    external_bins = (
-        ((conf.get("bundle") or {}).get("externalBin") or [])
-        if isinstance(conf, dict) else []
-    )
-    candidates = _sidecar_binary_candidates(external_bins)
+    candidates = _sidecar_binary_candidates()
     binary_present = any(path.exists() for path in candidates)
     provenance_path = _first_existing(_sidecar_provenance_candidates())
     provenance = _verify_sidecar_provenance(provenance_path)
     worker = jobs.get_worker()
     thread = worker._thread
     alive = thread is not None and thread.is_alive()
-    missing_binary = bool(external_bins) and not binary_present
+    missing_binary = not binary_present
     problems = []
     if missing_binary:
-        problems.append("external_bin_missing")
+        problems.append("sidecar_binary_missing")
     if provenance["status"] != "ok":
         problems.append("sidecar_provenance_not_verified")
     if not problems:
@@ -923,7 +1144,7 @@ def _sidecar_check(tier: TrustTier) -> dict[str, Any]:
         summary="sidecar configuration and provenance are observable"
         if level == "ok" else "sidecar provenance or packaged binary evidence is incomplete",
         detail={
-            "external_bin": external_bins,
+            "resource_root": str(REPO_ROOT / "electron" / "resources" / "services"),
             "binary_present": binary_present,
             "candidate_paths": [str(path) for path in candidates],
             "provenance": provenance,
@@ -931,7 +1152,7 @@ def _sidecar_check(tier: TrustTier) -> dict[str, Any]:
             "worker_enabled": config.JOBS_WORKER_ENABLED,
         },
         action=None if level == "ok"
-        else "Build the backend sidecar and verify src-tauri/resources/services/sidecar-provenance.json before packaged release smoke.",
+        else "Build the backend sidecar and verify electron/resources/services/sidecar-provenance.json before packaged release smoke.",
     )
 
 
@@ -948,13 +1169,16 @@ def _sidecar_provenance_candidates() -> list[Path]:
     explicit = os.environ.get("STUDYVAULT_SIDECAR_PROVENANCE")
     if explicit:
         candidates.append(Path(explicit))
-    candidates.extend(
-        [
-            REPO_ROOT / "src-tauri" / "resources" / "services" / "sidecar-provenance.json",
-            PACKAGED_CONTRACTS / "sidecar-provenance.json",
-            config.BASE_DIR / "release_contracts" / "sidecar-provenance.json",
-        ]
+    candidates.append(
+        REPO_ROOT / "electron" / "resources" / "services" / "sidecar-provenance.json"
     )
+    if not getattr(sys, "frozen", False):
+        candidates.extend(
+            [
+                PACKAGED_CONTRACTS / "sidecar-provenance.json",
+                config.BASE_DIR / "release_contracts" / "sidecar-provenance.json",
+            ]
+        )
     return candidates
 
 
@@ -1059,93 +1283,24 @@ def _verify_sidecar_provenance(path: Path | None) -> dict[str, Any]:
 
 
 def _updater_check(tier: TrustTier) -> dict[str, Any]:
-    conf = _tauri_conf()
-    updater = ((conf.get("plugins") or {}).get("updater") or {}) if isinstance(conf, dict) else {}
-    active = bool(updater.get("active"))
-    endpoints = updater.get("endpoints") or []
-    pubkey = updater.get("pubkey") or ""
-    placeholders = [
-        value for value in [pubkey, *endpoints]
-        if isinstance(value, str) and "PLACEHOLDER_TAURI_UPDATER" in value
-    ]
+    del tier
+    active = False
     level = "ok"
-    if active and placeholders:
-        level = "warn" if tier == "dev" else "block"
-    elif not active:
-        summary = "updater is disabled until signing/channel config is real"
-        action = None
-    else:
-        summary = "updater release channel is signed/configured"
-        action = None
+    summary = "updater is disabled until a signed Electron update channel is configured"
     return _check(
         status=level,
-        summary=summary if level == "ok" else "updater still contains placeholder signing/channel config",
-        detail={"active": active, "placeholder_count": len(placeholders)},
-        action=action if level == "ok" else "Wire signed updater endpoint/pubkey or disable updater for non-dev builds.",
+        summary=summary,
+        detail={"active": active, "placeholder_count": 0, "runtime": "electron"},
+        action=None,
     )
 
 
-def _sidecar_binary_candidates(external_bins: list[Any]) -> list[Path]:
-    binaries_dir = FRONTEND / "src-tauri" / "binaries"
-    candidates: list[Path] = []
-    for entry in external_bins:
-        if not isinstance(entry, str):
-            continue
-        base = Path(entry).name
-        candidates.extend(
-            [
-                binaries_dir / f"{base}.exe",
-                binaries_dir / base,
-            ]
-        )
-        target = _rust_host_triple()
-        if target:
-            candidates.extend(
-                [
-                    binaries_dir / f"{base}-{target}.exe",
-                    binaries_dir / f"{base}-{target}",
-                ]
-            )
-        candidates.extend(sorted(binaries_dir.glob(f"{base}-*")))
-        if getattr(sys, "frozen", False):
-            exe = Path(sys.executable)
-            frozen_target = _rust_host_triple()
-            candidates.extend(
-                [
-                    exe,
-                    exe.parent / f"{base}.exe",
-                    exe.parent / base,
-                ]
-            )
-            if frozen_target:
-                candidates.append(exe.parent / f"{base}-{frozen_target}.exe")
-    deduped: list[Path] = []
-    seen: set[str] = set()
-    for path in candidates:
-        key = str(path)
-        if key not in seen:
-            seen.add(key)
-            deduped.append(path)
-    return deduped
-
-
-def _rust_host_triple() -> str | None:
-    try:
-        proc = subprocess.run(
-            ["rustc", "-vV"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-    for line in proc.stdout.splitlines():
-        if line.startswith("host:"):
-            return line.split(":", 1)[1].strip() or None
-    return None
+def _sidecar_binary_candidates() -> list[Path]:
+    root = REPO_ROOT / "electron" / "resources" / "services" / "lsat-backend"
+    candidates = [root / "lsatlab-backend.exe", root / "lsatlab-backend"]
+    if getattr(sys, "frozen", False):
+        candidates.insert(0, Path(sys.executable))
+    return candidates
 
 
 def _scheduler_check(session: Session, tier: TrustTier) -> dict[str, Any]:
@@ -1277,29 +1432,11 @@ def _benchmark_check(session: Session, tier: TrustTier) -> dict[str, Any]:
     )
 
 
-def _tauri_conf() -> dict[str, Any]:
-    conf = _first_existing(_tauri_conf_candidates())
-    if conf is None:
-        return {}
-    try:
-        return json.loads(conf.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
 def _openapi_snapshot_candidates() -> list[Path]:
     return [
         OPENAPI_SNAPSHOT,
         PACKAGED_CONTRACTS / "openapi.json",
         config.BASE_DIR / "release_contracts" / "openapi.json",
-    ]
-
-
-def _tauri_conf_candidates() -> list[Path]:
-    return [
-        TAURI_CONF,
-        PACKAGED_CONTRACTS / "tauri.conf.json",
-        config.BASE_DIR / "release_contracts" / "tauri.conf.json",
     ]
 
 
@@ -1387,7 +1524,7 @@ def _next_actions(checks: dict[str, dict[str, Any]]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tier", choices=["dev", "release", "packaged"], default="dev")
+    parser.add_argument("--tier", choices=["dev", "release", "packaged"], default=_default_tier())
     parser.add_argument("--output", default="")
     parser.add_argument("--persist", action="store_true")
     parser.add_argument("--check", action="store_true")

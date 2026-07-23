@@ -5,7 +5,7 @@ cannot rely on `python -m uvicorn app.main:app`. Instead PyInstaller freezes
 *this* module into a single self-contained executable (see ``lsatlab.spec``)
 that boots uvicorn programmatically against the existing FastAPI app.
 
-The Tauri shell launches the frozen binary as a sidecar (``externalBin``). It is
+The Electron main process launches the frozen binary as a packaged sidecar. It is
 deliberately tiny and import-light at module scope so the frozen process starts
 fast; the heavy FastAPI app is imported inside ``main()`` after argument
 parsing.

@@ -2,7 +2,7 @@
  * NAV-1 — durable Study Trail + cross-restart session restore.
  *
  * The unified shell forgets WHERE the user was the moment the app restarts: a
- * relaunch (or a crash, or an OS reboot of the Tauri window) drops them on the
+ * relaunch (or a crash, or an OS reboot of the Electron window) drops them on the
  * default route with no breadcrumb back to the lesson / drill / passage they had
  * open. This module records a small, append-only trail of study CONTEXT
  * (route + domain + query-state + a resume handle) so the shell can offer
@@ -182,9 +182,7 @@ export function readResumeHandle(): ResumeHandle | null {
       route: h.route,
       label: typeof h.label === 'string' ? h.label : h.route,
       queryState:
-        h.queryState && typeof h.queryState === 'object'
-          ? (h.queryState as Record<string, string>)
-          : undefined,
+        h.queryState && typeof h.queryState === 'object' ? (h.queryState as Record<string, string>) : undefined,
       resumeHandle: typeof h.resumeHandle === 'string' ? h.resumeHandle : undefined,
       recordedAt: typeof h.recordedAt === 'string' ? h.recordedAt : new Date(0).toISOString(),
     };
@@ -267,9 +265,7 @@ export async function readStudyTrail(
  * back to the boot-readable localStorage handle when the trail store is
  * unavailable. Returns `null` when there is nothing to resume. NEVER throws.
  */
-export async function getResumeTarget(
-  injected?: KeyedTable<StudyTrailEntry>,
-): Promise<ResumeHandle | null> {
+export async function getResumeTarget(injected?: KeyedTable<StudyTrailEntry>): Promise<ResumeHandle | null> {
   const trail = await readStudyTrail({ limit: 1 }, injected);
   if (trail.length) return entryToResumeHandle(trail[0]);
   return readResumeHandle();

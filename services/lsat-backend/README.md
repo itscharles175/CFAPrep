@@ -5,6 +5,7 @@ SQLite file and a local Ollama instance. All HTTP routes are under `/api`; the
 contract lives in `../docs/05-api-contract.md` (source of truth).
 
 ## Stack
+
 - **FastAPI + uvicorn** (HTTP + SSE streaming)
 - **SQLModel** (SQLAlchemy 2 + Pydantic) over **SQLite** (`lsatlab.db`)
 - **httpx** (async streaming to Ollama)
@@ -13,6 +14,7 @@ contract lives in `../docs/05-api-contract.md` (source of truth).
 - **pytest** for tests
 
 ## Requirements
+
 - Python 3.12, `uv`
 - Ollama at `http://localhost:11434` with:
   - `phi4:14b` for preferred Tier-A explanations
@@ -21,14 +23,17 @@ contract lives in `../docs/05-api-contract.md` (source of truth).
   - `nomic-embed-text` for local retrieval and semantic deduplication
 
 ## Install
+
 ```powershell
 uv sync          # creates .venv and installs deps from pyproject.toml/uv.lock
 ```
 
 ## Seed sample content (offline, no Ollama needed)
+
 ```powershell
 uv run python -m app.seed
 ```
+
 Creates one PrepTest "Sample Diagnostic (original practice content)" — an 8-question
 LR section and a 5-question RC section (all original, `source="sample"`), with answer
 keys, per-choice trap tags, and pre-written explanations — plus one completed prior
@@ -36,54 +41,59 @@ study session with realistic attempts and a few SRS cards so the dashboard/analy
 render against real data. Re-running re-seeds idempotently.
 
 ## Run
+
 ```powershell
 .\run.ps1
 # or:
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
+
 Then visit `http://127.0.0.1:8000/docs` for interactive OpenAPI.
 
 ## Test
+
 ```powershell
 uv run pytest -q
 ```
+
 Unit tests mock Ollama (fast, deterministic). One integration test
 (`tests/test_live_ollama.py`) hits real Ollama and is auto-skipped when it is
 unreachable.
 
 ## Configuration (env vars, all optional — see `backend/.env.example` for the full list)
-| Var | Default | Meaning |
-|---|---|---|
-| `LSATLAB_DB` | `backend/lsatlab.db` | SQLite file path |
-| `LSATLAB_DB_KEY_B64` | - | base64 32-byte AES-GCM key for selected local-only SQLite text fields; packaged Tauri owns this through OS keychain |
-| `LSATLAB_LOCAL_PROVIDER` | `ollama` | Local inference provider: `ollama` or `lmstudio` (also switchable in Settings → AI & system) |
-| `LSATLAB_OLLAMA_URL` | `http://localhost:11434` | Ollama base URL; loopback only unless both remote local-model opt-outs are set |
-| `LSATLAB_LMSTUDIO_URL` | `http://localhost:1234/v1` | LM Studio OpenAI-compatible base URL (include the `/v1` suffix); loopback only unless both remote local-model opt-outs are set |
-| `LSATLAB_ALLOW_REMOTE_LLM` | `0` | permits non-loopback Ollama/LM Studio URLs only after `LSATLAB_ENFORCE_OFFLINE=0`; use only when off-device local-model traffic is intentional |
-| `LSATLAB_EXPLAIN_MODEL` | `phi4:14b` | Preferred Tier-A explanation model |
-| `LSATLAB_EXPLAIN_FALLBACK_MODEL` | `qwen3:8b` | Local fallback when the preferred explain model is not pulled |
-| `LSATLAB_GEN_MODEL` | `qwen3:14b` | Tier-B generation/structuring model |
-| `LSATLAB_GEN_CRITIC_MODEL` | `llama3.1:8b` | Decorrelated critic for Tier-B gate |
-| `LSATLAB_DIAGNOSE_MODEL` | `qwen3:8b` | coach diagnosis model |
-| `LSATLAB_TAG_MODEL` | `qwen3:8b` | tagging model (A9: small fast model) |
-| `LSATLAB_EMBED_MODEL` | `nomic-embed-text` | embeddings model (RAG / similarity) |
-| `LSATLAB_EMBED_REQUEST_TIMEOUT_S` | `30` | per-request timeout for embed calls |
-| `LSATLAB_VECTOR_BACKEND` | `auto` | H1: `auto`, `sqlite_vec`, or `python` |
-| `LSATLAB_GEN_SC_RUNS` | `3` | self-consistency runs in the validation gate |
-| `LSATLAB_GEN_PROVIDER` | `ollama` | offline generation provider: `ollama` or `cloud` |
-| `ANTHROPIC_API_KEY` / `LSATLAB_CLOUD_API_KEY` | - | cloud key; configures the `cloud` provider but does not allow egress by itself |
-| `LSATLAB_CLOUD_EGRESS_ALLOWED` | `0` | explicit outbound model-provider egress opt-in; set `1` only with `LSATLAB_ENFORCE_OFFLINE=0` |
-| `LSATLAB_CLOUD_GEN_MODEL` | `claude-3-5-sonnet-20241022` | cloud model for offline Tier-B generation |
-| `LSATLAB_CLOUD_MONTHLY_BUDGET_USD` | `0` | hard monthly budget for the cloud path; `0` means no budget cap |
-| `LSATLAB_LLM_RETRIES` | `2` | transient-error retries for model calls |
-| `LSATLAB_LLM_CONCURRENCY` | `2` | cap on concurrent local GPU calls |
-| `LSATLAB_JOBS_WORKER` | `1` | run the durable generation worker (`0` in tests) |
-| `LSATLAB_SCHEDULER_TICK_SECONDS` | `3600` | worker idle-pass cadence for polling due `ScheduledTask` rows; positive values clamp to a 60s floor and `0` disables the tick |
-| `LSATLAB_CALIBRATION_INTERVAL_S` | `86400` | empirical-difficulty recalibration period |
-| `LSATLAB_LOG_DIR` / `LSATLAB_LOG_LEVEL` | `<db dir>/logs`, `INFO` | local rotating log file |
-| `LSATLAB_CORS_ORIGINS` | `http://localhost:5173,tauri://localhost` | allowed CORS origins (validated at startup; `*` is rejected) |
-| `LSATLAB_LOCAL_API_TOKEN` | — | optional per-run local API token; when set, non-health `/api` routes require `Authorization: Bearer <token>` or `X-LSATLAB-API-Token` |
-| `LSATLAB_SQLITE_FK_ENFORCE` | `1` | toggles `PRAGMA foreign_keys=ON` (default on for app integrity) |
+
+| Var                                           | Default                                  | Meaning                                                                                                                                        |
+| --------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LSATLAB_DB`                                  | `backend/lsatlab.db`                     | SQLite file path                                                                                                                               |
+| `LSATLAB_DB_KEY_B64`                          | -                                        | base64 32-byte AES-GCM key for selected local-only SQLite text fields; packaged Electron main owns this through OS-backed safeStorage          |
+| `LSATLAB_LOCAL_PROVIDER`                      | `ollama`                                 | Local inference provider: `ollama` or `lmstudio` (also switchable in Settings → AI & system)                                                   |
+| `LSATLAB_OLLAMA_URL`                          | `http://localhost:11434`                 | Ollama base URL; loopback only unless both remote local-model opt-outs are set                                                                 |
+| `LSATLAB_LMSTUDIO_URL`                        | `http://localhost:1234/v1`               | LM Studio OpenAI-compatible base URL (include the `/v1` suffix); loopback only unless both remote local-model opt-outs are set                 |
+| `LSATLAB_ALLOW_REMOTE_LLM`                    | `0`                                      | permits non-loopback Ollama/LM Studio URLs only after `LSATLAB_ENFORCE_OFFLINE=0`; use only when off-device local-model traffic is intentional |
+| `LSATLAB_EXPLAIN_MODEL`                       | `phi4:14b`                               | Preferred Tier-A explanation model                                                                                                             |
+| `LSATLAB_EXPLAIN_FALLBACK_MODEL`              | `qwen3:8b`                               | Local fallback when the preferred explain model is not pulled                                                                                  |
+| `LSATLAB_GEN_MODEL`                           | `qwen3:14b`                              | Tier-B generation/structuring model                                                                                                            |
+| `LSATLAB_GEN_CRITIC_MODEL`                    | `llama3.1:8b`                            | Decorrelated critic for Tier-B gate                                                                                                            |
+| `LSATLAB_DIAGNOSE_MODEL`                      | `qwen3:8b`                               | coach diagnosis model                                                                                                                          |
+| `LSATLAB_TAG_MODEL`                           | `qwen3:8b`                               | tagging model (A9: small fast model)                                                                                                           |
+| `LSATLAB_EMBED_MODEL`                         | `nomic-embed-text`                       | embeddings model (RAG / similarity)                                                                                                            |
+| `LSATLAB_EMBED_REQUEST_TIMEOUT_S`             | `30`                                     | per-request timeout for embed calls                                                                                                            |
+| `LSATLAB_VECTOR_BACKEND`                      | `auto`                                   | H1: `auto`, `sqlite_vec`, or `python`                                                                                                          |
+| `LSATLAB_GEN_SC_RUNS`                         | `3`                                      | self-consistency runs in the validation gate                                                                                                   |
+| `LSATLAB_GEN_PROVIDER`                        | `ollama`                                 | offline generation provider: `ollama` or `cloud`                                                                                               |
+| `ANTHROPIC_API_KEY` / `LSATLAB_CLOUD_API_KEY` | -                                        | cloud key; configures the `cloud` provider but does not allow egress by itself                                                                 |
+| `LSATLAB_CLOUD_EGRESS_ALLOWED`                | `0`                                      | explicit outbound model-provider egress opt-in; set `1` only with `LSATLAB_ENFORCE_OFFLINE=0`                                                  |
+| `LSATLAB_CLOUD_GEN_MODEL`                     | `claude-3-5-sonnet-20241022`             | cloud model for offline Tier-B generation                                                                                                      |
+| `LSATLAB_CLOUD_MONTHLY_BUDGET_USD`            | `0`                                      | hard monthly budget for the cloud path; `0` means no budget cap                                                                                |
+| `LSATLAB_LLM_RETRIES`                         | `2`                                      | transient-error retries for model calls                                                                                                        |
+| `LSATLAB_LLM_CONCURRENCY`                     | `2`                                      | cap on concurrent local GPU calls                                                                                                              |
+| `LSATLAB_JOBS_WORKER`                         | `1`                                      | run the durable generation worker (`0` in tests)                                                                                               |
+| `LSATLAB_SCHEDULER_TICK_SECONDS`              | `3600`                                   | worker idle-pass cadence for polling due `ScheduledTask` rows; positive values clamp to a 60s floor and `0` disables the tick                  |
+| `LSATLAB_CALIBRATION_INTERVAL_S`              | `86400`                                  | empirical-difficulty recalibration period                                                                                                      |
+| `LSATLAB_LOG_DIR` / `LSATLAB_LOG_LEVEL`       | `<db dir>/logs`, `INFO`                  | local rotating log file                                                                                                                        |
+| `LSATLAB_CORS_ORIGINS`                        | `http://localhost:5173,app://studyvault` | allowed CORS origins (validated at startup; `*` is rejected)                                                                                   |
+| `LSATLAB_LOCAL_API_TOKEN`                     | —                                        | optional per-run local API token; when set, non-health `/api` routes require `Authorization: Bearer <token>` or `X-LSATLAB-API-Token`          |
+| `LSATLAB_SQLITE_FK_ENFORCE`                   | `1`                                      | toggles `PRAGMA foreign_keys=ON` (default on for app integrity)                                                                                |
 
 > **Realtime stays local.** Explain/diagnose/tag always use the configured local
 > provider (Ollama or LM Studio). The optional `cloud` provider serves **only**
@@ -106,7 +116,7 @@ set, every non-health route under `/api/` must include `Authorization: Bearer
 do not need secret material. The health response is also the packaged sidecar
 identity contract: `{"ok":true,"service":"lsat-backend","version":"..."}`.
 
-The packaged contract is: the Tauri supervisor generates a high-entropy token on
+The packaged contract is: the Electron supervisor generates a high-entropy token on
 each run, passes it to the backend as `LSATLAB_LOCAL_API_TOKEN`, exposes it to the
 webview through a read-only command, keeps it in memory only, and injects it into
 sidecar fetches as a header. Do not put the token in query strings, logs,
@@ -123,7 +133,7 @@ normal ORM/API reads return plaintext. The current encrypted scope is
 `TutorTurn.content`, `ErrorLogEntry.user_note`, `ErrorLogEntry.ai_diagnosis`,
 and `LLMCacheEntry.response`.
 
-In the packaged app, the Tauri supervisor creates/reads a distinct OS-keychain
+In the packaged app, the Electron main process creates/reads a distinct OS-backed
 credential, `studyvault/lsat-db-dek`, and passes it only to the LSAT backend as
 `LSATLAB_DB_KEY_B64`. The webview keychain commands still expose only the Secure
 Vault `studyvault/vault-dek`; the LSAT DB key is supervisor-owned and is not
@@ -138,6 +148,7 @@ handoff; protected API traffic still requires the token when
 `LSATLAB_LOCAL_API_TOKEN` is set.
 
 ## Local release trust
+
 Run the local release gate from the repository root before packaging or
 publishing:
 
@@ -154,6 +165,7 @@ generation, and embedding models to be visible to Ollama; missing preferred
 models are surfaced in the trust manifest instead of being hidden by fallbacks.
 
 ## Backend capabilities added on top of v1
+
 - **Resilient LLM layer** (`app/llm/`): retries/backoff, a GPU concurrency cap, and
   a pluggable provider (Ollama default; optional cloud for offline generation).
 - **Durable job queue** (`app/jobs.py`): generation jobs survive restarts; a worker
@@ -176,6 +188,7 @@ models are surfaced in the trust manifest instead of being hidden by fallbacks.
 > `uv run pytest --cov=app`.
 
 ## Project layout
+
 ```
 backend/
   app/
@@ -198,6 +211,7 @@ backend/
 ```
 
 ## Key behaviors
+
 - **Answer hiding:** test-mode question responses never include
   `correct_answer`/`is_correct`/`trap_type`/`explanation`. Only `?reveal=true`,
   `/sessions/{id}/results`, quarantine review, and error-log expose the key.
@@ -211,6 +225,7 @@ backend/
   and never served until manually approved.
 
 ## Score conversion curve
+
 `scoring.py` maps percent-correct on official questions to a 120–180 scaled estimate
 via a representative published-style piecewise-linear curve (100%→180, 90%→170,
 80%→164, 70%→158, 60%→152, 50%→145, 40%→138, 30%→131, 20%→125, ≤10%→120). It is an

@@ -2,8 +2,8 @@
 /*
  * Build the StudyVault LSAT backend (FastAPI + SQLite, vendored from LSAT Lab)
  * into a one-file PyInstaller binary and drop it into
- * `src-tauri/resources/services/lsat-backend/`, where `tauri.conf.json` →
- * `bundle.resources` ships it and the Rust supervisor (build_sidecar_specs)
+ * `electron/resources/services/lsat-backend/`, where electron-builder's
+ * `extraResources` ships it and the Electron sidecar supervisor
  * launches it on `127.0.0.1:8100`.
  *
  * Mirrors scripts/build-onb-binary.mjs (same isolated-venv discipline) but
@@ -38,7 +38,7 @@ const SPEC = 'lsatlab.spec'; // the backend's own spec, run with cwd=BACKEND_DIR
 const ENTRY = join(BACKEND_DIR, 'sidecar_main.py');
 const PYINST_BUILD = join(REPO_ROOT, '.pyinstaller-lsat-build');
 const PYINST_DIST = join(REPO_ROOT, '.pyinstaller-lsat-dist');
-const OUT_DIR = join(REPO_ROOT, 'src-tauri', 'resources', 'services', 'lsat-backend');
+const OUT_DIR = join(REPO_ROOT, 'electron', 'resources', 'services', 'lsat-backend');
 const VENV_DIR = join(REPO_ROOT, '.venv-lsat');
 const PYINSTALLER_VERSION = '6.20.0';
 const EXE_NAME = process.platform === 'win32' ? 'lsatlab-backend.exe' : 'lsatlab-backend';
@@ -77,9 +77,7 @@ function resolveBasePython() {
   return 'python';
 }
 function venvPython() {
-  return process.platform === 'win32'
-    ? join(VENV_DIR, 'Scripts', 'python.exe')
-    : join(VENV_DIR, 'bin', 'python');
+  return process.platform === 'win32' ? join(VENV_DIR, 'Scripts', 'python.exe') : join(VENV_DIR, 'bin', 'python');
 }
 
 ensure(existsSync(BACKEND_DIR), `Missing vendored backend at ${BACKEND_DIR}.`);
@@ -102,7 +100,10 @@ if (AMBIENT) {
   try {
     execSync(`${pythonCmd} -c "import PyInstaller"`, { stdio: 'ignore', shell: true });
   } catch {
-    ensure(false, `PyInstaller not installed for ${pythonCmd}. Run: ${pythonCmd} -m pip install pyinstaller==${PYINSTALLER_VERSION}`);
+    ensure(
+      false,
+      `PyInstaller not installed for ${pythonCmd}. Run: ${pythonCmd} -m pip install pyinstaller==${PYINSTALLER_VERSION}`,
+    );
   }
 } else {
   const basePython = resolveBasePython();
@@ -119,11 +120,9 @@ if (AMBIENT) {
 
 // Build using the backend's own spec, from the backend dir so its relative
 // pathex (".") and data-file globs resolve.
-run(
-  `${pythonCmd} -m PyInstaller ${SPEC} --noconfirm ` +
-    `--distpath "${PYINST_DIST}" --workpath "${PYINST_BUILD}"`,
-  { cwd: BACKEND_DIR },
-);
+run(`${pythonCmd} -m PyInstaller ${SPEC} --noconfirm ` + `--distpath "${PYINST_DIST}" --workpath "${PYINST_BUILD}"`, {
+  cwd: BACKEND_DIR,
+});
 
 const built = join(PYINST_DIST, EXE_NAME);
 ensure(exists(built), `PyInstaller did not produce ${built}.`);
@@ -140,5 +139,5 @@ const provenance = await recordSidecarProvenance({
 
 console.log(`\n✓ Bundled LSAT backend -> ${dest.split(sep).slice(-4).join(sep)}`);
 console.log(`  Provenance -> ${provenance.sha256.slice(0, 12)}… (${provenance.size} bytes)`);
-console.log('  StudyVault release builds will include it under bundle.resources;');
-console.log('  the Tauri supervisor launches it on 127.0.0.1:8100.');
+console.log('  StudyVault release builds include it through extraResources;');
+console.log('  the Electron supervisor launches it on 127.0.0.1:8100.');

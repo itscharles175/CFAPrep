@@ -7,6 +7,15 @@
 
 ## Execution Progress
 
+> **Runtime migration, 2026-07-16 (`264fe5e`).** The desktop shell moved from
+> Tauri 2 to Electron and `src-tauri/` was deleted. Entries below were written
+> against the Tauri shell; where one names Tauri, Cargo, `src-tauri`, or a Rust
+> test as *evidence*, read it as a record of what was proven **then**, not of
+> what guards the tree **now**. Entries whose verification did not survive the
+> migration have been corrected in place and are marked
+> **[superseded by the Electron migration]**. See
+> [decisions/2026-07-23-electron-desktop-runtime.md](decisions/2026-07-23-electron-desktop-runtime.md).
+
 Implementation has started after the original planning pass. Current completed
 guardrails:
 
@@ -50,11 +59,19 @@ guardrails:
   LSAT backend pytest suite in a dedicated PR job with hermetic loopback model
   env, `pytest-cov`, JSON/XML coverage artifacts, and an 85% floor against the
   measured 85.85% backend app coverage baseline.
-- Wave 1 native Rust gate: CI now runs the Tauri Rust supervisor gate on
-  `windows-latest` with rustfmt, clippy warnings denied, and
-  `cargo test --all-features`; local verification passed 136 tests covering the
-  Windows Job Object kill-on-drop path, relocation guard, sidecar identity,
-  provenance, port sweep, and supervision paths.
+- Wave 1 native shell gate **[superseded by the Electron migration]**: the
+  `tauri-rust` job (rustfmt, clippy, `cargo test --all-features`, 136 tests over
+  the Job Object kill-on-drop path, relocation guard, identity, provenance, port
+  sweep, and supervision) was deleted with `src-tauri/`. The desktop shell is now
+  gated by the `electron-runtime` job on `windows-latest`: `npm run test:electron`
+  (`node --test` over `electron/tests/`), sidecar build + provenance + smoke, and
+  an unpacked `electron-builder --dir` package verified for the executable and
+  staged sidecar. **This was a net loss of coverage, not a rename.** The
+  relocation guard, port sweep, keychain migration, and watchdog-degradation
+  paths have since been ported to `electron/` with tests. Crash-path sidecar
+  reaping has not: orphan protection rests on the owned-child watchdog plus
+  libuv's job object over non-detached Windows children, and no test asserts
+  either.
 - Wave 1 storage ID safety: SurrealDB record IDs now use reversible UTF-8
   percent encoding instead of lossy slug replacement for chunks, review items,
   mastery snapshots, and generic keyed tables; chunk search/export decode
@@ -100,10 +117,12 @@ guardrails:
   OpenAPI/client artifacts were refreshed, and the field-removal guard covers
   both routes so host-consumed planning/adaptive payloads no longer rely on the
   legacy fallback schema.
-- Wave 5 native lifecycle hardening: repeated sidecar exits now use a bounded
-  exponential respawn backoff, healthy probes clear the failure counter, and
-  Windows Job Object kill-on-close behavior is pinned by a real child-process
-  test so orphan protection is covered below the supervisor abstraction.
+- Wave 5 native lifecycle hardening (**partly superseded by the Electron
+  migration**): repeated sidecar exits still use a bounded exponential respawn
+  backoff and healthy probes still clear the failure counter. The Windows Job
+  Object kill-on-close child-process test did **not** survive the migration —
+  no code now creates a Job Object explicitly, and orphan protection below the
+  supervisor abstraction is unasserted.
 - Wave 5 packaged shutdown evidence: the release-local packaged smoke now checks
   all owned sidecar ports (`8000`, `5055`, and `8100`) after app termination,
   not only the LSAT backend port, so RAG-enabled bundles cannot leave SurrealDB
@@ -111,13 +130,22 @@ guardrails:
 - Wave 4 release manifest/SBOM evidence: `scripts/release-manifest.mjs` now emits
   a dependency-and-asset manifest with Node, Rust, and Python component counts,
   lockfile hashes, sidecar provenance digest, bundle asset hashes, and captured
-  signing configuration status; local and GitHub release gates require it after
+  platform-signing evidence; local and GitHub release gates require it after
   Tauri bundle creation, and backend release trust surfaces the manifest as a
   first-class check.
-- Wave 4 version/tag sync: package, Tauri, Cargo, and backend `APP_VERSION`
-  now agree on `0.9.0`; PR CI runs `npm run check:versions`; release
-  verification runs the same gate with `--git-tag` so a `vX.Y.Z` tag cannot
-  publish a differently versioned bundle.
+- Wave 4 signing enforcement: tagged Windows/macOS builds now fail before
+  sidecar compilation when credentials are incomplete, Windows receives its
+  signer thumbprint through a runner-local Tauri config overlay, and post-build
+  verification requires the expected signer plus timestamp or notarization
+  evidence for every published desktop artifact. Backend `release` and
+  `packaged` trust tiers reject missing or configuration-only evidence; Linux is
+  explicitly recorded as not applicable.
+- Wave 4 version/tag sync (**scope reduced by the Electron migration**): the
+  `tauri.conf.json` and `Cargo.toml` version sources went away with `src-tauri/`.
+  `scripts/check-version-sync.mjs` now reconciles `package.json` (canonical),
+  optional `.env` `VITE_APP_VERSION`, and backend `APP_VERSION`; PR CI runs
+  `npm run check:versions`; release verification runs the same gate with
+  `--git-tag` so a `vX.Y.Z` tag cannot publish a differently versioned bundle.
 - Wave 4 docs-drift gate: `scripts/check-docs-drift.mjs` now validates
   `docs/ARCHITECTURE.md` against the live unified-root boot path and curated
   load-bearing references; PR CI, release verification, and release-local trust
@@ -177,10 +205,13 @@ guardrails:
   refuse `/api`, backup/export, source-vault/source-bundle, and private-sentinel
   URLs, activation purges any previously cached private entries, and focused
   Vitest coverage proves private requests are removed while public assets stay.
-- Wave 3 desktop source-import hardening: the Tauri CFA folder/PDF bridge now
-  refuses symlinked roots/files, skips symlinked directories and non-regular
-  filesystem entries during recursive scans, caps desktop PDF reads at 50 MiB,
-  and covers the guards in Rust tests.
+- Wave 3 desktop source-import hardening (**re-implemented for Electron**): the
+  desktop CFA folder/PDF bridge refuses symlinked roots/files, skips symlinked
+  directories and non-regular filesystem entries during recursive scans, and caps
+  desktop PDF reads at 50 MiB. The Rust tests that covered these guards were
+  replaced by the `electron/tests/runtime.test.mjs` path-policy cases
+  (`path authorization lists only PDFs…`, `folder listing rejects symlinks and
+  enforces its entry cap`, `authorized reads reject files larger than 50 MiB`).
 - Wave 3 notebook upload bounds: `/api/notebook-sources/import` now reads
   multipart uploads with the source cap plus one byte before rejecting, enforces
   refs/tags metadata count and length parity with the JSON route, caps extracted
@@ -651,6 +682,10 @@ Workstreams:
   detached, and is verified before the PyInstaller sidecar build.
 - Verify sidecar hashes before Tauri bundling and again at startup.
 - Add signed/attested release artifacts.
+  **Signing done; attestations remain:** Windows and macOS release artifacts now
+  fail closed on credential import, signer verification, timestamping, and
+  notarization evidence. Cryptographic build provenance/hosted artifact
+  attestations remain a separate workstream.
 - Add packaged-app smoke after installer/bundle creation.
 - Commit or formalize visual baselines so visual regression fails closed.
   Evidence: `scripts/visual-baseline-policy.mjs` now computes the required

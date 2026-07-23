@@ -1,5 +1,5 @@
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
 /* Newsreader is loaded lazily by src/lib/serifFont.ts when serif reading mode
    is enabled — importing it unconditionally here would add ~35 KB to every
    page load for users who never enable serif mode. */
@@ -124,13 +124,13 @@
 
     /* ---- Okabe–Ito type-color families (docs/07 §1.5) — light mode ----
        Source of truth for hex lives in lib/labels.ts and must stay in sync. */
-    --tcolor-assumption: #0072B2;
-    --tcolor-strengthen-weaken: #009E73;
-    --tcolor-flaw-structure: #D55E00;
-    --tcolor-inference: #56B4E9;
-    --tcolor-principle: #E69F00;
-    --tcolor-parallel: #CC79A7;
-    --tcolor-paradox: #F0E442;
+    --tcolor-assumption: #0072b2;
+    --tcolor-strengthen-weaken: #009e73;
+    --tcolor-flaw-structure: #d55e00;
+    --tcolor-inference: #56b4e9;
+    --tcolor-principle: #e69f00;
+    --tcolor-parallel: #cc79a7;
+    --tcolor-paradox: #f0e442;
     --tcolor-rc: #374151;
   }
 
@@ -209,7 +209,7 @@
 
   /* ---- "Focus" reading theme (docs/07 §1.4): warm-tinted paper ---- */
   /* Compact density (docs/07 §3.3) */
-  [data-density="compact"] {
+  [data-density='compact'] {
     --space-unit: 3px;
   }
 
@@ -344,8 +344,10 @@
        final K4 cutover. The LSAT plane is always mounted INSIDE the host shell
        now, so it inherits bg/text from the host shell rather than clobbering the
        host's palette with the LSAT Tailwind tokens. */
-    font-family: theme("fontFamily.sans");
-    font-feature-settings: "rlig" 1, "calt" 1;
+    font-family: theme('fontFamily.sans');
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
     /* R8: engage Newsreader's optical-size (opsz) axis + Geist's so large serif
        gets true display glyphs and small text stays legible (docs/18 W2.2). */
     font-optical-sizing: auto;
@@ -357,14 +359,14 @@
   }
   input,
   textarea,
-  [contenteditable="true"] {
+  [contenteditable='true'] {
     caret-color: hsl(var(--primary));
   }
   /* Tabular figures everywhere digits should align (timer, scores, tables). */
   .stat,
   .tabular {
     font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum" 1;
+    font-feature-settings: 'tnum' 1;
   }
 }
 
@@ -378,7 +380,7 @@
     margin-top: 0.85em;
   }
   .reading-serif {
-    font-family: theme("fontFamily.serif");
+    font-family: theme('fontFamily.serif');
   }
   /* Three reading size steps (16/19/22px) */
   .reading-sm {
@@ -416,7 +418,7 @@
 }
 
 @layer utilities {
-  /* ---- Tauri custom-chrome drag region (§2.11) ----
+  /* ---- Electron custom-chrome drag region (§2.11) ----
      The titlebar (and its drag-region children) are draggable; the window
      controls inside are not (they use pointer events). No-op in the browser. */
   .titlebar {
@@ -424,7 +426,7 @@
     app-region: drag;
   }
   .titlebar button,
-  .titlebar [role="button"] {
+  .titlebar [role='button'] {
     -webkit-app-region: no-drag;
     app-region: no-drag;
   }
@@ -433,10 +435,10 @@
   .density-gap {
     gap: calc(var(--space-unit) * 4);
   }
-  [data-density="compact"] main {
+  [data-density='compact'] main {
     padding: calc(var(--space-unit) * 4) !important;
   }
-  [data-density="compact"] .density-pad {
+  [data-density='compact'] .density-pad {
     padding: calc(var(--space-unit) * 3);
   }
 }
@@ -465,10 +467,18 @@
    =========================================================================== */
 @layer utilities {
   /* Depth surfaces (luminance hierarchy, not borders). */
-  .bg-surface-0 { background-color: hsl(var(--surface-0)); }
-  .bg-surface-1 { background-color: hsl(var(--surface-1)); }
-  .bg-surface-2 { background-color: hsl(var(--surface-2)); }
-  .bg-surface-3 { background-color: hsl(var(--surface-3)); }
+  .bg-surface-0 {
+    background-color: hsl(var(--surface-0));
+  }
+  .bg-surface-1 {
+    background-color: hsl(var(--surface-1));
+  }
+  .bg-surface-2 {
+    background-color: hsl(var(--surface-2));
+  }
+  .bg-surface-3 {
+    background-color: hsl(var(--surface-3));
+  }
 
   /* Frosted glass — light-bending chrome (degrades to a solid tint if
      backdrop-filter is unsupported). */
@@ -499,28 +509,27 @@
 
   /* R9 — wake the dormant `data-theme` hook: per-environment material finishing
      (deeper glass at night, flatter in the accessible floor). Additive only. */
-  [data-theme="dark"] {
+  [data-theme='dark'] {
     --glass-blur: 16px;
   }
-  [data-theme="light-hc"],
-  [data-theme="dark-hc"] {
+  [data-theme='light-hc'],
+  [data-theme='dark-hc'] {
     --glass-alpha: 1;
     --glass-blur: 0px;
   }
 
   /* Aurora — a faint radial verdict glow behind hero numerals. Off in
      high-contrast (--aurora-strength: 0). Static (no motion) by default. */
-  .aurora { position: relative; isolation: isolate; }
+  .aurora {
+    position: relative;
+    isolation: isolate;
+  }
   .aurora::before {
-    content: "";
+    content: '';
     position: absolute;
     inset: -45% -25%;
     z-index: -1;
-    background: radial-gradient(
-      55% 55% at 50% 42%,
-      hsl(var(--aurora) / var(--aurora-strength)) 0%,
-      transparent 70%
-    );
+    background: radial-gradient(55% 55% at 50% 42%, hsl(var(--aurora) / var(--aurora-strength)) 0%, transparent 70%);
     pointer-events: none;
   }
   /* R10 A3.2 — only a page's hero "breathes"; bare .aurora is now a STATIC glow,
@@ -543,20 +552,35 @@
   }
 
   /* Semantic-subtle status backgrounds. */
-  .bg-success-subtle { background-color: hsl(var(--success-subtle) / var(--subtle-alpha)); }
-  .bg-warning-subtle { background-color: hsl(var(--warning-subtle) / var(--subtle-alpha)); }
-  .bg-info-subtle { background-color: hsl(var(--info-subtle) / var(--subtle-alpha)); }
-  .bg-destructive-subtle { background-color: hsl(var(--destructive-subtle) / var(--subtle-alpha)); }
+  .bg-success-subtle {
+    background-color: hsl(var(--success-subtle) / var(--subtle-alpha));
+  }
+  .bg-warning-subtle {
+    background-color: hsl(var(--warning-subtle) / var(--subtle-alpha));
+  }
+  .bg-info-subtle {
+    background-color: hsl(var(--info-subtle) / var(--subtle-alpha));
+  }
+  .bg-destructive-subtle {
+    background-color: hsl(var(--destructive-subtle) / var(--subtle-alpha));
+  }
   /* R10 B3.2 — the verdict-accent tint for the unified AccentPanel/hero idiom. */
-  .bg-primary-subtle { background-color: hsl(var(--primary) / var(--subtle-alpha)); }
+  .bg-primary-subtle {
+    background-color: hsl(var(--primary) / var(--subtle-alpha));
+  }
 
   /* Thin themed scrollbar (consumed by <ScrollArea>, docs/18 W1.9). */
   .scroll-thin {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--border)) transparent;
   }
-  .scroll-thin::-webkit-scrollbar { width: 9px; height: 9px; }
-  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  .scroll-thin::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  .scroll-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
   .scroll-thin::-webkit-scrollbar-thumb {
     background-color: hsl(var(--border));
     border-radius: 9999px;
@@ -578,7 +602,7 @@
   /* R10 A3.4 — the lift's shadow rides an opacity-faded ::after (compositor-only)
      instead of animating box-shadow (a paint property), so hover stays cheap. */
   .card-interactive::after {
-    content: "";
+    content: '';
     position: absolute;
     inset: 0;
     border-radius: inherit;
@@ -597,20 +621,22 @@
   /* The three type voices (docs/17 §I) — cast consistently instead of
      hand-rolling font-semibold/tracking-tight per screen. */
   .type-display {
-    font-family: theme("fontFamily.serif");
+    font-family: theme('fontFamily.serif');
     font-weight: 500;
     letter-spacing: -0.02em;
     font-optical-sizing: auto;
   }
   .type-counsel {
-    font-family: theme("fontFamily.serif");
+    font-family: theme('fontFamily.serif');
     font-weight: 400;
     font-optical-sizing: auto;
   }
   .type-numeric {
-    font-family: theme("fontFamily.mono");
+    font-family: theme('fontFamily.mono');
     font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum" 1, "zero" 1;
+    font-feature-settings:
+      'tnum' 1,
+      'zero' 1;
   }
   .type-overline {
     font-size: 11px;
@@ -661,10 +687,10 @@ html.theme-transition *::after {
    --------------------------------------------------------------------------- */
 @media print {
   /* Hide the app shell chrome and any explicitly print-hidden controls. */
-  aside[aria-label="Sidebar"],
+  aside[aria-label='Sidebar'],
   header,
   .titlebar,
-  [role="complementary"],
+  [role='complementary'],
   [data-print-hide],
   .print\:hidden {
     display: none !important;
@@ -726,7 +752,7 @@ html.theme-transition *::after {
 
   /* Constrain to the printable width and drop max-width caps. */
   .max-w-none,
-  [class*="max-w-"] {
+  [class*='max-w-'] {
     max-width: none !important;
   }
 
@@ -858,15 +884,15 @@ html.theme-transition *::after {
   input,
   select,
   textarea,
-  [role="button"],
-  [role="radio"],
-  [role="tab"],
-  [role="menuitem"] {
+  [role='button'],
+  [role='radio'],
+  [role='tab'],
+  [role='menuitem'] {
     border-color: ButtonBorder !important;
   }
 
   button,
-  [role="button"] {
+  [role='button'] {
     background-color: ButtonFace !important;
     background-image: none !important;
     color: ButtonText !important;
@@ -879,7 +905,7 @@ html.theme-transition *::after {
   input,
   select,
   textarea,
-  [contenteditable="true"] {
+  [contenteditable='true'] {
     background: Field !important;
     color: FieldText !important;
   }
@@ -914,21 +940,21 @@ html.theme-transition *::after {
   }
 
   .bg-primary,
-  .data-\[state\=active\]\:bg-primary[data-state="active"] {
+  .data-\[state\=active\]\:bg-primary[data-state='active'] {
     background: Highlight !important;
     color: HighlightText !important;
     border-color: Highlight !important;
   }
 
-  [aria-current="true"],
-  [aria-pressed="true"],
-  [role="radio"][aria-checked="true"] {
+  [aria-current='true'],
+  [aria-pressed='true'],
+  [role='radio'][aria-checked='true'] {
     outline: 2px solid Highlight !important;
     outline-offset: 2px !important;
     border-color: Highlight !important;
   }
 
-  [role="radio"][aria-labelledby*="choice-elim"] {
+  [role='radio'][aria-labelledby*='choice-elim'] {
     text-decoration-line: line-through;
     text-decoration-thickness: 2px;
     text-decoration-color: CanvasText;
@@ -968,7 +994,7 @@ html.theme-transition *::after {
     color: HighlightText !important;
   }
 
-  [data-heatmap-root] [role="img"] {
+  [data-heatmap-root] [role='img'] {
     background-color: Canvas !important;
     background-image: none !important;
     border: 1px solid CanvasText !important;
@@ -981,7 +1007,7 @@ html.theme-transition *::after {
     stroke: CanvasText !important;
   }
 
-  svg [fill]:not([fill="none"]) {
+  svg [fill]:not([fill='none']) {
     fill: Canvas !important;
   }
 
