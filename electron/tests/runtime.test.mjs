@@ -701,6 +701,79 @@ test('relocation guard adopts a legacy LSAT bank only while the new store is emp
   assert.equal(resolveLsatDataDir({ userDataPath, platform, env }).dataDir, newDir);
 });
 
+// The guard resolves the legacy directory from `platform` + `env`, so all three
+// platform branches are testable from any host. Without this the macOS and Linux
+// branches ship entirely unverified: the electron CI job runs windows-latest only,
+// so a wrong path there would strand every Mac and Linux user's question bank and
+// nothing would catch it. A fake statFile keeps the cases pure path resolution.
+test('relocation guard resolves the legacy bank location on every platform', () => {
+  const userDataPath = path.join(path.sep, 'app-data', 'StudyVault');
+  const cases = [
+    { platform: 'win32', env: { APPDATA: path.join('C:', 'Users', 'x', 'AppData', 'Roaming') } },
+    { platform: 'darwin', env: { HOME: path.join(path.sep, 'Users', 'x') } },
+    { platform: 'linux', env: { XDG_DATA_HOME: path.join(path.sep, 'home', 'x', '.local', 'share') } },
+    // Linux falls back to ~/.local/share when XDG_DATA_HOME is unset.
+    { platform: 'linux', env: { HOME: path.join(path.sep, 'home', 'x') } },
+    // macOS keeps its own layout rather than borrowing the XDG one.
+    { platform: 'darwin', env: { HOME: path.join(path.sep, 'Users', 'x'), XDG_DATA_HOME: path.join(path.sep, 'ignored') } },
+  ];
+
+  for (const { platform, env } of cases) {
+    const legacyDir = legacyLsatDataDir({ platform, env });
+    assert.ok(legacyDir, `${platform} must resolve a legacy dir from ${JSON.stringify(env)}`);
+    assert.equal(path.basename(legacyDir), 'LSATLab', `${platform} legacy dir must be the LSATLab leaf`);
+
+    // A populated legacy store with an empty current one is the adopt case, and it
+    // must hold identically on every platform.
+    const statFile = (target) =>
+      target === lsatStorePath(legacyDir) ? { isFile: () => true, size: 4096 } : { isFile: () => true, size: 0 };
+    const decision = resolveLsatDataDir({ userDataPath, platform, env, statFile });
+    assert.equal(decision.dataDir, legacyDir, `${platform} should adopt the populated legacy bank`);
+    assert.equal(decision.relocated, true);
+  }
+
+  assert.equal(legacyLsatDataDir({ platform: 'darwin', env: { HOME: path.join(path.sep, 'Users', 'x') } }).includes('Application Support'), true);
+});
+
+test('relocation guard never relocates onto itself and survives an unresolvable environment', () => {
+  // The same-path branch guards against "adopting" a directory that is already the
+  // active one, which would log a migration that never happened. It is unreachable
+  // while the leaves differ (`lsat-backend` vs `LSATLab`), and that is exactly what
+  // is worth pinning: if someone renames either constant into a collision, the
+  // guard would start relocating a directory onto itself and this fails first.
+  const populated = { isFile: () => true, size: 4096 };
+  for (const platform of ['win32', 'darwin', 'linux']) {
+    const env = legacyAppDataEnv(path.join(path.sep, 'same-path-root'), platform);
+    const legacyDir = legacyLsatDataDir({ platform, env });
+    const decision = resolveLsatDataDir({
+      userDataPath: path.dirname(legacyDir),
+      platform,
+      env,
+      statFile: () => populated,
+    });
+    assert.equal(decision.samePath, false, `${platform}: legacy and current dirs must not collide`);
+    assert.notEqual(decision.currentDir, decision.legacyDir);
+    // Both stores read as populated, so the current one must win outright.
+    assert.equal(decision.relocated, false, `${platform}: a populated current store is never displaced`);
+    assert.equal(decision.dataDir, decision.currentDir);
+  }
+
+  // Unresolvable environment: no APPDATA, no HOME, no XDG_DATA_HOME. The guard runs
+  // during boot before any window exists, so throwing here would be an unrecoverable
+  // startup crash rather than a degraded sidecar.
+  for (const unresolvable of [{ platform: 'win32', env: {} }, { platform: 'darwin', env: {} }, { platform: 'linux', env: {} }]) {
+    assert.equal(legacyLsatDataDir(unresolvable), null);
+    const decision = resolveLsatDataDir({
+      userDataPath: path.join(path.sep, 'app-data', 'StudyVault'),
+      ...unresolvable,
+      statFile: () => populated,
+    });
+    assert.equal(decision.legacyDir, null);
+    assert.equal(decision.relocated, false, 'no legacy base means nothing to adopt');
+    assert.equal(decision.dataDir, decision.currentDir);
+  }
+});
+
 test('LSAT authorization predicate is exact and redirect requests do not receive the token', () => {
   assert.equal(isExactLsatApiUrl('http://127.0.0.1:8100/api/questions?q=1'), true);
   assert.equal(isExactLsatApiUrl('http://localhost:8100/api/questions'), false);
