@@ -41,3 +41,12 @@ if (errors.length) {
   });
   process.exitCode = 1;
 }
+
+// CONTENT-3 — everything above validates coverage and structure against each
+// pack's SELF-DECLARED maturity, which a generated bank can satisfy while being
+// unusable. The exploitability gate measures the questions themselves, so it is
+// the one check a template-derived bank cannot pass by relabelling itself.
+const { runContentIntegrityGate } = await import('./check-content-integrity.mjs');
+if (!runContentIntegrityGate()) {
+  process.exitCode = 1;
+}

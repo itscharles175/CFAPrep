@@ -1,22 +1,14 @@
 <#
 .SYNOPSIS
     Build the LSAT Lab backend into a self-contained executable and stage it as
-    a Tauri sidecar.
+    an Electron extra resource.
 
 .DESCRIPTION
     1. Runs PyInstaller against lsatlab.spec to freeze the FastAPI backend
        (entry point: sidecar_main.py) into backend/dist/lsatlab-backend[.exe].
-    2. Resolves the Rust *host* target triple (e.g. x86_64-pc-windows-msvc) so
-       the binary can be renamed the way Tauri's `externalBin` expects:
-           binaries/lsatlab-backend-<target-triple>[.exe]
-    3. Copies the frozen binary into frontend/src-tauri/binaries/.
-
-    Tauri matches the sidecar to the current build target by the triple suffix,
-    so this script must run on (or cross-target for) each platform you ship.
-    CI calls it per-OS in the release workflow.
-
-.PARAMETER TargetTriple
-    Override the auto-detected Rust target triple (useful for cross-compiles).
+    2. Copies the frozen binary into
+       electron/resources/services/lsat-backend/ using its platform-native
+       executable suffix. electron-builder stages that directory unchanged.
 
 .PARAMETER PythonRunner
     How to invoke PyInstaller. Defaults to "uv run" so the project's locked
@@ -25,20 +17,16 @@
 
 .EXAMPLE
     ./build-sidecar.ps1
-    # Builds for the host triple using `uv run pyinstaller`.
-
-.EXAMPLE
-    ./build-sidecar.ps1 -TargetTriple aarch64-apple-darwin
+    # Builds for the host platform using `uv run pyinstaller`.
 #>
 [CmdletBinding()]
 param(
-    [string]$TargetTriple,
     [string]$PythonRunner = "uv run"
 )
 
 $ErrorActionPreference = "Stop"
 $backendDir = $PSScriptRoot
-$sidecarDir = Join-Path $backendDir "..\frontend\src-tauri\binaries"
+$sidecarDir = Join-Path $backendDir "..\..\electron\resources\services\lsat-backend"
 $specPath = Join-Path $backendDir "lsatlab.spec"
 $baseName = "lsatlab-backend"
 
@@ -69,20 +57,8 @@ finally {
     Pop-Location
 }
 
-# --- Resolve the Rust target triple ----------------------------------------
-if (-not $TargetTriple) {
-    Write-Host "==> Detecting Rust host target triple via rustc..." -ForegroundColor Cyan
-    $rustcOut = (& rustc -vV) -join "`n"
-    $match = [regex]::Match($rustcOut, "host:\s*(\S+)")
-    if (-not $match.Success) {
-        throw "Could not determine the Rust host triple from 'rustc -vV'. Pass -TargetTriple explicitly."
-    }
-    $TargetTriple = $match.Groups[1].Value
-}
-Write-Host "    target triple: $TargetTriple" -ForegroundColor DarkGray
-
-# Windows targets carry the .exe suffix on both the source and destination.
-$exeSuffix = if ($TargetTriple -like "*windows*") { ".exe" } else { "" }
+# Windows builds carry the .exe suffix on both the source and destination.
+$exeSuffix = if ($IsWindows -or $env:OS -eq "Windows_NT") { ".exe" } else { "" }
 
 # --- Locate the freshly built binary ---------------------------------------
 # One-file mode: dist/lsatlab-backend[.exe]
@@ -101,13 +77,13 @@ else {
     throw "Could not find the built binary. Looked for:`n  $oneFile`n  $oneDir"
 }
 
-# --- Stage into src-tauri/binaries/ with the triple suffix ------------------
+# --- Stage into Electron's packaged services directory ----------------------
 if (-not (Test-Path $sidecarDir)) {
     New-Item -ItemType Directory -Force -Path $sidecarDir | Out-Null
 }
-$dest = Join-Path $sidecarDir "$baseName-$TargetTriple$exeSuffix"
+$dest = Join-Path $sidecarDir "$baseName$exeSuffix"
 Copy-Item -Path $builtBinary -Destination $dest -Force
 
 Write-Host "==> Sidecar staged:" -ForegroundColor Green
 Write-Host "    $dest"
-Write-Host "    (referenced by tauri.conf.json -> bundle.externalBin: binaries/$baseName)" -ForegroundColor DarkGray
+Write-Host "    (staged by electron-builder extraResources)" -ForegroundColor DarkGray

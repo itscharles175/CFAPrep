@@ -1,28 +1,3 @@
-# Release workflow — triggered on v* tag push.
-# Runs the verify gate, then builds signed Tauri bundles on Windows, macOS,
-# and Linux in parallel, and uploads them as Release assets.
-#
-# Sidecar matrix (OPS-5) — required vs optional:
-#
-#   | Sidecar             | Tier      | Source                         | Build gate                          | If absent at runtime                       |
-#   | ------------------- | --------- | ------------------------------ | ----------------------------------- | ------------------------------------------ |
-#   | LSAT backend (8100) | REQUIRED  | committed services/lsat-backend| always built + smoke-tested + bundle-verified | release FAILS the build (never ships broken) |
-#   | SurrealDB (8000)    | REQUIRED* | vendored binary under spike/bin| not frozen here (native binary)     | open-notebook stack can't come up          |
-#   | open-notebook (5055)| OPTIONAL  | external clone via ONB_GIT_URL | built ONLY when ONB_GIT_URL is set  | supervisor SKIPS it; app degrades (RAG off)|
-#   | open-notebook worker| OPTIONAL  | (ships with open-notebook)     | bundled with the open-notebook resource | supervisor SKIPS it (paired with the API)  |
-#
-#   *SurrealDB is required for RAG but is only present when the open-notebook
-#    resource is; a RAG-less build ships neither and the Rust supervisor
-#    (build_sidecar_specs) marks the open-notebook API + worker `optional` so
-#    their absence is a graceful degrade, not an error.
-#
-#   A RAG-less build is therefore a DELIBERATE, LABELLED artifact: when the
-#   ONB_GIT_URL repo variable is unset the open-notebook build step is skipped
-#   with a loud ::warning::, the build summary records "RAG: OFF", and the
-#   uploaded bundle's artifact name is suffixed `-norag` so it's unmistakable
-#   in the Release assets. Set ONB_GIT_URL and full-SHA ONB_GIT_REF to ship a
-#   full RAG-enabled build.
-
 name: Release
 
 on:
@@ -36,40 +11,33 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify (web build + tests)
+    name: Verify Release Gates
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - run: npm ci --legacy-peer-deps
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Provision LSAT backend venv
+      - name: Provision LSAT backend
         run: |
           python -m venv .venv-lsat
           .venv-lsat/bin/python -m pip install --upgrade pip wheel
           .venv-lsat/bin/python -m pip install "services/lsat-backend"
-
-      - name: Verify release tag matches app version
-        run: npm run check:versions -- --git-tag
-
+      - run: npm run check:versions -- --git-tag
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm run typecheck:lsat
-      - run: npm test
+      - run: npm run test:ci
       - run: npm run test:lsat:ci
+      - run: npm run test:electron
       - run: npm run build
       - run: npm run bundle:report
       - run: npm run perf:regression
@@ -77,42 +45,17 @@ jobs:
       - run: npm run check:no-egress
       - run: npm run check:sidecar-fetches
       - run: npm run check:docs
+      - run: npm run check:baselines
       - run: npm run vault-archive:drill
-      - name: Prompt regression fixture floor
+      - name: Prompt Regression Floor
         run: |
           node --import ./scripts/register-ts-loader.mjs scripts/prompt-regression-fixture-floor.mjs
           (cd services/lsat-backend && ../../.venv-lsat/bin/python -m app.prompt_contracts --check)
-      - name: RAG retrieval-eval floor
-        run: node --import ./scripts/register-ts-loader.mjs scripts/rag-eval.mjs
-      - name: Citation faithfulness floor
-        run: node --import ./scripts/register-ts-loader.mjs scripts/citation-faithfulness-eval.mjs
-      - name: Source-grounded answer benchmark floor
-        run: node --import ./scripts/register-ts-loader.mjs scripts/source-grounded-answer-eval.mjs
-      - name: Generated content gate floor
-        run: node --import ./scripts/register-ts-loader.mjs scripts/generated-content-gate-eval.mjs
-      - name: Generation quality regression floor
-        working-directory: services/lsat-backend
-        env:
-          LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-generation-gate
-        run: |
-          ../../.venv-lsat/bin/python - <<'PY'
-          from sqlmodel import Session
-          from app.db import engine, init_db
-          from app import jobs
-
-          init_db()
-          with Session(engine) as session:
-              result = jobs.run_generation_gate_eval(session, notes="github_release_verify")
-          metrics = result["metrics"]
-          assert result["status"] == "ok", result
-          assert metrics["generation_quality_cases"] >= 3, metrics
-          assert metrics["generation_quality_failed_cases"] == 0.0, metrics
-          assert metrics["generation_quality_clean_pass"] >= 1.0, metrics
-          assert metrics["generation_quality_trap_metadata_rejected"] >= 1.0, metrics
-          assert metrics["generation_quality_weak_distractor_rejected"] >= 1.0, metrics
-          print(result["kind"], result["status"], metrics["generation_quality_cases"])
-          PY
-      - name: Explanation golden floor
+      - run: node --import ./scripts/register-ts-loader.mjs scripts/rag-eval.mjs
+      - run: node --import ./scripts/register-ts-loader.mjs scripts/citation-faithfulness-eval.mjs
+      - run: node --import ./scripts/register-ts-loader.mjs scripts/source-grounded-answer-eval.mjs
+      - run: node --import ./scripts/register-ts-loader.mjs scripts/generated-content-gate-eval.mjs
+      - name: Explanation Golden Floor
         working-directory: services/lsat-backend
         env:
           LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-explanation-gate
@@ -120,133 +63,84 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
 
   build:
-    name: Tauri bundle — ${{ matrix.os }}
+    name: Electron Bundle - ${{ matrix.id }}
     needs: verify
-    timeout-minutes: 45
-
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            signing-platform: linux
-            bundle-root: src-tauri/target/release
-            target-args: ''
-            artifact-glob: 'src-tauri/target/release/bundle/{deb,appimage}/*'
           - os: windows-latest
-            signing-platform: windows
-            bundle-root: src-tauri/target/release
-            target-args: ''
-            artifact-glob: 'src-tauri/target/release/bundle/{msi,nsis}/*'
-          - os: macos-latest
-            signing-platform: macos
-            bundle-root: src-tauri/target/universal-apple-darwin/release
-            target-args: '--target universal-apple-darwin'
-            artifact-glob: 'src-tauri/target/universal-apple-darwin/release/bundle/{dmg,macos}/*'
-
-    runs-on: ${{ matrix.os }}
-
+            id: windows-x64
+            platform: windows
+            arch: x64
+            artifact-glob: |
+              release/*.exe
+              release/*.msi
+          - os: macos-15
+            id: macos-arm64
+            platform: macos
+            arch: arm64
+            artifact-glob: release/*.dmg
+          - os: macos-15-intel
+            id: macos-x64
+            platform: macos
+            arch: x64
+            artifact-glob: release/*.dmg
+          - os: ubuntu-latest
+            id: linux-x64
+            platform: linux
+            arch: x64
+            artifact-glob: |
+              release/*.AppImage
+              release/*.deb
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
         with:
-          workspaces: src-tauri
-
-      # Linux-only: install the system packages Tauri needs (webkit2gtk, etc.)
-      - name: Install Linux build deps
-        if: matrix.os == 'ubuntu-latest'
+          python-version: '3.12'
+      - name: Install Linux Packaging Dependencies
+        if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
-
-      # macOS-only: install both rustc targets for the universal binary.
-      - name: Add macOS rustc targets
-        if: matrix.os == 'macos-latest'
-        run: |
-          rustup target add aarch64-apple-darwin
-          rustup target add x86_64-apple-darwin
-
+          sudo apt-get install -y libfuse2 rpm xvfb
       - run: npm ci --legacy-peer-deps
-
-      - name: Validate Linux signing policy
-        if: matrix.signing-platform == 'linux'
-        run: node scripts/release-signing.mjs preflight --platform linux
-
-      - name: Validate Windows signing credentials
-        if: matrix.signing-platform == 'windows'
+      - name: Validate Signing Credentials
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
           WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
-        run: >
-          node scripts/release-signing.mjs preflight
-          --platform windows
-          --config-output "${{ runner.temp }}/tauri-signing.json"
-
-      - name: Validate macOS signing and notarization credentials
-        if: matrix.signing-platform == 'macos'
-        env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: node scripts/release-signing.mjs preflight --platform macos
+        run: node scripts/release-signing.mjs preflight --platform ${{ matrix.platform }} --config-output ${{ runner.temp }}/windows-signing-config.json
 
-      # --- Backend sidecars (Plan P3 / P4) -----------------------------------
-      # PyInstaller binaries are platform-native, so each must be frozen on the
-      # SAME runner OS that builds the Tauri bundle (they can't be built once and
-      # shared). Without this, `tauri build` happily bundles an empty
-      # resources/services/ dir → a tagged release that ships with no working
-      # backend. This is the single biggest release-correctness risk.
-      - name: Set up Python (sidecar builds)
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      # LSAT backend: source is committed (services/lsat-backend) → always built.
-      - name: Build LSAT backend sidecar
+      - name: Build LSAT Backend Sidecar
         run: npm run build:lsat-binary
-
-      # P4: boot the frozen binary on a throwaway port and assert /api/health →
-      # {ok:true}. Catches a missed PyInstaller hidden-import (builds fine, dies
-      # at boot) that bundling alone would never surface. LSATLAB_DATA_DIR points
-      # at a runner-temp dir so the first-run SQLite create can't fail on perms.
-      - name: Smoke-test LSAT backend sidecar
+      - name: Smoke Test LSAT Backend Sidecar
         shell: bash
         env:
           LSATLAB_DATA_DIR: ${{ runner.temp }}/lsat-smoke
         run: |
+          bin="electron/resources/services/lsat-backend/lsatlab-backend"
+          if [ -f "${bin}.exe" ]; then bin="${bin}.exe"; fi
           node scripts/smoke-sidecar.mjs \
-            --bin src-tauri/resources/services/lsat-backend/lsatlab-backend \
+            --bin "$bin" \
             --url http://127.0.0.1:8123/api/health \
             --expect-ok --timeout 90000 --label lsat-backend \
             -- --host 127.0.0.1 --port 8123
 
-      # open-notebook (RAG): an external project living in gitignored spike/, so
-      # there is no committed source to build from. OPTIONAL sidecar (OPS-5):
-      # built ONLY when a clone source is configured via the ONB_GIT_URL +
-      # full-SHA ONB_GIT_REF repo variables; otherwise the release is a
-      # DELIBERATE RAG-less artifact and says so loudly. The Rust supervisor
-      # (build_sidecar_specs) marks the open-notebook API + worker `optional`, so
-      # a bundle without the open-notebook resource degrades gracefully (RAG
-      # off) at runtime instead of erroring. (No HTTP smoke here — its health
-      # route isn't pinned in-repo.) Emits `rag_enabled` for the summary +
-      # artifact-name suffix downstream so the RAG-less build is clearly labelled.
-      - name: Build open-notebook sidecar (optional)
+      - name: Build Open Notebook Sidecar (Optional)
         id: onb
         shell: bash
         env:
@@ -254,85 +148,42 @@ jobs:
           ONB_GIT_REF: ${{ vars.ONB_GIT_REF }}
         run: |
           if [ -z "${ONB_GIT_URL}" ]; then
-            echo "::warning title=RAG-less build::ONB_GIT_URL repo variable is not set — skipping the OPTIONAL open-notebook RAG sidecar. This bundle will NOT include RAG / notebook features and is labelled '-norag'. Set ONB_GIT_URL and full-SHA ONB_GIT_REF to ship a full RAG build."
+            echo "::warning title=RAG-less build::ONB_GIT_URL is unset; this release intentionally omits optional RAG services."
             echo "rag_enabled=false" >> "$GITHUB_OUTPUT"
-            echo "RAG_ENABLED=false" >> "$GITHUB_ENV"
             exit 0
           fi
-          if [ -z "${ONB_GIT_REF}" ]; then
-            echo "::error title=Open Notebook source is not pinned::ONB_GIT_REF must be set to a full 40-character commit SHA when ONB_GIT_URL is set."
-            exit 1
-          fi
           if ! printf '%s' "${ONB_GIT_REF}" | grep -Eq '^[0-9a-fA-F]{40}$'; then
-            echo "::error title=Open Notebook source is not pinned::ONB_GIT_REF must be a full 40-character commit SHA, not a branch, tag, or short SHA."
+            echo "::error title=Open Notebook source is not pinned::ONB_GIT_REF must be a full commit SHA."
             exit 1
           fi
           git clone "${ONB_GIT_URL}" spike/open-notebook
           git -C spike/open-notebook checkout --detach "${ONB_GIT_REF}"
           npm run check:onb-source -- --dir spike/open-notebook --expected "${ONB_GIT_REF}"
+          npm run stage:surreal-binary
           npm run build:onb-binary
+          npm run check:sidecar-provenance -- --require "SurrealDB" --require "open-notebook binary" --require "open-notebook worker binary"
           echo "rag_enabled=true" >> "$GITHUB_OUTPUT"
-          echo "RAG_ENABLED=true" >> "$GITHUB_ENV"
 
-      # Fail the build NOW (not at user-install time) if a REQUIRED sidecar is
-      # missing from the bundle staging dir (OPS-5). Only the LSAT backend is
-      # required, so only it gates the release. The OPTIONAL open-notebook
-      # resource is intentionally NOT checked here — its absence is a labelled
-      # RAG-less build, surfaced in the summary below, not a failure.
-      - name: Verify required sidecars are present
+      - name: Verify Required Sidecar And Provenance
         shell: bash
         run: |
-          missing=0
-          for f in "src-tauri/resources/services/lsat-backend/lsatlab-backend"; do
-            if [ -s "$f" ] || [ -s "$f.exe" ]; then
-              echo "ok (required): $f"
-            else
-              echo "::error::required sidecar binary missing: $f"
-              missing=1
-            fi
-          done
-          [ "$missing" = "0" ]
+          bin="electron/resources/services/lsat-backend/lsatlab-backend"
+          if [ ! -s "$bin" ] && [ ! -s "${bin}.exe" ]; then
+            echo "::error::required LSAT sidecar binary is missing"
+            exit 1
+          fi
+          npm run check:sidecar-provenance
 
-      - name: Verify sidecar provenance manifest
-        run: npm run check:sidecar-provenance
-
-      # OPS-5: record the required-vs-optional outcome in the job summary so the
-      # RAG-less build is a deliberate, visible decision rather than a silent gap.
-      - name: Sidecar bundle summary (required vs optional)
-        if: always()
-        shell: bash
-        env:
-          RAG_ENABLED: ${{ steps.onb.outputs.rag_enabled }}
-        run: |
-          rag="${RAG_ENABLED:-false}"
-          onb_dir="src-tauri/resources/services/open-notebook"
-          {
-            echo "### Sidecar bundle — ${{ matrix.os }}"
-            echo ""
-            echo "| Sidecar | Tier | Bundled |"
-            echo "| ------- | ---- | ------- |"
-            if [ -s "src-tauri/resources/services/lsat-backend/lsatlab-backend" ] || [ -s "src-tauri/resources/services/lsat-backend/lsatlab-backend.exe" ]; then
-              echo "| LSAT backend (8100) | REQUIRED | yes |"
-            else
-              echo "| LSAT backend (8100) | REQUIRED | **MISSING** |"
-            fi
-            if [ "$rag" = "true" ] && [ -d "$onb_dir" ]; then
-              echo "| open-notebook (5055) + worker | OPTIONAL | yes (RAG ON) |"
-            else
-              echo "| open-notebook (5055) + worker | OPTIONAL | no (RAG OFF — degrades gracefully) |"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - run: npm run build
-
-      # Decode signing certs from base64 secrets into the runner's cert store.
-      - name: Import Windows signing cert
-        if: matrix.signing-platform == 'windows'
+      # win.signtoolOptions.certificateSha1 makes electron-builder resolve the
+      # signer from the Windows certificate store, so CSC_LINK is never consulted
+      # on this path and the PFX must be imported before the build.
+      - name: Import Windows Signing Certificate
+        if: matrix.platform == 'windows'
+        shell: pwsh
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
           WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
-        shell: pwsh
         run: |
           $certPath = Join-Path $env:RUNNER_TEMP 'studyvault-release.pfx'
           try {
@@ -341,141 +192,102 @@ jobs:
             $imported = @(Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password)
             $expected = $env:WINDOWS_CERT_THUMBPRINT.Replace(' ', '').ToUpperInvariant()
             if (-not ($imported | Where-Object { $_.Thumbprint -eq $expected })) {
-              throw "Imported PFX does not contain expected certificate thumbprint $expected"
+              throw "imported PFX does not contain expected certificate thumbprint $expected"
             }
           } finally {
             Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
           }
 
-      - name: Import macOS signing cert
-        if: matrix.signing-platform == 'macos'
+      # `--config` REPLACES electron-builder.yml unless the overlay extends it, so
+      # assert the MERGED config still carries the packaging invariants (signing
+      # enforcement, both Windows targets, sidecar staging, fuse hook) rather than
+      # discovering a silently gutted build after the fact.
+      - name: Assert Effective Electron Builder Config
         env:
-          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: |
-          cert_path="${RUNNER_TEMP}/studyvault-release.p12"
-          keychain_path="${RUNNER_TEMP}/studyvault-build.keychain-db"
-          keychain_password="$(openssl rand -base64 32)"
-          trap 'rm -f "$cert_path"' EXIT
-          printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$cert_path"
-          security create-keychain -p "$keychain_password" "$keychain_path"
-          security default-keychain -s "$keychain_path"
-          security unlock-keychain -p "$keychain_password" "$keychain_path"
-          security import "$cert_path" -k "$keychain_path" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path"
-          security find-identity -v -p codesigning "$keychain_path" | grep -F "$APPLE_SIGNING_IDENTITY"
+          WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
+        run: node scripts/release-signing.mjs assert-config ${{ matrix.platform == 'windows' && format('--config {0}/windows-signing-config.json', runner.temp) || '' }}
 
-      - name: Build Windows Tauri bundle
-        if: matrix.signing-platform == 'windows'
-        run: npx tauri build --config "${{ runner.temp }}/tauri-signing.json"
-
-      - name: Build macOS Tauri bundle
-        if: matrix.signing-platform == 'macos'
+      - name: Build Electron Installers
         env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          CSC_LINK: ${{ matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          CSC_NAME: ${{ matrix.platform == 'macos' && secrets.APPLE_SIGNING_IDENTITY || '' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx tauri build ${{ matrix.target-args }}
+        run: npm run electron:build -- --${{ matrix.arch }} ${{ matrix.platform == 'windows' && format('--config {0}/windows-signing-config.json', runner.temp) || '' }}
 
-      - name: Build Linux Tauri bundle
-        if: matrix.signing-platform == 'linux'
-        run: npx tauri build
+      - name: Packaged App Smoke
+        if: matrix.platform != 'linux'
+        run: python scripts/release_local.py _packaged_smoke
+      - name: Packaged App Smoke (Linux)
+        if: matrix.platform == 'linux'
+        run: xvfb-run --auto-servernum python scripts/release_local.py _packaged_smoke
 
-      - name: Verify Windows Authenticode signatures
-        if: matrix.signing-platform == 'windows'
+      - name: Verify Signing Evidence
         env:
           WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
-        run: >
-          node scripts/release-signing.mjs verify
-          --platform windows
-          --bundle-root "${{ matrix.bundle-root }}"
-          --output "dist/signing-evidence-${{ matrix.os }}.json"
-
-      - name: Verify macOS signatures and notarization
-        if: matrix.signing-platform == 'macos'
-        env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: >
-          node scripts/release-signing.mjs verify
-          --platform macos
-          --bundle-root "${{ matrix.bundle-root }}"
-          --output "dist/signing-evidence-${{ matrix.os }}.json"
+        run: node scripts/release-signing.mjs verify --platform ${{ matrix.platform }} --bundle-root release --output dist/signing-evidence-${{ matrix.id }}.json
 
-      - name: Record Linux signing policy
-        if: matrix.signing-platform == 'linux'
-        run: >
-          node scripts/release-signing.mjs verify
-          --platform linux
-          --bundle-root "${{ matrix.bundle-root }}"
-          --output "dist/signing-evidence-${{ matrix.os }}.json"
-
-      - name: Remove imported Windows certificate
-        if: always() && matrix.signing-platform == 'windows'
+      - name: Remove Imported Windows Certificate
+        if: always() && matrix.platform == 'windows'
+        shell: pwsh
         env:
           WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
-        shell: pwsh
         run: |
-          $expected = $env:WINDOWS_CERT_THUMBPRINT.Replace(' ', '').ToUpperInvariant()
+          $expected = "$env:WINDOWS_CERT_THUMBPRINT".Replace(' ', '').ToUpperInvariant()
+          if (-not $expected) { return }
           Get-ChildItem Cert:\CurrentUser\My |
             Where-Object { $_.Thumbprint -eq $expected } |
             Remove-Item -Force
 
-      - name: Remove temporary macOS keychain
-        if: always() && matrix.signing-platform == 'macos'
-        run: |
-          security default-keychain -s "$HOME/Library/Keychains/login.keychain-db" || true
-          security delete-keychain "${RUNNER_TEMP}/studyvault-build.keychain-db" || true
-
-      - name: Generate release manifest and SBOM evidence
+      - name: Generate Release Manifest
         env:
-          STUDYVAULT_SIGNING_EVIDENCE: ${{ github.workspace }}/dist/signing-evidence-${{ matrix.os }}.json
-        run: >
-          node scripts/release-manifest.mjs write
-          --require-assets
-          --require-sidecar-provenance
-          ${{ matrix.signing-platform != 'linux' && '--require-signing' || '' }}
-          --output dist/studyvault-release-manifest-${{ matrix.os }}.json
+          STUDYVAULT_SIGNING_EVIDENCE: ${{ github.workspace }}/dist/signing-evidence-${{ matrix.id }}.json
+        run: node scripts/release-manifest.mjs write --require-assets --require-sidecar-provenance ${{ matrix.platform != 'linux' && '--require-signing' || '' }} --output dist/studyvault-release-manifest-${{ matrix.id }}.json
 
-      # OPS-5: a RAG-less build is labelled `-norag` so the artifact (and the
-      # downstream Release asset) is unmistakably a deliberate, RAG-disabled
-      # bundle. A full build keeps the plain `studyvault-<os>` name.
-      - name: Upload bundles
+      - name: Sidecar Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Electron bundle - ${{ matrix.id }}"
+            echo ""
+            echo "| Sidecar | Tier | Bundled |"
+            echo "| --- | --- | --- |"
+            echo "| LSAT backend (8100) | Required | yes |"
+            if [ "${{ steps.onb.outputs.rag_enabled }}" = "true" ]; then
+              echo "| Open Notebook (5055) + worker | Optional | yes |"
+            else
+              echo "| Open Notebook (5055) + worker | Optional | no |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Bundles
         uses: actions/upload-artifact@v4
         with:
-          name: studyvault-${{ matrix.os }}${{ steps.onb.outputs.rag_enabled == 'true' && '' || '-norag' }}
+          name: studyvault-${{ matrix.id }}${{ steps.onb.outputs.rag_enabled == 'true' && '' || '-norag' }}
           path: |
             ${{ matrix.artifact-glob }}
-            dist/signing-evidence-${{ matrix.os }}.json
-            dist/studyvault-release-manifest-${{ matrix.os }}.json
-          # audit M20 — fail the build if the installer glob matched nothing
-          # (a bad glob / empty Tauri bundle dir) instead of publishing a release
-          # with missing installers.
+            dist/signing-evidence-${{ matrix.id }}.json
+            dist/studyvault-release-manifest-${{ matrix.id }}.json
           if-no-files-found: error
           retention-days: 30
 
-  release:
+  publish:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all bundles
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: bundles
-
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           files: bundles/**/*
           generate_release_notes: true
-          # audit M20 — fail rather than publish a green release whose asset glob
-          # matched nothing (paired with if-no-files-found:error on upload above).
           fail_on_unmatched_files: true

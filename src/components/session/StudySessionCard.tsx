@@ -67,19 +67,13 @@ export function StudySessionCard({
         boxShadow: 'var(--elevation-2)',
         // A slightly more opaque backdrop so content scrolling *under* the
         // sticky card stays legible behind it. audit (LOW) — pair the -webkit-
-        // prefix so the saturate applies in the Tauri WebKit WebView too (every
+        // prefix so the saturate applies in the Electron renderer too (every
         // other backdrop-filter site in the codebase pairs them).
         backdropFilter: 'saturate(140%)',
         WebkitBackdropFilter: 'saturate(140%)',
       }}
     >
-      <SessionTabs
-        tabs={tabs}
-        activeId={active.id}
-        onChange={setActiveId}
-        label="Study session"
-        idBase={idBase}
-      />
+      <SessionTabs tabs={tabs} activeId={active.id} onChange={setActiveId} label="Study session" idBase={idBase} />
       <div
         role="tabpanel"
         id={sessionPanelId(idBase, active.id)}

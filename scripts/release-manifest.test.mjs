@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildReleaseManifest,
-  parseCargoLock,
-  parseNpmLock,
-  parseUvLock,
-  validateReleaseManifest,
-} from './release-manifest.mjs';
+import { buildReleaseManifest, parseNpmLock, parseUvLock, validateReleaseManifest } from './release-manifest.mjs';
 import { SIGNING_EVIDENCE_SCHEMA } from './release-signing.mjs';
 
 function verifiedWindowsSigning() {
@@ -29,14 +23,14 @@ function verifiedWindowsSigning() {
     status: 'verified',
     artifacts: [
       artifact('app', 'StudyVault.exe', false),
-      artifact('nsis', 'src-tauri/target/release/bundle/nsis/StudyVault-setup.exe', true),
-      artifact('msi', 'src-tauri/target/release/bundle/msi/StudyVault.msi', true),
+      artifact('nsis', 'release/StudyVault-0.9.0-win-x64.exe', true),
+      artifact('msi', 'release/StudyVault-0.9.0-win-x64.msi', true),
     ],
   };
 }
 
 describe('release manifest evidence', () => {
-  it('parses npm, Cargo, and uv lock components', () => {
+  it('parses npm and uv lock components', () => {
     expect(
       parseNpmLock({
         packages: {
@@ -52,24 +46,6 @@ describe('release manifest evidence', () => {
         dev: false,
         resolved: null,
         integrity: 'sha512-react',
-      },
-    ]);
-
-    expect(
-      parseCargoLock(`
-[[package]]
-name = "serde"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abc"
-`),
-    ).toEqual([
-      {
-        ecosystem: 'cargo',
-        name: 'serde',
-        version: '1.0.0',
-        source: 'registry+https://github.com/rust-lang/crates.io-index',
-        checksum: 'abc',
       },
     ]);
 
@@ -99,16 +75,15 @@ source = { registry = "https://pypi.org/simple" }
     expect(manifest.versions.consistent).toBe(true);
     expect(manifest.lockfiles.every((entry) => entry.present && entry.sha256)).toBe(true);
     expect(manifest.sbom.counts.npm).toBeGreaterThan(0);
-    expect(manifest.sbom.counts.cargo).toBeGreaterThan(0);
     expect(manifest.sbom.counts.pypi).toBeGreaterThan(0);
   });
 
   it('fails validation when release assets or required sidecar provenance are missing', () => {
     const manifest = {
-      schema: 'studyvault.release-manifest.v1',
+      schema: 'studyvault.release-manifest.v2',
       versions: { consistent: true },
       lockfiles: [],
-      sbom: { counts: { npm: 1, cargo: 1, pypi: 1 } },
+      sbom: { counts: { npm: 1, pypi: 1 } },
       sidecarProvenance: { present: false, entries: [] },
       bundleAssets: [],
     };
@@ -119,19 +94,19 @@ source = { registry = "https://pypi.org/simple" }
 
   it('requires artifact-level signing evidence for strict release manifests', () => {
     const manifest = {
-      schema: 'studyvault.release-manifest.v1',
+      schema: 'studyvault.release-manifest.v2',
       versions: { consistent: true },
       lockfiles: [],
-      sbom: { counts: { npm: 1, cargo: 1, pypi: 1 } },
+      sbom: { counts: { npm: 1, pypi: 1 } },
       sidecarProvenance: { present: true, entries: [{ service: 'LSAT backend' }] },
       bundleAssets: [
         {
-          path: 'src-tauri/target/release/bundle/nsis/StudyVault-setup.exe',
+          path: 'release/StudyVault-0.9.0-win-x64.exe',
           sha256: 'b'.repeat(64),
           size: 100,
         },
         {
-          path: 'src-tauri/target/release/bundle/msi/StudyVault.msi',
+          path: 'release/StudyVault-0.9.0-win-x64.msi',
           sha256: 'c'.repeat(64),
           size: 100,
         },

@@ -1,6 +1,6 @@
-// Native folder ingestion (Tauri shell only). Lets the user point at a real
-// folder of CFA PDFs on disk; we walk it via a Rust command, read each PDF's
-// bytes via another Rust command, then extract + chunk + classify + persist
+// Native folder ingestion (Electron shell only). Lets the user point at a real
+// folder of CFA PDFs on disk; the constrained preload lists and reads them,
+// then this renderer extracts + chunks + classifies + persists the content
 // into the same Dexie source-vault tables the bundled `.qvsource` writes to.
 // No bundling, no copying — works offline against whatever the user has.
 //
@@ -8,12 +8,17 @@
 // so the resulting documents are indistinguishable from the bundled ingestion.
 
 import type { CfaSourceChunk, CfaSourceDocument, CfaSourceLevel } from './cfaSourceTypes';
+import {
+  getDesktopBridge,
+  isElectronRuntime,
+  registerDesktopSubscription,
+  type DesktopUnsubscribe,
+} from './desktopBridge';
 import { db } from './progressStore';
 import { encryptSourceChunksForStorage } from './sourceChunkSecureVault';
 
-/** True when we're running inside the Tauri webview (vs plain browser dev). */
-export function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+export function isElectron(): boolean {
+  return isElectronRuntime();
 }
 
 export interface PdfEntry {
@@ -24,46 +29,63 @@ export interface PdfEntry {
   relative: string;
 }
 
-async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (!isTauri()) throw new Error('Native folder ingestion is only available in the desktop shell.');
-  // Dynamic import: pure-browser dev should never load this code path.
-  const core = await import('@tauri-apps/api/core');
-  return core.invoke<T>(cmd, args);
+function requireDesktopFiles() {
+  const files = getDesktopBridge()?.files;
+  if (!files) throw new Error('Native folder ingestion is only available in the desktop shell.');
+  return files;
 }
 
 export async function pickCfaFolder(): Promise<string | null> {
-  return tauriInvoke<string | null>('cfa_pick_folder');
+  return requireDesktopFiles().pickFolder();
 }
 
 export async function listFolderPdfs(folder: string): Promise<PdfEntry[]> {
-  return tauriInvoke<PdfEntry[]>('cfa_list_pdfs', { folder });
+  const entries = await requireDesktopFiles().listPdfs(folder);
+  return entries.map((entry) => ({
+    path: entry.path,
+    name: entry.name,
+    size: entry.size,
+    relative: entry.relative_path,
+  }));
 }
 
 export async function readPdfBytes(path: string): Promise<Uint8Array> {
-  // Tauri serializes Vec<u8> as a JSON array of numbers across the bridge.
-  const raw = await tauriInvoke<number[]>('cfa_read_pdf_bytes', { path });
-  return new Uint8Array(raw);
+  const result = await requireDesktopFiles().read(path);
+  return new Uint8Array(result.data);
+}
+
+type PdfDropSubscription = DesktopUnsubscribe & {
+  then(onRegistered: (unsubscribe: DesktopUnsubscribe) => void): Promise<void>;
+};
+
+/** Keep the current JS consumer's `.then(...)` path while cleanup is now synchronous. */
+function withLegacyAsyncSubscription(unsubscribe: DesktopUnsubscribe): PdfDropSubscription {
+  return Object.assign(unsubscribe, {
+    then(onRegistered: (registered: DesktopUnsubscribe) => void): Promise<void> {
+      return Promise.resolve().then(() => onRegistered(unsubscribe));
+    },
+  });
 }
 
 /**
- * Subscribe to the Tauri window's drag-drop event for PDF files. The handler
+ * Subscribe to the Electron window's drag-drop event for PDF files. The handler
  * is called once per drop with the absolute paths the user dropped, filtered
  * to .pdf files. Returns an unlisten function (call it on unmount).
  *
- * No-op in plain web dev (Tauri APIs unavailable); returns a noop unlisten.
+ * No-op in plain web dev; returns cleanup synchronously. The thenable facet keeps
+ * the existing unowned JS caller compatible while it migrates to sync cleanup.
  */
-export async function onTauriPdfDrop(
-  handler: (paths: string[]) => void,
-): Promise<() => void> {
-  if (!isTauri()) return () => undefined;
-  const { getCurrentWebview } = await import('@tauri-apps/api/webview');
-  const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
-    if (event.payload.type !== 'drop') return;
-    const paths = (event.payload.paths || []).filter((p) => /\.pdf$/i.test(p));
-    if (paths.length === 0) return;
-    handler(paths);
-  });
-  return unlisten;
+export function onElectronPdfDrop(handler: (paths: string[]) => void): PdfDropSubscription {
+  const bridge = getDesktopBridge();
+  if (!bridge) return withLegacyAsyncSubscription(() => undefined);
+
+  const unsubscribe = registerDesktopSubscription(() =>
+    bridge.events.onPdfDrop((event) => {
+      const paths = event.paths.filter((path) => /\.pdf$/i.test(path));
+      if (paths.length > 0) handler(paths);
+    }),
+  );
+  return withLegacyAsyncSubscription(unsubscribe);
 }
 
 /**
@@ -306,17 +328,14 @@ const LOS_VERB_ALTERNATION = LOS_COMMAND_VERBS.join('|');
 // verb then the rest of the statement up to a terminating ; or . or newline or
 // the next list marker. The verb is captured in group 1.
 const LOS_LINE_PATTERN = new RegExp(
-  String.raw`(?:^|[;\n••\-–]|\b[a-z]\.|\b[a-z]\)|\b\d{1,2}\.)\s*(` +
-    LOS_VERB_ALTERNATION +
-    String.raw`)\b[^;.\n••]*`,
+  String.raw`(?:^|[;\n••\-–]|\b[a-z]\.|\b[a-z]\)|\b\d{1,2}\.)\s*(` + LOS_VERB_ALTERNATION + String.raw`)\b[^;.\n••]*`,
   'gi',
 );
 
 // Lead-in phrases that introduce a LOS section. We only mine for LOS once we've
 // seen one of these, which guards against random sentences that happen to begin
 // with a command verb (e.g. "Describe the chart below.").
-const LOS_LEADIN_PATTERN =
-  /(?:the candidate should be able to|learning outcomes?|learning outcome statements?)\s*:?/i;
+const LOS_LEADIN_PATTERN = /(?:the candidate should be able to|learning outcomes?|learning outcome statements?)\s*:?/i;
 
 const MAX_LOS = 20;
 const MAX_LOS_LENGTH = 200;
@@ -447,9 +466,12 @@ async function loadPdfjs(): Promise<PdfJsLib> {
   return lib;
 }
 
-export async function extractPdfPages(bytes: Uint8Array): Promise<{ pages: PageText[]; numPages: number; charCount: number }> {
+export async function extractPdfPages(
+  bytes: Uint8Array,
+): Promise<{ pages: PageText[]; numPages: number; charCount: number }> {
   const pdfjs = await loadPdfjs();
-  const doc = await pdfjs.getDocument({ data: bytes, useSystemFonts: true, isEvalSupported: false, verbosity: 0 }).promise;
+  const doc = await pdfjs.getDocument({ data: bytes, useSystemFonts: true, isEvalSupported: false, verbosity: 0 })
+    .promise;
   const pages: PageText[] = [];
   try {
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
@@ -500,13 +522,7 @@ export async function ingestTextSource(params: {
 
   const importedAt = new Date().toISOString();
   // Synthesize one "page" so the chunker's locator code yields p.1 references.
-  const chunks = pageChunksFromPages(
-    [{ pageNumber: 1, text }],
-    documentId,
-    hash,
-    params.topicIds || [],
-    importedAt,
-  );
+  const chunks = pageChunksFromPages([{ pageNumber: 1, text }], documentId, hash, params.topicIds || [], importedAt);
   const document: CfaSourceDocument = {
     id: documentId,
     title,

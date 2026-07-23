@@ -1,21 +1,18 @@
 /**
- * OPS-1 — System Health sidecar console (host-side Tauri client).
+ * OPS-1 — System Health sidecar console (host-side Electron client).
  *
  * A thin, typed wrapper over the native `get_sidecar_status` / `get_sidecar_logs`
- * Tauri commands (defined in `src-tauri/src/lib.rs`, shipped by BA1/BA2/BA8).
+ * preload bridge methods supplied by the Electron main process.
  * The desktop shell supervises four sidecars — SurrealDB (:8000), the
  * open-notebook API (:5055), the open-notebook worker (no socket), and the LSAT
  * backend (:8100) — and exposes their live status + a rolling stdout/stderr ring
  * buffer per sidecar. This module surfaces both to the host UI.
  *
- * Everything is guarded for the non-Tauri (browser dev / Vitest) case: the
- * commands only exist inside the desktop runtime, so calls there return a clear
- * "unavailable" state rather than throwing. Same lazy-invoke idiom as
- * `OfflineContext` / `domains/lsat/lib/tauri.ts` — the `@tauri-apps/api/core`
- * module is imported dynamically and only under Tauri, so the web bundle never
- * pulls it in.
+ * Everything is guarded for browser dev / Vitest: calls return an unavailable
+ * state rather than throwing when the preload bridge is absent.
  */
 import type { paths } from '../domains/lsat/lib/api.gen';
+import { getDesktopBridge, isElectronRuntime } from './desktopBridge';
 import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
 const BACKEND_HEALTH_PATH = '/api/observability/health-aggregated' satisfies keyof paths;
@@ -47,23 +44,22 @@ export interface SidecarStatus {
   pid: number | null;
 }
 
-/** Whether the host is running inside the Tauri desktop shell. */
-export function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+export function isElectron(): boolean {
+  return isElectronRuntime();
 }
 
 /**
- * Snapshot the status of every supervised sidecar. Returns `null` outside Tauri
- * (browser dev / tests) and on any invoke failure, so the caller can render an
+ * Snapshot the status of every supervised sidecar. Returns `null` outside Electron
+ * (browser dev / tests) and on any bridge failure, so the caller can render an
  * honest "desktop-app only" / "unavailable" state instead of throwing. The
  * vector preserves spec order: SurrealDB, open-notebook API, open-notebook
  * worker, LSAT backend.
  */
 export async function getSidecarStatus(): Promise<SidecarStatus[] | null> {
-  if (!isTauri()) return null;
+  const bridge = getDesktopBridge();
+  if (!bridge) return null;
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<SidecarStatus[]>('get_sidecar_status');
+    return await bridge.sidecar.status();
   } catch {
     return null;
   }
@@ -73,13 +69,13 @@ export async function getSidecarStatus(): Promise<SidecarStatus[] | null> {
  * Fetch the most recent captured stdout/stderr lines (oldest → newest, up to the
  * backend's ring-buffer capacity) for one named sidecar. An unknown name — or a
  * sidecar that hasn't emitted anything yet — yields an empty array from the
- * backend, so this only returns `null` outside Tauri or on an invoke failure.
+ * backend, so this only returns `null` outside Electron or on a bridge failure.
  */
 export async function getSidecarLogs(name: string): Promise<string[] | null> {
-  if (!isTauri()) return null;
+  const bridge = getDesktopBridge();
+  if (!bridge) return null;
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<string[]>('get_sidecar_logs', { name });
+    return await bridge.sidecar.logs(name);
   } catch {
     return null;
   }
@@ -93,8 +89,8 @@ export async function getSidecarLogs(name: string): Promise<string[] | null> {
 export type HealthVerdict = 'ok' | 'degraded' | 'error';
 
 /**
- * OPS-3 — the native sidecar-supervision roll-up (`get_system_health_aggregated`
- * Tauri command). Mirrors the Rust `SystemHealthAggregate` payload exactly
+ * OPS-3 — the native sidecar-supervision roll-up. Mirrors the main-process
+ * aggregate payload exactly
  * (snake_case on the wire). Speaks only to PROCESS supervision — required vs
  * optional sidecar liveness; the LSAT backend's own internal health is layered
  * in separately from its `/observability/health-aggregated` endpoint.
@@ -116,15 +112,15 @@ export interface SidecarHealthAggregate {
 }
 
 /**
- * Snapshot the native sidecar-supervision verdict. Returns `null` outside Tauri
- * (browser dev / tests) and on any invoke failure, so callers can fall back to
+ * Snapshot the native sidecar-supervision verdict. Returns `null` outside Electron
+ * (browser dev / tests) and on any bridge failure, so callers can fall back to
  * the backend-only signal rather than throwing.
  */
 export async function getSidecarHealthAggregated(): Promise<SidecarHealthAggregate | null> {
-  if (!isTauri()) return null;
+  const bridge = getDesktopBridge();
+  if (!bridge) return null;
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<SidecarHealthAggregate>('get_system_health_aggregated');
+    return await bridge.sidecar.aggregate();
   } catch {
     return null;
   }
@@ -164,16 +160,11 @@ export interface BackendHealthAggregate {
  * returns `null` so the badge falls back to the sidecar-only verdict instead of
  * hanging the page. Mirrors the degrading-fetch idiom in `lsatBackend.ts`.
  */
-export async function getBackendHealthAggregated(
-  timeoutMs = 2500,
-): Promise<BackendHealthAggregate | null> {
-  const res = await fetchLsatSidecarJson<Partial<BackendHealthAggregate>>(
-    BACKEND_HEALTH_PATH,
-    {
-      timeoutMs,
-      headers: { accept: 'application/json' },
-    },
-  );
+export async function getBackendHealthAggregated(timeoutMs = 2500): Promise<BackendHealthAggregate | null> {
+  const res = await fetchLsatSidecarJson<Partial<BackendHealthAggregate>>(BACKEND_HEALTH_PATH, {
+    timeoutMs,
+    headers: { accept: 'application/json' },
+  });
   if (!res.ok || !res.data || typeof res.data !== 'object') return null;
   return res.data as BackendHealthAggregate;
 }
@@ -182,7 +173,7 @@ export async function getBackendHealthAggregated(
 export interface AggregatedSystemHealth {
   /** The worst of the two available sources (error > degraded > ok). */
   verdict: HealthVerdict;
-  /** Native sidecar-supervision roll-up, or `null` outside Tauri / on failure. */
+  /** Native sidecar-supervision roll-up, or `null` outside Electron / on failure. */
   sidecars: SidecarHealthAggregate | null;
   /** LSAT backend internal health, or `null` when unreachable / older build. */
   backend: BackendHealthAggregate | null;
@@ -211,13 +202,8 @@ export function worstVerdict(...verdicts: Array<HealthVerdict | null | undefined
  * available, defaulting to "ok" when nothing is reachable so a pure-browser
  * session isn't falsely alarmed.
  */
-export async function getAggregatedSystemHealth(
-  timeoutMs = 2500,
-): Promise<AggregatedSystemHealth> {
-  const [sidecars, backend] = await Promise.all([
-    getSidecarHealthAggregated(),
-    getBackendHealthAggregated(timeoutMs),
-  ]);
+export async function getAggregatedSystemHealth(timeoutMs = 2500): Promise<AggregatedSystemHealth> {
+  const [sidecars, backend] = await Promise.all([getSidecarHealthAggregated(), getBackendHealthAggregated(timeoutMs)]);
   return {
     verdict: worstVerdict(sidecars?.status, backend?.status),
     sidecars,

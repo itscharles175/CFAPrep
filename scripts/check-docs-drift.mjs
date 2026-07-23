@@ -35,6 +35,11 @@ import { fileURLToPath } from 'node:url';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, '..');
 const ARCH_PATH = join(REPO_ROOT, 'docs', 'ARCHITECTURE.md');
+const PACKAGING_DOCS = [
+  'docs/PACKAGING-PYINSTALLER.md',
+  'docs/lsat/14-packaging.md',
+  'electron/resources/services/README.md',
+];
 
 function fileExists(rel) {
   return existsSync(join(REPO_ROOT, rel));
@@ -49,11 +54,20 @@ function readArch() {
   }
 }
 
+function readRequiredText(rel) {
+  try {
+    return readFileSync(join(REPO_ROOT, rel), 'utf8');
+  } catch (err) {
+    console.error(`check-docs-drift: cannot read ${rel}: ${err.message}`);
+    process.exit(2);
+  }
+}
+
 /**
  * Each assertion returns { ok, name, detail }. `ok=false` is drift. Assertions
  * are pure (no side effects) and read the doc text + the file tree only.
  */
-function buildAssertions(arch) {
+function buildAssertions(arch, packagingDocs) {
   const assertions = [];
 
   // --- 1. boot-path truth --------------------------------------------------
@@ -111,7 +125,9 @@ function buildAssertions(arch) {
     'src/components/UnifiedRoot.tsx',
     'src/lib/lsatBackend.ts',
     'src/lib/lsatReviewBridge.ts',
-    'src-tauri/src/lib.rs',
+    'electron/main.js',
+    'electron/preload.cjs',
+    'electron-builder.yml',
     'services/lsat-backend',
     '.github/workflows/ci.yml',
     '.github/workflows/release.yml',
@@ -119,8 +135,7 @@ function buildAssertions(arch) {
   for (const rel of REQUIRED_PATHS) {
     // Only assert paths the doc actually references, so the gate stays coupled to
     // the doc's claims rather than to an arbitrary file list.
-    const referenced = arch.includes(rel) ||
-      arch.includes(rel.split('/').pop());
+    const referenced = arch.includes(rel) || arch.includes(rel.split('/').pop());
     if (!referenced) continue;
     assertions.push({
       name: `referenced path exists: ${rel}`,
@@ -131,34 +146,41 @@ function buildAssertions(arch) {
     });
   }
 
+  for (const [rel, content] of Object.entries(packagingDocs)) {
+    for (const requiredToken of ['lsatlab-backend', 'open-notebook-worker', 'bin/surreal2', 'sidecar-provenance']) {
+      assertions.push({
+        name: `${rel} documents ${requiredToken}`,
+        ok: content.includes(requiredToken),
+        detail: `${rel} must document the complete Electron service inventory, including ${requiredToken}.`,
+      });
+    }
+  }
+
   return assertions;
 }
 
 function main() {
   const asJson = process.argv.includes('--json');
   const arch = readArch();
-  const assertions = buildAssertions(arch);
+  const packagingDocs = Object.fromEntries(PACKAGING_DOCS.map((rel) => [rel, readRequiredText(rel)]));
+  const assertions = buildAssertions(arch, packagingDocs);
   const failures = assertions.filter((a) => !a.ok);
 
   if (asJson) {
-    console.log(JSON.stringify(
-      { checked: assertions.length, failures: failures.map((f) => f.name) },
-      null,
-      2,
-    ));
+    console.log(JSON.stringify({ checked: assertions.length, failures: failures.map((f) => f.name) }, null, 2));
   }
 
   if (failures.length === 0) {
     console.log(
       `check-docs-drift: OK — docs/ARCHITECTURE.md passes all ${assertions.length} ` +
-      'structural + boot-path assertions.',
+        'structural + boot-path assertions.',
     );
     process.exit(0);
   }
 
   console.error(
     `\ncheck-docs-drift: FAIL — docs/ARCHITECTURE.md drifted from the code ` +
-    `(${failures.length}/${assertions.length} assertion(s)):\n`,
+      `(${failures.length}/${assertions.length} assertion(s)):\n`,
   );
   for (const f of failures) {
     console.error(`  [${f.name}]`);

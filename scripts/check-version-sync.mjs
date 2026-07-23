@@ -10,8 +10,6 @@
  *
  * Sources checked (all read-only — this script never writes):
  *   - package.json                              .version            (CANONICAL)
- *   - src-tauri/tauri.conf.json                 .version
- *   - src-tauri/Cargo.toml                      [package] version
  *   - .env                                      VITE_APP_VERSION    (if present)
  *   - services/lsat-backend/app/config.py       APP_VERSION default (if present)
  *
@@ -47,24 +45,6 @@ function packageVersion() {
   const raw = readMaybe('package.json');
   if (raw === null) return null;
   return JSON.parse(raw).version ?? null;
-}
-
-/** src-tauri/tauri.conf.json .version (top-level). */
-function tauriConfVersion() {
-  const raw = readMaybe(join('src-tauri', 'tauri.conf.json'));
-  if (raw === null) return null;
-  return JSON.parse(raw).version ?? null;
-}
-
-/** src-tauri/Cargo.toml [package] version (first `version = "..."` line). */
-function cargoVersion() {
-  const raw = readMaybe(join('src-tauri', 'Cargo.toml'));
-  if (raw === null) return null;
-  // The first version key in the manifest is the [package] version; build- and
-  // dependency versions are pinned with `= "x"` inside `{ ... }` tables, so a
-  // line-anchored `version = "..."` only matches the package field.
-  const match = raw.match(/^\s*version\s*=\s*"([^"]+)"/m);
-  return match ? match[1] : null;
 }
 
 /** .env VITE_APP_VERSION (optional — only checked when the key is present). */
@@ -123,8 +103,6 @@ if (!canonical) {
 // label, value, optional? (optional sources are skipped when null/absent)
 const sources = [
   ['package.json', canonical, false],
-  ['src-tauri/tauri.conf.json', tauriConfVersion(), false],
-  ['src-tauri/Cargo.toml', cargoVersion(), false],
   ['.env (VITE_APP_VERSION)', envVersion(), true],
   ['services/lsat-backend/app/config.py (APP_VERSION)', configPyVersion(), true],
 ];

@@ -1,10 +1,159 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { classifyPath, extractStructure, ingestTextSource, isTauri, pageChunksFromPages } from './desktopIngestion';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  classifyPath,
+  extractStructure,
+  ingestTextSource,
+  isElectron,
+  listFolderPdfs,
+  onElectronPdfDrop,
+  pageChunksFromPages,
+  pickCfaFolder,
+  readPdfBytes,
+} from './desktopIngestion';
+import { registerDesktopSubscription, type DesktopUnsubscribe, type StudyVaultBridge } from './desktopBridge';
 import { db } from './progressStore';
 
+function createBridge(
+  overrides: {
+    files?: Partial<StudyVaultBridge['files']>;
+    events?: Partial<StudyVaultBridge['events']>;
+  } = {},
+): StudyVaultBridge {
+  const unsubscribe = () => undefined;
+  return {
+    runtime: {
+      info: async () => ({
+        app_version: 'test',
+        electron_version: 'test',
+        chrome_version: 'test',
+        node_version: 'test',
+        platform: 'win32',
+        arch: 'x64',
+        is_packaged: false,
+      }),
+    },
+    files: {
+      pickFolder: async () => null,
+      pickFiles: async () => [],
+      listPdfs: async () => [],
+      read: async (path) => ({ path, name: 'file.pdf', extension: '.pdf', size: 0, data: new Uint8Array() }),
+      ...overrides.files,
+    },
+    sidecar: {
+      status: async () => [],
+      logs: async () => [],
+      aggregate: async () => ({
+        status: 'ok',
+        ready: 0,
+        required_down: 0,
+        optional_down: 0,
+        total: 0,
+        required_down_names: [],
+      }),
+    },
+    keychain: {
+      get: async () => null,
+      set: async () => ({ ok: true }),
+      delete: async () => ({ ok: true }),
+    },
+    openPath: async () => ({ opened: true, error: '' }),
+    openExternal: async () => ({ opened: true }),
+    popout: async () => ({ id: 1 }),
+    notification: async () => ({ shown: true }),
+    fullscreen: {
+      get: async () => false,
+      set: async (value) => value,
+    },
+    events: {
+      onBootStatus: () => unsubscribe,
+      onSecondInstance: () => unsubscribe,
+      onOpenFile: () => unsubscribe,
+      onPdfDrop: () => unsubscribe,
+      ...overrides.events,
+    },
+  };
+}
+
+afterEach(() => {
+  delete window.studyvault;
+  vi.restoreAllMocks();
+});
+
 describe('desktopIngestion (pure helpers)', () => {
-  it('isTauri returns false in plain browser / jsdom test env', () => {
-    expect(isTauri()).toBe(false);
+  it('reports whether the Electron bridge is available', () => {
+    expect(isElectron()).toBe(false);
+  });
+
+  it('detects and routes native file operations through the Electron bridge', async () => {
+    const wireEntries = [
+      {
+        path: 'C:\\CFA\\book.pdf',
+        name: 'book.pdf',
+        extension: '.pdf' as const,
+        size: 42,
+        relative_path: 'book.pdf',
+      },
+    ];
+    const entries = [{ path: 'C:\\CFA\\book.pdf', name: 'book.pdf', size: 42, relative: 'book.pdf' }];
+    const pickFolder = vi.fn(async () => 'C:\\CFA');
+    const listPdfs = vi.fn(async () => wireEntries);
+    const read = vi.fn(async (path: string) => ({
+      path,
+      name: 'book.pdf',
+      extension: '.pdf' as const,
+      size: 3,
+      data: new Uint8Array([1, 2, 255]),
+    }));
+    window.studyvault = createBridge({ files: { pickFolder, listPdfs, read } });
+
+    expect(isElectron()).toBe(true);
+    await expect(pickCfaFolder()).resolves.toBe('C:\\CFA');
+    await expect(listFolderPdfs('C:\\CFA')).resolves.toEqual(entries);
+    await expect(readPdfBytes('C:\\CFA\\book.pdf')).resolves.toEqual(new Uint8Array([1, 2, 255]));
+    expect(listPdfs).toHaveBeenCalledWith('C:\\CFA');
+    expect(read).toHaveBeenCalledWith('C:\\CFA\\book.pdf');
+  });
+
+  it('returns drag-drop cleanup synchronously and preserves the current caller contract', async () => {
+    let dropHandler!: (event: { paths: string[] }) => void;
+    const nativeUnsubscribe = vi.fn();
+    const onPdfDrop = vi.fn((handler: (event: { paths: string[] }) => void) => {
+      dropHandler = handler;
+      return nativeUnsubscribe;
+    });
+    window.studyvault = createBridge({ events: { onPdfDrop } });
+    const received = vi.fn();
+
+    const unsubscribe = onElectronPdfDrop(received);
+
+    expect(typeof unsubscribe).toBe('function');
+    dropHandler({ paths: ['first.pdf', 'notes.txt', 'SECOND.PDF'] });
+    expect(received).toHaveBeenCalledWith(['first.pdf', 'SECOND.PDF']);
+
+    unsubscribe();
+    expect(nativeUnsubscribe).toHaveBeenCalledTimes(1);
+
+    let compatibilityCleanup: DesktopUnsubscribe | null = null;
+    await unsubscribe.then((registered) => {
+      compatibilityCleanup = registered;
+    });
+    expect(compatibilityCleanup).toBe(unsubscribe);
+  });
+
+  it('closes a subscription that resolves after synchronous cleanup', async () => {
+    let resolveRegistration!: (unsubscribe: DesktopUnsubscribe) => void;
+    const nativeUnsubscribe = vi.fn();
+    const unsubscribe = registerDesktopSubscription(
+      () =>
+        new Promise<DesktopUnsubscribe>((resolve) => {
+          resolveRegistration = resolve;
+        }),
+    );
+
+    unsubscribe();
+    resolveRegistration(nativeUnsubscribe);
+
+    await vi.waitFor(() => expect(nativeUnsubscribe).toHaveBeenCalledTimes(1));
   });
 
   it('classifies an official Level I PDF path', () => {

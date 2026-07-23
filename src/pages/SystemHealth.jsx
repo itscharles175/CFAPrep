@@ -1,7 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
-import { Boxes, CloudCog, Database, Download, Gauge, HardDrive, History, KeyRound, Mic2, Network, RefreshCw, ServerCog, ShieldCheck, Terminal, Upload, WifiOff, Wrench } from 'lucide-react';
+import {
+  Boxes,
+  CloudCog,
+  Database,
+  Download,
+  Gauge,
+  HardDrive,
+  History,
+  KeyRound,
+  Mic2,
+  Network,
+  RefreshCw,
+  ServerCog,
+  ShieldCheck,
+  Terminal,
+  Upload,
+  WifiOff,
+  Wrench,
+} from 'lucide-react';
 import { PageHeader, MetricCard, StatusBadge, Surface } from '../components/ui/Primitives';
-import { exportVaultData, getVaultHealthReport, importVaultData, previewVaultRepair, restoreRollbackSnapshot } from '../lib/learning';
+import {
+  exportVaultData,
+  getVaultHealthReport,
+  importVaultData,
+  previewVaultRepair,
+  restoreRollbackSnapshot,
+} from '../lib/learning';
 // AUDIT-2 — unified {host, lsat} backup/restore (DATA-5 wired into the UI).
 import { exportUnifiedBackup, importUnifiedBackup, UnifiedBackupError } from '../lib/unifiedBackup';
 import { decryptVaultBackup, encryptVaultBackup } from '../lib/encryptedBackup';
@@ -15,10 +39,30 @@ import {
   listNotebooks as listOnbNotebooks,
   saveOpenNotebookSettings,
 } from '../lib/openNotebook';
-import { ingestFolder, ingestPdfPaths, ingestTextSource, isTauri, onTauriPdfDrop, pickCfaFolder } from '../lib/desktopIngestion';
+import {
+  ingestFolder,
+  ingestPdfPaths,
+  ingestTextSource,
+  isElectron,
+  onElectronPdfDrop,
+  pickCfaFolder,
+} from '../lib/desktopIngestion';
 import { useToast } from '../context/ToastContext';
-import { deleteCfaSourceDocument, exportCfaSourceBundle, getCfaSourceDocuments, importCfaSourceBundle } from '../lib/cfaSourceVault';
-import { getStorage, getActiveDriverName, cutoverTo, previewCutover, switchToDexie, setStoredStoragePreference, getStoredStoragePreference } from '../lib/storage';
+import {
+  deleteCfaSourceDocument,
+  exportCfaSourceBundle,
+  getCfaSourceDocuments,
+  importCfaSourceBundle,
+} from '../lib/cfaSourceVault';
+import {
+  getStorage,
+  getActiveDriverName,
+  cutoverTo,
+  previewCutover,
+  switchToDexie,
+  setStoredStoragePreference,
+  getStoredStoragePreference,
+} from '../lib/storage';
 import { checkLsatBackendHealth, getLsatCloudBudget, syncProviderToLsat, LSAT_SETTINGS_PATH } from '../lib/lsatBackend';
 import EditModelRoutingModal from '../components/SystemHealth/EditModelRoutingModal';
 import { TrustReleasePanel } from '../components/ui/TrustReleasePanel';
@@ -31,11 +75,7 @@ import MaintenancePanel from '../components/SystemHealth/MaintenancePanel';
 import { GenerationQualityPanel } from '../components/SystemHealth/GenerationQualityPanel';
 import { recognizeOnceOffline } from '../lib/voice';
 import { readLastCrash, clearLastCrash } from '../components/ErrorBoundary';
-import {
-  clearPersistedParameters,
-  persistOptimizedParameters,
-  readPersistedParameters,
-} from '../lib/fsrsOptimizer';
+import { clearPersistedParameters, persistOptimizedParameters, readPersistedParameters } from '../lib/fsrsOptimizer';
 import { setSchedulerParameters } from '../lib/scheduler';
 import { db } from '../lib/progressStore';
 import {
@@ -158,14 +198,14 @@ export default function SystemHealth() {
   // OPS-1: unified sidecar console. The desktop shell supervises all four
   // sidecars (SurrealDB :8000, open-notebook API :5055 + worker, LSAT :8100);
   // these mirror the native get_sidecar_status / get_sidecar_logs commands.
-  // null = not yet checked (or, after a load, "unavailable outside Tauri").
+  // null = not yet checked (or, after a load, unavailable outside Electron).
   const [sidecars, setSidecars] = useState(null);
   const [sidecarsBusy, setSidecarsBusy] = useState(false);
   // Name of the sidecar whose log tail is expanded, or null when collapsed.
   const [openSidecarLog, setOpenSidecarLog] = useState(null);
   const [sidecarLogLines, setSidecarLogLines] = useState([]);
   const [sidecarLogBusy, setSidecarLogBusy] = useState(false);
-  // Tracks whether we are running inside the Tauri shell (where the commands
+  // Tracks whether we are running inside the Electron shell (where the bridge
   // exist) vs browser dev, so the panel can render an honest "desktop-app only"
   // note instead of an empty list.
   // BB4: cloud-budget picture + next-call dry-run estimate from the LSAT sidecar
@@ -184,7 +224,7 @@ export default function SystemHealth() {
   // P5: the last render crash the ErrorBoundary persisted (local-first apps
   // have no remote telemetry). Read once on mount; null when there's none.
   const [lastCrash, setLastCrash] = useState(() => readLastCrash());
-  const desktopAvailable = isTauri();
+  const desktopAvailable = isElectron();
   const [ingestState, setIngestState] = useState('idle'); // idle | picking | running | done | error | cancelled
   const [ingestProgress, setIngestProgress] = useState(null);
   const [ingestResult, setIngestResult] = useState(null);
@@ -288,9 +328,11 @@ export default function SystemHealth() {
   useEffect(() => {
     let active = true;
     refreshCacheBuckets();
-    getStorage().settings.get('exam-date').then((row) => {
-      if (active && row?.value) setExamDate(row.value);
-    });
+    getStorage()
+      .settings.get('exam-date')
+      .then((row) => {
+        if (active && row?.value) setExamDate(row.value);
+      });
     readPersistedParameters().then((row) => {
       if (active) setFsrsCustom(row);
     });
@@ -346,7 +388,7 @@ export default function SystemHealth() {
   // OPS-1: unified sidecar console
   //
   // Pulls the live supervisor snapshot (all four sidecars) from the native
-  // get_sidecar_status command. Returns null outside Tauri (browser dev / tests)
+  // sidecar status bridge. Returns null outside Electron (browser dev / tests)
   // or on an invoke failure, which the panel renders as a "desktop-app only"
   // note rather than an empty list.
   // ---------------------------------------------------------------------------
@@ -437,7 +479,10 @@ export default function SystemHealth() {
       setWhisperDownloadPct(100);
       setWhisperDownloadState('done');
       setWhisperBrowserCached(await probeWhisperBrowserCache());
-      toast.success('Voice model ready', 'Whisper-tiny is cached locally — offline voice input works without a download next time.');
+      toast.success(
+        'Voice model ready',
+        'Whisper-tiny is cached locally — offline voice input works without a download next time.',
+      );
     } catch (error) {
       setWhisperDownloadState('error');
       const detail = error instanceof Error ? error.message : 'Could not download the voice model.';
@@ -454,7 +499,10 @@ export default function SystemHealth() {
       const report = await computePsychometricsInWorker(rows);
       await persistPsychometricsReport(report);
       setPsychReport(report);
-      toast.success('Psychometrics updated', `${report.totalItems} items scored across ${report.totalAttempts} attempts.`);
+      toast.success(
+        'Psychometrics updated',
+        `${report.totalItems} items scored across ${report.totalAttempts} attempts.`,
+      );
     } catch (error) {
       setPsychError(error?.message || String(error));
     } finally {
@@ -507,7 +555,11 @@ export default function SystemHealth() {
       setDriverPref(getStoredStoragePreference());
       if (result.report) {
         setCutoverReport(result.report);
-        const copied = result.report.settings + result.report.reviewItems + result.report.questionResults + result.report.masterySnapshots;
+        const copied =
+          result.report.settings +
+          result.report.reviewItems +
+          result.report.questionResults +
+          result.report.masterySnapshots;
         const chunkNote = result.report.chunks
           ? ` and ${result.report.chunks} chunk${result.report.chunks === 1 ? '' : 's'}`
           : '';
@@ -589,9 +641,15 @@ export default function SystemHealth() {
       const refreshed = await readTargetedQueue();
       setTargetedQueue(refreshed);
       if (errors > 0) {
-        toast.warning('Targeted material partial', `${errors} job${errors !== 1 ? 's' : ''} failed — see status below.`);
+        toast.warning(
+          'Targeted material partial',
+          `${errors} job${errors !== 1 ? 's' : ''} failed — see status below.`,
+        );
       } else if (pending.length > 0) {
-        toast.success('Targeted material complete', `${pending.length} job${pending.length !== 1 ? 's' : ''} finished.`);
+        toast.success(
+          'Targeted material complete',
+          `${pending.length} job${pending.length !== 1 ? 's' : ''} finished.`,
+        );
       }
     } catch (error) {
       setTargetedError(error?.message || String(error));
@@ -842,9 +900,7 @@ export default function SystemHealth() {
     setCacheBusy(true);
     try {
       const rows = await getStorage().settings.toArray();
-      const keysToDelete = rows
-        .map((row) => row.key)
-        .filter((key) => !SKIP_KEYS.has(key));
+      const keysToDelete = rows.map((row) => row.key).filter((key) => !SKIP_KEYS.has(key));
       await getStorage().settings.bulkDelete(keysToDelete);
       await refreshCacheBuckets();
       const msg = `Cleared ${keysToDelete.length} cached row(s) from app caches.`;
@@ -921,13 +977,13 @@ export default function SystemHealth() {
     ingestAbortRef.current?.abort();
   }
 
-  // Tauri OS drag-drop: PDFs dropped on the window auto-ingest via the same
+  // Electron OS drag-drop: PDFs dropped on the window auto-ingest via the same
   // pipeline as the folder picker, with the same progress UX.
   useEffect(() => {
     if (!desktopAvailable) return undefined;
     let active = true;
     let unlistenFn = () => undefined;
-    onTauriPdfDrop(async (paths) => {
+    onElectronPdfDrop(async (paths) => {
       if (!active) return;
       const controller = new AbortController();
       ingestAbortRef.current = controller;
@@ -944,7 +1000,9 @@ export default function SystemHealth() {
         if (!active) return;
         setIngestResult(result);
         setIngestState(controller.signal.aborted ? 'cancelled' : 'done');
-        setMessage(`Drag-dropped: ingested ${result.ingested}, skipped ${result.skipped}, ${result.chunkCount} chunks.`);
+        setMessage(
+          `Drag-dropped: ingested ${result.ingested}, skipped ${result.skipped}, ${result.chunkCount} chunks.`,
+        );
         await refreshSourceDocs();
       } catch (error) {
         if (!active) return;
@@ -1049,8 +1107,13 @@ export default function SystemHealth() {
       const counts = envelope.rowCounts || {};
       setUnifiedPassphrase('');
       setUnifiedPassphraseConfirm('');
-      setMessage(`Encrypted unified backup downloaded (host + LSAT): ${counts.questions ?? 0} questions, ${counts.preptests ?? 0} preptests.`);
-      toast.success('Encrypted unified backup ready', 'One passphrase-protected file holds both your host vault and the LSAT bank.');
+      setMessage(
+        `Encrypted unified backup downloaded (host + LSAT): ${counts.questions ?? 0} questions, ${counts.preptests ?? 0} preptests.`,
+      );
+      toast.success(
+        'Encrypted unified backup ready',
+        'One passphrase-protected file holds both your host vault and the LSAT bank.',
+      );
     } catch (err) {
       const detail = err instanceof UnifiedBackupError ? err.message : 'Could not build the unified backup.';
       setMessage(detail);
@@ -1061,15 +1124,24 @@ export default function SystemHealth() {
   }
 
   async function handlePlaintextUnifiedExport() {
-    if (!window.confirm('Create a plaintext unified backup? This local-only diagnostic copy can contain host vault data and should not be synced or shared.')) {
+    if (
+      !window.confirm(
+        'Create a plaintext unified backup? This local-only diagnostic copy can contain host vault data and should not be synced or shared.',
+      )
+    ) {
       return;
     }
     setUnifiedBusy(true);
     try {
       const envelope = await exportUnifiedBackup({ allowPlaintext: true });
       const counts = envelope.rowCounts || {};
-      setMessage(`Plaintext unified backup downloaded from the advanced path: ${counts.questions ?? 0} questions, ${counts.preptests ?? 0} preptests.`);
-      toast.warning('Plaintext unified backup created', 'Keep this diagnostic copy local and prefer encrypted unified backups.');
+      setMessage(
+        `Plaintext unified backup downloaded from the advanced path: ${counts.questions ?? 0} questions, ${counts.preptests ?? 0} preptests.`,
+      );
+      toast.warning(
+        'Plaintext unified backup created',
+        'Keep this diagnostic copy local and prefer encrypted unified backups.',
+      );
     } catch (err) {
       const detail = err instanceof UnifiedBackupError ? err.message : 'Could not build the unified backup.';
       setMessage(detail);
@@ -1134,7 +1206,8 @@ export default function SystemHealth() {
       URL.revokeObjectURL(url);
       setBackupPassphrase('');
       setBackupPassphraseConfirm('');
-      const summary = 'Encrypted backup downloaded as .qvenc.json. Store the passphrase separately — without it the blob is unrecoverable.';
+      const summary =
+        'Encrypted backup downloaded as .qvenc.json. Store the passphrase separately — without it the blob is unrecoverable.';
       setMessage(summary);
       toast.success('Encrypted backup ready', summary);
     } catch (error) {
@@ -1180,13 +1253,19 @@ export default function SystemHealth() {
   async function handleRepairPreview() {
     const report = await previewVaultRepair();
     setVaultHealth(report);
-    setMessage(report.repairActions.length ? `Repair preview found ${report.repairActions.length} action(s).` : 'Repair preview found no required action.');
+    setMessage(
+      report.repairActions.length
+        ? `Repair preview found ${report.repairActions.length} action(s).`
+        : 'Repair preview found no required action.',
+    );
   }
 
   async function handlePersistStorage() {
     const granted = await navigator.storage?.persist?.();
     setPersisted(Boolean(granted));
-    setMessage(granted ? 'Browser persistent storage requested successfully.' : 'Browser did not grant persistent storage yet.');
+    setMessage(
+      granted ? 'Browser persistent storage requested successfully.' : 'Browser did not grant persistent storage yet.',
+    );
   }
 
   async function handleCacheCriticalRoutes() {
@@ -1273,17 +1352,54 @@ export default function SystemHealth() {
               aria-label="Encrypted backup passphrase"
               style={{ minWidth: 190 }}
             />
-            <button className="btn btn-primary" onClick={handleEncryptedBackup}><KeyRound size={16} /> Encrypted Backup</button>
+            <button className="btn btn-primary" onClick={handleEncryptedBackup}>
+              <KeyRound size={16} /> Encrypted Backup
+            </button>
           </div>
         }
       />
 
       <div className="grid-4 page-metrics">
-        <MetricCard label="IndexedDB Storage" value={`${usageMb} MB`} detail={`${usagePct}% of estimated quota`} icon={Database} />
-        <MetricCard label="Quota" value={`${quotaMb || '-'} MB`} detail="Browser estimate" icon={HardDrive} tone="warning" />
-        <MetricCard label="Service Worker" value={serviceWorkerReady ? 'Ready' : 'Unavailable'} detail="Offline shell support" icon={ShieldCheck} tone={serviceWorkerReady ? 'success' : 'danger'} />
-        <MetricCard label="Offline Routes" value={`${offlineReadiness?.cachedCount ?? 0}/${offlineReadiness?.totalCriticalRoutes ?? 0}`} detail="Critical local routes cached" icon={WifiOff} tone={offlineReadiness?.cachedCount === offlineReadiness?.totalCriticalRoutes ? 'success' : 'warning'} />
-        <MetricCard label="Vault Safety" value={vaultHealth?.status || 'Checking'} detail={`${vaultHealth?.totalRows ?? 0} local rows`} icon={Database} tone={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} />
+        <MetricCard
+          label="IndexedDB Storage"
+          value={`${usageMb} MB`}
+          detail={`${usagePct}% of estimated quota`}
+          icon={Database}
+        />
+        <MetricCard
+          label="Quota"
+          value={`${quotaMb || '-'} MB`}
+          detail="Browser estimate"
+          icon={HardDrive}
+          tone="warning"
+        />
+        <MetricCard
+          label="Service Worker"
+          value={serviceWorkerReady ? 'Ready' : 'Unavailable'}
+          detail="Offline shell support"
+          icon={ShieldCheck}
+          tone={serviceWorkerReady ? 'success' : 'danger'}
+        />
+        <MetricCard
+          label="Offline Routes"
+          value={`${offlineReadiness?.cachedCount ?? 0}/${offlineReadiness?.totalCriticalRoutes ?? 0}`}
+          detail="Critical local routes cached"
+          icon={WifiOff}
+          tone={offlineReadiness?.cachedCount === offlineReadiness?.totalCriticalRoutes ? 'success' : 'warning'}
+        />
+        <MetricCard
+          label="Vault Safety"
+          value={vaultHealth?.status || 'Checking'}
+          detail={`${vaultHealth?.totalRows ?? 0} local rows`}
+          icon={Database}
+          tone={
+            vaultHealth?.status === 'repair-needed'
+              ? 'danger'
+              : vaultHealth?.status === 'warning'
+                ? 'warning'
+                : 'success'
+          }
+        />
       </div>
 
       <Surface tone="vault" status={activeDriver === 'surrealdb' ? 'success' : undefined} className="ops-report-panel">
@@ -1291,11 +1407,21 @@ export default function SystemHealth() {
           <div style={{ flex: 1, minWidth: 0 }}>
             <StatusBadge tone="vault">Storage Backend</StatusBadge>
             <h3 className="qv-m-0 qv-mt-2">
-              <ServerCog size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
-              Active store: <span className="qv-mono">{activeDriver === 'surrealdb' ? 'SurrealDB (:8000)' : 'Dexie (IndexedDB)'}</span>
+              <ServerCog
+                size={18}
+                aria-hidden="true"
+                style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }}
+              />
+              Active store:{' '}
+              <span className="qv-mono">
+                {activeDriver === 'surrealdb' ? 'SurrealDB (:8000)' : 'Dexie (IndexedDB)'}
+              </span>
             </h3>
             <p className="qv-text-secondary qv-m-0">
-              StudyVault runs on the local Dexie/IndexedDB store by default. If the SurrealDB sidecar is running (Tauri shell, port 8000) you can cut over to it — settings, the FSRS review queue, attempt log, and mastery snapshots migrate automatically. Curriculum chunks rebuild on the next ingest. Roll back to Dexie any time; your IndexedDB data is never cleared.
+              StudyVault runs on the local Dexie/IndexedDB store by default. If the SurrealDB sidecar is running
+              (Electron app, port 8000) you can cut over to it — settings, the FSRS review queue, attempt log, and
+              mastery snapshots migrate automatically. Curriculum chunks rebuild on the next ingest. Roll back to Dexie
+              any time; your IndexedDB data is never cleared.
             </p>
             {driverPref === 'surrealdb' && activeDriver === 'dexie' && (
               <p className="qv-text-warning qv-m-0 qv-mt-2 qv-fs-sm">
@@ -1331,9 +1457,7 @@ export default function SystemHealth() {
                 {cutoverManifest.safe ? (
                   <span className="qv-text-success">Safe to migrate.</span>
                 ) : (
-                  <span className="qv-text-warning">
-                    Blocked: {cutoverManifest.blockers.join('; ')}.
-                  </span>
+                  <span className="qv-text-warning">Blocked: {cutoverManifest.blockers.join('; ')}.</span>
                 )}
               </div>
             )}
@@ -1367,19 +1491,22 @@ export default function SystemHealth() {
           <div style={{ flex: 1, minWidth: 0 }}>
             <StatusBadge tone="exam">LSAT Backend</StatusBadge>
             <h3 className="qv-m-0 qv-mt-2">
-              <ServerCog size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
+              <ServerCog
+                size={18}
+                aria-hidden="true"
+                style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }}
+              />
               LSAT sidecar{' '}
               <span className="qv-mono">
                 {lsatHealth == null ? '(checking…)' : lsatHealth.ok ? ':8100 · healthy' : ':8100 · offline'}
               </span>
             </h3>
             <p className="qv-text-secondary qv-m-0">
-              The LSAT domain is served by a local FastAPI sidecar (SQLite question bank, spaced repetition, AI explanations). It boots with the desktop shell; in browser dev, start it manually on port 8100.
+              The LSAT domain is served by a local FastAPI sidecar (SQLite question bank, spaced repetition, AI
+              explanations). It boots with the desktop shell; in browser dev, start it manually on port 8100.
             </p>
             {lsatHealth && (
-              <p
-                className={`qv-m-0 qv-mt-2 qv-fs-sm ${lsatHealth.ok ? 'qv-text-success' : 'qv-text-warning'}`}
-              >
+              <p className={`qv-m-0 qv-mt-2 qv-fs-sm ${lsatHealth.ok ? 'qv-text-success' : 'qv-text-warning'}`}>
                 {lsatHealth.detail}
                 {lsatHealth.ok && lsatHealth.latencyMs != null ? ` (${lsatHealth.latencyMs}ms)` : ''}
                 {lsatHealth.ai?.provider ? ` · provider: ${lsatHealth.ai.provider}` : ''}
@@ -1513,20 +1640,18 @@ export default function SystemHealth() {
           "desktop-app only" note rather than an empty list. */}
       <Surface
         tone="ops"
-        status={
-          sidecars == null
-            ? undefined
-            : sidecars.some((s) => !s.ready)
-              ? 'warning'
-              : 'success'
-        }
+        status={sidecars == null ? undefined : sidecars.some((s) => !s.ready) ? 'warning' : 'success'}
         className="ops-report-panel"
       >
         <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <StatusBadge tone="ops">Sidecars</StatusBadge>
             <h3 className="qv-m-0 qv-mt-2">
-              <Boxes size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
+              <Boxes
+                size={18}
+                aria-hidden="true"
+                style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }}
+              />
               Supervised local services{' '}
               <span className="qv-mono">
                 {sidecars == null
@@ -1542,17 +1667,13 @@ export default function SystemHealth() {
             {sidecars == null && (
               <p className="qv-m-0 qv-mt-2 qv-fs-sm qv-text-muted">
                 Sidecar supervision is a desktop-app feature — the native status/log commands are only available inside
-                the StudyVault desktop shell. In browser dev, start the sidecars manually and use each service&apos;s own
-                health card above.
+                the StudyVault desktop shell. In browser dev, start the sidecars manually and use each service&apos;s
+                own health card above.
               </p>
             )}
           </div>
           <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => refreshSidecars(true)}
-              disabled={sidecarsBusy}
-            >
+            <button className="btn btn-secondary btn-sm" onClick={() => refreshSidecars(true)} disabled={sidecarsBusy}>
               <RefreshCw size={14} style={{ marginRight: 'var(--space-1)' }} />
               {sidecarsBusy ? 'Refreshing…' : 'Re-check'}
             </button>
@@ -1569,7 +1690,10 @@ export default function SystemHealth() {
                   className="surface surface-default surface-compact"
                   style={{ padding: 'var(--space-3)' }}
                 >
-                  <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  <div
+                    className="flex-between"
+                    style={{ gap: 'var(--space-3)', alignItems: 'flex-start', flexWrap: 'wrap' }}
+                  >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="qv-row-2" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
                         <StatusBadge tone={sidecar.ready ? 'vault' : 'warning'}>
@@ -1577,7 +1701,11 @@ export default function SystemHealth() {
                         </StatusBadge>
                         <strong className="qv-fs-sm">{sidecar.name}</strong>
                         <span className="qv-fs-sm qv-text-muted qv-mono">
-                          <Network size={13} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 2 }} />
+                          <Network
+                            size={13}
+                            aria-hidden="true"
+                            style={{ verticalAlign: 'text-bottom', marginRight: 2 }}
+                          />
                           {port == null ? 'no socket' : `:${port}`}
                         </span>
                       </div>
@@ -1602,9 +1730,7 @@ export default function SystemHealth() {
                       {sidecarLogBusy ? (
                         <p className="qv-m-0 qv-fs-sm qv-text-muted">Loading log tail…</p>
                       ) : sidecarLogLines.length === 0 ? (
-                        <p className="qv-m-0 qv-fs-sm qv-text-muted">
-                          No output captured yet for this sidecar.
-                        </p>
+                        <p className="qv-m-0 qv-fs-sm qv-text-muted">No output captured yet for this sidecar.</p>
                       ) : (
                         <pre
                           aria-label={`${sidecar.name} log tail`}
@@ -1707,9 +1833,12 @@ export default function SystemHealth() {
           <div style={{ flex: 1, minWidth: 0 }}>
             <StatusBadge tone="exam">Performance</StatusBadge>
             <h3 className="qv-m-0 qv-mt-2">
-              <Gauge size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
-              Core Web Vitals{' '}
-              <span className="qv-mono">{webVitals.supported ? 'observing' : 'unavailable'}</span>
+              <Gauge
+                size={18}
+                aria-hidden="true"
+                style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }}
+              />
+              Core Web Vitals <span className="qv-mono">{webVitals.supported ? 'observing' : 'unavailable'}</span>
             </h3>
             <p className="qv-text-secondary qv-m-0">
               Render-quality metrics measured in-app with the browser&apos;s PerformanceObserver. Fully local — no
@@ -1744,26 +1873,24 @@ export default function SystemHealth() {
       {cloudBudget?.ok && cloudBudget.cloud && (
         <Surface
           tone="ops"
-          status={
-            cloudBudget.cloud.budget_usd != null && !cloudBudget.cloud.within_budget
-              ? 'warning'
-              : 'success'
-          }
+          status={cloudBudget.cloud.budget_usd != null && !cloudBudget.cloud.within_budget ? 'warning' : 'success'}
           className="ops-report-panel"
         >
           <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <StatusBadge tone="exam">Cloud Budget</StatusBadge>
               <h3 className="qv-m-0 qv-mt-2">
-                <CloudCog size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
+                <CloudCog
+                  size={18}
+                  aria-hidden="true"
+                  style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }}
+                />
                 Opt-in cloud spend{' '}
-                <span className="qv-mono">
-                  {cloudBudget.cloud.cloud_enabled ? 'enabled' : 'disabled (local-only)'}
-                </span>
+                <span className="qv-mono">{cloudBudget.cloud.cloud_enabled ? 'enabled' : 'disabled (local-only)'}</span>
               </h3>
               <p className="qv-text-secondary qv-m-0">
-                Realtime explanations and all score-affecting content run on local models. Only opt-in Tier-B
-                generation may use a cloud provider, and never past the monthly cap.
+                Realtime explanations and all score-affecting content run on local models. Only opt-in Tier-B generation
+                may use a cloud provider, and never past the monthly cap.
                 {cloudBudget.cloud.budget_usd == null
                   ? ' No monthly budget is set — cloud stays opt-in either way.'
                   : ''}
@@ -1775,8 +1902,8 @@ export default function SystemHealth() {
               )}
               {cloudBudget.cloud.next_call?.would_exceed_budget && cloudBudget.cloud.within_budget && (
                 <p className="qv-m-0 qv-mt-2 qv-fs-sm qv-text-warning">
-                  A typical next call ({cloudBudget.cloud.next_call.estimated_cost_usd.toFixed(4)} USD) would push
-                  spend past the cap — it would run locally instead.
+                  A typical next call ({cloudBudget.cloud.next_call.estimated_cost_usd.toFixed(4)} USD) would push spend
+                  past the cap — it would run locally instead.
                 </p>
               )}
             </div>
@@ -1796,11 +1923,15 @@ export default function SystemHealth() {
               <small>Spent this month</small>
             </div>
             <div>
-              <strong>{cloudBudget.cloud.budget_usd == null ? 'None' : `$${cloudBudget.cloud.budget_usd.toFixed(2)}`}</strong>
+              <strong>
+                {cloudBudget.cloud.budget_usd == null ? 'None' : `$${cloudBudget.cloud.budget_usd.toFixed(2)}`}
+              </strong>
               <small>Monthly budget</small>
             </div>
             <div>
-              <strong>{cloudBudget.cloud.remaining_usd == null ? '∞' : `$${cloudBudget.cloud.remaining_usd.toFixed(4)}`}</strong>
+              <strong>
+                {cloudBudget.cloud.remaining_usd == null ? '∞' : `$${cloudBudget.cloud.remaining_usd.toFixed(4)}`}
+              </strong>
               <small>Remaining</small>
             </div>
             <div>
@@ -1810,8 +1941,10 @@ export default function SystemHealth() {
           </div>
           {cloudBudget.cloud.next_call && (
             <p className="qv-m-0 qv-mt-3 qv-fs-sm qv-text-muted qv-mono">
-              dry-run priced on {cloudBudget.cloud.next_call.input_tokens} in · {cloudBudget.cloud.next_call.output_tokens} out
-              {' · '}${cloudBudget.cloud.pricing?.input_cost_per_mtok_usd}/Mtok in · ${cloudBudget.cloud.pricing?.output_cost_per_mtok_usd}/Mtok out
+              dry-run priced on {cloudBudget.cloud.next_call.input_tokens} in ·{' '}
+              {cloudBudget.cloud.next_call.output_tokens} out
+              {' · '}${cloudBudget.cloud.pricing?.input_cost_per_mtok_usd}/Mtok in · $
+              {cloudBudget.cloud.pricing?.output_cost_per_mtok_usd}/Mtok out
             </p>
           )}
         </Surface>
@@ -1830,14 +1963,14 @@ export default function SystemHealth() {
           <div style={{ flex: 1, minWidth: 0 }}>
             <StatusBadge tone="exam">Voice Input</StatusBadge>
             <h3 className="qv-m-0 qv-mt-2">
-              <Mic2 size={18} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }} />
+              <Mic2
+                size={18}
+                aria-hidden="true"
+                style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-1)' }}
+              />
               Offline Whisper model{' '}
               <span className="qv-mono">
-                {whisperBrowserCached === null
-                  ? '(checking…)'
-                  : whisperBrowserCached
-                    ? 'downloaded'
-                    : 'not downloaded'}
+                {whisperBrowserCached === null ? '(checking…)' : whisperBrowserCached ? 'downloaded' : 'not downloaded'}
               </span>
             </h3>
             <p className="qv-text-secondary qv-m-0">
@@ -1880,7 +2013,9 @@ export default function SystemHealth() {
                     }}
                   />
                 </div>
-                <p className="qv-m-0 qv-mt-1 qv-fs-sm qv-text-secondary">Downloading voice model… {whisperDownloadPct}%</p>
+                <p className="qv-m-0 qv-mt-1 qv-fs-sm qv-text-secondary">
+                  Downloading voice model… {whisperDownloadPct}%
+                </p>
               </div>
             )}
             {whisperDownloadState === 'error' && whisperError && (
@@ -1942,17 +2077,26 @@ export default function SystemHealth() {
         </Surface>
       )}
 
-      <Surface tone="vault" status={vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'} className="ops-report-panel">
+      <Surface
+        tone="vault"
+        status={
+          vaultHealth?.status === 'repair-needed' ? 'danger' : vaultHealth?.status === 'warning' ? 'warning' : 'success'
+        }
+        className="ops-report-panel"
+      >
         <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
           <div>
             <StatusBadge tone="vault">Vault Safety</StatusBadge>
             <h3>Local Vault Health</h3>
             <p className="qv-text-secondary">
-              Schema v{vaultHealth?.schemaVersion || '-'} · {vaultHealth?.schemaHash || 'checking'} · persistent storage {persisted === null ? 'unknown' : persisted ? 'granted' : 'not granted'}
+              Schema v{vaultHealth?.schemaVersion || '-'} · {vaultHealth?.schemaHash || 'checking'} · persistent storage{' '}
+              {persisted === null ? 'unknown' : persisted ? 'granted' : 'not granted'}
             </p>
           </div>
           <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
-            <button className="btn btn-secondary" onClick={handleRepairPreview}><Wrench size={16} /> Repair Preview</button>
+            <button className="btn btn-secondary" onClick={handleRepairPreview}>
+              <Wrench size={16} /> Repair Preview
+            </button>
             <button
               className="btn btn-secondary"
               onClick={handleRestoreLatestSnapshot}
@@ -1961,19 +2105,47 @@ export default function SystemHealth() {
             >
               <History size={16} /> Restore Snapshot
             </button>
-            <button className="btn btn-secondary" onClick={handlePersistStorage}>Persist Storage</button>
-            <button className="btn btn-secondary" onClick={handlePlaintextBackup}><Download size={16} /> Plaintext Export</button>
+            <button className="btn btn-secondary" onClick={handlePersistStorage}>
+              Persist Storage
+            </button>
+            <button className="btn btn-secondary" onClick={handlePlaintextBackup}>
+              <Download size={16} /> Plaintext Export
+            </button>
           </div>
         </div>
         <div className="coverage-grid" style={{ marginTop: 'var(--space-4)' }}>
-          <div><strong>{vaultHealth?.malformedRows ?? 0}</strong><small>Malformed rows</small></div>
-          <div><strong>{vaultHealth?.orphanedReviews ?? 0}</strong><small>Orphaned reviews</small></div>
-          <div><strong>{vaultHealth?.staleIndexes ?? 0}</strong><small>Stale indexes</small></div>
-          <div><strong>{vaultHealth?.checksumIssues ?? 0}</strong><small>Checksum issues</small></div>
-          <div><strong>{vaultHealth?.rollbackSnapshots?.length ?? 0}</strong><small>Rollback snapshots</small></div>
-          <div><strong>{vaultHealth?.importJobs?.length ?? 0}</strong><small>Recent import jobs</small></div>
-          <div><strong>{vaultHealth?.sourceBundleManifests?.length ?? 0}</strong><small>Source bundle manifests</small></div>
-          <div><strong>{vaultHealth?.calculatorScenarios?.length ?? 0}</strong><small>Calculator scenarios</small></div>
+          <div>
+            <strong>{vaultHealth?.malformedRows ?? 0}</strong>
+            <small>Malformed rows</small>
+          </div>
+          <div>
+            <strong>{vaultHealth?.orphanedReviews ?? 0}</strong>
+            <small>Orphaned reviews</small>
+          </div>
+          <div>
+            <strong>{vaultHealth?.staleIndexes ?? 0}</strong>
+            <small>Stale indexes</small>
+          </div>
+          <div>
+            <strong>{vaultHealth?.checksumIssues ?? 0}</strong>
+            <small>Checksum issues</small>
+          </div>
+          <div>
+            <strong>{vaultHealth?.rollbackSnapshots?.length ?? 0}</strong>
+            <small>Rollback snapshots</small>
+          </div>
+          <div>
+            <strong>{vaultHealth?.importJobs?.length ?? 0}</strong>
+            <small>Recent import jobs</small>
+          </div>
+          <div>
+            <strong>{vaultHealth?.sourceBundleManifests?.length ?? 0}</strong>
+            <small>Source bundle manifests</small>
+          </div>
+          <div>
+            <strong>{vaultHealth?.calculatorScenarios?.length ?? 0}</strong>
+            <small>Calculator scenarios</small>
+          </div>
           <div>
             <strong>
               {vaultHealth?.secureVault?.status
@@ -1993,16 +2165,20 @@ export default function SystemHealth() {
         </div>
         {vaultHealth?.secureVault && (
           <p className="qv-text-secondary qv-fs-sm" style={{ marginTop: 'var(--space-3)' }}>
-            Notes {vaultHealth.secureVault.rows.notes.encrypted}/{vaultHealth.secureVault.rows.notes.total} ·
-            artifacts {vaultHealth.secureVault.rows.resultArtifacts.encrypted}/{vaultHealth.secureVault.rows.resultArtifacts.total} ·
-            open-notebook settings {vaultHealth.secureVault.rows.openNotebookSettings.encrypted}/{vaultHealth.secureVault.rows.openNotebookSettings.total} ·
-            source chunks {vaultHealth.secureVault.rows.sourceChunks.encrypted}/{vaultHealth.secureVault.rows.sourceChunks.total}.{' '}
+            Notes {vaultHealth.secureVault.rows.notes.encrypted}/{vaultHealth.secureVault.rows.notes.total} · artifacts{' '}
+            {vaultHealth.secureVault.rows.resultArtifacts.encrypted}/
+            {vaultHealth.secureVault.rows.resultArtifacts.total} · open-notebook settings{' '}
+            {vaultHealth.secureVault.rows.openNotebookSettings.encrypted}/
+            {vaultHealth.secureVault.rows.openNotebookSettings.total} · source chunks{' '}
+            {vaultHealth.secureVault.rows.sourceChunks.encrypted}/{vaultHealth.secureVault.rows.sourceChunks.total}.{' '}
             Source-vault rows outside live Secure Vault scope: {vaultHealth.secureVault.outsideScopeRows.sourceVault}.
           </p>
         )}
         {vaultHealth?.repairActions?.length > 0 && (
           <ul className="qv-text-secondary" style={{ marginTop: 'var(--space-4)' }}>
-            {vaultHealth.repairActions.map((action) => <li key={action}>{action}</li>)}
+            {vaultHealth.repairActions.map((action) => (
+              <li key={action}>{action}</li>
+            ))}
           </ul>
         )}
       </Surface>
@@ -2012,9 +2188,10 @@ export default function SystemHealth() {
           <StatusBadge tone="vault">Encrypted Export</StatusBadge>
           <h3 style={{ margin: 'var(--space-2) 0 0' }}>AES-GCM-256 backup &amp; restore</h3>
           <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-            Locally encrypts your full vault export with a passphrase (PBKDF2-SHA256, 200,000 iterations → 256-bit AES-GCM key).
-            The downloaded <code className="qv-mono">.qvenc.json</code> is safe to keep alongside cloud sync — without the
-            passphrase it is unrecoverable. Importing accepts the same format and merges into your local vault.
+            Locally encrypts your full vault export with a passphrase (PBKDF2-SHA256, 200,000 iterations → 256-bit
+            AES-GCM key). The downloaded <code className="qv-mono">.qvenc.json</code> is safe to keep alongside cloud
+            sync — without the passphrase it is unrecoverable. Importing accepts the same format and merges into your
+            local vault.
           </p>
         </div>
         <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
@@ -2048,11 +2225,7 @@ export default function SystemHealth() {
             <button
               className="btn btn-primary"
               onClick={handleEncryptedExportV2}
-              disabled={
-                encryptedBusy ||
-                backupPassphrase.length < 8 ||
-                backupPassphrase !== backupPassphraseConfirm
-              }
+              disabled={encryptedBusy || backupPassphrase.length < 8 || backupPassphrase !== backupPassphraseConfirm}
               title={
                 backupPassphrase.length < 8
                   ? 'Passphrase must be at least 8 characters'
@@ -2069,11 +2242,16 @@ export default function SystemHealth() {
         <div className="qv-mb-2">
           <strong>Import Encrypted Backup</strong>
           <p className="qv-text-secondary qv-fs-sm qv-m-0">
-            Decrypts a <code className="qv-mono">.qvenc.json</code> file with its passphrase and merges the contained vault data.
+            Decrypts a <code className="qv-mono">.qvenc.json</code> file with its passphrase and merges the contained
+            vault data.
           </p>
         </div>
         <div className="grid-3" style={{ gap: 'var(--space-3)' }}>
-          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} aria-disabled={encryptedBusy}>
+          <label
+            className="btn btn-secondary btn-sm"
+            style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+            aria-disabled={encryptedBusy}
+          >
             <Upload size={14} style={{ marginRight: 'var(--space-1)' }} />
             {pendingEncryptedFile ? pendingEncryptedFile.name : 'Pick .qvenc.json'}
             <input
@@ -2117,10 +2295,10 @@ export default function SystemHealth() {
           <StatusBadge tone="vault">Unified Backup</StatusBadge>
           <h3 style={{ margin: 'var(--space-2) 0 0' }}>One file for the whole vault (host + LSAT)</h3>
           <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-            Bundles your host study vault (CFA / Quant / Excel) and the LSAT question bank into a single
-            checksummed envelope, encrypted by default as <code className="qv-mono">.qvenc.json</code>. Copyrighted
-            official LSAT content is never included (provenance firewall). Requires the LSAT backend to be running —
-            the host-only backups above keep working offline.
+            Bundles your host study vault (CFA / Quant / Excel) and the LSAT question bank into a single checksummed
+            envelope, encrypted by default as <code className="qv-mono">.qvenc.json</code>. Copyrighted official LSAT
+            content is never included (provenance firewall). Requires the LSAT backend to be running — the host-only
+            backups above keep working offline.
           </p>
         </div>
         <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
@@ -2154,11 +2332,7 @@ export default function SystemHealth() {
             <button
               className="btn btn-primary"
               onClick={handleUnifiedExport}
-              disabled={
-                unifiedBusy ||
-                unifiedPassphrase.length < 8 ||
-                unifiedPassphrase !== unifiedPassphraseConfirm
-              }
+              disabled={unifiedBusy || unifiedPassphrase.length < 8 || unifiedPassphrase !== unifiedPassphraseConfirm}
             >
               <KeyRound size={16} /> {unifiedBusy ? 'Working…' : 'Encrypted Unified Backup'}
             </button>
@@ -2216,34 +2390,34 @@ export default function SystemHealth() {
             <StatusBadge tone="exam">FSRS Tuning</StatusBadge>
             <h3 className="qv-m-0 qv-mt-2">Personalised spaced-repetition weights</h3>
             <p className="qv-text-secondary qv-m-0">
-              Fit FSRS parameters to your own review history. Searches a principled subset of weights via coordinate descent against the binary-cross-entropy of your past predictions. Requires at least 50 historical reviews. Reverts to FSRS-4.5 library defaults with one click.
+              Fit FSRS parameters to your own review history. Searches a principled subset of weights via coordinate
+              descent against the binary-cross-entropy of your past predictions. Requires at least 50 historical
+              reviews. Reverts to FSRS-4.5 library defaults with one click.
             </p>
             {fsrsCustom && (
               <p className="qv-text-success qv-m-0 qv-mt-2 qv-fs-sm">
                 <strong>Active:</strong> request_retention ={' '}
                 <span className="qv-mono">{fsrsCustom.request_retention.toFixed(3)}</span>, fit on{' '}
-                {new Date(fsrsCustom.fittedAt).toLocaleDateString()} from{' '}
-                {fsrsCustom.reviewCount} reviews · improvement{' '}
+                {new Date(fsrsCustom.fittedAt).toLocaleDateString()} from {fsrsCustom.reviewCount} reviews · improvement{' '}
                 {(fsrsCustom.improvement * 100).toFixed(1)}%
               </p>
             )}
             {fsrsFit?.ok && (
               <div className="qv-mt-2 qv-fs-sm qv-text-secondary">
                 <div>
-                  Original log-loss <span className="qv-mono">{fsrsFit.originalLoss.toFixed(3)}</span>{' '}
-                  → fitted <span className="qv-mono">{fsrsFit.optimizedLoss.toFixed(3)}</span>{' '}
-                  · <span className="qv-text-success">{(fsrsFit.improvement * 100).toFixed(1)}% improvement</span>
+                  Original log-loss <span className="qv-mono">{fsrsFit.originalLoss.toFixed(3)}</span> → fitted{' '}
+                  <span className="qv-mono">{fsrsFit.optimizedLoss.toFixed(3)}</span> ·{' '}
+                  <span className="qv-text-success">{(fsrsFit.improvement * 100).toFixed(1)}% improvement</span>
                 </div>
                 <div>
-                  request_retention <span className="qv-mono">{fsrsFit.originalParameters.request_retention.toFixed(3)}</span>{' '}
-                  → <span className="qv-mono">{fsrsFit.optimizedParameters.request_retention.toFixed(3)}</span>{' '}
-                  · {fsrsFit.cardCount} cards · {fsrsFit.iterations} evaluations
+                  request_retention{' '}
+                  <span className="qv-mono">{fsrsFit.originalParameters.request_retention.toFixed(3)}</span> →{' '}
+                  <span className="qv-mono">{fsrsFit.optimizedParameters.request_retention.toFixed(3)}</span> ·{' '}
+                  {fsrsFit.cardCount} cards · {fsrsFit.iterations} evaluations
                 </div>
               </div>
             )}
-            {fsrsError && (
-              <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{fsrsError}</p>
-            )}
+            {fsrsError && <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{fsrsError}</p>}
           </div>
           <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
             <button className="btn btn-secondary btn-sm" onClick={handleFsrsFit} disabled={fsrsBusy}>
@@ -2269,21 +2443,36 @@ export default function SystemHealth() {
             <StatusBadge tone="exam">Item Psychometrics</StatusBadge>
             <h3 className="qv-m-0 qv-mt-2">IRT-lite item calibration</h3>
             <p className="qv-text-secondary qv-m-0">
-              Per-item difficulty + point-biserial discrimination across your history. Surfaces too-easy, too-hard, and low-discrimination items so you can retire or revise them. All compute is local.
+              Per-item difficulty + point-biserial discrimination across your history. Surfaces too-easy, too-hard, and
+              low-discrimination items so you can retire or revise them. All compute is local.
             </p>
             {psychReport && (
               <>
                 <div className="qv-row-2 qv-mt-2" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-                  <span className="qv-chip" title="Total attempts">{psychReport.totalAttempts} attempts</span>
-                  <span className="qv-chip" title="Total items">{psychReport.totalItems} items</span>
-                  <span className="qv-chip qv-text-danger" title="Items flagged too hard">⚠️ too-hard: {psychReport.itemsByFlag['too-hard']}</span>
-                  <span className="qv-chip qv-text-warning" title="Items flagged too easy">↑ too-easy: {psychReport.itemsByFlag['too-easy']}</span>
-                  <span className="qv-chip qv-text-secondary" title="Items with low discrimination">↧ low-disc: {psychReport.itemsByFlag['low-discrimination']}</span>
-                  <span className="qv-chip qv-text-success" title="Items passing all checks">✓ ok: {psychReport.itemsByFlag['ok']}</span>
+                  <span className="qv-chip" title="Total attempts">
+                    {psychReport.totalAttempts} attempts
+                  </span>
+                  <span className="qv-chip" title="Total items">
+                    {psychReport.totalItems} items
+                  </span>
+                  <span className="qv-chip qv-text-danger" title="Items flagged too hard">
+                    ⚠️ too-hard: {psychReport.itemsByFlag['too-hard']}
+                  </span>
+                  <span className="qv-chip qv-text-warning" title="Items flagged too easy">
+                    ↑ too-easy: {psychReport.itemsByFlag['too-easy']}
+                  </span>
+                  <span className="qv-chip qv-text-secondary" title="Items with low discrimination">
+                    ↧ low-disc: {psychReport.itemsByFlag['low-discrimination']}
+                  </span>
+                  <span className="qv-chip qv-text-success" title="Items passing all checks">
+                    ✓ ok: {psychReport.itemsByFlag['ok']}
+                  </span>
                 </div>
                 {psychReport.items.length > 0 && (
                   <details className="qv-mt-2 qv-fs-sm">
-                    <summary className="qv-text-secondary" style={{ cursor: 'pointer' }}>Show top 10 flagged items</summary>
+                    <summary className="qv-text-secondary" style={{ cursor: 'pointer' }}>
+                      Show top 10 flagged items
+                    </summary>
                     <table className="qv-mt-2 qv-fs-xs" style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr className="qv-text-muted">
@@ -2296,16 +2485,27 @@ export default function SystemHealth() {
                         </tr>
                       </thead>
                       <tbody>
-                        {psychReport.items.filter((it) => it.flag !== 'ok' && it.flag !== 'insufficient-data').slice(0, 10).map((it) => (
-                          <tr key={`${it.domain}-${it.questionId}`}>
-                            <td className="qv-mono" style={{ padding: 'var(--space-1)' }}>{it.questionId}</td>
-                            <td style={{ padding: 'var(--space-1)' }}>{it.topic}</td>
-                            <td className="qv-mono" style={{ padding: 'var(--space-1)', textAlign: 'right' }}>{it.attempts}</td>
-                            <td className="qv-mono" style={{ padding: 'var(--space-1)', textAlign: 'right' }}>{(it.accuracy * 100).toFixed(0)}%</td>
-                            <td className="qv-mono" style={{ padding: 'var(--space-1)', textAlign: 'right' }}>{it.discrimination.toFixed(2)}</td>
-                            <td style={{ padding: 'var(--space-1)' }}>{it.flag}</td>
-                          </tr>
-                        ))}
+                        {psychReport.items
+                          .filter((it) => it.flag !== 'ok' && it.flag !== 'insufficient-data')
+                          .slice(0, 10)
+                          .map((it) => (
+                            <tr key={`${it.domain}-${it.questionId}`}>
+                              <td className="qv-mono" style={{ padding: 'var(--space-1)' }}>
+                                {it.questionId}
+                              </td>
+                              <td style={{ padding: 'var(--space-1)' }}>{it.topic}</td>
+                              <td className="qv-mono" style={{ padding: 'var(--space-1)', textAlign: 'right' }}>
+                                {it.attempts}
+                              </td>
+                              <td className="qv-mono" style={{ padding: 'var(--space-1)', textAlign: 'right' }}>
+                                {(it.accuracy * 100).toFixed(0)}%
+                              </td>
+                              <td className="qv-mono" style={{ padding: 'var(--space-1)', textAlign: 'right' }}>
+                                {it.discrimination.toFixed(2)}
+                              </td>
+                              <td style={{ padding: 'var(--space-1)' }}>{it.flag}</td>
+                            </tr>
+                          ))}
                       </tbody>
                     </table>
                   </details>
@@ -2315,9 +2515,7 @@ export default function SystemHealth() {
                 </p>
               </>
             )}
-            {psychError && (
-              <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{psychError}</p>
-            )}
+            {psychError && <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{psychError}</p>}
           </div>
           <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
             <button className="btn btn-secondary btn-sm" onClick={handlePsychCompute} disabled={psychBusy}>
@@ -2338,18 +2536,31 @@ export default function SystemHealth() {
             <StatusBadge tone="exam">Auto-generated material</StatusBadge>
             <h3 className="qv-m-0 qv-mt-2">Targeted AI material queue</h3>
             <p className="qv-text-secondary qv-m-0">
-              Generate practice questions, flashcards, and topic summaries on-device for every weak topic. Each job is grounded in your ingested curriculum and saved to the same cache slots the rest of the app reads from.
+              Generate practice questions, flashcards, and topic summaries on-device for every weak topic. Each job is
+              grounded in your ingested curriculum and saved to the same cache slots the rest of the app reads from.
             </p>
             {targetedQueue.length > 0 && (
               <div className="qv-mt-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
                 {targetedQueue.map((job) => {
                   const tone =
-                    job.status === 'done' ? 'qv-text-success'
-                      : job.status === 'error' ? 'qv-text-danger'
-                      : job.status === 'running' ? 'qv-text-warning'
-                      : 'qv-text-secondary';
+                    job.status === 'done'
+                      ? 'qv-text-success'
+                      : job.status === 'error'
+                        ? 'qv-text-danger'
+                        : job.status === 'running'
+                          ? 'qv-text-warning'
+                          : 'qv-text-secondary';
                   return (
-                    <div key={job.id} className="qv-fs-sm" style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', alignItems: 'baseline' }}>
+                    <div
+                      key={job.id}
+                      className="qv-fs-sm"
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 'var(--space-2)',
+                        alignItems: 'baseline',
+                      }}
+                    >
                       <span>
                         <span className="qv-fw-semibold">{job.title}</span>
                         <span className="qv-text-muted"> · {job.kind}</span>
@@ -2361,9 +2572,7 @@ export default function SystemHealth() {
                 })}
               </div>
             )}
-            {targetedError && (
-              <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{targetedError}</p>
-            )}
+            {targetedError && <p className="qv-text-danger qv-m-0 qv-mt-2 qv-fs-sm">{targetedError}</p>}
           </div>
           <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
             <button className="btn btn-secondary btn-sm" onClick={handleTargetedGenerate} disabled={targetedBusy}>
@@ -2391,7 +2600,8 @@ export default function SystemHealth() {
             <StatusBadge tone="exam">Browser Reminders</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>Native review reminders</h3>
             <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-              Grant permission once and StudyVault will surface a desktop notification when you have reviews due. No network — fires from the local service worker.
+              Grant permission once and StudyVault will surface a desktop notification when you have reviews due. No
+              network — fires from the local service worker.
             </p>
           </div>
           <button
@@ -2405,14 +2615,18 @@ export default function SystemHealth() {
               if (Notification.permission === 'granted') return;
               const perm = await Notification.requestPermission();
               if (perm === 'granted') {
-                new Notification('StudyVault', { body: 'Reminders enabled — you will be pinged when reviews are due.' });
+                new Notification('StudyVault', {
+                  body: 'Reminders enabled — you will be pinged when reviews are due.',
+                });
                 toast.success('Reminders enabled', 'You will be notified when reviews are due.');
               } else {
                 toast.warning('Reminder declined', 'You can grant permission later from this same button.');
               }
             }}
           >
-            {typeof Notification !== 'undefined' && Notification.permission === 'granted' ? 'Enabled' : 'Enable reminders'}
+            {typeof Notification !== 'undefined' && Notification.permission === 'granted'
+              ? 'Enabled'
+              : 'Enable reminders'}
           </button>
         </div>
       </Surface>
@@ -2434,18 +2648,24 @@ export default function SystemHealth() {
               onChange={(event) => setExamDate(event.target.value)}
               aria-label="Target CFA exam date"
             />
-            <button className="btn btn-primary btn-sm" onClick={handleSaveExamDate}>Save</button>
+            <button className="btn btn-primary btn-sm" onClick={handleSaveExamDate}>
+              Save
+            </button>
           </div>
         </div>
       </Surface>
 
       <Surface tone="ops" className="ops-report-panel">
-        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+        <div
+          className="flex-between"
+          style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}
+        >
           <div>
             <StatusBadge tone="accent">Local AI</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>On-device generation (Ollama / LM Studio)</h3>
             <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-              Point StudyVault at a local OpenAI-compatible model server. Fully offline — no cloud, no API key. Powers practice generated from your ingested curriculum.
+              Point StudyVault at a local OpenAI-compatible model server. Fully offline — no cloud, no API key. Powers
+              practice generated from your ingested curriculum.
             </p>
           </div>
         </div>
@@ -2454,7 +2674,13 @@ export default function SystemHealth() {
             <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
               <label className="qv-stack-1">
                 <span className="qv-fs-xs qv-text-muted">Base URL</span>
-                <input className="input" value={llm.baseUrl} onChange={(event) => setLlm({ ...llm, baseUrl: event.target.value })} placeholder="http://localhost:11434/v1" aria-label="Local model base URL" />
+                <input
+                  className="input"
+                  value={llm.baseUrl}
+                  onChange={(event) => setLlm({ ...llm, baseUrl: event.target.value })}
+                  placeholder="http://localhost:11434/v1"
+                  aria-label="Local model base URL"
+                />
               </label>
               <label className="qv-stack-1">
                 <span className="qv-fs-xs qv-text-muted">Model</span>
@@ -2475,20 +2701,40 @@ export default function SystemHealth() {
                     ))}
                   </select>
                 ) : (
-                  <input className="input" value={llm.model} onChange={(event) => setLlm({ ...llm, model: event.target.value })} placeholder="llama3.1" aria-label="Local model name" />
+                  <input
+                    className="input"
+                    value={llm.model}
+                    onChange={(event) => setLlm({ ...llm, model: event.target.value })}
+                    placeholder="llama3.1"
+                    aria-label="Local model name"
+                  />
                 )}
               </label>
               <label className="qv-row-2" style={{ marginTop: 'var(--space-5)' }}>
-                <input type="checkbox" checked={llm.enabled} onChange={(event) => setLlm({ ...llm, enabled: event.target.checked })} />
+                <input
+                  type="checkbox"
+                  checked={llm.enabled}
+                  onChange={(event) => setLlm({ ...llm, enabled: event.target.checked })}
+                />
                 <span>Enable AI generation</span>
               </label>
             </div>
             <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
               {LLM_PRESETS.map((preset) => (
-                <button key={preset.label} className="btn btn-secondary btn-sm" onClick={() => setLlm({ ...llm, baseUrl: preset.baseUrl })}>{preset.label}</button>
+                <button
+                  key={preset.label}
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setLlm({ ...llm, baseUrl: preset.baseUrl })}
+                >
+                  {preset.label}
+                </button>
               ))}
-              <button className="btn btn-primary" onClick={handleSaveLlm}>Save</button>
-              <button className="btn btn-secondary" onClick={handleTestLlm} disabled={llmTesting}>{llmTesting ? 'Testing…' : 'Test Connection'}</button>
+              <button className="btn btn-primary" onClick={handleSaveLlm}>
+                Save
+              </button>
+              <button className="btn btn-secondary" onClick={handleTestLlm} disabled={llmTesting}>
+                {llmTesting ? 'Testing…' : 'Test Connection'}
+              </button>
               {llmStatus && (
                 <StatusBadge tone={llmStatus.ok ? 'success' : 'danger'}>
                   {llmStatus.ok ? `Connected · ${llmStatus.models.length} model(s)` : `Offline · ${llmStatus.error}`}
@@ -2509,10 +2755,9 @@ export default function SystemHealth() {
           <StatusBadge tone="accent">Local AI</StatusBadge>
           <h3 style={{ margin: 'var(--space-2) 0 0' }}>Figure understanding (vision)</h3>
           <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-            Drop a curriculum chart or diagram (PNG, JPEG, or WebP) and the locally loaded
-            multimodal model will describe it in exam terms. Requires a vision-capable model
-            loaded in LM Studio or Ollama — e.g. Gemma 4 E4B (Gemma 3+ accepts image inputs).
-            Falls back to a clear error if the loaded model is text-only.
+            Drop a curriculum chart or diagram (PNG, JPEG, or WebP) and the locally loaded multimodal model will
+            describe it in exam terms. Requires a vision-capable model loaded in LM Studio or Ollama — e.g. Gemma 4 E4B
+            (Gemma 3+ accepts image inputs). Falls back to a clear error if the loaded model is text-only.
           </p>
         </div>
         <FigureExplainer topicTitle="Curriculum figure" />
@@ -2523,9 +2768,9 @@ export default function SystemHealth() {
           <StatusBadge tone="accent">Hybrid Search</StatusBadge>
           <h3 style={{ margin: 'var(--space-2) 0 0' }}>Hybrid curriculum search</h3>
           <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-            Search every imported curriculum chunk with a BM25-style lexical scorer
-            (and cosine vector similarity, when embeddings are present). Routes through
-            the active storage driver — Dexie today, SurrealDB when the sidecar is up.
+            Search every imported curriculum chunk with a BM25-style lexical scorer (and cosine vector similarity, when
+            embeddings are present). Routes through the active storage driver — Dexie today, SurrealDB when the sidecar
+            is up.
           </p>
         </div>
         <div className="qv-row-2" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2545,11 +2790,15 @@ export default function SystemHealth() {
             {chunkBusy ? 'Searching…' : 'Search'}
           </button>
           {chunkHits.length > 0 && (
-            <StatusBadge tone="accent">{chunkHits.length} hit{chunkHits.length === 1 ? '' : 's'}</StatusBadge>
+            <StatusBadge tone="accent">
+              {chunkHits.length} hit{chunkHits.length === 1 ? '' : 's'}
+            </StatusBadge>
           )}
         </div>
         {chunkError && (
-          <p className="qv-mt-2" style={{ color: 'var(--danger)' }}>{chunkError}</p>
+          <p className="qv-mt-2" style={{ color: 'var(--danger)' }}>
+            {chunkError}
+          </p>
         )}
         {chunkHits.length > 0 && (
           <ol className="qv-stack-2 qv-mt-3" style={{ listStyle: 'decimal inside', padding: 0 }}>
@@ -2586,12 +2835,17 @@ export default function SystemHealth() {
       </Surface>
 
       <Surface tone="ops" className="ops-report-panel">
-        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+        <div
+          className="flex-between"
+          style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}
+        >
           <div>
             <StatusBadge tone="accent">Embedded Notebook</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>Grounded RAG over your curriculum (open-notebook)</h3>
             <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-              StudyVault embeds open-notebook as a local sidecar (FastAPI + SurrealDB + job worker). It builds per-topic notebooks from your ingested CFA volumes and answers questions with cited, source-grounded synthesis. Fully offline.
+              StudyVault embeds open-notebook as a local sidecar (FastAPI + SurrealDB + job worker). It builds per-topic
+              notebooks from your ingested CFA volumes and answers questions with cited, source-grounded synthesis.
+              Fully offline.
             </p>
           </div>
         </div>
@@ -2600,19 +2854,35 @@ export default function SystemHealth() {
             <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
               <label className="qv-stack-1">
                 <span className="qv-fs-xs qv-text-muted">Backend URL</span>
-                <input className="input" value={onb.baseUrl} onChange={(event) => setOnb({ ...onb, baseUrl: event.target.value })} placeholder="http://localhost:5055" aria-label="Open-notebook backend URL" />
+                <input
+                  className="input"
+                  value={onb.baseUrl}
+                  onChange={(event) => setOnb({ ...onb, baseUrl: event.target.value })}
+                  placeholder="http://localhost:5055"
+                  aria-label="Open-notebook backend URL"
+                />
               </label>
               <label className="qv-row-2" style={{ marginTop: 'var(--space-5)' }}>
-                <input type="checkbox" checked={onb.enabled} onChange={(event) => setOnb({ ...onb, enabled: event.target.checked })} />
+                <input
+                  type="checkbox"
+                  checked={onb.enabled}
+                  onChange={(event) => setOnb({ ...onb, enabled: event.target.checked })}
+                />
                 <span>Enable grounded RAG</span>
               </label>
             </div>
             <div className="qv-row-2" style={{ flexWrap: 'wrap' }}>
-              <button className="btn btn-primary" onClick={handleSaveOnb}>Save</button>
-              <button className="btn btn-secondary" onClick={handleTestOnb} disabled={onbTesting}>{onbTesting ? 'Testing…' : 'Test Connection'}</button>
+              <button className="btn btn-primary" onClick={handleSaveOnb}>
+                Save
+              </button>
+              <button className="btn btn-secondary" onClick={handleTestOnb} disabled={onbTesting}>
+                {onbTesting ? 'Testing…' : 'Test Connection'}
+              </button>
               {onbStatus && (
                 <StatusBadge tone={onbStatus.ok ? 'success' : 'danger'}>
-                  {onbStatus.ok ? `Connected · ${onbStatus.models?.length ?? 0} model(s)` : `Offline · ${onbStatus.error}`}
+                  {onbStatus.ok
+                    ? `Connected · ${onbStatus.models?.length ?? 0} model(s)`
+                    : `Offline · ${onbStatus.error}`}
                 </StatusBadge>
               )}
             </div>
@@ -2627,12 +2897,16 @@ export default function SystemHealth() {
 
       {onb?.enabled && (
         <Surface tone="ops" className="ops-report-panel">
-          <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+          <div
+            className="flex-between"
+            style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}
+          >
             <div>
               <StatusBadge tone="accent">Notebook Backend</StatusBadge>
               <h3 style={{ margin: 'var(--space-2) 0 0' }}>Embedded open-notebook notebooks ({onbNotebooks.length})</h3>
               <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-                Notebooks the backend currently holds. Deleting one removes its sources, insights, and chat sessions from the embedded SurrealDB; StudyVault re-creates per-topic notebooks on demand when asks resume.
+                Notebooks the backend currently holds. Deleting one removes its sources, insights, and chat sessions
+                from the embedded SurrealDB; StudyVault re-creates per-topic notebooks on demand when asks resume.
               </p>
             </div>
             <button className="btn btn-secondary btn-sm" onClick={refreshOnbNotebooks} disabled={onbNotebooksBusy}>
@@ -2641,7 +2915,9 @@ export default function SystemHealth() {
           </div>
           {onbNotebooks.length === 0 ? (
             <p className="muted-copy qv-m-0">
-              {onbNotebooksBusy ? 'Loading…' : 'No notebooks yet on the backend. Ask a question on any CFA topic to create one.'}
+              {onbNotebooksBusy
+                ? 'Loading…'
+                : 'No notebooks yet on the backend. Ask a question on any CFA topic to create one.'}
             </p>
           ) : (
             <div className="qv-stack-2">
@@ -2658,7 +2934,11 @@ export default function SystemHealth() {
                   }}
                 >
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{notebook.name || notebook.id}</strong>
+                    <strong
+                      style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      {notebook.name || notebook.id}
+                    </strong>
                     <small className="muted-copy">
                       {notebook.source_count ?? 0} source(s) · {notebook.note_count ?? 0} note(s)
                       {notebook.description ? ` · ${notebook.description}` : ''}
@@ -2675,9 +2955,7 @@ export default function SystemHealth() {
                 </div>
               ))}
               {onbNotebooks.length > 20 && (
-                <p className="muted-copy qv-m-0">
-                  Showing 20 of {onbNotebooks.length} notebooks.
-                </p>
+                <p className="muted-copy qv-m-0">Showing 20 of {onbNotebooks.length} notebooks.</p>
               )}
             </div>
           )}
@@ -2686,12 +2964,17 @@ export default function SystemHealth() {
 
       {desktopAvailable && (
         <Surface tone="ops" className="ops-report-panel">
-          <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+          <div
+            className="flex-between"
+            style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}
+          >
             <div>
               <StatusBadge tone="success">Desktop Shell</StatusBadge>
               <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingest a local CFA folder</h3>
               <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-                Point StudyVault at a folder of CFA curriculum PDFs on disk; the native shell will walk it, extract text, chunk by page, classify by topic, and store in your local source vault. Duplicates (by SHA-256) are skipped automatically. You can also drag-drop PDFs directly onto this window.
+                Point StudyVault at a folder of CFA curriculum PDFs on disk; the native shell will walk it, extract
+                text, chunk by page, classify by topic, and store in your local source vault. Duplicates (by SHA-256)
+                are skipped automatically. You can also drag-drop PDFs directly onto this window.
               </p>
             </div>
             <div className="qv-row-2" style={{ flexShrink: 0 }}>
@@ -2700,10 +2983,16 @@ export default function SystemHealth() {
                 onClick={handleIngestFolder}
                 disabled={ingestState === 'picking' || ingestState === 'running'}
               >
-                {ingestState === 'picking' ? 'Waiting on picker…' : ingestState === 'running' ? 'Ingesting…' : 'Pick folder…'}
+                {ingestState === 'picking'
+                  ? 'Waiting on picker…'
+                  : ingestState === 'running'
+                    ? 'Ingesting…'
+                    : 'Pick folder…'}
               </button>
               {ingestState === 'running' && (
-                <button className="btn btn-secondary" onClick={handleCancelIngest}>Cancel</button>
+                <button className="btn btn-secondary" onClick={handleCancelIngest}>
+                  Cancel
+                </button>
               )}
             </div>
           </div>
@@ -2737,12 +3026,17 @@ export default function SystemHealth() {
       )}
 
       <Surface tone="ops" className="ops-report-panel">
-        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+        <div
+          className="flex-between"
+          style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}
+        >
           <div>
             <StatusBadge tone="accent">App Caches</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>App caches</h3>
             <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-              Rows written to the settings store by AI-practice, generative mocks, and grounded Q&amp;A. Clearing a bucket removes generated content but not persistent settings (LLM config, open-notebook config, onboarding).
+              Rows written to the settings store by AI-practice, generative mocks, and grounded Q&amp;A. Clearing a
+              bucket removes generated content but not persistent settings (LLM config, open-notebook config,
+              onboarding).
             </p>
           </div>
           <div className="qv-row-2" style={{ flexShrink: 0 }}>
@@ -2773,7 +3067,11 @@ export default function SystemHealth() {
               { id: 'ai-questions', label: 'AI-practice generated questions', prefix: 'ai-questions:*' },
               { id: 'generated-mock', label: 'Saved generative mock exams', prefix: 'generated-mock:*' },
               { id: 'open-notebook:answer', label: 'Grounded Q&A per topic', prefix: 'open-notebook:answer:*' },
-              { id: 'open-notebook:topic-notebooks', label: 'Topic-notebook map', prefix: 'open-notebook:topic-notebooks' },
+              {
+                id: 'open-notebook:topic-notebooks',
+                label: 'Topic-notebook map',
+                prefix: 'open-notebook:topic-notebooks',
+              },
               { id: 'other', label: 'Other (cfa-* and unknown keys)', prefix: '' },
             ].map(({ id, label, prefix }) => (
               <div
@@ -2789,8 +3087,14 @@ export default function SystemHealth() {
               >
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <strong>{label}</strong>
-                  {prefix && <small className="muted-copy" style={{ marginLeft: 'var(--space-2)' }}>{prefix}</small>}
-                  <small className="muted-copy" style={{ display: 'block' }}>{cacheBuckets[id] ?? 0} row(s)</small>
+                  {prefix && (
+                    <small className="muted-copy" style={{ marginLeft: 'var(--space-2)' }}>
+                      {prefix}
+                    </small>
+                  )}
+                  <small className="muted-copy" style={{ display: 'block' }}>
+                    {cacheBuckets[id] ?? 0} row(s)
+                  </small>
                 </div>
                 <button
                   className="btn btn-secondary btn-sm"
@@ -2807,16 +3111,24 @@ export default function SystemHealth() {
       </Surface>
 
       <Surface tone="ops" className="ops-report-panel">
-        <div className="flex-between" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}>
+        <div
+          className="flex-between"
+          style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)', alignItems: 'flex-start' }}
+        >
           <div>
             <StatusBadge tone="accent">Source Vault</StatusBadge>
             <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingested source documents ({sourceDocs.length})</h3>
             <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-              Everything in your local vault — bundled `.qvsource` imports plus desktop folder ingestion. Deletes are scoped (the document and its chunks only) and irreversible.
+              Everything in your local vault — bundled `.qvsource` imports plus desktop folder ingestion. Deletes are
+              scoped (the document and its chunks only) and irreversible.
             </p>
           </div>
           <div className="qv-row-2" style={{ flexShrink: 0 }}>
-            <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }} aria-disabled={sourceDocsBusy}>
+            <label
+              className="btn btn-secondary btn-sm"
+              style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+              aria-disabled={sourceDocsBusy}
+            >
               Import .qvsource
               <input
                 type="file"
@@ -2830,7 +3142,11 @@ export default function SystemHealth() {
                 disabled={sourceDocsBusy}
               />
             </label>
-            <button className="btn btn-secondary btn-sm" onClick={handleExportSourceBundle} disabled={sourceDocsBusy || sourceDocs.length === 0}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleExportSourceBundle}
+              disabled={sourceDocsBusy || sourceDocs.length === 0}
+            >
               Export .qvsource
             </button>
             <button className="btn btn-secondary btn-sm" onClick={refreshSourceDocs} disabled={sourceDocsBusy}>
@@ -2840,7 +3156,8 @@ export default function SystemHealth() {
         </div>
         {sourceDocs.length === 0 ? (
           <p className="muted-copy qv-m-0">
-            No ingested documents yet. Import a `.qvsource` bundle or ingest a CFA folder from the desktop shell to populate the vault.
+            No ingested documents yet. Import a `.qvsource` bundle or ingest a CFA folder from the desktop shell to
+            populate the vault.
           </p>
         ) : (
           <div className="qv-stack-2">
@@ -2857,9 +3174,14 @@ export default function SystemHealth() {
                 }}
               >
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title || doc.id}</strong>
+                  <strong
+                    style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    {doc.title || doc.id}
+                  </strong>
                   <small className="muted-copy">
-                    {doc.level} · {doc.sourceKind} · {doc.publisher || '—'} · {doc.chunkCount ?? 0} chunks · {doc.format || 'unknown'}
+                    {doc.level} · {doc.sourceKind} · {doc.publisher || '—'} · {doc.chunkCount ?? 0} chunks ·{' '}
+                    {doc.format || 'unknown'}
                     {doc.topicIds?.length ? ` · ${doc.topicIds.slice(0, 4).join(', ')}` : ''}
                   </small>
                 </div>
@@ -2874,9 +3196,7 @@ export default function SystemHealth() {
               </div>
             ))}
             {sourceDocs.length > 12 && (
-              <p className="muted-copy qv-m-0">
-                Showing 12 of {sourceDocs.length} documents.
-              </p>
+              <p className="muted-copy qv-m-0">Showing 12 of {sourceDocs.length} documents.</p>
             )}
           </div>
         )}
@@ -2887,17 +3207,28 @@ export default function SystemHealth() {
           <StatusBadge tone="accent">Paste a source</StatusBadge>
           <h3 style={{ margin: 'var(--space-2) 0 0' }}>Ingest free text directly into the vault</h3>
           <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-            For lecture notes, blog excerpts, or any non-PDF material you want to use in grounded answers. Same chunker/dedupe path as PDF ingestion; SHA-256 of the text serves as the document id.
+            For lecture notes, blog excerpts, or any non-PDF material you want to use in grounded answers. Same
+            chunker/dedupe path as PDF ingestion; SHA-256 of the text serves as the document id.
           </p>
         </div>
         <div className="grid-3" style={{ gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
           <label className="qv-stack-1">
             <span className="qv-fs-xs qv-text-muted">Title</span>
-            <input className="input" value={pasteTitle} onChange={(event) => setPasteTitle(event.target.value)} placeholder="e.g. Fixed Income lecture notes" />
+            <input
+              className="input"
+              value={pasteTitle}
+              onChange={(event) => setPasteTitle(event.target.value)}
+              placeholder="e.g. Fixed Income lecture notes"
+            />
           </label>
           <label className="qv-stack-1">
             <span className="qv-fs-xs qv-text-muted">Topic id (optional)</span>
-            <input className="input" value={pasteTopic} onChange={(event) => setPasteTopic(event.target.value)} placeholder="e.g. fixed-income" />
+            <input
+              className="input"
+              value={pasteTopic}
+              onChange={(event) => setPasteTopic(event.target.value)}
+              placeholder="e.g. fixed-income"
+            />
           </label>
         </div>
         <textarea
@@ -2910,7 +3241,11 @@ export default function SystemHealth() {
         />
         <div className="flex-between" style={{ gap: 'var(--space-2)', alignItems: 'center' }}>
           <small className="muted-copy">{pasteText.length.toLocaleString()} character(s)</small>
-          <button className="btn btn-primary" onClick={handleIngestPastedText} disabled={pasteBusy || !pasteText.trim()}>
+          <button
+            className="btn btn-primary"
+            onClick={handleIngestPastedText}
+            disabled={pasteBusy || !pasteText.trim()}
+          >
             {pasteBusy ? 'Ingesting…' : 'Ingest paste'}
           </button>
         </div>
@@ -2922,17 +3257,22 @@ export default function SystemHealth() {
           <div>
             <h3 style={{ marginTop: 0 }}>Offline Readiness</h3>
             <p className="qv-text-secondary" style={{ marginBottom: 0 }}>
-              {offlineReadiness?.cacheName || 'quantvault-offline-content'} · {offlineReadiness?.cachedCount ?? 0}/{offlineReadiness?.totalCriticalRoutes ?? 0} critical routes cached
+              {offlineReadiness?.cacheName || 'quantvault-offline-content'} · {offlineReadiness?.cachedCount ?? 0}/
+              {offlineReadiness?.totalCriticalRoutes ?? 0} critical routes cached
             </p>
           </div>
-          <button className="btn btn-secondary" onClick={handleCacheCriticalRoutes}>Cache Critical Routes</button>
+          <button className="btn btn-secondary" onClick={handleCacheCriticalRoutes}>
+            Cache Critical Routes
+          </button>
         </div>
         {offlineReadiness?.criticalRoutes?.length > 0 && (
           <div className="coverage-grid" style={{ marginBottom: 'var(--space-4)' }}>
             {offlineReadiness.criticalRoutes.slice(0, 8).map((route) => (
               <div key={route.routeId}>
                 <strong>{route.label}</strong>
-                <small>{route.cached ? 'cached' : 'not cached'} · {route.path}</small>
+                <small>
+                  {route.cached ? 'cached' : 'not cached'} · {route.path}
+                </small>
               </div>
             ))}
           </div>
@@ -2955,7 +3295,8 @@ export default function SystemHealth() {
       <Surface tone="vault">
         <h3 style={{ marginTop: 0 }}>Backup Reminder</h3>
         <p className="qv-text-secondary">
-          StudyVault is local-first. Export a backup before clearing browser data, moving devices, or starting a long mock-exam cycle.
+          StudyVault is local-first. Export a backup before clearing browser data, moving devices, or starting a long
+          mock-exam cycle.
         </p>
         {message && <p style={{ color: 'var(--success)' }}>{message}</p>}
       </Surface>

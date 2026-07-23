@@ -27,11 +27,7 @@ describe('stack-doctor argument parsing', () => {
 });
 
 describe('stack-doctor summary policy', () => {
-  const checks = [
-    { status: 'pass' },
-    { status: 'warn' },
-    { status: 'skip' },
-  ];
+  const checks = [{ status: 'pass' }, { status: 'warn' }, { status: 'skip' }];
 
   it('allows warnings by default', () => {
     const summary = summarizeChecks(checks);
@@ -48,10 +44,12 @@ describe('stack-doctor summary policy', () => {
 
 describe('stack-doctor command checks', () => {
   it('maps a passing command to a passing check', () => {
-    const check = evaluateCommandCheck(
-      { id: 'x', label: 'tool', command: 'tool', args: ['--version'] },
-      () => ({ exitCode: 0, stdoutTail: 'tool 1.2.3\n', stderrTail: '', timedOut: false }),
-    );
+    const check = evaluateCommandCheck({ id: 'x', label: 'tool', command: 'tool', args: ['--version'] }, () => ({
+      exitCode: 0,
+      stdoutTail: 'tool 1.2.3\n',
+      stderrTail: '',
+      timedOut: false,
+    }));
     expect(check.status).toBe('pass');
     expect(check.details).toBe('tool 1.2.3');
   });
@@ -69,17 +67,17 @@ describe('stack-doctor command checks', () => {
 describe('stack-doctor sidecar provenance', () => {
   function tempRepo() {
     const root = mkdtempSync(join(tmpdir(), 'stack-doctor-'));
-    mkdirSync(join(root, 'src-tauri', 'resources', 'services', 'lsat-backend'), { recursive: true });
+    mkdirSync(join(root, 'electron', 'resources', 'services', 'lsat-backend'), { recursive: true });
     return root;
   }
 
   it('passes when a staged sidecar matches the recorded hash and size', () => {
     const root = tempRepo();
     const artifactRel = join('lsat-backend', 'lsatlab-backend.exe');
-    const artifactAbs = join(root, 'src-tauri', 'resources', 'services', artifactRel);
+    const artifactAbs = join(root, 'electron', 'resources', 'services', artifactRel);
     writeFileSync(artifactAbs, 'binary');
     writeFileSync(
-      join(root, 'src-tauri', 'resources', 'services', 'sidecar-provenance.json'),
+      join(root, 'electron', 'resources', 'services', 'sidecar-provenance.json'),
       JSON.stringify({
         schema: 'studyvault.sidecar-provenance.v1',
         entries: [
@@ -101,10 +99,10 @@ describe('stack-doctor sidecar provenance', () => {
   it('fails required artifacts when the staged hash drifts', () => {
     const root = tempRepo();
     const artifactRel = join('lsat-backend', 'lsatlab-backend.exe');
-    const artifactAbs = join(root, 'src-tauri', 'resources', 'services', artifactRel);
+    const artifactAbs = join(root, 'electron', 'resources', 'services', artifactRel);
     writeFileSync(artifactAbs, 'changed');
     writeFileSync(
-      join(root, 'src-tauri', 'resources', 'services', 'sidecar-provenance.json'),
+      join(root, 'electron', 'resources', 'services', 'sidecar-provenance.json'),
       JSON.stringify({
         entries: [
           {

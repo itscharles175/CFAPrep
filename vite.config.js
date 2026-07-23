@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -19,11 +20,7 @@ export default defineConfig({
         // (kokoro + transformers, ~2MB, only used for voice). They're still
         // served + runtime-cached on first use; this just keeps the install
         // footprint small. (Plan S3.)
-        globIgnores: [
-          '**/lsat-*',
-          '**/kokoro*',
-          '**/transformers*',
-        ],
+        globIgnores: ['**/lsat-*', '**/kokoro*', '**/transformers*'],
         // A few of these chunks exceed the default 2 MiB precache cap anyway;
         // raising the cap is unnecessary now that they're ignored.
       },
@@ -34,7 +31,7 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
-    open: true,
+    open: process.env.VITE_OPEN_BROWSER !== '0',
   },
   build: {
     rollupOptions: {
@@ -164,7 +161,7 @@ export default defineConfig({
           // `spike/` holds the gitignored open-notebook clone with its own
           // test suite (and a colliding `@/` alias) — never run it here.
           // `src/domains/lsat/` is the LSAT project below.
-          exclude: ['**/node_modules/**', '**/dist/**', 'spike/**', '.claude/**', 'src-tauri/**', 'src/domains/lsat/**'],
+          exclude: ['**/node_modules/**', '**/dist/**', 'spike/**', '.claude/**', 'electron/**', 'src/domains/lsat/**'],
         },
       },
       {
@@ -173,7 +170,7 @@ export default defineConfig({
           name: 'lsat',
           environment: 'jsdom',
           // The vendored subtree ships its own setup (jest-dom, localStorage
-          // stub, `@lsat/lib/tauri` mock, fetch guard).
+          // stub, Electron bridge mock, fetch guard).
           setupFiles: './src/domains/lsat/test/setup.ts',
           globals: true,
           include: ['src/domains/lsat/**/*.{test,spec}.{ts,tsx}'],
