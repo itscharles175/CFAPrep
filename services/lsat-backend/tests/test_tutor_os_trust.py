@@ -222,6 +222,92 @@ def test_release_manifest_trust_blocks_unverified_signing(monkeypatch, tmp_path)
     assert dev_check["status"] == "ok"
 
 
+@pytest.mark.parametrize("evidence", ["absent", "empty", "null", "not_a_dict"])
+@pytest.mark.parametrize("tier", ["release", "packaged"])
+def test_release_manifest_trust_blocks_missing_signing_evidence(monkeypatch, tmp_path, evidence, tier):
+    """The signing gate exists for exactly these shapes: a manifest that carries
+    no signing evidence at all must BLOCK, not pass for lack of anything to check."""
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(tmp_path)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    if evidence == "absent":
+        payload.pop("signing")
+    elif evidence == "empty":
+        payload["signing"] = {}
+    elif evidence == "null":
+        payload["signing"] = None
+    else:
+        payload["signing"] = "verified"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    check = trust_mod._release_manifest_check(tier)
+
+    assert check["status"] == "block"
+    assert "signing_evidence_missing" in check["detail"]["errors"]
+    assert check["detail"]["signing"] == {}
+
+
+def test_release_manifest_trust_blocks_mutated_bundle_asset_digest(monkeypatch, tmp_path):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(tmp_path)
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+    assert trust_mod._release_manifest_check("release")["status"] == "ok"
+
+    # Swap the shipped artifact after signing evidence was recorded: the signed
+    # digest no longer describes the asset the bundle would actually install.
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["bundleAssets"][0]["sha256"] = "9" * 64
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    check = trust_mod._release_manifest_check("release")
+
+    assert check["status"] == "block"
+    assert "signing_asset_digest_mismatch" in check["detail"]["errors"]
+
+
+def test_packaged_backend_floors_dev_tier_requests(monkeypatch, tmp_path):
+    monkeypatch.delenv(trust_mod.TRUST_TIER_ENV, raising=False)
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Windows")
+    manifest = _write_release_manifest(tmp_path)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload.pop("signing")
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
+
+    # Source checkout: the "dev" tier every UI surface asks for skips the signing
+    # check entirely, so an unsigned manifest still reports ok — which is exactly
+    # why the tier a real user gets must not be derived from the request alone.
+    monkeypatch.delattr(trust_mod.sys, "frozen", raising=False)
+    assert trust_mod._default_tier() == "dev"
+    assert trust_mod._normalize_tier("dev") == "dev"
+    assert trust_mod._release_manifest_check(trust_mod._normalize_tier("dev"))["status"] == "ok"
+
+    # Packaged sidecar: the same request must land on the strict signing path.
+    monkeypatch.setattr(trust_mod.sys, "frozen", True, raising=False)
+    assert trust_mod._default_tier() == "packaged"
+    assert trust_mod._normalize_tier("dev") == "packaged"
+    assert trust_mod._normalize_tier("garbage") == "packaged"
+    assert trust_mod._normalize_tier("release") == "release"
+    strict = trust_mod._release_manifest_check(trust_mod._normalize_tier("dev"))
+    assert strict["status"] == "block"
+    assert "signing_evidence_missing" in strict["detail"]["errors"]
+
+    # Development keeps an explicit override out of the strict path.
+    monkeypatch.setenv(trust_mod.TRUST_TIER_ENV, "dev")
+    assert trust_mod._normalize_tier("dev") == "dev"
+
+
+def test_release_trust_manifest_reports_packaged_tier_when_frozen(db_session, monkeypatch):
+    monkeypatch.delenv(trust_mod.TRUST_TIER_ENV, raising=False)
+    monkeypatch.setattr(trust_mod.sys, "frozen", True, raising=False)
+
+    manifest = trust_mod.build_release_trust_manifest(db_session, tier="dev")
+
+    assert manifest["tier"] == "packaged"
+    assert manifest["checks"]["privacy_firewall"]["detail"]["tier"] == "packaged"
+
+
 def test_release_manifest_trust_accepts_linux_signing_not_applicable(monkeypatch, tmp_path):
     monkeypatch.setattr(trust_mod.platform, "system", lambda: "Linux")
     manifest = _write_release_manifest(

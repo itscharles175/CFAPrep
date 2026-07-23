@@ -34,7 +34,11 @@ DEFAULT_REPORT = DIST_DIR / "release_local_report.json"
 DEFAULT_TRUST = DIST_DIR / "release_trust.json"
 PACKAGED_SMOKE_PORTS = (8000, 5055, 8100)
 PACKAGED_SMOKE_HEALTH_URL = "http://127.0.0.1:8100/api/health"
-WINDOWS_SIGNING_CONFIG = DIST_DIR / "windows-signing-config.json"
+# The signing overlay is written BEFORE `npm run electron:build`, whose `vite
+# build` step empties dist/ — so it must live outside every build output
+# directory (and outside the repo, so it can never dirty the release manifest's
+# git state). CI uses the runner temp dir for the same reason.
+WINDOWS_SIGNING_CONFIG = Path(tempfile.gettempdir()) / "studyvault-release" / "windows-signing-config.json"
 SIGNING_EVIDENCE = DIST_DIR / "signing-evidence-local.json"
 
 REQUIRED_RELEASE_LOCAL_LABELS = (
@@ -288,6 +292,9 @@ def _optional_checks(args: argparse.Namespace, py: str, node: str, npm: str) -> 
             )
         signing_platform = _signing_platform()
         if not args.electron_debug:
+            assert_config = [node, "scripts/release-signing.mjs", "assert-config"]
+            if signing_platform == "windows":
+                assert_config.extend(["--config", str(WINDOWS_SIGNING_CONFIG)])
             checks.append(
                 Check(
                     "release signing preflight",
@@ -302,7 +309,10 @@ def _optional_checks(args: argparse.Namespace, py: str, node: str, npm: str) -> 
                                 "--config-output",
                                 str(WINDOWS_SIGNING_CONFIG),
                             ]
-                        )
+                        ),
+                        # `--config` replaces electron-builder.yml unless the overlay
+                        # extends it; assert the merged result before building.
+                        Step(assert_config),
                     ],
                 )
             )

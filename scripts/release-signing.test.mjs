@@ -1,20 +1,31 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import process from 'node:process';
 import { afterEach, describe, expect, it } from 'vitest';
+// collectBundleAssets is imported here on purpose: the bundle-hash test below
+// must run BOTH walkers - signing evidence and manifest assets - over one
+// fixture and prove their digests agree.
+import { collectBundleAssets } from './release-manifest.mjs';
 import {
   SIGNING_EVIDENCE_SCHEMA,
   buildWindowsSigningConfig,
+  hashDirectory,
   inspectCredentialSet,
   normalizePlatform,
   normalizeThumbprint,
+  resolveEffectiveBuilderConfig,
+  validateEffectiveBuilderConfig,
   validateSigningAssetBindings,
   validateSigningEvidence,
   verifyMacArtifacts,
   verifyWindowsArtifacts,
 } from './release-signing.mjs';
+
+function repoRelative(path) {
+  return relative(process.cwd(), path).replace(/\\/g, '/');
+}
 
 const TEMP_DIRS = [];
 
@@ -66,14 +77,104 @@ describe('release signing policy', () => {
 
   it('creates the electron-builder Windows config overlay from the expected signer', () => {
     expect(buildWindowsSigningConfig(WINDOWS_ENV.WINDOWS_CERT_THUMBPRINT)).toEqual({
+      extends: 'electron-builder.yml',
       win: { signtoolOptions: { certificateSha1: 'A'.repeat(40) } },
     });
   });
 
   it('wires the Windows signing overlay from release preflight into Electron Builder', async () => {
     const workflow = await readFile(join(process.cwd(), '.github', 'workflows', 'release.yml'), 'utf8');
-    expect(workflow).toContain('--config-output dist/windows-signing-config.json');
-    expect(workflow).toContain("'--config dist/windows-signing-config.json'");
+    // The overlay must never live under dist/: `npm run electron:build` runs
+    // `vite build` first, which empties dist/ before electron-builder reads it.
+    expect(workflow).not.toContain('dist/windows-signing-config.json');
+    expect(workflow).toContain('--config-output ${{ runner.temp }}/windows-signing-config.json');
+    expect(workflow).toContain("format('--config {0}/windows-signing-config.json', runner.temp)");
+    expect(workflow).toContain('node scripts/release-signing.mjs assert-config');
+    // certificateSha1 resolves through the Windows certificate store, so the PFX
+    // import is the credential path that actually signs.
+    expect(workflow).toContain('Import-PfxCertificate');
+    expect(workflow).not.toContain('CSC_LINK: ${{ matrix.platform == \'windows\'');
+
+    const local = await readFile(join(process.cwd(), 'scripts', 'release_local.py'), 'utf8');
+    expect(local).toContain('WINDOWS_SIGNING_CONFIG = Path(tempfile.gettempdir())');
+    expect(local).not.toContain('WINDOWS_SIGNING_CONFIG = DIST_DIR');
+  });
+
+  it('rejects an effective electron-builder config that lost the packaging invariants', async () => {
+    const dir = await tempDir();
+    const overlay = join(dir, 'windows-signing-config.json');
+    await writeFile(overlay, JSON.stringify(buildWindowsSigningConfig(WINDOWS_ENV.WINDOWS_CERT_THUMBPRINT)));
+    const merged = await resolveEffectiveBuilderConfig(overlay);
+    expect(
+      validateEffectiveBuilderConfig(merged, { expectedThumbprint: WINDOWS_ENV.WINDOWS_CERT_THUMBPRINT }),
+    ).toEqual({ ok: true, errors: [] });
+
+    // An overlay without `extends` is what electron-builder actually loaded
+    // before this fix: --config REPLACES electron-builder.yml wholesale.
+    await writeFile(overlay, JSON.stringify({ win: { signtoolOptions: { certificateSha1: 'A'.repeat(40) } } }));
+    const replaced = await resolveEffectiveBuilderConfig(overlay);
+    const validation = validateEffectiveBuilderConfig(replaced);
+    expect(validation.ok).toBe(false);
+    expect(validation.errors).toEqual([
+      'forceCodeSigning must remain true',
+      "directories.output must remain 'release'",
+      'win.target must still include nsis',
+      'win.target must still include msi',
+      'extraResources must still stage the sidecar services directory',
+      'afterPack must still apply the Electron fuses',
+    ]);
+  });
+
+  it('hashes bundle directories identically for signing evidence and manifest assets', async () => {
+    // The fixture lives under the repo because manifest asset paths are
+    // repo-relative, and it carries the two entry kinds the two walkers used to
+    // disagree on: a symlink (every real .app bundle is full of them) and a
+    // zero-byte file.
+    const root = await mkdtemp(join(process.cwd(), '.studyvault-bundle-fixture-'));
+    try {
+      const app = join(root, 'StudyVault.app');
+      const versions = join(app, 'Contents', 'Frameworks', 'Squirrel.framework', 'Versions');
+      await mkdir(join(app, 'Contents', 'MacOS'), { recursive: true });
+      await mkdir(join(app, 'Contents', 'Resources'), { recursive: true });
+      await mkdir(join(versions, 'A'), { recursive: true });
+      await writeFile(join(app, 'Contents', 'MacOS', 'StudyVault'), 'app-binary');
+      await writeFile(join(app, 'Contents', 'Resources', 'empty.pak'), '');
+      await writeFile(join(versions, 'A', 'Squirrel'), 'framework-binary');
+      // 'junction' is the only symlink flavour a non-elevated Windows runner can
+      // create; POSIX ignores the type and makes a plain directory symlink.
+      await symlink(join(versions, 'A'), join(versions, 'Current'), 'junction');
+
+      const directory = await hashDirectory(app);
+      const assets = await collectBundleAssets({ root });
+      const paths = assets.map((asset) => asset.path.slice(`${repoRelative(app)}/`.length));
+
+      expect(paths).toContain('Contents/Resources/empty.pak');
+      expect(paths.filter((path) => path.includes('Versions/Current'))).toEqual([]);
+      expect(
+        validateSigningAssetBindings(
+          {
+            schema: SIGNING_EVIDENCE_SCHEMA,
+            platform: 'macos',
+            required: true,
+            status: 'verified',
+            artifacts: [
+              {
+                path: repoRelative(app),
+                kind: 'app',
+                size: directory.size,
+                sha256: directory.sha256,
+                published: true,
+                signed: true,
+                verified: true,
+              },
+            ],
+          },
+          assets,
+        ),
+      ).toEqual({ ok: true, errors: [] });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('accepts verified Authenticode evidence and rejects unsigned evidence', () => {

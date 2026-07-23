@@ -13,6 +13,14 @@ files:
   - dist/**/*
   - electron/**/*
   - package.json
+  # The main process imports only node builtins + electron; every production
+  # dependency is renderer-only and is already bundled into dist/ by Vite.
+  # electron-builder otherwise walks the production tree into app.asar (~318 MB).
+  - '!node_modules/**/*'
+  # Verify/CI artifacts written under dist/ (coverage, junit, stack-doctor
+  # report) — build output, not shipped app content, and they embed local paths.
+  - '!dist/reports/**/*'
+  - '!electron/tests/**/*'
   - '!electron/resources/**/*'
 extraResources:
   - from: electron/resources/services

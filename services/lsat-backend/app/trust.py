@@ -77,6 +77,7 @@ REQUIRED_RELEASE_LOCAL_LABELS = (
 )
 
 PACKAGED_SMOKE_IN_PROGRESS_ENV = "LSATLAB_RELEASE_LOCAL_PACKAGED_SMOKE_IN_PROGRESS"
+TRUST_TIER_ENV = "STUDYVAULT_TRUST_TIER"
 
 REQUIRED_OPENAPI_PATHS = (
     "/api/ready",
@@ -248,9 +249,28 @@ def trust_status(
     return payload
 
 
+def _default_tier() -> TrustTier:
+    """Tier a caller falls back to when it does not (or must not) pin one.
+
+    Every shipped UI surface asks for ``dev``, where the strict gates — signing
+    evidence above all — are skipped outright. Deriving the floor from
+    ``sys.frozen`` means a packaged sidecar evaluates the release-grade path for
+    real users; ``STUDYVAULT_TRUST_TIER`` is the explicit development override.
+    """
+    override = (os.getenv(TRUST_TIER_ENV) or "").strip().lower()
+    if override in {"dev", "release", "packaged"}:
+        return override  # type: ignore[return-value]
+    return "packaged" if getattr(sys, "frozen", False) else "dev"
+
+
 def _normalize_tier(tier: str) -> TrustTier:
+    default = _default_tier()
     if tier not in {"dev", "release", "packaged"}:
-        return "dev"
+        return default
+    # A packaged build must not be able to self-downgrade into the lenient dev
+    # path just because the requesting surface asked for it.
+    if tier == "dev" and default != "dev":
+        return default
     return tier  # type: ignore[return-value]
 
 
@@ -1504,7 +1524,7 @@ def _next_actions(checks: dict[str, dict[str, Any]]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tier", choices=["dev", "release", "packaged"], default="dev")
+    parser.add_argument("--tier", choices=["dev", "release", "packaged"], default=_default_tier())
     parser.add_argument("--output", default="")
     parser.add_argument("--persist", action="store_true")
     parser.add_argument("--check", action="store_true")

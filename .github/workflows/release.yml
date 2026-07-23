@@ -123,7 +123,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: node scripts/release-signing.mjs preflight --platform ${{ matrix.platform }} --config-output dist/windows-signing-config.json
+        run: node scripts/release-signing.mjs preflight --platform ${{ matrix.platform }} --config-output ${{ runner.temp }}/windows-signing-config.json
 
       - name: Build LSAT Backend Sidecar
         run: npm run build:lsat-binary
@@ -174,15 +174,48 @@ jobs:
           fi
           npm run check:sidecar-provenance
 
+      # win.signtoolOptions.certificateSha1 makes electron-builder resolve the
+      # signer from the Windows certificate store, so CSC_LINK is never consulted
+      # on this path and the PFX must be imported before the build.
+      - name: Import Windows Signing Certificate
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP 'studyvault-release.pfx'
+          try {
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+            $password = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -AsPlainText -Force
+            $imported = @(Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password)
+            $expected = $env:WINDOWS_CERT_THUMBPRINT.Replace(' ', '').ToUpperInvariant()
+            if (-not ($imported | Where-Object { $_.Thumbprint -eq $expected })) {
+              throw "imported PFX does not contain expected certificate thumbprint $expected"
+            }
+          } finally {
+            Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
+          }
+
+      # `--config` REPLACES electron-builder.yml unless the overlay extends it, so
+      # assert the MERGED config still carries the packaging invariants (signing
+      # enforcement, both Windows targets, sidecar staging, fuse hook) rather than
+      # discovering a silently gutted build after the fact.
+      - name: Assert Effective Electron Builder Config
+        env:
+          WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
+        run: node scripts/release-signing.mjs assert-config ${{ matrix.platform == 'windows' && format('--config {0}/windows-signing-config.json', runner.temp) || '' }}
+
       - name: Build Electron Installers
         env:
-          CSC_LINK: ${{ matrix.platform == 'windows' && secrets.WINDOWS_CERT_BASE64 || matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE_BASE64 || '' }}
-          CSC_KEY_PASSWORD: ${{ matrix.platform == 'windows' && secrets.WINDOWS_CERT_PASSWORD || matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          CSC_LINK: ${{ matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           CSC_NAME: ${{ matrix.platform == 'macos' && secrets.APPLE_SIGNING_IDENTITY || '' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run electron:build -- --${{ matrix.arch }} ${{ matrix.platform == 'windows' && '--config dist/windows-signing-config.json' || '' }}
+        run: npm run electron:build -- --${{ matrix.arch }} ${{ matrix.platform == 'windows' && format('--config {0}/windows-signing-config.json', runner.temp) || '' }}
 
       - name: Packaged App Smoke
         if: matrix.platform != 'linux'
@@ -197,6 +230,18 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: node scripts/release-signing.mjs verify --platform ${{ matrix.platform }} --bundle-root release --output dist/signing-evidence-${{ matrix.id }}.json
+
+      - name: Remove Imported Windows Certificate
+        if: always() && matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
+        run: |
+          $expected = "$env:WINDOWS_CERT_THUMBPRINT".Replace(' ', '').ToUpperInvariant()
+          if (-not $expected) { return }
+          Get-ChildItem Cert:\CurrentUser\My |
+            Where-Object { $_.Thumbprint -eq $expected } |
+            Remove-Item -Force
 
       - name: Generate Release Manifest
         env:

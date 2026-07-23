@@ -1,7 +1,7 @@
 'use strict';
 
-/* global process */
 const { spawnSync } = require('node:child_process');
+const { readFileSync, writeSync } = require('node:fs');
 const readline = require('node:readline');
 const { setInterval } = require('node:timers');
 
@@ -21,6 +21,33 @@ function isProcessAlive(pid) {
     return true;
   } catch (error) {
     return error?.code === 'EPERM';
+  }
+}
+
+// Written synchronously so the line survives the process.exit(0) that ends a
+// reap; a buffered process.stderr write into the parent's pipe would be dropped.
+function writeDiagnostic(line) {
+  try {
+    writeSync(2, `${line}\n`);
+  } catch {
+    // The parent already closed its end of the pipe; the reap still proceeds.
+  }
+}
+
+// PID-reuse fingerprint for POSIX, captured at track time and re-read before the
+// kill. Linux publishes the process start time as field 22 of /proc/<pid>/stat;
+// the comm field can itself contain spaces and parentheses, so the numeric
+// fields only start after the LAST ')'. macOS and the BSDs expose no comparably
+// cheap source (`ps -o lstart=` costs a process spawn per tracked pid), so they
+// return null, which disables the guard and keeps the pre-existing residual
+// risk: a stale entry could SIGKILL an unrelated process that reused the pid.
+function posixStartFingerprint(pid) {
+  if (process.platform !== 'linux') return null;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -62,17 +89,25 @@ function windowsProcessSnapshot() {
   }
 }
 
-function discoverOwnedDescendants(snapshot = windowsProcessSnapshot()) {
-  if (process.platform !== 'win32' || snapshot === null) return snapshot;
+// Deliberately called ONCE, from the reap: the CIM query was measured at
+// 3.8-7.5s, so running it on the 1500ms parent probe meant back-to-back queries
+// burning CPU for the life of the app. Descendants are only needed at reap time.
+function discoverOwnedDescendants() {
+  if (process.platform !== 'win32' || ownedProcesses.size === 0) return null;
+  const snapshot = windowsProcessSnapshot();
+  if (snapshot === null) {
+    writeDiagnostic('watchdog_snapshot_unavailable: reaping tracked roots without descendant discovery');
+    return null;
+  }
 
   for (const [pid, record] of ownedProcesses) {
-    if (record.creationDate !== null) continue;
+    if (record.startFingerprint !== null) continue;
     const current = snapshot.get(pid);
-    if (!current || current.parentPid !== parentPid) {
-      ownedProcesses.delete(pid);
-      continue;
-    }
-    record.creationDate = current.creationDate;
+    // Never untrack on a snapshot inconsistency: dropping the entry here is what
+    // turned a transient WMI hiccup into a leaked sidecar holding its port, which
+    // then blocks the next boot. Leave the root unrefined instead.
+    if (!current || current.parentPid !== parentPid) continue;
+    record.startFingerprint = current.creationDate;
   }
 
   let added = true;
@@ -81,7 +116,7 @@ function discoverOwnedDescendants(snapshot = windowsProcessSnapshot()) {
     for (const [pid, details] of snapshot) {
       if (ownedProcesses.has(pid) || !ownedProcesses.has(details.parentPid)) continue;
       ownedProcesses.set(pid, {
-        creationDate: details.creationDate,
+        startFingerprint: details.creationDate,
         rootPid: ownedProcesses.get(details.parentPid).rootPid,
       });
       added = true;
@@ -91,16 +126,22 @@ function discoverOwnedDescendants(snapshot = windowsProcessSnapshot()) {
 }
 
 function killOwnedTree(pid, snapshot) {
-  if (!ownedProcesses.has(pid) || !isAllowedPid(pid)) return;
+  const record = ownedProcesses.get(pid);
+  if (!record || !isAllowedPid(pid)) return;
   if (process.platform === 'win32') {
     const current = snapshot?.get(pid);
-    const record = ownedProcesses.get(pid);
-    if (!current) return;
-    if (record.creationDate === null) {
-      if (current.parentPid !== parentPid) return;
-      record.creationDate = current.creationDate;
+    // An explicitly tracked ROOT was verified alive and parented by us at track
+    // time, so only a snapshot that POSITIVELY identifies the pid as another
+    // process may veto its kill. A missing, stale, or unavailable snapshot must
+    // not: that silent no-op leaked every tracked sidecar. DISCOVERED
+    // descendants exist only because a snapshot reported them, so they still
+    // require that same snapshot to confirm them.
+    if (record.rootPid === pid) {
+      if (current && current.parentPid !== parentPid) return;
+      if (current && record.startFingerprint !== null && current.creationDate !== record.startFingerprint) return;
+    } else if (!current || current.creationDate !== record.startFingerprint) {
+      return;
     }
-    if (current.creationDate !== record.creationDate) return;
     spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
       windowsHide: true,
       stdio: 'ignore',
@@ -108,6 +149,7 @@ function killOwnedTree(pid, snapshot) {
     });
     return;
   }
+  if (record.startFingerprint !== null && posixStartFingerprint(pid) !== record.startFingerprint) return;
   try {
     process.kill(-pid, 'SIGKILL');
   } catch (error) {
@@ -158,9 +200,12 @@ reader.on('line', (line) => {
         respond(message.id, false);
         return;
       }
-      ownedProcesses.set(message.pid, { creationDate: null, rootPid: message.pid });
+      ownedProcesses.set(message.pid, { startFingerprint: null, rootPid: message.pid });
     } else {
-      ownedProcesses.set(message.pid, { creationDate: 'owned', rootPid: message.pid });
+      ownedProcesses.set(message.pid, {
+        startFingerprint: posixStartFingerprint(message.pid),
+        rootPid: message.pid,
+      });
     }
     respond(message.id, true);
   } else if (message?.op === 'untrack' && isAllowedPid(message.pid)) {
@@ -180,8 +225,11 @@ process.stdin.on('error', reapAndExit);
 
 if (process.platform === 'win32' && windowsProcessSnapshot() === null) process.exit(3);
 
+// Parent death is already detected within ~100ms by the stdin 'close' above;
+// this poll is only the backstop for a parent that dies without the pipe
+// closing. It stays a bare process.kill(pid, 0) syscall on purpose — descendant
+// discovery is deferred to the reap so the interval costs nothing.
 const parentProbe = setInterval(() => {
-  if (ownedProcesses.size > 0) discoverOwnedDescendants();
   if (!parentIsAlive()) reapAndExit();
 }, 1500);
 parentProbe.unref?.();

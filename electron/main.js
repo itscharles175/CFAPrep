@@ -19,7 +19,7 @@ import { IPC_CHANNELS, IPC_EVENTS, validateEvent } from './contracts.js';
 import { registerIpcHandlers } from './ipc.js';
 import { LsatDbKeyStore, SecureKeyStore } from './keychain.js';
 import { installProcessCrashCapture, JsonLogger } from './logging.js';
-import { NativeFileAccess, extractLaunchFilePaths } from './path-policy.js';
+import { NativeFileAccess, extractDeepLinks, extractLaunchFilePaths } from './path-policy.js';
 import { APP_ORIGIN, installAppProtocol, registerAppScheme } from './protocol.js';
 import { installLsatAuthorization } from './session-auth.js';
 import { buildServiceSpecs, resolveServicesDirectory } from './service-specs.js';
@@ -53,9 +53,16 @@ if (!hasSingleInstanceLock) {
   const rendererEventQueue = [];
   const pendingOpenFiles = [];
   const popouts = new Set();
-  const devServerUrl = process.env.VITE_DEV_SERVER_URL
-    ? validatedDevServerUrl(process.env.VITE_DEV_SERVER_URL).toString()
-    : null;
+  // Packaged builds ignore the dev-server override entirely. The dev origin is
+  // trusted everywhere downstream — IPC sender checks, permission grants,
+  // navigation policy — and it is served over http, so it also bypasses the
+  // app:// CSP. Honouring the env var in a signed install would let anyone who
+  // can set one variable load their own page with the full bridge, including
+  // keychain access.
+  const devServerUrl =
+    !app.isPackaged && process.env.VITE_DEV_SERVER_URL
+      ? validatedDevServerUrl(process.env.VITE_DEV_SERVER_URL).toString()
+      : null;
 
   function emitEvent(channel, rawPayload) {
     const payload = validateEvent(channel, rawPayload);
@@ -92,7 +99,11 @@ if (!hasSingleInstanceLock) {
         webSecurity: true,
         allowRunningInsecureContent: false,
         webviewTag: false,
-        spellcheck: true,
+        // Offline invariant: Chromium's spellchecker fetches hunspell dictionaries
+        // from Google's CDN on first use (Windows/Linux). macOS uses the OS
+        // spellchecker, which needs no download. `spellcheck` defaults to true, so
+        // this must stay explicit — deleting the line re-enables the egress.
+        spellcheck: process.platform === 'darwin',
         devTools: !app.isPackaged,
         additionalArguments: [
           `--studyvault-ipc=${encodeURIComponent(JSON.stringify({ CHANNELS: IPC_CHANNELS, EVENTS: IPC_EVENTS }))}`,
@@ -168,9 +179,19 @@ if (!hasSingleInstanceLock) {
       pendingOpenFiles.push({ type: 'second-instance', argv, cwd });
       return;
     }
-    const paths = await authorizeLaunchPaths(extractLaunchFilePaths(argv, cwd));
+    const paths = await authorizeLaunchPaths(extractLaunchFilePaths(argv));
     emitEvent(IPC_EVENTS.SECOND_INSTANCE, { argv, cwd, paths });
     if (paths.length > 0) emitEvent(IPC_EVENTS.OPEN_FILE, { paths });
+  }
+
+  // Deep links carry a route, never a file. They are parsed as URLs and forwarded
+  // with an empty `paths`, so nothing here can reach the launch-file authorizer.
+  function forwardDeepLinks(argv) {
+    const links = extractDeepLinks(argv);
+    if (links.length === 0) return false;
+    focusMainWindow();
+    for (const link of links) emitEvent(IPC_EVENTS.SECOND_INSTANCE, { argv: [link.href], cwd: '', paths: [] });
+    return true;
   }
 
   async function forwardOpenFiles(paths) {
@@ -205,7 +226,7 @@ if (!hasSingleInstanceLock) {
   });
   app.on('open-url', (event, url) => {
     event.preventDefault();
-    void forwardSecondInstance([url], process.cwd());
+    if (!forwardDeepLinks([url])) logger?.warn('deep_link_rejected', { url });
   });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
@@ -281,6 +302,7 @@ if (!hasSingleInstanceLock) {
         lsatDbKeyB64,
         lsatKeyBlockReason,
         isPackaged: app.isPackaged,
+        logger,
       });
       sidecars = new SidecarManager({
         specs,
@@ -310,7 +332,10 @@ if (!hasSingleInstanceLock) {
       });
 
       await createMainWindow();
-      await forwardOpenFiles(extractLaunchFilePaths(process.argv, process.cwd()));
+      await forwardOpenFiles(extractLaunchFilePaths(process.argv));
+      // Windows delivers a deep link as an argv entry rather than via `open-url`,
+      // and a cold launch has no second-instance event to carry it.
+      forwardDeepLinks(process.argv);
       for (const pending of pendingOpenFiles.splice(0)) {
         if (pending.type === 'second-instance') await forwardSecondInstance(pending.argv, pending.cwd);
         else await forwardOpenFiles(pending.paths);

@@ -7,12 +7,17 @@ resources, file associations, hardened runtime settings, and platform signing.
 ## Local Builds
 
 ```bash
-npm run electron:dev
-npm run electron:build:dir
-npm run electron:build
+npm run test:electron       # desktop shell gate (node --test), run this first
+npm run electron:dev        # Vite dev server + Electron main (scripts/electron-dev.mjs)
+npm run electron:build:dir  # unpacked app only, no installers
+npm run electron:build      # npm run build && electron-builder (full installers)
 ```
 
-Outputs land under `release/`:
+`npm run electron:build:debug` writes an unpacked build to `release-debug/` with
+`forceCodeSigning` disabled — for local diagnostics only, never for distribution.
+
+`electron-builder.yml` sets `directories.output: release`, so outputs land under
+`release/`:
 
 - Windows: `win-unpacked/StudyVault.exe`, NSIS `.exe`, and `.msi`.
 - macOS: `mac*/StudyVault.app` and `.dmg`.
@@ -35,10 +40,30 @@ cleanly when absent.
 The packaged fuse policy disables `NODE_OPTIONS`, inspector arguments, and
 legacy file-protocol privileges; enables cookie encryption, embedded ASAR
 integrity, and ASAR-only loading; and keeps `runAsNode` enabled only for the
-owned-child watchdog. WebAssembly trap handlers remain enabled. The dedicated
-fuse hook requires an explicit value for every Electron fuse, so packaging fails
-when an Electron upgrade introduces an unreviewed option. Sidecars fail closed
-if the watchdog cannot start.
+owned-child watchdog. WebAssembly trap handlers remain enabled. The fuse hook
+(`scripts/apply-electron-fuses.mjs`, wired as electron-builder's `afterPack`)
+requires an explicit value for every Electron fuse, so packaging fails when an
+Electron upgrade introduces an unreviewed option.
+
+If the crash-safe watchdog cannot start, sidecars still launch: the boot reports
+`crash_guard_unavailable` as its degraded reason and the UI shows a banner. That
+is deliberate — an EDR or WMI hiccup must not make the app unusable — but it
+means a packaged Linux/macOS build with a degraded guard has no crash cleanup at
+all. On Windows, libuv's job object over non-detached children still reaps the
+tree.
+
+`asar: true` with `files` excluding `node_modules/**`: the main process imports
+only Node builtins and `electron`, and every production dependency is
+renderer-only and already bundled into `dist/` by Vite. `electron/tests/**` and
+`electron/resources/**` are excluded from the ASAR — sidecars are staged as
+`extraResources` (`electron/resources/services` → `resources/services`) instead.
+
+The packaged shell creates no Job Object of its own and arms no PDEATHSIG — the
+Tauri build did both. Crash cleanup now depends on the owned-child watchdog plus,
+on Windows, libuv's implicit job object. No automated test covers the crash path,
+so packaged smoke runs should confirm by hand that no `lsatlab-backend` process
+survives an abrupt app kill; see
+[decisions/2026-07-23-electron-desktop-runtime.md](decisions/2026-07-23-electron-desktop-runtime.md).
 
 ## Signing
 

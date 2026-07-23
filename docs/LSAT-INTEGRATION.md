@@ -20,7 +20,7 @@ merge see [LSAT-LAB-MERGE-PLAN.md](LSAT-LAB-MERGE-PLAN.md).
 | Concern           | Mechanism                                                                                                                                                      |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Module resolution | `vite.config.js` alias `@lsat` → `/src/domains/lsat` (most-specific first, before `@` → `/src`)                                                                |
-| Host strict tsc   | `tsconfig.json` **excludes** `src/domains/lsat`; an ambient shim (`src/lsat-domain.d.ts`) declares `@lsat/*` so host code that references it still type-checks |
+| Host strict tsc   | `tsconfig.json` **excludes** `src/domains/lsat` as root files but maps `@lsat/*` to the real subtree source, so cross-domain imports type-check against real types (the old `declare module '@lsat/*'` → `any` shim in `src/lsat-domain.d.ts` is documentation only) |
 | LSAT types        | `tsconfig.lsat.json` type-checks the subtree on its own (strict, TS 6) — clean; run `npm run typecheck:lsat`                                                   |
 | Tests             | vitest `lsat` **project** in `vite.config.js` (own setup file, 25s timeout); `npm run test:lsat`                                                               |
 | Lint              | the subtree is excluded from the host flat config (vendored, different toolchain conventions; tests + strict types are its safety net)                         |
@@ -31,11 +31,14 @@ merged into the host `package.json`, so it runs on the host's hoisted toolchain
 
 ## How it mounts at runtime
 
-`src/main.jsx` → `src/domains/lsat/LsatRoot.tsx` when the URL is under `/lsat`.
-`LsatRoot` wraps the LSAT `App` in its providers (`QueryClient`, theme/mode/
-motion, tooltip) and its own `BrowserRouter basename="/lsat"`. See
-[ARCHITECTURE.md](ARCHITECTURE.md) §2 for why domain switches reload today and
-the soft-nav branch.
+`src/main.jsx` boots `src/components/UnifiedRoot.tsx`, whose single host
+`<BrowserRouter>` routes `/lsat` + `/lsat/*` to `<LsatUnifiedMount>`. That mount
+supplies the LSAT providers (`QueryClient`, theme/mode/motion, tooltip) and
+startup, with the vendored LSAT `App` re-based onto the `/lsat` prefix by
+`src/components/RebasedLsatRouter.tsx`. The mount is persistent and crossing
+`/cfa ↔ /lsat` is a soft navigation — the separate `LsatRoot.tsx` root and the
+per-domain hard reload were retired in the K4-12/K4-13 unified-root cutover. See
+[ARCHITECTURE.md](ARCHITECTURE.md) §2.
 
 ## The backend sidecar
 

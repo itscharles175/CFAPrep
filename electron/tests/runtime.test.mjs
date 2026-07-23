@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { createRequire } from 'node:module';
-import { mkdtemp, mkdir, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -20,22 +20,40 @@ import {
 import {
   KEYCHAIN_ACCOUNT,
   KEYCHAIN_SERVICE,
+  LSAT_DB_RECORD,
   LsatDbKeyStore,
   SecureKeyStore,
   assertKeychainTarget,
   assertSafeStorageAvailable,
+  readLegacyCredential,
 } from '../keychain.js';
-import { FILE_READ_CAP_BYTES, PathAuthorization, extractLaunchFilePaths, isPathWithin } from '../path-policy.js';
+import { legacyLsatDataDir, lsatStorePath, resolveLsatDataDir } from '../relocation.js';
+import {
+  FILE_READ_CAP_BYTES,
+  PathAuthorization,
+  extractDeepLinks,
+  extractLaunchFilePaths,
+  isPathWithin,
+  parseDeepLink,
+} from '../path-policy.js';
 import {
   appAssetCandidate,
   productionContentSecurityPolicy,
   registerAppScheme,
   resolveAppAssetPath,
 } from '../protocol.js';
+import {
+  SWEEP_OUTCOMES,
+  createSystemSweeper,
+  parseLsofPids,
+  parseNetstatListeningPids,
+  sweepOwnedPorts,
+} from '../port-sweep.js';
 import { manifestRelativePath, verifyServiceProvenance } from '../provenance.js';
 import { installLsatAuthorization, isExactLsatApiUrl } from '../session-auth.js';
 import { buildServiceSpecs, resolveOpenNotebookPrograms, resolveServicesDirectory } from '../service-specs.js';
 import {
+  CRASH_GUARD_UNAVAILABLE_REASON,
   SidecarManager,
   aggregateSidecarHealth,
   matchesServiceIdentity,
@@ -64,12 +82,37 @@ async function temporaryDirectory(t) {
   return directory;
 }
 
+function fakeSafeStorage() {
+  return {
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => Uint8Array.from([...value].map((character) => character.charCodeAt(0) ^ 0xaa)),
+    decryptString: (value) => [...value].map((byte) => String.fromCharCode(byte ^ 0xaa)).join(''),
+  };
+}
+
+// Point the platform's OS app-data base at a temp root so the legacy LSAT dir the
+// relocation guard looks for resolves inside the test sandbox.
+function legacyAppDataEnv(root, platform) {
+  if (platform === 'win32') return { APPDATA: root };
+  if (platform === 'darwin') return { HOME: root };
+  return { XDG_DATA_HOME: root };
+}
+
 test('stable IPC allowlist has no LSAT token channel and rejects unknown input', () => {
   assert.equal('SIDECAR_TOKEN' in CHANNELS, false);
   assert.equal(ALLOWED_INVOKE_CHANNELS.includes('studyvault:sidecar:token'), false);
   assert.throws(() => validateRequest('studyvault:sidecar:token'), ContractError);
   assert.throws(() => validateRequest(IPC_CHANNELS.FILES_READ, { path: 'x.pdf', extra: true }), /not allowed/);
   assert.throws(() => validateResponse(IPC_CHANNELS.FULLSCREEN_GET, 'false'), /boolean/);
+});
+
+test('packaging prunes node_modules from the asar', async () => {
+  // The main process imports only node: builtins and electron, but electron-builder
+  // harvests node_modules unless a negated glob prunes it — which is worth 287 MB
+  // of app.asar (319 MB -> 32 MB). Nothing else observes packaged output size, so
+  // without this assertion a stray edit to files: silently re-inflates the installer.
+  const builderConfig = await readFile(path.join(repoRoot, 'electron-builder.yml'), 'utf8');
+  assert.match(builderConfig, /^\s+- '!node_modules\/\*\*\/\*'$/m);
 });
 
 test('packaging enables hardened fuses without requiring an absent browser snapshot', async () => {
@@ -107,7 +150,7 @@ test('path authorization lists only PDFs and does not authorize arbitrary root f
   assert.equal((await authorization.readAuthorizedFile(text)).data.byteLength, 10);
 });
 
-test('folder listing rejects symlinks and enforces its entry cap', async (t) => {
+test('folder listing skips symlinks and enforces its entry cap', async (t) => {
   const root = await temporaryDirectory(t);
   await writeFile(path.join(root, 'a.pdf'), 'a');
   await writeFile(path.join(root, 'b.pdf'), 'b');
@@ -118,19 +161,139 @@ test('folder listing rejects symlinks and enforces its entry cap', async (t) => 
 
   const target = path.join(root, 'target.pdf');
   const link = path.join(root, 'linked.pdf');
+  const linkedDirectory = path.join(root, 'real');
+  const junction = path.join(root, 'junction');
   await writeFile(target, 'target');
-  try {
-    await symlink(target, link, 'file');
-  } catch (error) {
-    if (error?.code === 'EPERM') {
-      t.diagnostic('Symlink creation is unavailable on this Windows host');
-      return;
+  await mkdir(linkedDirectory);
+  await writeFile(path.join(linkedDirectory, 'inside.pdf'), 'inside');
+
+  // Windows refuses file symlinks without developer mode but always allows a
+  // directory junction, which lstat reports as a link just the same — so at least
+  // one of the two exercises the skip on every host.
+  let links = 0;
+  let fileLink = false;
+  for (const [source, destination, type] of [
+    [target, link, 'file'],
+    [linkedDirectory, junction, process.platform === 'win32' ? 'junction' : 'dir'],
+  ]) {
+    try {
+      await symlink(source, destination, type);
+      links += 1;
+      fileLink ||= type === 'file';
+    } catch (error) {
+      if (error?.code !== 'EPERM') throw error;
+      t.diagnostic(`Creating a ${type} link is unavailable on this host`);
     }
-    throw error;
   }
+  assert.notEqual(links, 0);
+
   const authorization = new PathAuthorization();
   await authorization.authorizePickedRoot(root);
-  await assert.rejects(() => authorization.listPdfs(root), /symbolic link/i);
+  const rows = await authorization.listPdfs(root);
+  // Links are skipped, not fatal: every real PDF beside them still lists, and the
+  // junction's target is reached once through the real directory instead.
+  assert.deepEqual(
+    rows.map((row) => row.name),
+    ['a.pdf', 'b.pdf', 'inside.pdf', 'target.pdf'],
+  );
+  assert.equal(rows.skipped_links, links);
+  assert.equal(rows.skipped_oversize, 0);
+  assert.equal(rows.skipped_errors, 0);
+  if (fileLink) await assert.rejects(() => authorization.readAuthorizedFile(link), /symbolic link/i);
+});
+
+test('folder listing skips oversized and unstattable entries instead of aborting', async (t) => {
+  const root = await temporaryDirectory(t);
+  const nested = path.join(root, 'nested');
+  await mkdir(nested);
+  await writeFile(path.join(root, 'good.pdf'), 'good');
+  await writeFile(path.join(nested, 'deep.pdf'), 'deep');
+  await writeFile(path.join(root, 'broken.pdf'), 'broken');
+  const oversized = path.join(root, 'huge.pdf');
+  await writeFile(oversized, 'x');
+  await truncate(oversized, FILE_READ_CAP_BYTES + 1);
+
+  const authorization = new PathAuthorization({
+    statEntry: async (candidate) => {
+      if (path.basename(candidate) === 'broken.pdf') throw Object.assign(new Error('simulated'), { code: 'EIO' });
+      return lstat(candidate);
+    },
+  });
+  await authorization.authorizePickedRoot(root);
+  const rows = await authorization.listPdfs(root);
+  assert.deepEqual(
+    rows.map((row) => row.name),
+    ['good.pdf', 'deep.pdf'],
+  );
+  assert.equal(rows.skipped_oversize, 1);
+  assert.equal(rows.skipped_errors, 1);
+  assert.equal(rows.skipped_links, 0);
+  // Skipping must not widen authorization: neither skipped file became readable.
+  await assert.rejects(() => authorization.readAuthorizedFile(oversized), /not been authorized/);
+  await assert.rejects(() => authorization.readAuthorizedFile(path.join(root, 'broken.pdf')), /not been authorized/);
+});
+
+test('folder listing skips an unreadable subtree but still fails on an unreadable root', async (t) => {
+  const root = await temporaryDirectory(t);
+  const locked = path.join(root, 'locked');
+  await mkdir(locked);
+  await writeFile(path.join(root, 'top.pdf'), 'top');
+  await writeFile(path.join(locked, 'inner.pdf'), 'inner');
+
+  const authorization = new PathAuthorization({
+    readDirectory: async (directory, options) => {
+      if (path.basename(directory) === 'locked') throw Object.assign(new Error('simulated'), { code: 'EACCES' });
+      return readdir(directory, options);
+    },
+  });
+  await authorization.authorizePickedRoot(root);
+  const rows = await authorization.listPdfs(root);
+  assert.deepEqual(
+    rows.map((row) => row.name),
+    ['top.pdf'],
+  );
+  assert.equal(rows.skipped_errors, 1);
+
+  const unreadableRoot = new PathAuthorization({
+    readDirectory: async () => {
+      throw Object.assign(new Error('root is unreadable'), { code: 'EACCES' });
+    },
+  });
+  await unreadableRoot.authorizePickedRoot(root);
+  await assert.rejects(() => unreadableRoot.listPdfs(root), /root is unreadable/);
+});
+
+test('pdf listing contract carries large metadata and skip counters without loosening the read cap', () => {
+  const listing = Object.assign(
+    [
+      {
+        path: path.join('C:', 'study', 'huge.pdf'),
+        relative_path: 'huge.pdf',
+        name: 'huge.pdf',
+        extension: '.pdf',
+        size: FILE_READ_CAP_BYTES + 1,
+      },
+    ],
+    { skipped_links: 2, skipped_oversize: 1, skipped_errors: 3 },
+  );
+  const validated = validateResponse(IPC_CHANNELS.FILES_LIST_PDFS, listing);
+  assert.equal(validated.length, 1);
+  assert.equal(validated[0].size, FILE_READ_CAP_BYTES + 1);
+  assert.equal(validated.skipped_links, 2);
+  assert.equal(validated.skipped_oversize, 1);
+  assert.equal(validated.skipped_errors, 3);
+  assert.equal(validateResponse(IPC_CHANNELS.FILES_LIST_PDFS, []).skipped_links, 0);
+  assert.throws(
+    () =>
+      validateResponse(IPC_CHANNELS.FILES_READ, {
+        path: path.join('C:', 'study', 'huge.pdf'),
+        name: 'huge.pdf',
+        extension: '.pdf',
+        size: FILE_READ_CAP_BYTES + 1,
+        data: new Uint8Array(FILE_READ_CAP_BYTES + 1),
+      }),
+    /at most 50 MiB/,
+  );
 });
 
 test('authorized reads reject files larger than 50 MiB', async (t) => {
@@ -143,16 +306,57 @@ test('authorized reads reject files larger than 50 MiB', async (t) => {
   await assert.rejects(() => authorization.readAuthorizedFile(oversized), /read cap/);
 });
 
-test('launch path extraction accepts only PDF and TXT paths', () => {
-  const paths = extractLaunchFilePaths(['electron', '.', 'a.pdf', '--flag', 'b.exe', 'c.TXT'], 'C:\\study');
-  assert.equal(paths.length, 2);
-  assert.equal(
-    paths.some((entry) => entry.toLocaleLowerCase('en-US').endsWith('.pdf')),
-    true,
-  );
-  assert.equal(
-    paths.some((entry) => entry.toLocaleLowerCase('en-US').endsWith('.txt')),
-    true,
+test('launch path extraction accepts only absolute, traversal-free PDF and TXT paths', () => {
+  const studyRoot = path.resolve('study');
+  const absolutePdf = path.join(studyRoot, 'a.pdf');
+  const absoluteText = path.join(studyRoot, 'c.TXT');
+  const paths = extractLaunchFilePaths([
+    'electron',
+    '.',
+    'a.pdf',
+    '--flag',
+    absolutePdf,
+    path.join(studyRoot, 'b.exe'),
+    absoluteText,
+    absolutePdf,
+    // A relative argument would previously have been resolved against the cwd.
+    path.join('nested', 'relative.pdf'),
+    // `..` is rejected on the raw argument: normalize() would collapse it away.
+    `${studyRoot}${path.sep}..${path.sep}..${path.sep}secret.pdf`,
+  ]);
+  assert.deepEqual(paths, [absolutePdf, absoluteText]);
+});
+
+test('deep-link URLs are routed as URLs and never reach the launch file extractor', () => {
+  assert.deepEqual(parseDeepLink('studyvault://open/lsat/srs'), {
+    action: 'open',
+    route: '/lsat/srs',
+    href: 'studyvault://open/lsat/srs',
+  });
+  assert.equal(parseDeepLink('studyvault://ROUTE/dashboard').action, 'route');
+  assert.equal(parseDeepLink('studyvault://open').route, '/');
+  // Anything that is not an allowlisted studyvault action, or that carries path
+  // syntax instead of route segments, is refused outright.
+  assert.equal(parseDeepLink('studyvault://exfiltrate/a'), null);
+  assert.equal(parseDeepLink('studyvault:C:\\Windows\\secret.pdf'), null);
+  assert.equal(parseDeepLink('studyvault:///c:/Windows/secret.pdf'), null);
+  assert.equal(parseDeepLink('file:///C:/Windows/win.ini'), null);
+  assert.equal(parseDeepLink('https://example.com/x'), null);
+  assert.equal(parseDeepLink('not a url'), null);
+  assert.equal(parseDeepLink(''), null);
+
+  const hostile = [
+    'studyvault://open/../../../Windows/System32/config/SAM.txt',
+    'studyvault://open/%2e%2e/secret.pdf',
+    'studyvault://open/notes.pdf',
+    'file:///C:/Windows/win.ini',
+  ];
+  // The deep-link parser accepts some of these as in-app routes, but the launch
+  // extractor — the only path to file authorization — accepts none of them.
+  assert.deepEqual(extractLaunchFilePaths(hostile), []);
+  assert.deepEqual(
+    extractDeepLinks(hostile).map((link) => link.route),
+    ['/Windows/System32/config/SAM.txt', '/secret.pdf', '/notes.pdf'],
   );
 });
 
@@ -324,12 +528,16 @@ test('safeStorage rejects basic-text Linux and stores only encrypted bytes', asy
   );
 
   const root = await temporaryDirectory(t);
-  const fakeSafeStorage = {
-    isEncryptionAvailable: () => true,
-    encryptString: (value) => Uint8Array.from([...value].map((character) => character.charCodeAt(0) ^ 0xaa)),
-    decryptString: (value) => [...value].map((byte) => String.fromCharCode(byte ^ 0xaa)).join(''),
+  // `env: {}` leaves no OS app-data base, so the relocation guard cannot reach
+  // this machine's real LSAT bank; `readLegacy` keeps the OS credential store out.
+  const options = {
+    safeStorage: fakeSafeStorage(),
+    userDataPath: root,
+    platform: 'win32',
+    env: {},
+    readLegacy: () => null,
   };
-  const store = new SecureKeyStore({ safeStorage: fakeSafeStorage, userDataPath: root, platform: 'win32' });
+  const store = new SecureKeyStore(options);
   await store.set(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, 'plain-secret');
   const disk = await readFile(store.filePath, 'utf8');
   assert.equal(disk.includes('plain-secret'), false);
@@ -337,12 +545,160 @@ test('safeStorage rejects basic-text Linux and stores only encrypted bytes', asy
   await store.delete(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
   assert.equal(await store.get(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT), null);
 
-  const dbKeys = new LsatDbKeyStore({ safeStorage: fakeSafeStorage, userDataPath: root, platform: 'win32' });
+  const dbKeys = new LsatDbKeyStore(options);
   const first = await dbKeys.getOrCreate();
   const second = await dbKeys.getOrCreate();
   assert.match(first, /^[A-Za-z0-9+/]{43}=$/);
   assert.equal(second, first);
   assert.equal((await readFile(dbKeys.filePath, 'utf8')).includes(first), false);
+});
+
+test('LSAT DB key store refuses to rotate a key an existing database still depends on', async (t) => {
+  const root = await temporaryDirectory(t);
+  const dataDir = path.join(root, 'lsat-backend');
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(lsatStorePath(dataDir), 'sqlite-bank-bytes');
+  const dbKeys = new LsatDbKeyStore({
+    safeStorage: fakeSafeStorage(),
+    userDataPath: root,
+    platform: 'win32',
+    env: {},
+    readLegacy: () => null,
+  });
+  await assert.rejects(() => dbKeys.getOrCreate(), /refusing to mint a replacement key/);
+  assert.equal(dbKeys.protectedStorePath(), lsatStorePath(dataDir));
+
+  // A 0-byte file is a stub, not a protected bank: minting stays available.
+  await truncate(lsatStorePath(dataDir), 0);
+  assert.equal(dbKeys.protectedStorePath(), null);
+  assert.match(await dbKeys.getOrCreate(), /^[A-Za-z0-9+/]{43}=$/);
+});
+
+test('first run imports the Tauri credential once and a delete is never resurrected', async (t) => {
+  const root = await temporaryDirectory(t);
+  const legacyKey = `${'c'.repeat(43)}=`;
+  let probes = 0;
+  const dbKeys = new LsatDbKeyStore({
+    safeStorage: fakeSafeStorage(),
+    userDataPath: root,
+    platform: 'win32',
+    env: {},
+    readLegacy: ({ account }) => {
+      probes += 1;
+      return account === 'lsat-db-dek' ? legacyKey : null;
+    },
+  });
+  assert.equal(await dbKeys.getOrCreate(), legacyKey);
+  assert.equal(await dbKeys.getOrCreate(), legacyKey);
+  assert.equal(probes, 1);
+
+  const vault = new SecureKeyStore({
+    safeStorage: fakeSafeStorage(),
+    userDataPath: root,
+    platform: 'win32',
+    env: {},
+    readLegacy: () => 'legacy-vault-dek',
+  });
+  assert.equal(await vault.get(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT), 'legacy-vault-dek');
+  await vault.delete(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+  assert.equal(await vault.get(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT), null);
+});
+
+test('legacy credential lookup targets the Tauri names and tolerates absence', () => {
+  const refuse = () => {
+    throw new Error('the credential store must not be probed here');
+  };
+  const calls = [];
+  assert.equal(
+    readLegacyCredential({
+      account: 'lsat-db-dek',
+      platform: 'darwin',
+      runCommand: (file, args) => {
+        calls.push([file, ...args]);
+        return { status: 0, stdout: 'legacy-secret\n' };
+      },
+    }),
+    'legacy-secret',
+  );
+  assert.deepEqual(calls[0], ['security', 'find-generic-password', '-s', 'studyvault/lsat-db-dek', '-w']);
+  assert.equal(
+    readLegacyCredential({ account: 'lsat-db-dek', platform: 'darwin', runCommand: () => ({ status: 44, stdout: '' }) }),
+    null,
+  );
+  assert.equal(readLegacyCredential({ account: 'lsat-db-dek', platform: 'linux', runCommand: refuse }), null);
+  assert.equal(readLegacyCredential({ account: 'not-a-target', platform: 'darwin', runCommand: refuse }), null);
+
+  // cmdkey only proves presence, so an absent target must skip the blob read.
+  const windowsCalls = [];
+  assert.equal(
+    readLegacyCredential({
+      account: 'vault-dek',
+      platform: 'win32',
+      runCommand: (file, args) => {
+        windowsCalls.push([file, ...args]);
+        return { status: 0, stdout: '* NONE *' };
+      },
+    }),
+    null,
+  );
+  assert.deepEqual(windowsCalls, [['cmdkey', '/list:studyvault/vault-dek']]);
+});
+
+test('encrypted records are bound to their record name and reject a swapped file', async (t) => {
+  const root = await temporaryDirectory(t);
+  const safeStorage = fakeSafeStorage();
+  const options = { safeStorage, userDataPath: root, platform: 'win32', env: {}, readLegacy: () => null };
+  const vault = new SecureKeyStore(options);
+  const dbKeys = new LsatDbKeyStore(options);
+  await vault.set(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, 'vault-secret');
+  const minted = await dbKeys.getOrCreate();
+  assert.equal(path.basename(dbKeys.filePath), `${LSAT_DB_RECORD}.bin`);
+  assert.equal(JSON.parse(safeStorage.decryptString(await readFile(vault.filePath))).name, KEYCHAIN_ACCOUNT);
+
+  // A same-app attacker swaps the vault ciphertext into the LSAT record's path.
+  await writeFile(dbKeys.filePath, await readFile(vault.filePath));
+  await assert.rejects(() => dbKeys.getOrCreate(), /bound to a different record/);
+  assert.notEqual(minted, 'vault-secret');
+});
+
+test('relocation guard adopts a legacy LSAT bank only while the new store is empty', async (t) => {
+  const root = await temporaryDirectory(t);
+  const platform = process.platform;
+  const env = legacyAppDataEnv(root, platform);
+  const legacyDir = legacyLsatDataDir({ platform, env });
+  const userDataPath = path.join(root, 'userData');
+  const newDir = path.join(userDataPath, 'lsat-backend');
+  await mkdir(legacyDir, { recursive: true });
+  await mkdir(newDir, { recursive: true });
+
+  assert.equal(resolveLsatDataDir({ userDataPath, platform, env }).dataDir, newDir);
+  await writeFile(lsatStorePath(legacyDir), '');
+  assert.equal(resolveLsatDataDir({ userDataPath, platform, env }).dataDir, newDir);
+
+  await writeFile(lsatStorePath(legacyDir), 'sqlite-bank-bytes');
+  const adopted = resolveLsatDataDir({ userDataPath, platform, env });
+  assert.equal(adopted.dataDir, legacyDir);
+  assert.equal(adopted.relocated, true);
+
+  const logged = [];
+  const specs = buildServiceSpecs({
+    servicesDirectory: path.resolve('services-root'),
+    userDataPath,
+    lsatToken: 'a'.repeat(64),
+    lsatDbKeyB64: `${'b'.repeat(43)}=`,
+    platform,
+    env,
+    logger: { info: (event, details) => logged.push([event, details]) },
+  });
+  const lsat = specs.find((spec) => spec.name === 'LSAT backend');
+  assert.equal(lsat.env.LSATLAB_DATA_DIR, legacyDir);
+  // The containment root must follow, or the sidecar rejects its own data dir.
+  assert.equal(lsat.dataRoot, legacyDir);
+  assert.equal(logged[0][0], 'lsat_data_dir_resolved');
+
+  // A populated new store always wins — the guard never redirects live data.
+  await writeFile(lsatStorePath(newDir), 'newer-bank-bytes');
+  assert.equal(resolveLsatDataDir({ userDataPath, platform, env }).dataDir, newDir);
 });
 
 test('LSAT authorization predicate is exact and redirect requests do not receive the token', () => {
@@ -445,74 +801,251 @@ test('aggregate, backoff, port block, and redaction decisions are bounded', () =
   assert.equal(redactSidecarLine('Authorization: Bearer abc token=xyz', ['abc']).includes('abc'), false);
 });
 
-test('occupied expected port blocks launch without spawning or terminating anything', async () => {
-  let spawnCount = 0;
-  let terminateCount = 0;
-  const spec = {
-    name: 'LSAT backend',
-    program: 'lsatlab-backend.exe',
+function sidecarSpec(overrides = {}) {
+  return {
+    name: 'test service',
+    program: 'service.exe',
     args: [],
-    env: { LSATLAB_DATA_DIR: os.tmpdir() },
+    env: {},
     readyPort: 8100,
     dependsOn: [],
     optional: false,
     resourcePath: null,
     provenanceRequired: false,
     cwd: os.tmpdir(),
+    ...overrides,
   };
-  const manager = new SidecarManager({
-    specs: [spec],
+}
+
+function stubChild(pid) {
+  const child = new EventEmitter();
+  child.pid = pid;
+  child.exitCode = null;
+  child.signalCode = null;
+  child.stdout = null;
+  child.stderr = null;
+  // The manager attaches its 'spawn' listener synchronously, so a microtask is
+  // the earliest safe point to report a successful spawn.
+  void Promise.resolve().then(() => child.emit('spawn'));
+  return child;
+}
+
+function stubManager(options) {
+  return new SidecarManager({
     servicesDirectory: os.tmpdir(),
     lsatToken: 'b'.repeat(64),
     logger: quietLogger,
+    provenanceVerifier: async () => ({ status: 'not_applicable', blocksLaunch: false, message: null }),
+    terminateTree: async () => {},
+    portSweep: async () => [],
+    ...options,
+  });
+}
+
+async function waitFor(predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await delay(5);
+  }
+  throw new Error('Condition was not met before the deadline');
+}
+
+test('occupied expected port is retried on a bounded budget instead of latching blocked', async () => {
+  let spawnCount = 0;
+  let terminateCount = 0;
+  const retrying = stubManager({
+    specs: [sidecarSpec({ name: 'LSAT backend', env: { LSATLAB_DATA_DIR: os.tmpdir() } })],
     spawnProcess: () => {
       spawnCount += 1;
     },
     portProbe: async () => true,
-    provenanceVerifier: async () => ({ status: 'not_applicable', blocksLaunch: false, message: null }),
     terminateTree: async () => {
       terminateCount += 1;
     },
+    portRetryBaseMs: 50,
   });
-  await manager.startAll();
-  const [status] = await manager.getStatus();
-  assert.equal(status.blocked, true);
-  assert.equal(status.provenance_status, 'port_occupied');
-  assert.equal(manager.getAuthorizationTokenForRequest(), null);
+  await retrying.startAll();
+  const [retried] = await retrying.getStatus();
+  assert.equal(retried.blocked, false);
+  assert.equal(retried.state, 'backoff');
+  assert.equal(retried.provenance_status, 'port_occupied');
+  assert.equal(retrying.records.get('LSAT backend').portRetryCount, 1);
+  assert.equal(retrying.getAuthorizationTokenForRequest(), null);
   assert.equal(spawnCount, 0);
-  await manager.stopAll();
+  await retrying.stopAll();
   assert.equal(terminateCount, 0);
+
+  // The budget is bounded: an occupancy that never clears still latches blocked.
+  const exhausted = stubManager({
+    specs: [sidecarSpec()],
+    spawnProcess: () => {},
+    portProbe: async () => true,
+    maxPortRetries: 0,
+  });
+  await exhausted.startAll();
+  const [latched] = await exhausted.getStatus();
+  assert.equal(latched.blocked, true);
+  assert.equal(latched.provenance_status, 'port_occupied');
+  await exhausted.stopAll();
 });
 
-test('free-port launch fails closed when crash-safe watchdog is unavailable', async () => {
+test('free-port launch degrades instead of blocking when the crash guard is unavailable', async () => {
   let spawnCount = 0;
-  const spec = {
-    name: 'optional service',
-    program: 'service.exe',
-    args: [],
-    env: {},
-    readyPort: 5055,
-    dependsOn: [],
-    optional: true,
-    resourcePath: null,
-    provenanceRequired: false,
-    cwd: os.tmpdir(),
-  };
-  const manager = new SidecarManager({
-    specs: [spec],
-    servicesDirectory: os.tmpdir(),
-    lsatToken: 'b'.repeat(64),
-    logger: quietLogger,
+  const manager = stubManager({
+    specs: [sidecarSpec({ name: 'optional service', readyPort: 5055, optional: true })],
     spawnProcess: () => {
       spawnCount += 1;
+      return stubChild(4242);
     },
     portProbe: async () => false,
-    provenanceVerifier: async () => ({ status: 'not_applicable', blocksLaunch: false, message: null }),
+    readinessProbe: async () => true,
+    watchdog: null,
+  });
+  const boot = await manager.startAll();
+  const [status] = await manager.getStatus();
+  assert.equal(spawnCount, 1);
+  assert.equal(status.ready, true);
+  assert.equal(manager.records.get('optional service').crashGuardDegraded, true);
+  assert.equal(boot.status, 'degraded');
+  assert.match(boot.degraded_reason, new RegExp(CRASH_GUARD_UNAVAILABLE_REASON));
+  await manager.stopAll();
+});
+
+test('boot sweep reclaims our own stale listener and leaves a foreign one alone', async () => {
+  const killed = [];
+  const sweeper = {
+    async pidsOnPort(port) {
+      if (port === 8100) return [4242];
+      if (port === 8000) return [777];
+      if (port === 5055) return [process.pid];
+      return [];
+    },
+    async kill(pid) {
+      killed.push(pid);
+      return true;
+    },
+  };
+  const results = await sweepOwnedPorts({
+    targets: [
+      { name: 'LSAT backend', port: 8100, identity: { path: '/api/health', service: 'lsat-backend' } },
+      { name: 'SurrealDB', port: 8000, identity: { path: '/health', service: 'surreal' } },
+      { name: 'self held', port: 5055, identity: { path: '/health', service: 'self' } },
+      { name: 'unclaimed', port: 4321, identity: null },
+      // A repeated port must not be swept — and killed — twice.
+      { name: 'LSAT backend', port: 8100, identity: { path: '/api/health', service: 'lsat-backend' } },
+    ],
+    sweeper,
+    identityProbe: async (_identity, port) => port === 8100,
+    selfPids: [process.pid],
+    logger: quietLogger,
+  });
+  assert.deepEqual(
+    results.map((result) => result.outcome),
+    [SWEEP_OUTCOMES.RECLAIMED, SWEEP_OUTCOMES.FOREIGN, SWEEP_OUTCOMES.SELF, SWEEP_OUTCOMES.FREE],
+  );
+  assert.deepEqual(killed, [4242]);
+});
+
+test('boot sweep never throws and never kills an unidentified or unreachable listener', async () => {
+  const killed = [];
+  const results = await sweepOwnedPorts({
+    targets: [
+      { name: 'exploding', port: 8100, identity: { path: '/api/health', service: 'lsat-backend' } },
+      { name: 'no identity contract', port: 8000, identity: null },
+    ],
+    sweeper: {
+      async pidsOnPort(port) {
+        if (port === 8100) throw new Error('netstat is blocked by policy');
+        return [999];
+      },
+      async kill(pid) {
+        killed.push(pid);
+        return true;
+      },
+    },
+    identityProbe: async () => true,
+    selfPids: [process.pid],
+    logger: quietLogger,
+  });
+  assert.deepEqual(
+    results.map((result) => result.outcome),
+    [SWEEP_OUTCOMES.UNRESOLVED, SWEEP_OUTCOMES.UNIDENTIFIED],
+  );
+  assert.deepEqual(killed, []);
+
+  // An unusable discovery tool reports the port unresolved rather than free.
+  const sweeper = createSystemSweeper({
+    platform: 'win32',
+    runCommand: async () => ({ ok: false, available: false, stdout: '' }),
+  });
+  assert.equal(await sweeper.pidsOnPort(8100), null);
+  assert.deepEqual(parseNetstatListeningPids('  TCP  127.0.0.1:81000  0.0.0.0:0  LISTENING  55\n', 100), []);
+  assert.deepEqual(
+    parseNetstatListeningPids(
+      '  TCP    127.0.0.1:8100    0.0.0.0:0    LISTENING    4242\n' +
+        '  TCP    127.0.0.1:8100    127.0.0.1:51000    ESTABLISHED    9999\n',
+      8100,
+    ),
+    [4242],
+  );
+  assert.deepEqual(parseLsofPids('4242\n9999\n4242\n\n'), [4242, 9999]);
+});
+
+test('boot sweeps every present owned port before the first launch attempt', async () => {
+  const observed = [];
+  const manager = stubManager({
+    specs: [
+      sidecarSpec({
+        name: 'identified service',
+        readinessIdentity: { path: '/api/health', service: 'lsat-backend' },
+      }),
+      sidecarSpec({ name: 'missing service', readyPort: 5055, resourcePath: path.join(os.tmpdir(), 'absent.exe') }),
+      sidecarSpec({ name: 'worker', readyPort: null }),
+    ],
+    spawnProcess: () => stubChild(4242),
+    portProbe: async () => false,
+    readinessProbe: async () => true,
+    portSweep: async ({ targets }) => {
+      observed.push(...targets);
+      return [];
+    },
   });
   await manager.startAll();
-  const [status] = await manager.getStatus();
-  assert.equal(status.provenance_status, 'crash_guard_unavailable');
-  assert.equal(spawnCount, 0);
+  assert.deepEqual(observed, [
+    { name: 'identified service', port: 8100, identity: { path: '/api/health', service: 'lsat-backend' } },
+  ]);
+  await manager.stopAll();
+});
+
+test('restart budget is restored once a respawned sidecar polls healthy again', async () => {
+  let pid = 5000;
+  const manager = stubManager({
+    specs: [sidecarSpec({ name: 'flaky service' })],
+    spawnProcess: () => {
+      pid += 1;
+      return stubChild(pid);
+    },
+    portProbe: async () => false,
+    readinessProbe: async () => true,
+    respawnBaseMs: 10,
+    healthIntervalMs: 10,
+  });
+  await manager.startAll();
+  const record = manager.records.get('flaky service');
+  assert.equal(record.state, 'ready');
+  assert.equal(record.restartCount, 0);
+
+  const first = record.child;
+  first.exitCode = 1;
+  first.emit('exit', 1, null);
+  // A transient blip consumes budget immediately and must not be permanent.
+  assert.equal(record.restartCount, 1);
+  assert.equal(record.state, 'backoff');
+
+  await waitFor(() => record.state === 'ready' && record.child !== first);
+  await waitFor(() => record.restartCount === 0);
+  assert.equal(record.child.pid, 5002);
   await manager.stopAll();
 });
 
@@ -539,11 +1072,170 @@ test('owned-child watchdog reaps an explicitly tracked disposable process', asyn
   const exited = once(child, 'exit');
   await watchdog.track(child.pid);
   await watchdog.close();
+  // The reap budget must exceed the watchdog's own internal timeouts, not just a
+  // typical reap. On Windows the shutdown path runs a PowerShell CIM snapshot
+  // (spawnSync timeout 8s) and then taskkill (timeout 10s); a deadline below that
+  // sum fails on a loaded machine while the implementation is working correctly.
+  const REAP_BUDGET_MS = 45_000;
   await Promise.race([
     exited,
-    delay(5000).then(() => {
-      throw new Error('Tracked child was not reaped by watchdog');
+    delay(REAP_BUDGET_MS).then(() => {
+      throw new Error(`Tracked child was not reaped by watchdog within ${REAP_BUDGET_MS}ms`);
     }),
   ]);
   assert.equal(child.exitCode !== null || child.signalCode !== null, true);
+});
+
+const SNAPSHOT_DIAGNOSTIC = 'watchdog_snapshot_unavailable';
+
+function stderrRecordingLogger() {
+  const lines = [];
+  return {
+    lines,
+    info() {},
+    warn(event, payload) {
+      if (event === 'watchdog_stderr') lines.push(String(payload?.message ?? ''));
+    },
+    error() {},
+    crash() {},
+  };
+}
+
+async function hasStderrLine(logger, marker, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    if (logger.lines.some((line) => line.includes(marker))) return true;
+    await delay(50);
+  } while (Date.now() < deadline);
+  return false;
+}
+
+// Starts a real watchdog whose Win32_Process snapshot can be broken ON DEMAND:
+// `breakSnapshot()` drops an unusable `powershell.exe` at the front of the
+// child's PATH. The stub is written only after readiness, so the child's startup
+// snapshot probe still resolves the genuine PowerShell.
+async function watchdogWithBreakableSnapshot(t) {
+  const stubDirectory = await temporaryDirectory(t);
+  const logger = stderrRecordingLogger();
+  const spawnWithStubPath = (executable, args, options) => {
+    const env = { ...options.env };
+    for (const key of Object.keys(env)) {
+      if (key.toUpperCase() === 'PATH') delete env[key];
+    }
+    env.PATH = `${stubDirectory}${path.delimiter}${process.env.PATH}`;
+    return spawn(executable, args, { ...options, env });
+  };
+  const watchdog = await OwnedChildWatchdog.start({
+    scriptPath: fileURLToPath(new URL('../child-watchdog.cjs', import.meta.url)),
+    logger,
+    executable: process.execPath,
+    spawnProcess: spawnWithStubPath,
+  });
+  t.after(() => watchdog.close());
+  return { watchdog, logger, breakSnapshot: () => writeFile(path.join(stubDirectory, 'powershell.exe'), '') };
+}
+
+function spawnDisposableChild(t) {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    detached: process.platform !== 'win32',
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  t.after(() => {
+    if (child.exitCode === null) child.kill('SIGKILL');
+  });
+  return child;
+}
+
+test('reap still kills a tracked root PID when the process snapshot is unavailable', async (t) => {
+  if (process.platform !== 'win32') {
+    t.diagnostic('The CIM snapshot degradation path only exists on Windows');
+    return;
+  }
+  const { watchdog, logger, breakSnapshot } = await watchdogWithBreakableSnapshot(t);
+  const child = spawnDisposableChild(t);
+  await once(child, 'spawn');
+  const exited = once(child, 'exit');
+  await watchdog.track(child.pid);
+  await breakSnapshot();
+  await watchdog.close();
+
+  const REAP_BUDGET_MS = 45_000;
+  await Promise.race([
+    exited,
+    delay(REAP_BUDGET_MS).then(() => {
+      throw new Error(`Tracked root was not reaped without a snapshot within ${REAP_BUDGET_MS}ms`);
+    }),
+  ]);
+  assert.equal(child.exitCode !== null || child.signalCode !== null, true);
+  // Also proves the sabotage actually took effect, which the probe test below
+  // relies on when it asserts the diagnostic is ABSENT.
+  assert.equal(await hasStderrLine(logger, SNAPSHOT_DIAGNOSTIC), true);
+});
+
+test('the parent probe never takes a process snapshot while the app is alive', async (t) => {
+  if (process.platform !== 'win32') {
+    t.diagnostic('The CIM snapshot degradation path only exists on Windows');
+    return;
+  }
+  const { watchdog, logger, breakSnapshot } = await watchdogWithBreakableSnapshot(t);
+  const child = spawnDisposableChild(t);
+  await once(child, 'spawn');
+  await watchdog.track(child.pid);
+  await breakSnapshot();
+
+  // Three 1500ms probe ticks. A probe that still ran descendant discovery would
+  // hit the broken stub and emit the snapshot diagnostic on every tick.
+  await delay(5000);
+  assert.equal(
+    logger.lines.some((line) => line.includes(SNAPSHOT_DIAGNOSTIC)),
+    false,
+  );
+  // A discovery call on the interval blocks the child's event loop for seconds
+  // (spawnSync), so a prompt round trip is the second, independent signal.
+  const startedAt = Date.now();
+  await watchdog.track(child.pid);
+  assert.equal(Date.now() - startedAt < 2500, true);
+  assert.equal(child.exitCode, null);
+});
+
+// Stand-in watchdog child that acknowledges shutdown and then takes longer to
+// exit than the old 5s close() grace, the way a real reap does while it waits on
+// its own snapshot and taskkill timeouts.
+const SLOW_REAP_CHILD = [
+  "process.stdout.write('STUDYVAULT_WATCHDOG_READY\\n');",
+  "require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {",
+  "  process.stdout.write(JSON.stringify({ id: JSON.parse(line).id, ok: true }) + '\\n');",
+  '  setTimeout(() => process.exit(0), 7000);',
+  '});',
+].join('\n');
+
+test('close waits out a slow reap instead of killing the watchdog part-way through it', async (t) => {
+  let forceKilled = false;
+  const spawnSlowReaper = () => {
+    const child = spawn(process.execPath, ['-e', SLOW_REAP_CHILD], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    const nativeKill = child.kill.bind(child);
+    child.kill = (...args) => {
+      forceKilled = true;
+      return nativeKill(...args);
+    };
+    return child;
+  };
+  const watchdog = await OwnedChildWatchdog.start({
+    scriptPath: 'unused-by-the-stand-in',
+    logger: quietLogger,
+    spawnProcess: spawnSlowReaper,
+  });
+  t.after(() => {
+    if (watchdog.child.exitCode === null) watchdog.child.kill('SIGKILL');
+  });
+
+  await watchdog.close();
+  // Force-killing here abandons whatever the child was still terminating, which
+  // is the leak the crash guard exists to prevent.
+  assert.equal(forceKilled, false);
+  assert.equal(watchdog.child.exitCode, 0);
 });

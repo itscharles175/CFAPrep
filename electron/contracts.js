@@ -87,6 +87,8 @@ function fileDescriptor(value, path = 'result') {
   };
 }
 
+const PDF_LISTING_MAX_ROWS = 100_000;
+
 function pdfEntry(value, path = 'result') {
   const object = exactObject(value, path, ['path', 'relative_path', 'name', 'extension', 'size']);
   return {
@@ -101,8 +103,23 @@ function pdfEntry(value, path = 'result') {
       max: 4,
       pattern: /^\.pdf$/,
     }),
-    size: finiteInteger(object.size, `${path}.size`, 0, 50 * 1024 * 1024),
+    // Metadata only. Bounding this at the 50 MiB read cap made one large PDF
+    // reject the entire folder listing; the read cap lives in readResult.
+    size: finiteInteger(object.size, `${path}.size`, 0, Number.MAX_SAFE_INTEGER),
   };
+}
+
+function pdfListing(value) {
+  const rows = arrayValue(value, 'result', pdfEntry, PDF_LISTING_MAX_ROWS);
+  // Skip counters ride on the rows array (see PathAuthorization#listPdfs), so they
+  // are validated and carried over without changing the listing's array shape.
+  const counter = (key) =>
+    finiteInteger(value[key] === undefined ? 0 : value[key], `result.${key}`, 0, PDF_LISTING_MAX_ROWS);
+  return Object.assign(rows, {
+    skipped_links: counter('skipped_links'),
+    skipped_oversize: counter('skipped_oversize'),
+    skipped_errors: counter('skipped_errors'),
+  });
 }
 
 function readResult(value) {
@@ -354,13 +371,6 @@ const requestContracts = new Map([
   [CHANNELS.KEYCHAIN_DELETE, noPayload],
   [CHANNELS.OPEN_PATH, pathPayload],
   [
-    CHANNELS.OPEN_EXTERNAL,
-    (value) => {
-      const object = exactObject(value, 'payload', ['url']);
-      return { url: stringValue(object.url, 'payload.url', { min: 9, max: 8192 }) };
-    },
-  ],
-  [
     CHANNELS.POPOUT,
     (value) => {
       const object = exactObject(value, 'payload', ['route', 'title', 'width', 'height']);
@@ -400,7 +410,7 @@ const responseContracts = new Map([
     (value) => nullable(value, (entry) => stringValue(entry, 'result', { min: 1, max: 32_768 })),
   ],
   [CHANNELS.FILES_PICK_FILES, (value) => arrayValue(value, 'result', fileDescriptor, 256)],
-  [CHANNELS.FILES_LIST_PDFS, (value) => arrayValue(value, 'result', pdfEntry, 100_000)],
+  [CHANNELS.FILES_LIST_PDFS, pdfListing],
   [CHANNELS.FILES_READ, readResult],
   [CHANNELS.FILES_AUTHORIZE_DROP, (value) => arrayValue(value, 'result', fileDescriptor, 256)],
   [CHANNELS.SIDECAR_STATUS, (value) => arrayValue(value, 'result', sidecarStatus, 100)],

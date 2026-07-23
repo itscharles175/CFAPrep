@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { resolveLsatDataDir } from './relocation.js';
 
 export const SERVICE_NAMES = Object.freeze({
   SURREAL: 'SurrealDB',
@@ -93,6 +94,7 @@ export function buildServiceSpecs({
   isPackaged = false,
   env = process.env,
   platform = process.platform,
+  logger = null,
 }) {
   const notebookPrograms = resolveOpenNotebookPrograms({
     servicesDirectory,
@@ -100,6 +102,7 @@ export function buildServiceSpecs({
     env,
     platform,
   });
+  const lsatData = resolveLsatDataDir({ userDataPath, platform, env, logger });
   const surrealProgram = path.join(servicesDirectory, 'bin', executable('surreal2', platform));
   const lsatProgram = path.join(servicesDirectory, 'lsat-backend', executable('lsatlab-backend', platform));
 
@@ -155,7 +158,7 @@ export function buildServiceSpecs({
       args: ['--host', '127.0.0.1', '--port', '8100'],
       env: {
         LSATLAB_PORT: '8100',
-        LSATLAB_DATA_DIR: path.join(userDataPath, 'lsat-backend'),
+        LSATLAB_DATA_DIR: lsatData.dataDir,
         LSATLAB_LOCAL_API_TOKEN: lsatToken,
         STUDYVAULT_SIDECAR_PROVENANCE: path.join(servicesDirectory, 'sidecar-provenance.json'),
         ...(lsatDbKeyB64 ? { LSATLAB_DB_KEY_B64: lsatDbKeyB64 } : {}),
@@ -169,7 +172,11 @@ export function buildServiceSpecs({
       resourcePath: lsatProgram,
       provenanceRequired: true,
       launchBlockReason: lsatKeyBlockReason,
-      dataRoot: userDataPath,
+      // The containment root has to follow the data dir: a recovered legacy bank
+      // is a sibling of userData, not a child, and would otherwise be rejected as
+      // an escaped data directory before the sidecar ever launches.
+      dataRoot: lsatData.relocated ? lsatData.dataDir : userDataPath,
+      dataDirRelocated: lsatData.relocated,
       cwd: path.dirname(lsatProgram),
     },
   ];

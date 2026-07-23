@@ -2,7 +2,7 @@ import process from 'node:process';
 import { BrowserWindow } from 'electron';
 import { ALLOWED_INVOKE_CHANNELS, IPC_CHANNELS, IPC_EVENTS, validateRequest, validateResponse } from './contracts.js';
 import { KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE } from './keychain.js';
-import { isAllowedExternalHttpsUrl, isSafeRendererUrl } from './window-security.js';
+import { isSafeRendererUrl } from './window-security.js';
 
 function assertTrustedSender(event, devServerUrl) {
   const frame = event.senderFrame;
@@ -78,14 +78,6 @@ export function registerIpcHandlers({
         const authorized = await nativeFiles.authorization.resolveAuthorizedOpenPath(path);
         const error = await shell.openPath(authorized);
         return { opened: error === '', error };
-      },
-    ],
-    [
-      IPC_CHANNELS.OPEN_EXTERNAL,
-      async ({ url }) => {
-        if (!isAllowedExternalHttpsUrl(url)) throw new Error('Only validated HTTPS URLs can be opened externally');
-        await shell.openExternal(url, { activate: true });
-        return { opened: true };
       },
     ],
     [IPC_CHANNELS.POPOUT, async (payload, event) => createPopout(payload, event.sender)],

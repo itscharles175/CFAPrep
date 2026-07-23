@@ -83,6 +83,17 @@ export function configureSessionSecurity(session, { devServerUrl = null } = {}) 
     );
   });
   session.setDevicePermissionHandler?.(() => false);
+
+  // Belt-and-braces for the offline invariant: even if a window is created with
+  // spellcheck enabled, point the dictionary fetch at a non-resolving loopback
+  // URL so Chromium can never reach Google's CDN. Wrapped because the API is
+  // absent on platforms using the OS spellchecker.
+  try {
+    session.setSpellCheckerDictionaryDownloadURL?.('http://127.0.0.1:0/');
+    session.setSpellCheckerEnabled?.(false);
+  } catch {
+    // Older/other platforms without the spellchecker APIs need no suppression.
+  }
 }
 
 export function hardenWebContents(webContents, { devServerUrl = null, logger }) {

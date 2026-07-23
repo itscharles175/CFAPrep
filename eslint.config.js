@@ -70,4 +70,32 @@ export default [
       },
     },
   },
+  // Electron main process + preload: Node, not browser. These must come after
+  // the `**/*.{js,jsx}` block so they replace its browser globals — otherwise
+  // `process`/`require`/`__dirname` typos lint clean. `.cjs` is CommonJS
+  // (preload/watchdog) while `.js` is ESM under the root `"type": "module"`.
+  {
+    files: ['electron/**/*.js', 'electron/tests/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      globals: {
+        ...globals.node,
+        ...globals.es2022,
+      },
+      parserOptions: {
+        sourceType: 'module',
+      },
+    },
+  },
+  {
+    files: ['electron/**/*.cjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: {
+        ...globals.node,
+        ...globals.es2022,
+      },
+    },
+  },
 ];

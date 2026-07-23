@@ -56,9 +56,11 @@ statements, 37% branches, 49% functions, and 50% lines; CI writes
 `dist/reports/coverage/coverage-summary.json`.
 
 `npm run doctor` writes `dist/reports/stack-doctor.json` using the DX-3
-read-only stack doctor. Default mode verifies local Node/npm/Python/Rust tools,
-required manifests/lockfiles, staged sidecar provenance hashes, and expected
-loopback ports. `npm run doctor -- --all` additionally runs the fast static
+read-only stack doctor. Default mode verifies local Node/npm/npx/Python tools and
+a non-blocking `electron-builder` probe, required manifests/lockfiles, staged
+sidecar provenance hashes, and expected loopback ports. No part of the build
+needs a Rust toolchain any more; the `cargo`/`rustc` probes went away with the
+Tauri shell. `npm run doctor -- --all` additionally runs the fast static
 gates: version sync, OpenAPI drift, no-egress, direct sidecar fetch inventory,
 docs drift, baseline catalog, and the vault archive restore drill.
 
@@ -340,13 +342,32 @@ node scripts/export-lsat-openapi.mjs --write   # writes services/lsat-backend/op
 ## Electron Runtime
 
 ```sh
-npx vitest run --project host electron
+npm run test:electron
 npm run electron:build:dir
 ```
 
+The Electron tests are **not** vitest: `vite.config.js` excludes `electron/**`
+from the `host` project, so `vitest --project host electron` silently matches
+zero files. `npm run test:electron` runs `node --test` over
+`electron/tests/**/*.test.mjs`. Budget ~1 minute — several watchdog cases wait on
+real child processes (the reap case alone budgets 45s).
+
 Runtime tests cover the custom protocol, IPC contracts, file grants, secure
-storage, navigation policy, sidecar provenance, port conflicts, status
-aggregation, and LSAT request-header injection.
+storage and the one-time Tauri credential import, navigation policy, sidecar
+provenance, the relocation guard, boot port sweep, bounded port retry, status
+aggregation, LSAT request-header injection, and the degraded-boot path when the
+crash-safe watchdog is unavailable.
+
+One supervisor behaviour the retired Tauri Rust suite covered is **not** covered
+here: reaping sidecars after an abrupt main-process death. The watchdog cases
+exercise the graceful `close()` path and the Windows snapshot-degradation path,
+but nothing kills the parent and asserts the 1500 ms probe reaps the tree. Also
+unpinned: `detached: false` on win32 in `electron/sidecar-manager.js`, which is
+what makes crash-guard degradation survivable on Windows. After changing
+`electron/sidecar-manager.js`, `electron/watchdog.js`, or
+`electron/child-watchdog.cjs`, verify a packaged run by hand — kill the app
+abruptly and confirm no `lsatlab-backend` process survives. See
+[docs/decisions/2026-07-23-electron-desktop-runtime.md](docs/decisions/2026-07-23-electron-desktop-runtime.md).
 
 ## Sidecar provenance
 
@@ -416,7 +437,8 @@ cd services/lsat-backend && python -m app.prompt_contracts --check
 6. `npm run bundle:report`
 7. `npm run check:no-egress`
 8. backend `pytest` with the 85% coverage floor (above)
-9. Electron runtime tests and unpacked-package validation when `electron/` changes
+9. `npm run test:electron` + `npm run electron:build:dir` when `electron/`,
+   `electron-builder.yml`, or the sidecar staging path changes
 10. `npm run check:sidecar-provenance` (when packaged sidecars changed)
 11. `node --import ./scripts/register-ts-loader.mjs scripts/rag-eval.mjs`
 12. `node --import ./scripts/register-ts-loader.mjs scripts/citation-faithfulness-eval.mjs`

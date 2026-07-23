@@ -39,20 +39,43 @@ function toolMappingFromSkillLab(mapping) {
   }));
 }
 
-// Maturity gating removed — the runtime always serves authored content.
-// Inert descriptive summary; never blocks.
+// CONTENT-3 — status is DERIVED from the packs, never asserted. The previous
+// version hard-coded mode:'exam-ready'/releaseEligible:true/blockers:[], which
+// overrode each pack's own maturity and is why a template-derived bank shipped
+// while every report read clean. A pack only counts as exam-ready if it says so.
 export function runtimeStatusForPacks(level, packs, expectedTopicIds) {
+  const validatedTopics = packs.filter((pack) => pack.maturity === 'validated').length;
+  const examReadyTopics = packs.filter((pack) => pack.maturity === 'exam-ready').length;
+  const blockers = [];
+  const warnings = [];
+
+  const missingTopics = expectedTopicIds.filter(
+    (topicId) => !packs.some((pack) => pack.topicId === topicId),
+  );
+  if (missingTopics.length > 0) {
+    blockers.push(`${missingTopics.length} expected topic(s) have no authored pack: ${missingTopics.join(', ')}`);
+  }
+
+  const unreadyTopics = packs.filter((pack) => pack.maturity !== 'exam-ready');
+  if (unreadyTopics.length > 0) {
+    blockers.push(
+      `${unreadyTopics.length} of ${packs.length} pack(s) are not exam-ready: ` +
+        unreadyTopics.map((pack) => `${pack.topicId}(${pack.maturity ?? 'unknown'})`).join(', '),
+    );
+  }
+
+  const mode = blockers.length === 0 ? 'exam-ready' : validatedTopics > 0 ? 'validated-beta' : 'generated';
   return {
     level,
-    mode: 'exam-ready',
-    label: runtimeLabel('exam-ready'),
-    releaseEligible: true,
+    mode,
+    label: runtimeLabel(mode),
+    releaseEligible: blockers.length === 0,
     topicCount: expectedTopicIds.length,
     authoredPackCount: packs.length,
-    validatedTopics: packs.filter((pack) => pack.maturity === 'validated').length,
-    examReadyTopics: packs.filter((pack) => pack.maturity === 'exam-ready').length,
-    blockers: [],
-    warnings: [],
+    validatedTopics,
+    examReadyTopics,
+    blockers,
+    warnings,
   };
 }
 

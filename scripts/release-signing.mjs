@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,8 @@ const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(dirname(__filename), '..');
 
 export const SIGNING_EVIDENCE_SCHEMA = 'studyvault.signing-evidence.v1';
+
+const BUILDER_CONFIG_FILE = 'electron-builder.yml';
 
 const CREDENTIALS = Object.freeze({
   windows: ['WINDOWS_CERT_BASE64', 'WINDOWS_CERT_PASSWORD', 'WINDOWS_CERT_THUMBPRINT'],
@@ -64,18 +66,59 @@ export function inspectCredentialSet(platformValue, env = process.env) {
   };
 }
 
+/*
+ * `electron-builder --config <path>` REPLACES electron-builder.yml rather than
+ * merging with it (app-builder-lib getConfig reads only the given file and never
+ * falls back to findAndReadConfig), so an overlay without `extends` silently
+ * drops forceCodeSigning, the MSI target, the sidecar extraResources, and the
+ * afterPack fuse hook. `extends` is resolved against the project directory, not
+ * the overlay's own directory, so it stays a bare repo-relative name even though
+ * the overlay is written outside the repo.
+ */
 export function buildWindowsSigningConfig(thumbprint) {
   const normalized = normalizeThumbprint(thumbprint);
   if (!/^[A-F0-9]{40}$/.test(normalized)) {
     throw new Error('cannot build Windows signing config without a valid certificate thumbprint');
   }
   return {
+    extends: BUILDER_CONFIG_FILE,
     win: {
       signtoolOptions: {
         certificateSha1: normalized,
       },
     },
   };
+}
+
+function builderTargets(section) {
+  const targets = section?.target;
+  const list = Array.isArray(targets) ? targets : targets ? [targets] : [];
+  return list.map((item) => String(typeof item === 'string' ? item : item?.target || ''));
+}
+
+export function validateEffectiveBuilderConfig(config, { expectedThumbprint = '' } = {}) {
+  const errors = [];
+  if (config?.forceCodeSigning !== true) errors.push('forceCodeSigning must remain true');
+  if (config?.directories?.output !== 'release') errors.push("directories.output must remain 'release'");
+  for (const target of ['nsis', 'msi']) {
+    if (!builderTargets(config?.win).includes(target)) errors.push(`win.target must still include ${target}`);
+  }
+  if (!(Array.isArray(config?.extraResources) ? config.extraResources : []).some((item) => item?.to === 'services')) {
+    errors.push('extraResources must still stage the sidecar services directory');
+  }
+  if (!config?.afterPack) errors.push('afterPack must still apply the Electron fuses');
+  const expected = normalizeThumbprint(expectedThumbprint);
+  if (expected && normalizeThumbprint(config?.win?.signtoolOptions?.certificateSha1) !== expected) {
+    errors.push('win.signtoolOptions.certificateSha1 does not pin the expected certificate');
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+export async function resolveEffectiveBuilderConfig(configPath) {
+  // app-builder-lib owns the real precedence rules, so resolve the config the
+  // way electron-builder will instead of re-implementing the merge here.
+  const { getConfig } = await import('app-builder-lib/out/util/config/config.js');
+  return getConfig(REPO_ROOT, configPath ? resolve(configPath) : null, null);
 }
 
 function evidencePath(path) {
@@ -101,7 +144,15 @@ async function filesIn(path, predicate) {
   return entries.filter((entry) => entry.isFile() && predicate(entry.name)).map((entry) => join(path, entry.name));
 }
 
-async function hashDirectory(path) {
+/*
+ * Signing evidence and the release manifest hash the same bundle trees, so both
+ * must walk them identically or a .app digest can never bind to its assets.
+ * Dirents carry lstat semantics: symlinks — which a real .app bundle is full of
+ * — are skipped rather than followed, and zero-byte files are kept, on both
+ * sides. release-manifest.mjs reuses this walker for exactly that reason.
+ */
+export async function walkBundleFiles(root) {
+  if (!existsSync(root)) return [];
   const files = [];
   async function visit(current) {
     for (const entry of await readdir(current, { withFileTypes: true })) {
@@ -110,7 +161,12 @@ async function hashDirectory(path) {
       else if (entry.isFile()) files.push(entryPath);
     }
   }
-  await visit(path);
+  await visit(root);
+  return files;
+}
+
+export async function hashDirectory(path) {
+  const files = await walkBundleFiles(path);
   files.sort((a, b) => {
     const left = relative(path, a).replace(/\\/g, '/');
     const right = relative(path, b).replace(/\\/g, '/');
@@ -119,7 +175,7 @@ async function hashDirectory(path) {
   const digest = createHash('sha256');
   let size = 0;
   for (const file of files) {
-    const info = await stat(file);
+    const info = await lstat(file);
     const rel = relative(path, file).replace(/\\/g, '/');
     const fileHash = await sha256File(file);
     digest.update(`${rel}\0${fileHash}\0${info.size}\n`);
@@ -491,13 +547,14 @@ async function writeJson(path, payload) {
 
 function parseArgs(argv) {
   const [command = '', ...rest] = argv;
-  const opts = { command, platform: process.platform, bundleRoot: '', output: '', configOutput: '' };
+  const opts = { command, platform: process.platform, bundleRoot: '', output: '', configOutput: '', config: '' };
   while (rest.length) {
     const arg = rest.shift();
     if (arg === '--platform') opts.platform = rest.shift();
     else if (arg === '--bundle-root') opts.bundleRoot = rest.shift();
     else if (arg === '--output') opts.output = rest.shift();
     else if (arg === '--config-output') opts.configOutput = rest.shift();
+    else if (arg === '--config') opts.config = rest.shift();
     else throw new Error(`unknown release-signing arg: ${arg}`);
   }
   return opts;
@@ -518,6 +575,15 @@ async function main() {
       await writeJson(resolve(opts.configOutput), buildWindowsSigningConfig(process.env.WINDOWS_CERT_THUMBPRINT));
     }
     console.log(`release-signing: ${platform} credential preflight OK`);
+    return;
+  }
+  if (opts.command === 'assert-config') {
+    const config = await resolveEffectiveBuilderConfig(opts.config);
+    const validation = validateEffectiveBuilderConfig(config, {
+      expectedThumbprint: opts.config ? process.env.WINDOWS_CERT_THUMBPRINT : '',
+    });
+    if (!validation.ok) throw new Error(`effective electron-builder config regressed: ${validation.errors.join('; ')}`);
+    console.log(`release-signing: effective electron-builder config OK${opts.config ? ` (${opts.config})` : ''}`);
     return;
   }
   if (opts.command === 'verify') {
@@ -541,7 +607,7 @@ async function main() {
     console.log(`release-signing: ${platform} artifact evidence ${evidence.status}`);
     return;
   }
-  throw new Error('usage: release-signing.mjs preflight|verify --platform windows|macos|linux [options]');
+  throw new Error('usage: release-signing.mjs preflight|assert-config|verify --platform windows|macos|linux [options]');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === __filename) {

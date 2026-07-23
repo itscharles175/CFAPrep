@@ -58,6 +58,14 @@ jobs:
       - name: Content validation
         run: npm run content:validate
 
+      # CONTENT-3 — the step above proves every objective has questions attached;
+      # this one proves those questions are worth answering. A template-derived
+      # bank passes coverage perfectly while being trivially gameable, so the
+      # exploitability metrics get their own named check rather than hiding
+      # inside another step's output.
+      - name: Content exploitability gate
+        run: node --import ./scripts/register-ts-loader.mjs scripts/check-content-integrity.mjs
+
       # GAP-EGRESS-1 — build-time "no-cloud" gate. StudyVault's central invariant
       # is offline-only ("works on a plane"); today that's convention, not a build
       # check, so a stray non-loopback fetch in shipped source (src/ + the LSAT

@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,7 @@ import {
   normalizePlatform,
   validateSigningAssetBindings,
   validateSigningEvidence,
+  walkBundleFiles,
 } from './release-signing.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -126,36 +127,15 @@ export function parseNpmLock(lock) {
     .sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
 }
 
-async function walkFiles(root) {
-  if (!existsSync(root)) return [];
-  const out = [];
-  async function visit(path) {
-    const info = await stat(path);
-    if (info.isDirectory()) {
-      const entries = await readdir(path);
-      for (const entry of entries) {
-        await visit(join(path, entry));
-      }
-      return;
-    }
-    if (info.isFile() && info.size > 0) {
-      out.push(path);
-    }
-  }
-  await visit(root);
-  return out;
-}
-
-export async function collectBundleAssets({ debug = false } = {}) {
-  const roots = [repoPath(debug ? 'release-debug' : 'release')];
-  const files = [];
-  for (const root of roots) {
-    files.push(...(await walkFiles(root)));
-  }
+// `root` is an override for fixtures only; releases always walk the bundle dir
+// electron-builder wrote. The walker and its lstat sizing are shared with
+// release-signing.mjs so a .app digest can bind to these assets.
+export async function collectBundleAssets({ debug = false, root } = {}) {
+  const files = await walkBundleFiles(root ? resolve(root) : repoPath(debug ? 'release-debug' : 'release'));
   files.sort((a, b) => normalizePath(a).localeCompare(normalizePath(b)));
   return Promise.all(
     files.map(async (path) => {
-      const info = await stat(path);
+      const info = await lstat(path);
       return {
         path: normalizePath(path),
         sha256: await sha256File(path),

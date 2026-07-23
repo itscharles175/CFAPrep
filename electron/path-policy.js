@@ -5,6 +5,16 @@ import process from 'node:process';
 export const FILE_ENTRY_CAP = 100_000;
 export const FILE_READ_CAP_BYTES = 50 * 1024 * 1024;
 export const ALLOWED_FILE_EXTENSIONS = Object.freeze(new Set(['.pdf', '.txt']));
+export const DEEP_LINK_PROTOCOL = 'studyvault:';
+
+// A single letter before the colon is a Windows drive (`C:\study\a.pdf`), not a
+// URL scheme, so this requires at least two scheme characters. Widening it to
+// `*` would make every Windows launch path look like a URL.
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]+:/i;
+// Deep links address in-app routes only: no drive letters, no separators inside
+// a segment, and no `.`/`..` (the leading class excludes both).
+const DEEP_LINK_SEGMENT_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
+const DEEP_LINK_ACTIONS = Object.freeze(new Set(['open', 'route']));
 
 export function normalizePathKey(input, platform = process.platform) {
   const normalized = path.normalize(path.resolve(input));
@@ -22,12 +32,26 @@ export function extensionFor(input) {
   return path.extname(input).toLocaleLowerCase('en-US');
 }
 
-export function extractLaunchFilePaths(argv, cwd) {
+function hasParentSegment(argument) {
+  return argument.split(/[\\/]/).includes('..');
+}
+
+/**
+ * Launch arguments only ever name files the OS already resolved for us, so this
+ * accepts absolute paths and nothing else. Resolving relative arguments against
+ * the cwd, or letting a URL through, would let a crafted argv entry or a
+ * `studyvault://` deep link authorize a read outside every picked folder.
+ */
+export function extractLaunchFilePaths(argv) {
   const seen = new Set();
   const paths = [];
   for (const argument of argv) {
     if (typeof argument !== 'string' || argument.length === 0 || argument.startsWith('-')) continue;
-    const candidate = path.isAbsolute(argument) ? path.normalize(argument) : path.resolve(cwd, argument);
+    if (URL_SCHEME_PATTERN.test(argument) || !path.isAbsolute(argument)) continue;
+    // Checked before normalization: normalize() collapses `..` inside an absolute
+    // path, so a post-normalize check would silently accept `<root>\..\..\secret.pdf`.
+    if (hasParentSegment(argument)) continue;
+    const candidate = path.normalize(argument);
     if (!ALLOWED_FILE_EXTENSIONS.has(extensionFor(candidate))) continue;
     const key = normalizePathKey(candidate);
     if (seen.has(key)) continue;
@@ -35,6 +59,37 @@ export function extractLaunchFilePaths(argv, cwd) {
     paths.push(candidate);
   }
   return paths;
+}
+
+/**
+ * Parse a `studyvault://` deep link into an in-app route. Deep links are routed
+ * by action (hostname) and route (pathname) and are never treated as filesystem
+ * paths, so they can never reach the launch-file authorizer.
+ */
+export function parseDeepLink(input) {
+  if (typeof input !== 'string' || input.length === 0) return null;
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== DEEP_LINK_PROTOCOL) return null;
+  // Non-special schemes keep the authority's case, so normalize before matching.
+  const action = url.hostname.toLocaleLowerCase('en-US');
+  if (!DEEP_LINK_ACTIONS.has(action)) return null;
+  const segments = url.pathname.split('/').filter((segment) => segment.length > 0);
+  if (!segments.every((segment) => DEEP_LINK_SEGMENT_PATTERN.test(segment))) return null;
+  return { action, route: `/${segments.join('/')}`, href: url.href };
+}
+
+export function extractDeepLinks(argv) {
+  const links = [];
+  for (const argument of argv) {
+    const link = parseDeepLink(argument);
+    if (link) links.push(link);
+  }
+  return links;
 }
 
 async function canonicalNonSymlink(input, expectedType) {
@@ -62,11 +117,15 @@ export class PathAuthorization {
   #roots = new Map();
   #files = new Map();
 
-  constructor({ entryCap = FILE_ENTRY_CAP } = {}) {
+  // `statEntry`/`readDirectory` are seams for the recursive scan only — the
+  // authorization boundary itself always uses the real lstat/realpath.
+  constructor({ entryCap = FILE_ENTRY_CAP, statEntry = lstat, readDirectory = readdir } = {}) {
     if (!Number.isSafeInteger(entryCap) || entryCap < 1 || entryCap > FILE_ENTRY_CAP) {
       throw new Error(`Entry cap must be between 1 and ${FILE_ENTRY_CAP}`);
     }
     this.entryCap = entryCap;
+    this.statEntry = statEntry;
+    this.readDirectory = readDirectory;
   }
 
   get authorizedRootCount() {
@@ -118,10 +177,22 @@ export class PathAuthorization {
     const entries = [];
     const stack = [root];
     let visited = 0;
+    let skippedLinks = 0;
+    let skippedOversize = 0;
+    let skippedErrors = 0;
 
     while (stack.length > 0) {
       const directory = stack.pop();
-      const children = await readdir(directory, { withFileTypes: true });
+      let children;
+      try {
+        children = await this.readDirectory(directory, { withFileTypes: true });
+      } catch (error) {
+        // An unreadable picked root is a real failure the user must see; deeper
+        // directories are skipped so one bad subtree cannot abort a whole import.
+        if (directory === root) throw error;
+        skippedErrors += 1;
+        continue;
+      }
       for (const child of children) {
         visited += 1;
         if (visited > this.entryCap) {
@@ -130,25 +201,53 @@ export class PathAuthorization {
 
         const candidate = path.join(directory, child.name);
         if (child.isSymbolicLink()) {
-          throw new Error(`Folder scan rejected a symbolic link: ${candidate}`);
+          skippedLinks += 1;
+          continue;
         }
-        const info = await lstat(candidate);
+        let info;
+        try {
+          info = await this.statEntry(candidate);
+        } catch {
+          skippedErrors += 1;
+          continue;
+        }
         if (info.isSymbolicLink()) {
-          throw new Error(`Folder scan rejected a symbolic link: ${candidate}`);
+          skippedLinks += 1;
+          continue;
         }
         if (info.isDirectory()) {
-          const canonicalDirectory = await realpath(candidate);
+          let canonicalDirectory;
+          try {
+            canonicalDirectory = await realpath(candidate);
+          } catch {
+            skippedErrors += 1;
+            continue;
+          }
+          // A canonical path outside the root means a reparse point lstat did not
+          // flag; skipping that subtree refuses it without failing the whole scan.
           if (!isPathWithin(root, canonicalDirectory)) {
-            throw new Error(`Folder scan escaped its authorized root: ${candidate}`);
+            skippedLinks += 1;
+            continue;
           }
           stack.push(canonicalDirectory);
           continue;
         }
         if (!info.isFile() || extensionFor(candidate) !== '.pdf') continue;
+        if (info.size > FILE_READ_CAP_BYTES) {
+          skippedOversize += 1;
+          continue;
+        }
 
-        const canonicalFile = await realpath(candidate);
+        let canonicalFile;
+        try {
+          canonicalFile = await realpath(candidate);
+        } catch {
+          skippedErrors += 1;
+          continue;
+        }
         if (!isPathWithin(root, canonicalFile)) {
-          throw new Error(`Folder scan escaped its authorized root: ${candidate}`);
+          skippedLinks += 1;
+          continue;
         }
         entries.push({
           ...fileDescriptor(canonicalFile, info),
@@ -161,7 +260,14 @@ export class PathAuthorization {
     for (const entry of entries) {
       this.#files.set(normalizePathKey(entry.path), { path: entry.path, source: 'listed' });
     }
-    return entries;
+    // The skip counters ride on the rows array rather than a wrapper object so the
+    // listing keeps its array shape end to end; structured clone copies own
+    // properties of an array, so they survive the IPC hop to the renderer.
+    return Object.assign(entries, {
+      skipped_links: skippedLinks,
+      skipped_oversize: skippedOversize,
+      skipped_errors: skippedErrors,
+    });
   }
 
   async resolveAuthorizedFile(input) {

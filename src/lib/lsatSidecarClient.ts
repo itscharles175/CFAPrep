@@ -7,10 +7,16 @@
  * by the session webRequest hook. This module never persists a token.
  */
 import { buildLoopbackHttpUrl, normalizeLoopbackHttpBaseUrl } from './localUrlPolicy';
-import { getDesktopBridge } from './desktopBridge';
+import { getDesktopBridge, registerDesktopSubscription } from './desktopBridge';
+import type { DesktopUnsubscribe, StudyVaultBridge } from './desktopBridge';
 
 export const DEFAULT_LSAT_SIDECAR_BASE = 'http://127.0.0.1:8100';
 export const LSAT_SIDECAR_AUTH_BOOTSTRAP_TIMEOUT_MS = 2000;
+export const LSAT_SIDECAR_SERVICE_NAME = 'LSAT backend';
+
+// `boot-status` fires once per launch, so readiness is also re-probed on a short
+// interval: a bootstrap that subscribes after that event must still observe it.
+const LSAT_SIDECAR_READY_POLL_MS = 100;
 
 const IN_MEMORY_TOKEN_KEYS = ['__STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__', '__LSATLAB_LOCAL_API_TOKEN__'] as const;
 
@@ -86,12 +92,58 @@ export function setLsatSidecarAuthToken(value: unknown): boolean {
   return true;
 }
 
+async function isLsatSidecarReady(bridge: StudyVaultBridge): Promise<boolean> {
+  try {
+    const rows = await bridge.sidecar.status();
+    return Array.isArray(rows) && rows.some((row) => row?.name === LSAT_SIDECAR_SERVICE_NAME && row.ready === true);
+  } catch {
+    return false;
+  }
+}
+
+function waitForLsatSidecarReady(bridge: StudyVaultBridge, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe: DesktopUnsubscribe | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let pollId: ReturnType<typeof setInterval> | null = null;
+
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId != null) clearTimeout(timeoutId);
+      if (pollId != null) clearInterval(pollId);
+      unsubscribe?.();
+      resolve(ready);
+    };
+
+    const probe = () => {
+      void isLsatSidecarReady(bridge).then((ready) => {
+        if (ready) finish(true);
+      });
+    };
+
+    timeoutId = setTimeout(() => finish(false), timeoutMs);
+    pollId = setInterval(probe, LSAT_SIDECAR_READY_POLL_MS);
+    unsubscribe = registerDesktopSubscription(() => bridge.events.onBootStatus(probe));
+    probe();
+  });
+}
+
 export async function bootstrapLsatSidecarAuthToken(options?: {
   timeoutMs?: number;
 }): Promise<LsatSidecarAuthBootstrapResult> {
   const bridge = getDesktopBridge();
   if (bridge) {
     for (const key of IN_MEMORY_TOKEN_KEYS) delete window[key];
+    // The bearer stays main-process-only, so a renderer /api call issued before
+    // the sidecar is up cannot be authenticated and answers 401. Gate the caller
+    // (root mount) on readiness the way the Tauri shell did, bounded so a dead
+    // sidecar degrades to a logged error instead of a hang.
+    const ready = await waitForLsatSidecarReady(bridge, options?.timeoutMs ?? LSAT_SIDECAR_AUTH_BOOTSTRAP_TIMEOUT_MS);
+    if (!ready) {
+      return { ok: false, skipped: true, tokenInjected: false, error: 'sidecar not ready' };
+    }
     return { ok: true, skipped: true, tokenInjected: false };
   }
   if (getLsatSidecarInMemoryAuthToken()) {

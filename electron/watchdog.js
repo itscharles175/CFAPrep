@@ -2,6 +2,16 @@ import { spawn } from 'node:child_process';
 import process from 'node:process';
 import readline from 'node:readline';
 
+// How long close() lets the child finish its reap before force-killing it. The
+// reap is synchronous and bounded by the child's own spawnSync timeouts: on
+// Windows a Win32_Process snapshot (8s) plus a taskkill per tracked root (10s).
+// Killing the child mid-reap abandons the sidecars it was about to terminate —
+// exactly the leak the crash guard exists to prevent — so the grace covers a
+// snapshot plus a first taskkill. A normal quit never approaches it: the sidecar
+// manager untracks each child as it stops, and an empty tracking table makes the
+// child skip the snapshot entirely.
+const REAP_GRACE_MS = 25_000;
+
 export function isOwnedChildPid(pid, parentPid = process.pid, watchdogPid = null) {
   return Number.isSafeInteger(pid) && pid > 0 && pid !== parentPid && (watchdogPid === null || pid !== watchdogPid);
 }
@@ -24,7 +34,13 @@ export class OwnedChildWatchdog {
     executable = process.execPath,
     parentPid = process.pid,
     spawnProcess = spawn,
-    readyTimeoutMs = 10_000,
+    // The child gates its own readiness on a full Win32_Process CIM query
+    // (spawnSync timeout 8s), and end-to-end readiness measured 2.8-4.9s on an
+    // IDLE machine. A 10s budget leaves almost no headroom once the machine is
+    // loaded, and a timeout here fails the crash guard closed — which blocks
+    // every sidecar launch — so the budget is sized off the child's own worst
+    // case rather than the observed happy path.
+    readyTimeoutMs = 30_000,
   }) {
     const child = spawnProcess(executable, [scriptPath, String(parentPid)], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
@@ -154,7 +170,7 @@ export class OwnedChildWatchdog {
       await this.#send({ op: 'shutdown' }).catch(() => {});
     }
     this.child.stdin?.end();
-    if (!(await waitForExit(this.child, 5000)) && this.child.exitCode === null) this.child.kill();
+    if (!(await waitForExit(this.child, REAP_GRACE_MS)) && this.child.exitCode === null) this.child.kill();
     this.healthy = false;
     this.trackedPids.clear();
     this.outputReader?.close();

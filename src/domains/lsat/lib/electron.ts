@@ -5,6 +5,7 @@ import {
   isElectronRuntime,
   registerDesktopSubscription,
   type StudyVaultBootStatus,
+  type StudyVaultBridge,
   type StudyVaultSecondInstanceEvent,
 } from '@/lib/desktopBridge';
 import { setJSON } from './storage';
@@ -114,7 +115,14 @@ function fileFromBytes(path: string, bytes: Uint8Array): File {
   });
 }
 
-/** Open a desktop file picker for PrepTest PDF/TXT import. */
+/**
+ * Open a desktop file picker for PrepTest PDF/TXT import.
+ *
+ * Deliberately single-file: the import wizard parses one PrepTest per job, and
+ * its browser fallback input is single-select too. The shared main-process
+ * dialog still advertises `multiSelections`, so anything past the first pick is
+ * dropped here — the dialog itself needs the matching single-select fix.
+ */
 export async function pickPdfFile(): Promise<File | null> {
   const bridge = getDesktopBridge();
   if (!bridge) return null;
@@ -222,11 +230,22 @@ export function listenTrayOpen(onOpen: () => void): () => void {
   return listenSecondInstance(() => onOpen());
 }
 
+const NAVIGATE_DEEP_LINK = 'studyvault://navigate/';
+
+/** In-app route body: no scheme, no leading slash, no path traversal. */
+const NAVIGATE_ROUTE = /^[A-Za-z0-9][A-Za-z0-9/_-]*$/;
+
+/**
+ * Only the explicit deep link is a route. A bare positional argument cannot be
+ * one: argv[0] is the executable path, and on Linux that looks exactly like an
+ * app route (`/usr/bin/studyvault`), so accepting it hijacked navigation on
+ * every second launch.
+ */
 function routeFromSecondInstance(event: StudyVaultSecondInstanceEvent): string | null {
   for (const arg of event.argv) {
-    if (/^\/[A-Za-z0-9/_-]*$/.test(arg)) return arg;
-    const prefix = 'studyvault://navigate/';
-    if (arg.startsWith(prefix)) return `/${arg.slice(prefix.length)}`;
+    if (typeof arg !== 'string' || !arg.startsWith(NAVIGATE_DEEP_LINK)) continue;
+    const route = arg.slice(NAVIGATE_DEEP_LINK.length);
+    if (NAVIGATE_ROUTE.test(route)) return `/${route}`;
   }
   return null;
 }
@@ -283,19 +302,62 @@ export function listenFirewallBlocked(_onBlocked: (payload: FirewallBlockedEvent
   return () => {};
 }
 
-/** Receive initial-launch and second-instance file-open handoffs from preload. */
+/**
+ * One-shot drain of launch files the main process captured before any renderer
+ * existed. Feature-detected: preload builds without the channel keep working on
+ * the event alone.
+ */
+interface LaunchFileDrain {
+  takeLaunchFiles?: () => Promise<{ paths?: unknown } | null>;
+}
+
+async function takePendingLaunchFiles(bridge: StudyVaultBridge): Promise<unknown> {
+  const files = bridge.files as StudyVaultBridge['files'] & LaunchFileDrain;
+  if (typeof files.takeLaunchFiles !== 'function') return [];
+  try {
+    const result = await files.takeLaunchFiles();
+    return result?.paths ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Receive initial-launch and second-instance file-open handoffs.
+ *
+ * Registration is pull-then-listen. The open-file event is fire-and-forget: on
+ * a cold "Open with StudyVault" the main process emits it while the renderer is
+ * still booting (and the LSAT plane is lazily mounted later still), so the
+ * event alone can never deliver a cold start. Draining the pending queue at
+ * registration time is what makes that path reachable.
+ */
 export function listenOpenFile(onFile: (path: string) => void): () => void {
   const bridge = getDesktopBridge();
   if (!bridge) return () => {};
-  let delivered = false;
-  const deliver = (path: string) => {
-    if (delivered || typeof path !== 'string' || !path) return;
-    delivered = true;
+
+  let disposed = false;
+  // A cold-start path can arrive twice - once from the drain, once from the
+  // event the main process already fired. The first echo of a drained path is
+  // swallowed; a genuine later re-open of the same file still gets through.
+  const drained = new Set<string>();
+
+  const deliver = (paths: unknown, fromDrain: boolean) => {
+    if (disposed || !Array.isArray(paths)) return;
+    // One handoff per batch: the import wizard takes a single PrepTest.
+    const path = paths.find((entry): entry is string => typeof entry === 'string' && entry !== '');
+    if (!path) return;
+    if (fromDrain) drained.add(path);
+    else if (drained.delete(path)) return;
     onFile(path);
   };
-  return registerDesktopSubscription(() =>
-    bridge.events.onOpenFile((event) => {
-      for (const path of event.paths) deliver(path);
-    }),
+
+  const unsubscribe = registerDesktopSubscription(() =>
+    bridge.events.onOpenFile((event) => deliver(event.paths, false)),
   );
+  void takePendingLaunchFiles(bridge).then((paths) => deliver(paths, true));
+
+  return () => {
+    disposed = true;
+    unsubscribe();
+  };
 }

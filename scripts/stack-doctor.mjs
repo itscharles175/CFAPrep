@@ -533,17 +533,15 @@ function toolChecks() {
       args: ['--version'],
     }),
     evaluateCommandCheck({
-      id: 'tool-cargo',
-      label: 'Cargo',
-      command: 'cargo',
-      args: ['--version'],
-      required: false,
-    }),
-    evaluateCommandCheck({
-      id: 'tool-rustc',
-      label: 'rustc',
-      command: 'rustc',
-      args: ['--version'],
+      id: 'tool-electron-builder',
+      label: 'electron-builder',
+      command: npxBin(),
+      // `--no` keeps the probe offline (npx never falls back to a registry
+      // fetch). The `--` is load-bearing: without it npx consumes `--version`
+      // itself and prints the npm version, so the probe would pass having
+      // never run electron-builder. Cold npx resolution can take ~10s.
+      args: ['--no', '--', 'electron-builder', '--version'],
+      timeoutMs: 60_000,
       required: false,
     }),
   ];

@@ -1,6 +1,6 @@
 'use strict';
 
-/* global process, window */
+/* global window */
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const channelsArgument = process.argv.find((argument) => argument.startsWith('--studyvault-ipc='));

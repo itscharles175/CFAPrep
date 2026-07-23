@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  LSAT_SIDECAR_SERVICE_NAME,
   bootstrapLsatSidecarAuthToken,
   buildLsatSidecarUrl,
   fetchLsatSidecar,
@@ -8,10 +9,35 @@ import {
   setLsatSidecarAuthToken,
   withLsatSidecarAuthHeaders,
 } from './lsatSidecarClient';
-import type { StudyVaultBridge } from './desktopBridge';
+import type { StudyVaultBootStatus, StudyVaultBridge, StudyVaultSidecarStatus } from './desktopBridge';
 
-function installElectronBridge(): void {
+function sidecarRow(ready: boolean): StudyVaultSidecarStatus {
+  return {
+    name: LSAT_SIDECAR_SERVICE_NAME,
+    port: 8100,
+    ready_port: 8100,
+    healthy: ready,
+    ready,
+    depends_on: [],
+    pid: ready ? 1234 : null,
+    optional: false,
+    present: true,
+    blocked: false,
+    block_reason: null,
+    provenance_status: 'ok',
+    state: ready ? 'ready' : 'starting',
+    restart_count: 0,
+  };
+}
+
+function installElectronBridge(
+  options: {
+    status?: () => Promise<StudyVaultSidecarStatus[]>;
+    onBootStatus?: StudyVaultBridge['events']['onBootStatus'];
+  } = {},
+): void {
   const unsubscribe = () => undefined;
+  const status = options.status ?? (async () => [sidecarRow(true)]);
   window.studyvault = {
     runtime: {
       info: async () => ({
@@ -37,7 +63,7 @@ function installElectronBridge(): void {
       }),
     },
     sidecar: {
-      status: async () => [],
+      status,
       logs: async () => [],
       aggregate: async () => ({
         status: 'ok',
@@ -62,7 +88,7 @@ function installElectronBridge(): void {
       set: async (value) => value,
     },
     events: {
-      onBootStatus: () => unsubscribe,
+      onBootStatus: options.onBootStatus ?? (() => unsubscribe),
       onSecondInstance: () => unsubscribe,
       onOpenFile: () => unsubscribe,
       onPdfDrop: () => unsubscribe,
@@ -130,6 +156,76 @@ describe('lsatSidecarClient', () => {
     expect(window.__STUDYVAULT_LSATLAB_LOCAL_API_TOKEN__).toBeUndefined();
     expect(getLsatSidecarAuthToken()).toBeNull();
     expect(withLsatSidecarAuthHeaders().has('authorization')).toBe(false);
+  });
+
+  it('gates the Electron bootstrap until the LSAT sidecar reports ready', async () => {
+    const rows = vi.fn(async () => [sidecarRow(false)]);
+    installElectronBridge({ status: rows });
+
+    const pending = bootstrapLsatSidecarAuthToken({ timeoutMs: 1000 });
+    await Promise.resolve();
+    rows.mockImplementation(async () => [sidecarRow(true)]);
+
+    expect(await pending).toEqual({ ok: true, skipped: true, tokenInjected: false });
+    expect(rows.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('resolves the Electron bootstrap from the boot-status event', async () => {
+    const handlers: ((status: StudyVaultBootStatus) => void)[] = [];
+    let ready = false;
+    installElectronBridge({
+      status: async () => [sidecarRow(ready)],
+      onBootStatus: (handler) => {
+        handlers.push(handler);
+        return () => {
+          handlers.splice(handlers.indexOf(handler), 1);
+        };
+      },
+    });
+
+    // Long enough that only the event/poll path — never the timeout — can settle it.
+    const pending = bootstrapLsatSidecarAuthToken({ timeoutMs: 5000 });
+    await Promise.resolve();
+    ready = true;
+    for (const handler of [...handlers]) {
+      handler({
+        status: 'ok',
+        launched: 1,
+        skipped: 0,
+        blocked: 0,
+        skipped_names: [],
+        blocked_names: [],
+        degraded_reason: '',
+      });
+    }
+
+    expect(await pending).toEqual({ ok: true, skipped: true, tokenInjected: false });
+    expect(handlers).toHaveLength(0);
+  });
+
+  it('reports a bounded sidecar-not-ready error instead of hanging the root mount', async () => {
+    installElectronBridge({ status: async () => [sidecarRow(false)] });
+
+    const result = await bootstrapLsatSidecarAuthToken({ timeoutMs: 30 });
+
+    expect(result).toEqual({ ok: false, skipped: true, tokenInjected: false, error: 'sidecar not ready' });
+    expect(getLsatSidecarAuthToken()).toBeNull();
+  });
+
+  it('treats an unreadable sidecar status bridge as not ready', async () => {
+    installElectronBridge({
+      status: async () => {
+        throw new Error('IPC channel closed');
+      },
+      onBootStatus: () => {
+        throw new Error('missing preload surface');
+      },
+    });
+
+    const result = await bootstrapLsatSidecarAuthToken({ timeoutMs: 30 });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('sidecar not ready');
   });
 
   it('keeps an explicitly supplied token in browser memory', async () => {
