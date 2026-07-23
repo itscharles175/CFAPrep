@@ -39,6 +39,9 @@ import { searchNotebookSources, getOpenNotebookSettings, notebookSourcesAvailabl
 import type { NotebookSourceHit } from './openNotebook';
 import { fetchLsatSidecar } from './lsatSidecarClient';
 import type { ChunkSearchResult } from './storage/types';
+import type { paths } from '../domains/lsat/lib/api.gen';
+
+const LSAT_QUESTION_SEARCH_PATH = '/api/search/questions' satisfies keyof paths;
 
 /** The study domain a content hit belongs to (mirrors the palette's UB6 set). */
 export type ContentDomain = 'cfa' | 'lsat' | 'quant' | 'excel' | 'vault' | 'general';
@@ -174,7 +177,7 @@ export async function searchLsatQuestions(
   if (!query) return [];
   try {
     const params = new URLSearchParams({ q: query, limit: String(Math.max(1, Math.min(100, input.limit))) });
-    const res = await fetchLsatSidecar(`/api/search/questions?${params.toString()}`, {
+    const res = await fetchLsatSidecar(`${LSAT_QUESTION_SEARCH_PATH}?${params.toString()}`, {
       timeoutMs: input.timeoutMs ?? 2500,
       signal: input.signal,
       headers: { accept: 'application/json' },

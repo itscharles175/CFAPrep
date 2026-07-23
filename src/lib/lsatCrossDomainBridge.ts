@@ -15,7 +15,10 @@
  * to the LSAT-only view (no host numbers passed) so it never depends on DATA-4a.
  */
 
+import type { paths } from '../domains/lsat/lib/api.gen';
 import { fetchLsatSidecarJson } from './lsatSidecarClient';
+
+const CROSS_DOMAIN_PATH = '/api/analytics/cross-domain' satisfies keyof paths;
 
 /** Per-domain rollup row (mirrors backend `analytics.cross_domain`). */
 export interface CrossDomainStat {
@@ -135,7 +138,7 @@ export async function getLsatCrossDomain(
   input: CrossDomainHostInput = {},
   timeoutMs = 3000,
 ): Promise<CrossDomainReport> {
-  const res = await fetchJson(`/api/analytics/cross-domain?${buildQuery(input)}`, timeoutMs);
+  const res = await fetchJson(`${CROSS_DOMAIN_PATH}?${buildQuery(input)}`, timeoutMs);
   if (!('ok' in res) || !res.ok || !res.data || typeof res.data !== 'object' || Array.isArray(res.data)) {
     return { ...EMPTY };
   }

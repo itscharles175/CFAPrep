@@ -15,7 +15,10 @@
  * module is imported dynamically and only under Tauri, so the web bundle never
  * pulls it in.
  */
+import type { paths } from '../domains/lsat/lib/api.gen';
 import { fetchLsatSidecarJson } from './lsatSidecarClient';
+
+const BACKEND_HEALTH_PATH = '/api/observability/health-aggregated' satisfies keyof paths;
 
 /**
  * Per-sidecar status snapshot — mirrors the Rust `SidecarStatus` payload
@@ -165,7 +168,7 @@ export async function getBackendHealthAggregated(
   timeoutMs = 2500,
 ): Promise<BackendHealthAggregate | null> {
   const res = await fetchLsatSidecarJson<Partial<BackendHealthAggregate>>(
-    '/api/observability/health-aggregated',
+    BACKEND_HEALTH_PATH,
     {
       timeoutMs,
       headers: { accept: 'application/json' },

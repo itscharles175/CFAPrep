@@ -23,8 +23,11 @@
  * concrete shapes the backend's `analytics.activity` / `confidence_calibration`
  * return) rather than trusting a fixed generated payload.
  */
-import type { operations } from '@/domains/lsat/lib/api.gen';
+import type { operations, paths } from '@/domains/lsat/lib/api.gen';
 import { fetchLsatSidecarJson } from './lsatSidecarClient';
+
+const ACTIVITY_PATH = '/api/analytics/activity' satisfies keyof paths;
+const CALIBRATION_PATH = '/api/analytics/calibration' satisfies keyof paths;
 
 /** Query window accepted by `GET /api/analytics/activity` (generated contract). */
 type ActivityDays = NonNullable<
@@ -109,7 +112,7 @@ export async function getLsatActivity(
   timeoutMs = 3000,
 ): Promise<LsatActivityReport> {
   const window = typeof days === 'number' && days > 0 ? Math.min(730, Math.round(days)) : 120;
-  const res = await fetchJson(`/api/analytics/activity?days=${window}`, timeoutMs);
+  const res = await fetchJson(`${ACTIVITY_PATH}?days=${window}`, timeoutMs);
   if (!('ok' in res) || !res.ok || !Array.isArray(res.data)) {
     return { reachable: false, days: [] };
   }
@@ -134,7 +137,7 @@ export async function getLsatCalibration(
   timeoutMs = 3000,
 ): Promise<LsatCalibrationReport> {
   const query = typeof days === 'number' && days > 0 ? `?days=${Math.min(730, Math.round(days))}` : '';
-  const res = await fetchJson(`/api/analytics/calibration${query}`, timeoutMs);
+  const res = await fetchJson(`${CALIBRATION_PATH}${query}`, timeoutMs);
   if (!('ok' in res) || !res.ok || !res.data || typeof res.data !== 'object' || Array.isArray(res.data)) {
     return { reachable: false, bands: [], verdict: null, calibrationGap: null };
   }

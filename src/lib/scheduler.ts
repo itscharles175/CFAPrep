@@ -18,10 +18,12 @@
 
 import { createEmptyCard, default_w, default_request_retention, fsrs, Rating, State } from 'ts-fsrs';
 import type { Card, FSRS, Grade } from 'ts-fsrs';
+import type { paths } from '../domains/lsat/lib/api.gen';
 import type { Confidence, ErrorCategory, QuestionResult, ReviewItem } from './learningTypes';
 import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SRS_PARAMS_PATH = '/api/srs/params' satisfies keyof paths;
 
 /**
  * Cached FSRS instance.  Defaults to FSRS-4.5 library weights.  When the
@@ -92,7 +94,7 @@ export interface BackendSrsParams {
  * match the expected shape.
  */
 export async function fetchBackendSrsParams(timeoutMs = 2500): Promise<BackendSrsParams | null> {
-  const res = await fetchLsatSidecarJson<Partial<BackendSrsParams>>('/api/srs/params', {
+  const res = await fetchLsatSidecarJson<Partial<BackendSrsParams>>(SRS_PARAMS_PATH, {
     timeoutMs,
     headers: { accept: 'application/json' },
   });

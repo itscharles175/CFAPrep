@@ -23,6 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CloudCog, Database, Download, RefreshCw, ServerCog, WifiOff, Wrench } from 'lucide-react';
+import type { paths } from '../../domains/lsat/lib/api.gen';
 import { StatusBadge, Surface } from '../ui/Primitives';
 import {
   ensureLsatScheduledDefaults,
@@ -48,11 +49,13 @@ import { fetchLsatSidecarJson } from '../../lib/lsatSidecarClient';
 import { getSidecarLogs, getSidecarStatus, type AggregatedSystemHealth } from '../../lib/systemHealth';
 import type { TrustManifest } from '../../hooks/useTrustManifest';
 
+const RUNTIME_EVIDENCE_PATH = '/api/observability/runtime-evidence' satisfies keyof paths;
+
 /** Degrading fetch of the backend runtime-evidence summary (log dir / recent
  *  errors). Never throws — returns null on any failure so the export still
  *  bundles. This is a read-only existing endpoint (/observability/runtime-evidence). */
 async function fetchBackendRuntimeEvidence(timeoutMs = 3000): Promise<unknown> {
-  const res = await fetchLsatSidecarJson('/api/observability/runtime-evidence', {
+  const res = await fetchLsatSidecarJson(RUNTIME_EVIDENCE_PATH, {
     timeoutMs,
     headers: { accept: 'application/json' },
   });

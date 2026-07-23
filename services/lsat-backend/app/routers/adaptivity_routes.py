@@ -1,7 +1,7 @@
 """vNext adaptive ability, readiness, and Socratic tutor endpoints."""
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -49,6 +49,130 @@ class UnifiedAbilityEstimate(BaseModel):
     plateau: bool
     mastery_eta_days: int | None = None
     components: dict[str, Any]
+
+
+class AbilityMatrixOut(BaseModel):
+    """Wire shape of ``adaptivity.ability_matrix`` — the default (LSAT-only)
+    branch of ``GET /api/adaptivity/ability``. All four keys are always present
+    and REQUIRED so the response union discriminates on them; the nested
+    estimate/selector payloads are engine-owned dicts and stay opaque.
+    ``extra="allow"`` keeps any future additive keys on the wire untouched."""
+
+    model_config = ConfigDict(extra="allow")
+
+    overall: dict[str, Any]
+    by_type: list[dict[str, Any]]
+    weakest: list[dict[str, Any]]
+    selector: dict[str, Any]
+
+
+class AbilityWithSelectorOut(BaseModel):
+    """Wire shape of the ``?q_type=``/``?section_type=`` branch of
+    ``GET /api/adaptivity/ability`` — a flat ``adaptivity.ability_estimate``
+    payload with the handler-attached ``selector``. Only ``selector`` is
+    required (it discriminates this branch from the matrix and unified-estimate
+    branches); the flat estimate fields are Optional so the model never invents
+    keys, and ``snapshot_id``/``created_at`` are only present when
+    ``?persist=true`` (excluded when unset). ``extra="allow"`` passes any
+    additive keys through unchanged."""
+
+    model_config = ConfigDict(extra="allow")
+
+    q_type: str | None = None
+    section_type: str | None = None
+    domain: str | None = None
+    ability: float | None = None
+    mastery: float | None = None
+    uncertainty: float | None = None
+    evidence_n: int | None = None
+    accuracy: float | None = None
+    avg_time_ms: float | None = None
+    model: str | None = None
+    learning_velocity: dict[str, Any] | None = None
+    plateau: bool | None = None
+    mastery_eta_days: int | None = None
+    components: dict[str, Any] | None = None
+    snapshot_id: int | None = None
+    created_at: str | None = None
+    selector: dict[str, Any]
+
+
+class AdaptivityPlanTaskOut(BaseModel):
+    """One task row inside ``adaptivity.daily_plan``'s ``tasks`` list.
+    ``kind``/``label``/``minutes``/``utility``/``utility_model``/``why`` appear
+    on every task; ``count`` is absent on the blind_review task and
+    ``q_type``/``target_difficulty`` only appear on adaptive_drill tasks
+    (excluded when unset). ``extra="allow"`` keeps additive keys."""
+
+    model_config = ConfigDict(extra="allow")
+
+    kind: str
+    label: str
+    minutes: int
+    count: int | None = None
+    q_type: str | None = None
+    target_difficulty: float | None = None
+    utility: float
+    utility_model: str
+    why: str
+
+
+class AdaptivityDailyPlanOut(BaseModel):
+    """Wire shape of ``adaptivity.daily_plan`` (``POST /api/adaptivity/plan``).
+    Every top-level key is always present; ``ability``/``ability_selector``/
+    ``utility``/``guardrails`` are engine-owned dicts kept opaque
+    (``utility`` may be None). ``extra="allow"`` keeps additive keys."""
+
+    model_config = ConfigDict(extra="allow")
+
+    minutes: int
+    ability: dict[str, Any]
+    ability_selector: dict[str, Any]
+    weakest: list[dict[str, Any]]
+    tasks: list[AdaptivityPlanTaskOut]
+    utility_model: str
+    utility: dict[str, Any] | None
+    concept_gap_count: int
+    leech_count: int
+    guardrails: dict[str, Any]
+
+
+class ReadinessOut(BaseModel):
+    """Wire shape of ``adaptivity.readiness`` (``GET /api/readiness``).
+    Headline scalars are always present (several nullable-valued);
+    ``snapshot_id``/``created_at`` only exist when ``?persist=true`` (the
+    default), so they are Optional and excluded when unset. The nested
+    ``ability``/``ability_selector``/``components``/``exam_simulation``/
+    ``utility`` blocks are engine-owned dicts kept opaque. ``extra="allow"``
+    keeps additive keys on the wire untouched."""
+
+    model_config = ConfigDict(extra="allow")
+
+    section_type: str | None
+    readiness_score: float
+    status: str
+    on_track: bool | None
+    exam_ready: bool
+    predicted_scaled_score: int | None
+    mastery_eta_days: int | None
+    plateau: bool
+    required_weekly_slope: float | None
+    components: dict[str, Any]
+    ability: dict[str, Any]
+    ability_selector: dict[str, Any]
+    utility: dict[str, Any] | None
+    exam_simulation: dict[str, Any]
+    snapshot_id: int | None = None
+    created_at: str | None = None
+
+
+class RecomputeItemStatsOut(BaseModel):
+    """Wire shape of ``adaptivity.refresh_all_item_stats``
+    (``POST /api/adaptivity/recompute-item-stats``): a single counter."""
+
+    model_config = ConfigDict(extra="allow")
+
+    updated: int
 
 
 class NextBody(BaseModel):
@@ -107,7 +231,18 @@ class TurnBody(BaseModel):
     streaming: bool = False
 
 
-@router.get("/adaptivity/ability")
+@router.get(
+    "/adaptivity/ability",
+    # Polymorphic contract — member order matters for union discrimination:
+    # the matrix branch (all four keys required) must win before the flat
+    # estimate+selector branch, which must win before the host-plane unified
+    # estimate. Every member is extra="allow", so serialization is passthrough
+    # (wire bytes unchanged) regardless of which member matches.
+    response_model=Union[
+        AbilityMatrixOut, AbilityWithSelectorOut, UnifiedAbilityEstimate
+    ],
+    response_model_exclude_unset=True,
+)
 def ability(
     q_type: str | None = Query(None),
     section_type: SectionType | None = Query(None),
@@ -143,7 +278,7 @@ def ability(
             persist=persist,
         )
         payload["selector"] = adaptivity.selector_from_ability(
-            session, payload, days=days,
+            session, dict(payload), days=days,
         )
         return payload
     return adaptivity.ability_matrix(session, days=days, persist=persist)
@@ -166,17 +301,29 @@ def next_questions(body: NextBody, session: Session = Depends(get_session)) -> A
     )
 
 
-@router.post("/adaptivity/plan")
+@router.post(
+    "/adaptivity/plan",
+    response_model=AdaptivityDailyPlanOut,
+    response_model_exclude_unset=True,
+)
 def plan(body: PlanBody | None = None, session: Session = Depends(get_session)):
     return adaptivity.daily_plan(session, minutes=(body.minutes if body else 60))
 
 
-@router.post("/adaptivity/recompute-item-stats")
+@router.post(
+    "/adaptivity/recompute-item-stats",
+    response_model=RecomputeItemStatsOut,
+    response_model_exclude_unset=True,
+)
 def recompute_item_stats(session: Session = Depends(get_session)):
     return adaptivity.refresh_all_item_stats(session)
 
 
-@router.get("/readiness")
+@router.get(
+    "/readiness",
+    response_model=ReadinessOut,
+    response_model_exclude_unset=True,
+)
 def readiness(
     section_type: SectionType | None = Query(None),
     days: int | None = Query(default=None, ge=7, le=730),

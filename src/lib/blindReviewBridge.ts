@@ -22,10 +22,11 @@
  * `studyProfileBridge.ts` / `lsatReviewBridge.ts`). Swap to the generated
  * operation once the contract is regenerated with the param.
  */
+import type { paths } from '../domains/lsat/lib/api.gen';
 import type { QuestionResult } from './learningTypes';
 import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
-const BLIND_REVIEW_GAP_PATH = '/api/analytics/blind-review-gap';
+const BLIND_REVIEW_GAP_PATH = '/api/analytics/blind-review-gap' satisfies keyof paths;
 
 /** The four 2x2 blind-review outcomes (mirrors backend `blind_review_outcome`). */
 export type BlindReviewOutcome = 'timed_ok' | 'timing_problem' | 'concept_gap' | 'lucky';

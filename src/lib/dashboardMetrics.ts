@@ -21,17 +21,16 @@
  * total (no `undefined`) so the Dashboard cards render an honest "no signal yet"
  * state rather than hanging or crashing.
  *
- * DATA-1: the `?domain=` ability param ships ahead of the next `api.gen.ts`
- * regeneration (same precedent as `blindReviewBridge.ts`), so the path is a
- * string literal for now.
+ * DATA-1: the route path is anchored to the generated OpenAPI client; callers
+ * append the typed `?domain=` query without weakening route-removal checks.
  */
+import type { paths } from '../domains/lsat/lib/api.gen';
 import type { DomainId, UnifiedAbilityEstimate } from './learningTypes';
 import { fetchLsatSidecarJson } from './lsatSidecarClient';
 import { fetchStudyProfile } from './studyProfileBridge';
 import type { SharedStudyProfile } from './types/StudyProfile';
 
-// Not yet bound to `keyof paths` — the `?domain=` param regenerates a batch later.
-const ABILITY_PATH = '/api/adaptivity/ability';
+const ABILITY_PATH = '/api/adaptivity/ability' satisfies keyof paths;
 
 /** The three host evidence planes the ability route accepts via `?domain=`. */
 export const HOST_DOMAINS: readonly DomainId[] = ['cfa', 'quant', 'excel'];

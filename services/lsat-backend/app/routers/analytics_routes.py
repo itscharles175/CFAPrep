@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session
 
 from .. import analytics
@@ -287,7 +287,42 @@ def focus_quality(session_id: int, session: Session = Depends(get_session)):
     return analytics.focus_quality(session, session_id)
 
 
-@router.get("/calibration")
+class CalibrationBandOut(BaseModel):
+    """One confidence band from ``analytics.confidence_calibration`` — all five
+    keys are always emitted (``accuracy`` is ``null`` on an empty band).
+    ``extra="allow"`` keeps future additive band keys on the wire."""
+
+    model_config = ConfigDict(extra="allow")
+
+    confidence: str
+    attempts: int
+    correct: int
+    accuracy: float | None = None
+    nominal_confidence: float
+
+
+class CalibrationOut(BaseModel):
+    """Envelope for GET /api/analytics/calibration. Every key is present on all
+    branches; the rate/gap fields are ``null`` (not absent) when there is no
+    rated history, so they serialize as explicit nulls unchanged."""
+
+    model_config = ConfigDict(extra="allow")
+
+    bands: list[CalibrationBandOut]
+    n: int
+    overall_accuracy: float | None = None
+    mean_nominal_confidence: float | None = None
+    calibration_gap: float | None = None
+    verdict: str
+    sure_but_wrong_rate: float | None = None
+    guess_but_right_rate: float | None = None
+
+
+@router.get(
+    "/calibration",
+    response_model=CalibrationOut,
+    response_model_exclude_unset=True,
+)
 def calibration(source: Optional[str] = Query(None, pattern="^(official|all)$"),
                 days: Optional[int] = _Days,
                 session: Session = Depends(get_session)):

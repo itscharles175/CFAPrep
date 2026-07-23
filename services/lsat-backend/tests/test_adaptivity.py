@@ -238,6 +238,16 @@ def test_route_default_is_lsat_matrix(client):
     assert "by_type" in body
 
 
+def test_route_q_type_returns_serializable_selector_snapshot(client):
+    r = client.get("/api/adaptivity/ability", params={"q_type": "Flaw"})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["q_type"] == "Flaw"
+    assert body["selector"]["ability"]["q_type"] == "Flaw"
+    assert "selector" not in body["selector"]["ability"]
+
+
 def test_route_host_domain_returns_unified_estimate(client):
     from app.db import engine
 

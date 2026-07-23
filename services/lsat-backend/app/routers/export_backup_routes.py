@@ -16,13 +16,80 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session
 
 from .. import export_backup
 from ..db import get_session
 
 router = APIRouter(prefix="/export")
+
+
+# --- typed response models (Wave 2 API-contract coverage) --------------------
+# Endpoint-local models per the repo convention (see UnifiedAbilityEstimate in
+# adaptivity_routes.py): every model is permissive (extra="allow") so additive
+# service-layer keys keep flowing over the wire unchanged, and the routes pair
+# them with response_model_exclude_unset=True so absent keys stay absent.
+class ExportValidateOut(BaseModel):
+    """``POST /api/export/validate`` — validate_envelope() + handler's
+    ``encrypted`` flag."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    errors: list[str]
+    encrypted: bool
+
+
+class ExportImportOut(BaseModel):
+    """``POST /api/export/import`` — import_unified_export() + handler's
+    ``encrypted`` flag. ``counts`` keys are produced dynamically by
+    ``bank_export.import_bank`` so they stay an open int map."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    export_id: str
+    counts: dict[str, int]
+    restore_count: int
+    host_data_present: bool
+    encrypted: bool
+
+
+class ExportHistoryItemOut(BaseModel):
+    """One ExportHistory provenance row (export_backup._history_dict).
+
+    ``row_counts`` is dynamically keyed (per-table counts plus optional
+    ``host_present``) so it stays an open dict."""
+
+    model_config = ConfigDict(extra="allow")
+
+    export_id: str
+    exported_at: str
+    schema_version: int
+    host_schema_version: int | None = None
+    format: str
+    source_host: bool
+    row_counts: dict[str, Any]
+    checksum: str
+    restore_count: int
+    last_restored: str | None = None
+    notes: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class ExportListOut(BaseModel):
+    """``GET /api/export/list`` — pagination envelope from
+    export_backup.list_history()."""
+
+    model_config = ConfigDict(extra="allow")
+
+    total: int
+    offset: int
+    limit: int
+    has_more: bool
+    items: list[ExportHistoryItemOut]
 
 
 class BackupBody(BaseModel):
@@ -39,6 +106,8 @@ class BackupBody(BaseModel):
     allow_plaintext: bool = False
 
 
+# Polymorphic response (encrypted blob | plaintext envelope) — deliberately
+# untyped; see Wave 2 deferral note.
 @router.post("/backup", response_model=dict[str, Any])
 def create_backup(
     body: Optional[BackupBody] = None,
@@ -103,7 +172,11 @@ def _resolve_envelope(body: EnvelopeBody) -> tuple[dict[str, Any], bool]:
         )
 
 
-@router.post("/validate", response_model=dict[str, Any])
+@router.post(
+    "/validate",
+    response_model=ExportValidateOut,
+    response_model_exclude_unset=True,
+)
 def validate(body: EnvelopeBody) -> dict[str, Any]:
     """Verify an envelope's schema + checksum + firewall BEFORE importing it.
 
@@ -115,7 +188,11 @@ def validate(body: EnvelopeBody) -> dict[str, Any]:
     return result
 
 
-@router.post("/import", response_model=dict[str, Any])
+@router.post(
+    "/import",
+    response_model=ExportImportOut,
+    response_model_exclude_unset=True,
+)
 def import_backup(
     body: EnvelopeBody,
     session: Session = Depends(get_session),
@@ -137,7 +214,11 @@ def import_backup(
         )
 
 
-@router.get("/list", response_model=dict[str, Any])
+@router.get(
+    "/list",
+    response_model=ExportListOut,
+    response_model_exclude_unset=True,
+)
 def list_exports(
     offset: int = 0,
     limit: int = 50,
@@ -147,7 +228,11 @@ def list_exports(
     return export_backup.list_history(session, offset=offset, limit=limit)
 
 
-@router.get("/history", response_model=dict[str, Any])
+@router.get(
+    "/history",
+    response_model=ExportHistoryItemOut,
+    response_model_exclude_unset=True,
+)
 def history(
     export_id: str,
     session: Session = Depends(get_session),

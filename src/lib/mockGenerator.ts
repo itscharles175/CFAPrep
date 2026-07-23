@@ -1,3 +1,4 @@
+import type { paths } from '../domains/lsat/lib/api.gen';
 import { getStorage } from './storage';
 import { generateQuestionsFromCurriculum } from './localLlm';
 import { getCfaSourceReadingForTopic } from './cfaSourceVault';
@@ -10,7 +11,7 @@ import { fetchLsatSidecar } from './lsatSidecarClient';
 // it means generated/imported questions are gated against ONE quality bar across
 // domains. Kept inside this module (a NEW seam this item owns) so DATA-1's
 // lsatBackend.ts is untouched; the degrading-fetch shape mirrors that client.
-const LSAT_GEN_QUALITY_PATH = '/api/gen/generation-quality';
+const LSAT_GEN_QUALITY_PATH = '/api/gen/generation-quality' satisfies keyof paths;
 
 const CHOICE_LABELS = ['A', 'B', 'C', 'D', 'E'] as const;
 

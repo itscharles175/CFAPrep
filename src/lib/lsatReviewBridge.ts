@@ -33,11 +33,7 @@ import { fetchLsatSidecarJson } from './lsatSidecarClient';
 
 /** The contract path the bridge consumes — kept honest against `api.gen.ts`. */
 const LSAT_DUE_PATH: keyof paths = '/api/srs/due';
-// LEARN-2 — the unified, ability-ranked cross-domain due queue. NOT yet bound to
-// `keyof paths`: the route ships ahead of the next `api.gen.ts` regeneration, so
-// it's a string literal for now (same as the legacy `/api/srs/due` body fields).
-// Swap to `keyof paths` once the contract is regenerated with this path.
-const LSAT_UNIFIED_DUE_PATH = '/api/study/due-unified';
+const LSAT_UNIFIED_DUE_PATH = '/api/study/due-unified' satisfies keyof paths;
 const LSAT_SRS_PATH = '/lsat/srs'; // deep-link target (host hard-navigates here)
 
 /** A domain-agnostic "due review" row for the unified inbox. */

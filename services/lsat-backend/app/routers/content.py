@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session, func, select
 
 from .. import ai, config, embeddings, queries, scoring, serializers
@@ -35,7 +35,29 @@ def health() -> HealthResponse:
     return HealthResponse(ok=True, service="lsat-backend", version=config.APP_VERSION)
 
 
-@router.get("/ai/health", response_model=dict[str, Any])
+class AiHealthOut(BaseModel):
+    """Typed wire shape of ``ai.health()`` — the six stable headline fields.
+
+    The handler spreads ``llm.provider_info()`` into the payload
+    (``{**info}``), whose key set is config/provider dependent, so this model
+    is permissive: ``extra="allow"`` accepts AND serializes those extra keys
+    untouched, keeping the wire bytes identical to the untyped response."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    provider: str
+    models: list[Any]
+    ollama: bool
+    missing_models: list[str]
+    missing_models_recovery: list[dict[str, Any]]
+
+
+@router.get(
+    "/ai/health",
+    response_model=AiHealthOut,
+    response_model_exclude_unset=True,
+)
 async def ai_health() -> dict[str, Any]:
     return await ai.health()
 
