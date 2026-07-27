@@ -154,7 +154,7 @@
     "katex": "^0.16.45",
     "kokoro-js": "^1.2.1",
     "lucide-react": "^1.26.0",
-    "motion": "^12.40.0",
+    "motion": "^12.42.2",
     "pdfjs-dist": "^5.7.284",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
