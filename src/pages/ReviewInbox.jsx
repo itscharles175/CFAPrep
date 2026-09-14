@@ -14,6 +14,7 @@ import { SourceRail } from '../components/SourceContext';
 import { useLevel3Pathway } from '../domains/cfa/useLevel3Pathway';
 import { fetchUnifiedDue, LSAT_REVIEW_PATH } from '../lib/lsatReviewBridge';
 import { useScrollRestoration } from '../lib/scrollRestore';
+import { prefersReducedMotion } from '../lib/viewTransitions';
 // PSY-13 — ONE global cross-domain ranker over host + LSAT due cards.
 import { buildUnifiedDueQueue } from '../lib/dueQueue';
 // NAV-1 — durable Study Trail + cross-restart "resume where you left off".
@@ -267,9 +268,9 @@ export default function ReviewInbox() {
     const node = deepLinkRef.current;
     if (!node) return;
     deepLinkHandled.current = true;
-    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    node.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
     node.classList.add('review-item-deeplinked');
-    const timer = window.setTimeout(() => node.classList.remove('review-item-deeplinked'), 2200);
+    const timer = window.setTimeout(() => node.classList.remove('review-item-deeplinked'), 900);
     return () => window.clearTimeout(timer);
   }, [deepLinkVisible, studyPlan]);
 
@@ -336,10 +337,8 @@ export default function ReviewInbox() {
         </Surface>
       )}
 
-      <div className="review-status-strip" aria-label="Review status">
-        {combinedQueueCount === 0 && !weakest && (studyPlan?.forecastReviewCount ?? 0) === 0 ? (
-          <span><strong>All caught up</strong> · no review work is waiting.</span>
-        ) : (
+      {(combinedQueueCount > 0 || weakest || (studyPlan?.forecastReviewCount ?? 0) > 0) && (
+        <div className="review-status-strip" aria-label="Review status">
           <>
             <span><strong>{combinedQueueCount}</strong> in queue</span>
             <span><strong>{studyPlan?.dueToday ?? 0}</strong> due today</span>
@@ -348,17 +347,26 @@ export default function ReviewInbox() {
               <span><strong>{studyPlan.forecastReviewCount}</strong> coming in 14 days</span>
             )}
           </>
-        )}
-      </div>
+        </div>
+      )}
 
       <section className="review-primary" aria-labelledby="review-queue-title">
         <div className="review-primary-head">
           <div>
-            <StatusBadge tone="vault">Next up</StatusBadge>
+            {combinedQueueCount > 0 && <StatusBadge tone="vault">Next up</StatusBadge>}
             <h2 id="review-queue-title">Your review queue</h2>
             <p>Ordered work from due reviews, mistakes, weak objectives, and unfinished study.</p>
           </div>
-          {combinedQueueCount > 0 && <span className="review-queue-count">{combinedQueueCount} items</span>}
+          {combinedQueueCount > 0 && (
+            <div className="review-primary-actions">
+              <span className="review-queue-count">{combinedQueueCount} items</span>
+              {lsatDue?.ok && lsatDue.dueCount > 0 && (
+                <a className="btn btn-primary btn-sm" href={LSAT_REVIEW_PATH}>
+                  Open LSAT review
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="review-filter-row">
@@ -384,8 +392,7 @@ export default function ReviewInbox() {
             )
           ) : (
             <div className="review-empty-state">
-              <StatusBadge tone="success">Nothing due</StatusBadge>
-              <h2>{filter === 'all' ? 'Your queue is clear' : 'Nothing in this view'}</h2>
+              <h2>{filter === 'all' ? "You're caught up" : 'Nothing in this view'}</h2>
               <p>{filter === 'all' ? 'Build momentum with a short practice set.' : 'Try another filter or start practice to create fresh review evidence.'}</p>
               <Link className="btn btn-primary" to={practicePath}>Start practice</Link>
             </div>
@@ -418,20 +425,6 @@ export default function ReviewInbox() {
             })}
           </ul>
         </details>
-      )}
-
-      {/* Phase 4.1 — cross-domain: LSAT reviews from the sidecar, merged in.
-          Rendered only when the LSAT backend is reachable; the actual review
-          happens in the LSAT app (hard nav to /lsat/srs). */}
-      {lsatDue?.ok && (
-        <div className="review-lsat-row">
-          <span><StatusBadge tone="study">LSAT</StatusBadge> {lsatDue.dueCount > 0 ? `${lsatDue.dueCount} due` : 'caught up'}</span>
-          {lsatDue.dueCount > 0 && (
-            <a className="btn btn-primary btn-sm" href={LSAT_REVIEW_PATH}>
-              Open LSAT review
-            </a>
-          )}
-        </div>
       )}
 
       {combinedQueueCount > 0 && studyPlan?.nextActions?.length > 0 && (

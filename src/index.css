@@ -914,6 +914,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   font-size: var(--fs-sm);
 }
 
+.review-primary-actions {
+  display: grid;
+  flex: none;
+  justify-items: end;
+  gap: var(--space-2);
+}
+
 .review-filter-row {
   display: flex;
   align-items: center;
@@ -1037,18 +1044,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   display: block;
   color: inherit;
   text-decoration: none;
-}
-
-.review-lsat-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  margin-top: var(--space-3);
-  padding: var(--space-3) 0;
-  border-top: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: var(--fs-sm);
 }
 
 .review-plan-copy,
@@ -3310,6 +3305,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   display: inline-flex;
   align-items: center;
   min-width: 0;
+  min-height: 40px;
 }
 
 .breadcrumb-link {
@@ -3334,7 +3330,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 
 .breadcrumb-current {
-  display: inline-block;
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
   max-width: 22ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3445,7 +3443,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   padding: 2px var(--space-2);
   border-radius: var(--radius-full, 999px);
   border: 1px solid var(--border);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3672,7 +3670,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   font-size: var(--fs-sm);
-  animation: toastIn var(--duration-base) var(--ease-spring);
+  animation: toastIn 180ms var(--ease-standard);
   min-width: 280px;
 }
 
@@ -3709,13 +3707,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .toast-action:hover { background: rgba(59,130,246,0.1); }
 
 @keyframes toastIn {
-  from { opacity: 0; transform: translateY(16px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes toastOut {
-  from { opacity: 1; transform: translateY(0) scale(1); }
-  to { opacity: 0; transform: translateY(8px) scale(0.95); }
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(4px); }
 }
 
 /* ===== Skip to main content (UC1 a11y) ===== */

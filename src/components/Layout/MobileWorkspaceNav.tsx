@@ -1,4 +1,5 @@
 import { Activity, BarChart3, BookOpen, Dumbbell, HardDrive, Library, MoreHorizontal, RefreshCw, Settings, Sun } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { workspaceForLocation, type StudyWorkspace } from '../../routes/routeManifest';
 import { useStudyContext, workspaceHref } from '../../lib/studyContext';
@@ -27,6 +28,31 @@ export default function MobileWorkspaceNav() {
   const location = useLocation();
   const [studyContext] = useStudyContext();
   const activeWorkspace = workspaceForLocation(location.pathname);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDetailsElement | null>(null);
+  const summaryRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    const closeFromOutside = (event: PointerEvent) => {
+      if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false);
+    };
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMoreOpen(false);
+      summaryRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', closeFromOutside);
+    window.addEventListener('keydown', closeFromEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeFromOutside);
+      window.removeEventListener('keydown', closeFromEscape);
+    };
+  }, [moreOpen]);
 
   return (
     <nav className="mobile-workspace-nav" aria-label="Study workspaces">
@@ -38,6 +64,7 @@ export default function MobileWorkspaceNav() {
             key={workspace.id}
             to={workspaceHref(workspace.id, studyContext)}
             end={workspace.id === 'today'}
+            aria-label={workspace.label}
             aria-current={active ? 'page' : undefined}
             className={active ? 'active' : undefined}
           >
@@ -46,8 +73,8 @@ export default function MobileWorkspaceNav() {
           </NavLink>
         );
       })}
-      <details className="mobile-workspace-more">
-        <summary className={activeWorkspace === 'progress' || activeWorkspace === 'library' || activeWorkspace === 'utility' ? 'active' : undefined} aria-label="More workspaces and utilities">
+      <details ref={moreRef} className="mobile-workspace-more" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)}>
+        <summary ref={summaryRef} className={activeWorkspace === 'progress' || activeWorkspace === 'library' || activeWorkspace === 'utility' ? 'active' : undefined} aria-label="More workspaces and utilities">
           <MoreHorizontal aria-hidden="true" />
           <span>More</span>
         </summary>
@@ -59,7 +86,10 @@ export default function MobileWorkspaceNav() {
               <NavLink
                 key={item.id}
                 to={path}
-                onClick={(event) => event.currentTarget.closest('details')?.removeAttribute('open')}
+                onClick={() => {
+                  setMoreOpen(false);
+                  requestAnimationFrame(() => document.getElementById('main')?.focus({ preventScroll: true }));
+                }}
               >
                 <Icon aria-hidden="true" />
                 <span>{item.label}</span>

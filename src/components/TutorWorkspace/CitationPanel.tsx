@@ -1,8 +1,18 @@
 import { BookOpen, ExternalLink, ShieldCheck, X } from 'lucide-react';
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import type { TutorCitation } from './types';
 
 export function CitationPanel({ citation, onClose }: { citation: TutorCitation | null; onClose: () => void }) {
+  useEffect(() => {
+    if (!citation) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [citation, onClose]);
+
   if (!citation) return null;
   return (
     <aside className="tutor-citation-panel" aria-label={`Citation ${citation.number}`}>

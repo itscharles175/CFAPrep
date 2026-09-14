@@ -94,6 +94,7 @@ export default function TutorWorkspace() {
   const [mobilePane, setMobilePane] = useState<MobilePane>('read');
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const mobileTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const [noteKind, setNoteKind] = useState<NoteKind>('notes');
   const [notes, setNotes] = useState<Record<NoteKind, string>>({ notes: '', annotations: '' });
@@ -307,13 +308,34 @@ export default function TutorWorkspace() {
         <span className="tutor-local-pill"><ShieldCheck size={14} aria-hidden="true" /> Private · local only</span>
       </header>
 
-      <nav className="tutor-mobile-tabs" aria-label="Tutor workspace panes">
+      <nav className="tutor-mobile-tabs" role="tablist" aria-label="Tutor workspace panes">
         {([
           ['sources', 'Sources'],
           ['read', 'Read'],
           ['ask', 'Ask'],
-        ] as const).map(([pane, label]) => (
-          <button key={pane} type="button" aria-current={mobilePane === pane ? 'page' : undefined} onClick={() => setMobilePane(pane)}>{label}</button>
+        ] as const).map(([pane, label], index, panes) => (
+          <button
+            key={pane}
+            ref={(node) => { mobileTabRefs.current[index] = node; }}
+            id={`tutor-${pane}-tab`}
+            type="button"
+            role="tab"
+            aria-selected={mobilePane === pane}
+            tabIndex={mobilePane === pane ? 0 : -1}
+            onClick={() => setMobilePane(pane)}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+              event.preventDefault();
+              const nextIndex = event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? panes.length - 1
+                  : (index + (event.key === 'ArrowRight' ? 1 : -1) + panes.length) % panes.length;
+              const nextPane = panes[nextIndex][0];
+              setMobilePane(nextPane);
+              mobileTabRefs.current[nextIndex]?.focus();
+            }}
+          >{label}</button>
         ))}
       </nav>
 
@@ -334,7 +356,7 @@ export default function TutorWorkspace() {
           <span><MessageSquareText size={14} aria-hidden="true" /> Answers stay constrained to the selected source.</span>
         </div>
 
-        <div id="tutor-source-drawer" className="tutor-source-drawer" data-open={sourcesOpen} data-mobile-active={mobilePane === 'sources'}>
+        <div id="tutor-source-drawer" role="tabpanel" aria-labelledby="tutor-sources-tab" className="tutor-source-drawer" data-open={sourcesOpen} data-mobile-active={mobilePane === 'sources'}>
           <SourceNavigator
             sources={filteredSources}
             selectedId={selectedId}
@@ -355,7 +377,7 @@ export default function TutorWorkspace() {
           </section>
         ) : (
           <div className="tutor-primary-columns">
-            <div className="tutor-center-column" data-mobile-active={mobilePane === 'read'}>
+            <div id="tutor-read-panel" role="tabpanel" aria-labelledby="tutor-read-tab" className="tutor-center-column" data-mobile-active={mobilePane === 'read'}>
               <ReaderPane source={selectedSource} content={reader} activeLocator={citation?.locator} />
               {selectedSource && (
                 <details className="tutor-writing-drawer">
@@ -374,7 +396,7 @@ export default function TutorWorkspace() {
                 </details>
               )}
             </div>
-            <div className="tutor-tutor-column" data-mobile-active={mobilePane === 'ask'}>
+            <div id="tutor-ask-panel" role="tabpanel" aria-labelledby="tutor-ask-tab" className="tutor-tutor-column" data-mobile-active={mobilePane === 'ask'}>
               <TutorPanel
                 source={selectedSource}
                 question={question}

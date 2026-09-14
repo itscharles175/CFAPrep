@@ -21,6 +21,7 @@ import { OfflineProvider } from './context/OfflineContext';
 import OfflineBanner from './components/OfflineBanner';
 import { StudySessionProvider } from './components/session';
 import { appRoutes } from './routes/routeManifest';
+import { prefersReducedMotion } from './lib/viewTransitions';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const CfaDashboard = lazy(() => import('./domains/cfa/CfaDashboard'));
@@ -229,6 +230,25 @@ function RouteFallback() {
   );
 }
 
+function RouteStage({ pathname, children }) {
+  const stageRef = useRef(null);
+
+  useEffect(() => {
+    const node = stageRef.current;
+    if (!node || prefersReducedMotion() || typeof node.animate !== 'function') return undefined;
+    const animation = node.animate(
+      [
+        { opacity: 0.86, transform: 'translateY(4px)' },
+        { opacity: 1, transform: 'translateY(0)' },
+      ],
+      { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'both' },
+    );
+    return () => animation.cancel();
+  }, [pathname]);
+
+  return <div ref={stageRef} className="route-stage">{children}</div>;
+}
+
 function routeElementFor(definition, element) {
   if (definition.boundary === 'domain') {
     return <DomainErrorBoundary name={definition.boundaryName}>{element}</DomainErrorBoundary>;
@@ -353,6 +373,7 @@ export default function App() {
                 Suspense boundary so <RouteProgressSignal> (mounted in the fallback)
                 can drive it from real suspense state, plus a per-navigation nudge. */}
             <RouteProgressBar pathname={location.pathname}>
+            <RouteStage pathname={location.pathname}>
             {/* P5: resetKey={pathname} auto-clears a caught crash on navigation,
                 so a bad page doesn't strand the user on the error screen. */}
             <ErrorBoundary name="app-root" level="page" resetKey={location.pathname}>
@@ -379,6 +400,7 @@ export default function App() {
                 </Routes>
               </Suspense>
             </ErrorBoundary>
+            </RouteStage>
             </RouteProgressBar>
           </main>
           <MobileWorkspaceNav />

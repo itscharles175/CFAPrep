@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Check, Loader2, X } from 'lucide-react';
+import { useReducedMotion } from '../lib/reducedMotion';
 
 // ---------------------------------------------------------------------------
 // UB5 — toast polish. The original API (show / success / warning / error /
@@ -328,29 +329,33 @@ function ToastItem({ toast: t, onDismiss }: ToastItemProps) {
   // The countdown bar (undo + auto-dismiss) animates from full → empty over the
   // toast's own duration. We flip width from 100% → 0% one frame after mount so
   // the CSS transition runs; reduced-motion users just see it sit at 100%.
-  const [barWidth, setBarWidth] = useState('100%');
+  const reducedMotion = useReducedMotion();
+  const [barScale, setBarScale] = useState(1);
   const showBar = t.duration > 0 && !t.exiting && t.type !== 'loading';
 
   useEffect(() => {
     if (!showBar) {
-      setBarWidth('100%');
+      setBarScale(1);
       return;
     }
-    setBarWidth('100%');
-    const raf = requestAnimationFrame(() => setBarWidth('0%'));
+    setBarScale(1);
+    if (reducedMotion) return undefined;
+    const raf = requestAnimationFrame(() => setBarScale(0));
     return () => cancelAnimationFrame(raf);
     // Re-run when the timer is re-armed (startedAt changes) or duration changes.
-  }, [showBar, t.startedAt, t.duration]);
+  }, [showBar, t.startedAt, t.duration, reducedMotion]);
 
   const barStyle: CSSProperties = {
     position: 'absolute',
     left: 0,
     bottom: 0,
     height: 2,
-    width: barWidth,
+    width: '100%',
+    transform: `scaleX(${barScale})`,
+    transformOrigin: 'left center',
     background: 'var(--accent)',
     borderBottomLeftRadius: 'var(--radius-md)',
-    transition: `width ${t.duration}ms linear`,
+    transition: reducedMotion ? 'none' : `transform ${t.duration}ms linear`,
   };
 
   return (

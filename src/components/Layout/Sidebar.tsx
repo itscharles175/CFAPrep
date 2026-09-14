@@ -342,6 +342,7 @@ export default function Sidebar({
           onClick={onToggle}
           style={{ marginLeft: 'auto' }}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {collapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
         </button>

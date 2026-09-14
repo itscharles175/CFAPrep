@@ -1,4 +1,6 @@
+import { useEffect, useRef } from 'react';
 import { AlertTriangle, BookOpenText, ChevronRight, FileQuestion } from 'lucide-react';
+import { prefersReducedMotion } from '../../lib/viewTransitions';
 import type { TutorReaderContent, TutorSource } from './types';
 
 interface ReaderPaneProps {
@@ -8,6 +10,16 @@ interface ReaderPaneProps {
 }
 
 export function ReaderPane({ source, content, activeLocator }: ReaderPaneProps) {
+  const activeArticleRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!activeLocator || !activeArticleRef.current || typeof activeArticleRef.current.scrollIntoView !== 'function') return;
+    activeArticleRef.current.scrollIntoView({
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+      block: 'center',
+    });
+  }, [activeLocator]);
+
   return (
     <section className="tutor-reader" aria-labelledby="tutor-reader-title">
       <header className="tutor-reader-head">
@@ -50,7 +62,11 @@ export function ReaderPane({ source, content, activeLocator }: ReaderPaneProps) 
       {source?.kind === 'cfa-document' && content.state === 'ready' && (
         <div className="tutor-reading-copy">
           {content.chunks.map((chunk) => (
-            <article key={chunk.id} data-active={Boolean(activeLocator && chunk.locator === activeLocator)}>
+            <article
+              key={chunk.id}
+              ref={activeLocator && chunk.locator === activeLocator ? activeArticleRef : null}
+              data-active={Boolean(activeLocator && chunk.locator === activeLocator)}
+            >
               <div className="tutor-reading-locator"><ChevronRight size={13} aria-hidden="true" /> {chunk.locator}</div>
               {chunk.heading && <h3>{chunk.heading}</h3>}
               <p>{chunk.text}</p>

@@ -112,16 +112,16 @@ describe('TutorWorkspace', () => {
     renderWorkspace();
     await screen.findAllByText('Fixed Income Curriculum');
 
-    const sourcesTab = screen.getByRole('button', { name: 'Sources' });
-    const readTab = screen.getByRole('button', { name: 'Read' });
-    expect(readTab).toHaveAttribute('aria-current', 'page');
+    const sourcesTab = screen.getByRole('tab', { name: 'Sources' });
+    const readTab = screen.getByRole('tab', { name: 'Read' });
+    expect(readTab).toHaveAttribute('aria-selected', 'true');
 
     await user.click(sourcesTab);
-    expect(sourcesTab).toHaveAttribute('aria-current', 'page');
+    expect(sourcesTab).toHaveAttribute('aria-selected', 'true');
     const sourceRow = screen.getAllByRole('button', { name: /Fixed Income Curriculum/i })
       .find((button) => button.hasAttribute('aria-pressed'));
     expect(sourceRow).toBeDefined();
     await user.click(sourceRow!);
-    expect(readTab).toHaveAttribute('aria-current', 'page');
+    expect(readTab).toHaveAttribute('aria-selected', 'true');
   });
 });

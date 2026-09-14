@@ -434,6 +434,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
       <button
         className="btn-icon btn-ghost mobile-menu-button"
         title="Open navigation"
+        aria-label="Open navigation"
         aria-expanded={navOpen}
         aria-controls="main-sidebar"
         onClick={onMenuToggle}
@@ -574,6 +575,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
         <button
           className="btn-icon btn-ghost"
           title="Notifications"
+          aria-label={summary.upcomingReviews.length > 0 ? `Notifications, ${summary.upcomingReviews.length} upcoming reviews` : 'Notifications'}
           aria-expanded={notificationsOpen}
           onClick={() => setNotificationsOpen((open) => !open)}
         >

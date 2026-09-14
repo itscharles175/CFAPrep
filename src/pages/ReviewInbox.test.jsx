@@ -68,9 +68,9 @@ describe('ReviewInbox focus hierarchy', () => {
     arrange();
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'Your queue is clear' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: "You're caught up" })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Start practice' })).toHaveAttribute('href', '/cfa/level2/mock');
-    expect(screen.getByLabelText('Review status')).toHaveTextContent('All caught up');
+    expect(screen.queryByLabelText('Review status')).not.toBeInTheDocument();
     expect(screen.queryByText('Repair Vault')).not.toBeInTheDocument();
     expect(screen.queryByText('Review Forecast')).not.toBeInTheDocument();
   });

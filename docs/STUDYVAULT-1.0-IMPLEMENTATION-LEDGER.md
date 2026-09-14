@@ -45,9 +45,11 @@ This document is the current source of truth for the StudyVault 1.0 finish-line 
 | Local-only boundaries | no-egress, sidecar-fetch, provenance, and version checks | **Verified** — 703 shipped files scanned, no new direct sidecar fetches, provenance 1/1, all versions `1.0.0`. |
 | Backup and restore | `npm run vault-archive:drill` | **Verified** — export, wipe, and import reproduced the original 30-store archive. |
 | Visual acceptance | Vizier `pr` matrix, run `run_b5d07646c530e966` | **Verified** — authoritative `pass`, score 100, 21/21 surfaces and 525/525 required checks, 0 new issues, 0 warnings, no waivers. Reviewed baseline: `run_d268883402d927c3`. |
+| UI polish follow-up | Vizier `pr` delta, run `run_0957c0b455e9623c` | **Verified** — Today, Review, Progress, and Tutor pass at desktop, tablet, and mobile: score 100, 12/12 surfaces, 300/300 required checks, 0 issues, and 0 warnings. Four independent agents reviewed motion, interaction, visual hierarchy, and accessibility/performance before remediation. |
 | Accessibility | `npm run a11y:check` plus Vizier axe/keyboard/reduced-motion checks | **Verified** — desktop/mobile light and dark routes, synthetic source states, contrast fixtures, OS increased contrast, and forced-colors all pass. |
 | Mutation floor | local host + backend mutation run | **Verified locally** — 12/12 mutants killed, score 100%. Final CI evidence remains pending. |
 | Apple Silicon package | `release-debug/StudyVault-1.0.0-mac-arm64-adhoc.zip` | **Verified development artifact** — the extracted app is arm64, strict code-sign verification passes with an ad-hoc signature, and clean-profile launch and restart were observed. It is not Developer ID signed or notarized. |
+| UI polish package | `release-debug/StudyVault-1.0.0-mac-arm64-ui-polish-adhoc.zip` | **Built and launch-checked** — SHA-256 `c52b905b81e66787d5f1952e4b757b498bbec28c30c883ead1587c5a75762502`; strict ad-hoc signature verification and packaged renderer launch pass. A launch from the temporary signing path could not unlock macOS `safeStorage`, so that run correctly kept the LSAT sidecar blocked rather than exposing an unencrypted database key. |
 | Full CI | GitHub workflow on the final revision | **Pending** — this working candidate has not been pushed. |
 
 ## Visual evidence

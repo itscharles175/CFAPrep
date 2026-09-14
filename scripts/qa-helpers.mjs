@@ -18,6 +18,9 @@ export const browserCandidates = [
   '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
   '/opt/google/chrome/chrome',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
 ].filter(Boolean);
 
 export const viewports = {
