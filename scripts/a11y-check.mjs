@@ -23,7 +23,7 @@ import {
 
 async function waitForBodyText(page, text, label) {
   await page.waitForFunction(
-    (expected) => document.body.innerText.includes(expected),
+    (expected) => document.body.innerText.toLocaleLowerCase().includes(expected.toLocaleLowerCase()),
     text,
     { timeout: 45_000 },
   ).catch((error) => {
@@ -220,11 +220,15 @@ try {
             const url = new URL(path, address).toString();
             const scope = `${route.id} ${viewportName} ${sourceState} [${theme}]`;
             // System Health owns several live local-service observers. Give its
-            // desktop scan a fresh page so observers from the preceding route
-            // sweep cannot starve the lazy route transition or readiness check.
-            const routePage = route.id === 'system' && viewportName === 'desktop'
-              ? await page.context().newPage()
-              : page;
+            // desktop scan a fresh browser context so pages and observers from
+            // the preceding route sweep cannot starve its lazy route transition.
+            // Reapply the theme seed because init scripts are context-scoped.
+            const needsIsolatedContext = route.id === 'system' && viewportName === 'desktop';
+            const routeContext = needsIsolatedContext
+              ? await browser.newContext({ viewport: viewports[viewportName] })
+              : null;
+            if (routeContext) await seedThemeInitScript(routeContext, theme);
+            const routePage = routeContext ? await routeContext.newPage() : page;
             try {
               await routePage.setViewportSize(viewports[viewportName]);
               await applySourceState(routePage, address, sourceState);
@@ -270,7 +274,7 @@ try {
                 violations: [message],
               });
             } finally {
-              if (routePage !== page) await routePage.close();
+              if (routeContext) await routeContext.close();
             }
           }
         }

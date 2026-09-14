@@ -3,7 +3,7 @@
   "configVersion": 1,
   "app": {
     "mode": "managed",
-    "startCommand": "VITE_LSAT_API_BASE=http://127.0.0.1:5198/lsat-api npm run build && bash scripts/vizier-stack.sh",
+    "startCommand": "VITE_LSAT_API_BASE=http://127.0.0.1:5198/lsat-api VITE_API_BASE=http://127.0.0.1:5198/lsat-api npm run build && bash scripts/vizier-stack.sh",
     "baseUrl": "http://127.0.0.1:5198",
     "readyPath": "/",
     "expectTitle": "StudyVault",
