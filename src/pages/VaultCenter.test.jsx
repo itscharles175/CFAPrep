@@ -55,6 +55,7 @@ describe('VaultCenter source scope', () => {
     expect(await screen.findByText('Source Scope & Provenance')).toBeInTheDocument();
     expect(screen.getByText('Active study context: LSAT')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open LSAT workspace' })).toHaveAttribute('href', '/lsat');
+    expect(screen.queryByText(/CFA source bundles:/)).not.toBeInTheDocument();
     expect(screen.queryByText('Import CFA source bundle')).not.toBeInTheDocument();
     expect(screen.queryByText('Rebuild CFA source map')).not.toBeInTheDocument();
   });

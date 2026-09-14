@@ -652,7 +652,7 @@ export default function CfaModule() {
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container cfa-module-page">
       <div style={{ marginBottom: 'var(--space-6)' }}>
         <Link to="/cfa" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginBottom: 'var(--space-4)' }}>
           <ArrowLeft size={16} /> Back to CFA Dashboard

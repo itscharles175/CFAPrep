@@ -271,6 +271,19 @@ function focusFirstVisibleSidebarTarget() {
   }
 }
 
+function visibleSidebarFocusTargets() {
+  return Array.from(document.querySelectorAll(
+    '#main-sidebar a[href], #main-sidebar button:not([disabled]), #main-sidebar input:not([disabled]), #main-sidebar select:not([disabled]), #main-sidebar textarea:not([disabled]), #main-sidebar summary, #main-sidebar [tabindex]:not([tabindex="-1"])',
+  )).filter((element) => {
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && !element.hasAttribute('hidden')
+      && (!element.closest('details:not([open])') || element.matches('summary'))
+      && !element.closest('[inert]');
+  });
+}
+
 export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -324,7 +337,8 @@ export default function App() {
   }, [location.pathname]);
 
   useEffect(() => {
-    if (!mobileNavOpen) {
+    const mobileDrawerOpen = mobileViewport && mobileNavOpen;
+    if (!mobileDrawerOpen) {
       if (mobileNavWasOpen.current) document.querySelector('.mobile-menu-button')?.focus?.();
       mobileNavWasOpen.current = false;
       return undefined;
@@ -333,13 +347,49 @@ export default function App() {
     const focusTimer = window.setTimeout(focusFirstVisibleSidebarTarget, 0);
     function handleKeyDown(event) {
       if (event.key === 'Escape') setMobileNavOpen(false);
+      if (event.key !== 'Tab') return;
+
+      const targets = visibleSidebarFocusTargets();
+      if (!targets.length) {
+        event.preventDefault();
+        return;
+      }
+
+      const active = document.activeElement;
+      const sidebar = document.querySelector('#main-sidebar');
+      const first = targets[0];
+      const last = targets[targets.length - 1];
+      if (!active || !sidebar?.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus({ preventScroll: true });
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.clearTimeout(focusTimer);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [mobileNavOpen]);
+  }, [mobileNavOpen, mobileViewport]);
+
+  useEffect(() => {
+    const background = [
+      document.querySelector('.skip-to-main'),
+      document.querySelector('.topbar'),
+      document.querySelector('#main'),
+    ].filter(Boolean);
+    if (mobileViewport && mobileNavOpen) {
+      background.forEach((element) => element.setAttribute('inert', ''));
+    } else {
+      background.forEach((element) => element.removeAttribute('inert'));
+    }
+    return () => background.forEach((element) => element.removeAttribute('inert'));
+  }, [mobileNavOpen, mobileViewport]);
 
   return (
     <ThemeProvider>

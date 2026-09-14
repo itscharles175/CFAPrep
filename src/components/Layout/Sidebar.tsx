@@ -23,6 +23,8 @@ import {
   contextSwitchHref,
   domainForLocation,
   rememberStudyContextRoute,
+  stageStudyContextHandoff,
+  stageStudyContextOrigin,
   type StudyDomain,
   useStudyContext,
   workspaceHref,
@@ -363,10 +365,20 @@ export default function Sidebar({
 
   function handleDomainChange(domain: StudyDomain) {
     if (domain === studyContext.domain) return;
-    rememberStudyContextRoute(studyContext.domain, activeWorkspace, location.pathname + location.search + location.hash);
+    const sourceRoute = location.pathname + location.search + location.hash;
+    const sourceDomainIsLsat = domainForLocation(location.pathname) === 'lsat';
+    rememberStudyContextRoute(studyContext.domain, activeWorkspace, sourceRoute);
     const nextContext = updateStudyContext({ domain });
     const destination = contextSwitchHref(activeWorkspace, nextContext);
     const destinationDomain = domainForLocation(destination);
+    const destinationIsLsat = destinationDomain === 'lsat';
+    if (sourceDomainIsLsat !== destinationIsLsat) {
+      // The host and LSAT route trees can unmount in either order. Persist the
+      // selection for the destination before navigation so Review/Progress do
+      // not re-open with the source curriculum after their generic host handoff.
+      stageStudyContextHandoff(nextContext);
+      if (destinationIsLsat) stageStudyContextOrigin(studyContext, sourceRoute);
+    }
     announceAndNavigate(
       destination,
       `Switched to ${domain === 'cfa' ? 'CFA' : domain === 'lsat' ? 'LSAT' : domain === 'quant' ? 'Quant' : 'Excel'} ${activeWorkspace}.`,

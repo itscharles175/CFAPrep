@@ -1029,6 +1029,18 @@ def artifact_entry(path: Path, kind: str) -> dict[str, Any]:
     return {"kind": kind, "name": path.name, "size": path.stat().st_size, "sha256": sha256_file(path)}
 
 
+def signed_application_identity(app_path: Path, app_artifact: dict[str, Any]) -> dict[str, Any]:
+    """Bind acceptance to the final, signed bytes that the harnesses execute."""
+    executable = app_path / "Contents" / "MacOS" / "StudyVault"
+    if not executable.is_file():
+        raise ReleaseError(f"signed StudyVault executable is unavailable: {executable}")
+    return {
+        "commit": run(["git", "rev-parse", "HEAD"]).stdout.strip(),
+        "app_tree_sha256": app_artifact["sha256"],
+        "executable_sha256": sha256_file(executable),
+    }
+
+
 def sanitize_evidence(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: sanitize_evidence(item) for key, item in value.items()}
@@ -1196,11 +1208,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sbom = write_sbom(EVIDENCE_ROOT / "studyvault-sbom.cdx.json")
     artifacts = [artifact_entry(app_path, "app"), artifact_entry(zip_path, "zip"), artifact_entry(dmg_path, "dmg")]
     artifacts[0]["nested_signed_items"] = len(signed_items)
-    application_identity = {
-        "commit": run(["git", "rev-parse", "HEAD"]).stdout.strip(),
-        "app_tree_sha256": artifacts[0]["sha256"],
-        "executable_sha256": architecture["application"]["sha256"],
-    }
+    application_identity = signed_application_identity(app_path, artifacts[0])
     artifacts.append(write_build_metadata(EVIDENCE_ROOT / "build-metadata.json", gatekeeper))
 
     install_status = "not_requested"

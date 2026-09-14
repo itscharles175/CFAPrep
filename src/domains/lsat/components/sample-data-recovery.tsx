@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { DatabaseZap, RefreshCw } from "lucide-react";
 import { Badge } from "@lsat/components/ui/badge";
 import { Button } from "@lsat/components/ui/button";
@@ -15,10 +16,22 @@ export function SampleDataRecovery({
   affectedSections,
 }: {
   section: string;
-  onRetry: () => void;
+  onRetry: () => void | Promise<void>;
   compact?: boolean;
   affectedSections?: string[];
 }) {
+  const [retrying, setRetrying] = useState(false);
+
+  async function handleRetry() {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await onRetry();
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   return (
     <section
       className={
@@ -28,6 +41,7 @@ export function SampleDataRecovery({
       }
       aria-label={`${section}: sample data excluded`}
       role="status"
+      aria-busy={retrying}
     >
       <div className="flex min-w-0 items-start gap-3">
         <span className="mt-0.5 rounded-md bg-warning/15 p-1.5 text-warning">
@@ -48,8 +62,8 @@ export function SampleDataRecovery({
           )}
         </div>
       </div>
-      <Button variant="outline" size="sm" className="shrink-0" onClick={onRetry}>
-        <Icon as={RefreshCw} size="xs" /> Retry
+      <Button variant="outline" size="sm" className="shrink-0" onClick={() => void handleRetry()} disabled={retrying}>
+        <Icon as={RefreshCw} size="xs" /> {retrying ? "Retrying…" : "Retry"}
       </Button>
     </section>
   );

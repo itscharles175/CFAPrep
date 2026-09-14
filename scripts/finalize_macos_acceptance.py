@@ -72,7 +72,12 @@ def validate_packaged_visual(manifest: dict, commit: str, app_tree_sha256: str, 
 def validate_performance(report: dict, commit: str, app_tree_sha256: str, executable_sha256: str) -> dict:
     if report.get("status") != "pass" or report.get("authoritative") is not True:
         raise ReleaseError("packaged performance evidence is not an authoritative pass")
-    if report.get("shutdown", {}).get("normal_quit") is not True or report.get("shutdown", {}).get("owned_ports_closed") is not True:
+    shutdown = report.get("shutdown", {})
+    if (
+        shutdown.get("request") != "native-apple-event-quit"
+        or shutdown.get("native_quit") is not True
+        or shutdown.get("owned_ports_closed") is not True
+    ):
         raise ReleaseError("packaged performance evidence lacks clean shutdown")
     if report.get("source", {}).get("commit") != commit or report.get("source", {}).get("working_tree_clean") is not True:
         raise ReleaseError("packaged performance evidence is not bound to the accepted clean commit")

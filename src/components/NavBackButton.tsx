@@ -30,6 +30,17 @@ export default function NavBackButton({ onSameDomainBack, className }: NavBackBu
 
   const label = canGoBack && target ? `Back to ${target.label}` : 'Back';
 
+  function navigateBack() {
+    const destination = performBack(pathname, onSameDomainBack);
+    if (!destination) return;
+    // A route change can unmount the focused Back button. Move focus to the
+    // destination's main landmark on the next frame, after either router has
+    // committed, rather than allowing it to fall back to <body>.
+    requestAnimationFrame(() => {
+      document.getElementById('main')?.focus({ preventScroll: true });
+    });
+  }
+
   return (
     <button
       type="button"
@@ -37,7 +48,7 @@ export default function NavBackButton({ onSameDomainBack, className }: NavBackBu
       aria-label={label}
       title={label}
       disabled={!canGoBack}
-      onClick={() => performBack(pathname, onSameDomainBack)}
+      onClick={navigateBack}
     >
       <ArrowLeft size={18} />
     </button>

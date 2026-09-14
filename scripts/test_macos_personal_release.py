@@ -237,7 +237,9 @@ class PersonalReleaseTests(unittest.TestCase):
     def test_finalizer_requires_commit_digest_and_real_manual_evidence(self) -> None:
         report = {
             "status": "pass", "authoritative": True,
-            "shutdown": {"normal_quit": True, "owned_ports_closed": True},
+            "shutdown": {
+                "request": "native-apple-event-quit", "native_quit": True, "owned_ports_closed": True,
+            },
             "source": {"commit": "a" * 40, "working_tree_clean": True},
             "artifact": {"bundle_tree_sha256": "b" * 64, "executable_sha256": "c" * 64},
         }
@@ -277,6 +279,31 @@ class PersonalReleaseTests(unittest.TestCase):
                 path.write_text(json.dumps(payload), encoding="utf-8")
             with self.assertRaisesRegex(release.ReleaseError, "incomplete"):
                 finalizer.finalize(*paths)
+
+    def test_signed_application_identity_hashes_current_executable_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            app = Path(raw) / "StudyVault.app"
+            executable = app / "Contents" / "MacOS" / "StudyVault"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"unsigned executable")
+            unsigned_sha256 = release.sha256_file(executable)
+            executable.write_bytes(b"signed executable bytes")
+            artifact = release.artifact_entry(app, "app")
+            with patch.object(release, "run", return_value=release.CommandResult(["git"], 0.1, "a" * 40 + "\n")):
+                identity = release.signed_application_identity(app, artifact)
+            self.assertEqual(identity["app_tree_sha256"], artifact["sha256"])
+            self.assertEqual(identity["executable_sha256"], release.sha256_file(executable))
+            self.assertNotEqual(identity["executable_sha256"], unsigned_sha256)
+
+    def test_finalizer_requires_native_apple_event_quit_contract(self) -> None:
+        report = {
+            "status": "pass", "authoritative": True,
+            "shutdown": {"normal_quit": True, "owned_ports_closed": True},
+            "source": {"commit": "a" * 40, "working_tree_clean": True},
+            "artifact": {"bundle_tree_sha256": "b" * 64, "executable_sha256": "c" * 64},
+        }
+        with self.assertRaisesRegex(release.ReleaseError, "clean shutdown"):
+            finalizer.validate_performance(report, "a" * 40, "b" * 64, "c" * 64)
 
     def test_fuse_verification_requires_run_as_node_disabled(self) -> None:
         insecure = release.CommandResult(

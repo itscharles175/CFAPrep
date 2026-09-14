@@ -138,3 +138,22 @@
     margin-bottom: 0;
   }
 }
+
+@media (max-width: 640px) {
+  /* The compact-desktop four-up metrics are useful beside the persistent rail,
+   * but collapse on phones so each assessment signal stays readable. */
+  .mock-exam-level3 .mock-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .mock-exam-level3 .mock-metrics .metric-tile {
+    min-height: 104px;
+  }
+
+  .mock-model-answer-toggle {
+    display: inline-flex;
+    min-height: 40px;
+    align-items: center;
+  }
+}

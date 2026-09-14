@@ -25,7 +25,7 @@ async function waitForBodyText(page, text, label) {
   await page.waitForFunction(
     (expected) => document.body.innerText.includes(expected),
     text,
-    { timeout: 20_000 },
+    { timeout: 45_000 },
   ).catch((error) => {
     throw new Error(`Timed out waiting for ${label}: ${error.message}`);
   });
@@ -219,13 +219,19 @@ try {
             const path = routePathForSourceState(route, sourceState);
             const url = new URL(path, address).toString();
             const scope = `${route.id} ${viewportName} ${sourceState} [${theme}]`;
+            // System Health owns several live local-service observers. Give its
+            // desktop scan a fresh page so observers from the preceding route
+            // sweep cannot starve the lazy route transition or readiness check.
+            const routePage = route.id === 'system' && viewportName === 'desktop'
+              ? await page.context().newPage()
+              : page;
             try {
-              await page.setViewportSize(viewports[viewportName]);
-              await applySourceState(page, address, sourceState);
-              await page.goto(url, { waitUntil: 'networkidle' });
-              await waitForBodyText(page, route.expectedText, scope);
-              await page.waitForTimeout(1800);
-              const result = await new AxeBuilder({ page })
+              await routePage.setViewportSize(viewports[viewportName]);
+              await applySourceState(routePage, address, sourceState);
+              await routePage.goto(url, { waitUntil: 'networkidle' });
+              await waitForBodyText(routePage, route.expectedText, scope);
+              await routePage.waitForTimeout(1800);
+              const result = await new AxeBuilder({ page: routePage })
                 .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
                 .analyze();
               const violations = result.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact || ''));
@@ -263,6 +269,8 @@ try {
                 url,
                 violations: [message],
               });
+            } finally {
+              if (routePage !== page) await routePage.close();
             }
           }
         }

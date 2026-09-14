@@ -3271,6 +3271,7 @@ export default function SystemHealth() {
         </div>
         <textarea
           className="input"
+          aria-label="Source text to ingest"
           rows={6}
           style={{ width: '100%', marginBottom: 'var(--space-2)', fontFamily: 'inherit' }}
           value={pasteText}

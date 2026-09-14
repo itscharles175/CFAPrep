@@ -335,6 +335,34 @@
   }
 }
 
+/* The timed runner has more controls than a 960px native window can keep on
+ * one line once the persistent app rail is accounted for. Give the title and
+ * controls their own rows so timer, flag, overview, focus, and reading tools
+ * remain visible and keyboard reachable instead of being clipped. */
+@media (max-width: 1100px) {
+  .exam-runner-header {
+    height: auto;
+    min-height: 0;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
+  .exam-runner-header > div:first-child,
+  .exam-runner-header > div:last-child {
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .exam-runner-header > div:last-child {
+    align-items: center;
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+    padding-bottom: 0.25rem;
+  }
+}
+
 /*
  * Unified-shell compact band (901–1100px).
  *
@@ -376,6 +404,38 @@ body[data-domain='lsat'] .qv-select-trigger,
 body[data-domain='lsat'] .qv-btn.btn-sm,
 body[data-domain='lsat'] [role='radio'] {
   min-height: 40px;
+}
+
+@media (max-width: 900px) {
+  /* Shadcn's h-9 controls are 36px by default. On touch screens every LSAT
+   * action, including recovery and first-light CTAs, has the shared 40px floor. */
+  body[data-domain='lsat'] button.h-9 {
+    min-height: 40px;
+  }
+
+  /* The unified shell now supplies the same mobile workspace bar on LSAT as
+   * every other curriculum. Keep the independent coach affordance above it. */
+  body[data-domain='lsat'] .lsat-docked-coach-trigger,
+  body[data-domain='lsat'] .lsat-docked-coach-panel {
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 640px) {
+  /* Keep every Review category immediately legible rather than presenting a
+   * clipped, un-signposted horizontal tab strip. */
+  body[data-domain='lsat'] .lsat-review-tabs {
+    display: grid;
+    width: 100%;
+    height: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+  }
+
+  body[data-domain='lsat'] .lsat-review-tabs .qv-tabs-trigger {
+    width: 100%;
+    padding-inline: var(--space-2);
+  }
 }
 
 @layer base {

@@ -25,6 +25,13 @@ import {
   isUnifiedOnboardingDismissed,
   setUnifiedOnboardingDismissed,
 } from "@/lib/unifiedResume";
+import {
+  clearStudyContextOrigin,
+  readStudyContextOrigin,
+  stageStudyContextHandoff,
+  writeStudyContext,
+} from "@/lib/studyContext";
+import { navigateDomain } from "@/lib/domainNav";
 
 /**
  * R9 F3.1 — "First Light" onboarding. A full-bleed dark stage with a breathing
@@ -76,6 +83,7 @@ export function OnboardingWizard() {
   const [step, setStep] = useState(0);
   const [targetScore, setTargetScore] = useState(165);
   const [examDate, setExamDate] = useState("");
+  const returnOrigin = readStudyContextOrigin();
 
   const finish = useCallback(
     (skipped = false) => {
@@ -92,6 +100,7 @@ export function OnboardingWizard() {
       // for the host, so the host wizard never auto-opens afterwards. Paired with
       // the suppression in the `open` gate above, this is the two-way dismiss sync.
       setUnifiedOnboardingDismissed();
+      clearStudyContextOrigin();
       setDismissedForSession(true);
     },
     [targetScore, examDate],
@@ -115,13 +124,30 @@ export function OnboardingWizard() {
     return () => setFirstLightChromeState(false);
   }, [open]);
 
+  const returnToCurriculum = useCallback(() => {
+    const origin = readStudyContextOrigin();
+    if (!origin || origin.context.domain === "lsat") return;
+    // Keep the selector's source context as the canonical destination state
+    // before the cross-domain root changes route trees.
+    stageStudyContextHandoff(origin.context);
+    writeStudyContext(origin.context);
+    clearStudyContextOrigin();
+    setDismissedForSession(true);
+    navigateDomain(origin.route);
+  }, []);
+
   if (!open) return null;
 
   const days = daysUntil(examDate);
   const examCountdown = examCountdownPresentation(days);
 
   return (
-    <FirstLightStage reduce={!!reduce} onSkip={() => finish(true)}>
+    <FirstLightStage
+      reduce={!!reduce}
+      onSkip={() => finish(true)}
+      onReturnToCurriculum={returnOrigin?.context.domain !== "lsat" ? returnToCurriculum : undefined}
+      returnLabel={returnOrigin ? `Return to ${returnOrigin.context.domain === "cfa" ? "CFA" : returnOrigin.context.domain === "quant" ? "Quant" : "Excel"}` : undefined}
+    >
       <AnimatePresence mode="wait" initial={false}>
         {step === 0 && (
           <Scene key="goal" reduce={!!reduce}>
@@ -299,10 +325,14 @@ function FirstLightStage({
   children,
   reduce,
   onSkip,
+  onReturnToCurriculum,
+  returnLabel,
 }: {
   children: ReactNode;
   reduce: boolean;
   onSkip: () => void;
+  onReturnToCurriculum?: () => void;
+  returnLabel?: string;
 }) {
   return (
     <m.div
@@ -323,9 +353,21 @@ function FirstLightStage({
           <span aria-hidden className="text-muted-foreground">/</span>
           <span className="truncate text-xs text-muted-foreground">LSAT setup</span>
         </div>
-        <Button variant="ghost" size="sm" onClick={onSkip}>
-          Skip setup
-        </Button>
+        <div className="flex items-center gap-1">
+          {onReturnToCurriculum && returnLabel && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onReturnToCurriculum}
+              title="Return to the curriculum you were studying"
+            >
+              {returnLabel}
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={onSkip}>
+            Skip setup
+          </Button>
+        </div>
       </header>
       {/* Brand mark catching the breathing aurora. */}
       <div className="aurora mb-8 flex items-center justify-center">

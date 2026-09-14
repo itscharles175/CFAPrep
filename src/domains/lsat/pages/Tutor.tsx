@@ -21,6 +21,8 @@ import { useAdaptivityPlan, useReadinessStatus } from "@lsat/lib/hooks";
 import { useSocraticStream } from "@lsat/hooks/useSocraticStream";
 import type { SocraticCitation, TutorSocraticContext } from "@lsat/lib/types";
 
+export const TUTOR_EMPTY_STATE = "Load an attempt to begin blind review and source-linked remediation.";
+
 export function SocraticEvidence({
   context,
 }: {
@@ -177,7 +179,7 @@ export default function Tutor() {
   const [answer, setAnswer] = useState("");
   const [confidence, setConfidence] = useState<"sure" | "likely" | "guess">("likely");
   const [rationale, setRationale] = useState("");
-  const [trapGuess, setTrapGuess] = useState("out_of_scope");
+  const [trapGuess, setTrapGuess] = useState("");
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [turn, setTurn] = useState("");
   // LSAT-4 — live Socratic streaming alongside the existing sync sendTurn. On by
@@ -269,7 +271,7 @@ export default function Tutor() {
         eyebrow="Socratic Blind Review"
         title="Tutor"
         subtitle="Local-only why loops, rationale memory, Socratic turns, and concept-gap remediation."
-        actions={<Button variant="outline" onClick={createCards}><RotateCcw className="h-4 w-4" aria-hidden /> Create SRS cards</Button>}
+        actions={<Button variant="outline" onClick={createCards} disabled={!why.data}><RotateCcw className="h-4 w-4" aria-hidden /> Create SRS cards</Button>}
       />
       <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
@@ -300,6 +302,9 @@ export default function Tutor() {
             <div className="rounded-md bg-muted/45 p-3 text-sm">
               Next: <span className="font-medium">{why.data?.next_step?.replace(/_/g, " ") ?? "load an attempt"}</span>
             </div>
+            {!why.data && (
+              <p className="text-sm text-muted-foreground">{TUTOR_EMPTY_STATE}</p>
+            )}
             <Textarea
               value={rationale}
               onChange={(e) => setRationale(e.target.value)}
@@ -309,7 +314,7 @@ export default function Tutor() {
             <Input
               value={trapGuess}
               onChange={(e) => setTrapGuess(e.target.value)}
-              placeholder="Trap guess"
+              placeholder="Optional trap pattern, for example scope shift"
               aria-label="Trap guess"
             />
             <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)]">

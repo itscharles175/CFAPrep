@@ -10,7 +10,7 @@
  * search); we stub those to isolate the palette composition.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -83,6 +83,62 @@ describe('unified palette', () => {
     renderTopBar('/cfa');
 
     expect(screen.getByLabelText('Command K')).toHaveTextContent('⌘K');
+  });
+
+  it('uses the Command shortcut on a Mac platform without a desktop bridge', () => {
+    const originalPlatform = navigator.platform;
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'MacIntel' });
+
+    renderTopBar('/cfa');
+
+    expect(screen.getByLabelText('Command K')).toHaveTextContent('⌘K');
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: originalPlatform });
+  });
+
+  it('uses the Command shortcut for a Mac user agent when platform is unavailable', () => {
+    const originalPlatform = navigator.platform;
+    const originalUserAgent = navigator.userAgent;
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Linux x86_64' });
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
+    });
+
+    renderTopBar('/cfa');
+
+    expect(screen.getByLabelText('Command K')).toHaveTextContent('⌘K');
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: originalPlatform });
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: originalUserAgent });
+  });
+
+  it('restores the shortcut origin after Escape closes the palette', async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/cfa/level3/mock']}>
+        <button type="button">Return target</button>
+        <TopBar />
+      </MemoryRouter>,
+    );
+    const returnTarget = screen.getByRole('button', { name: 'Return target' });
+    returnTarget.focus();
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /command palette/i })).toHaveFocus());
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() => expect(returnTarget).toHaveFocus());
+    expect(container.querySelector('.search-popover')).toBeNull();
+  });
+
+  it('puts the current CFA Level III route ahead of other CFA levels by default', async () => {
+    localStorage.setItem(
+      'studyvault:study-context:v1',
+      JSON.stringify({ domain: 'cfa', cfaLevel: 'level3', goal: 'balanced' }),
+    );
+    renderTopBar('/cfa/level3/mock');
+
+    await openPalette();
+    const options = screen.getAllByRole('option');
+    expect(within(options[0]).getByText('Start Level III Mock')).toBeInTheDocument();
   });
 
   it('marks the measured 960px desktop range as compact before controls can overlap', () => {

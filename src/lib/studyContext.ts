@@ -14,6 +14,14 @@ export interface StudyContext {
 export const STUDY_CONTEXT_STORAGE_KEY = 'studyvault:study-context:v1';
 export const STUDY_CONTEXT_EVENT = 'studyvault:study-context-change';
 export const STUDY_CONTEXT_RETURN_STORAGE_KEY = 'studyvault:study-context-returns:v1';
+/**
+ * A one-hop handoff protects a deliberately selected curriculum while the
+ * unified root swaps the LSAT and host route trees. The destination consumes it
+ * synchronously before any old-plane effect can re-hydrate stale context.
+ */
+export const STUDY_CONTEXT_HANDOFF_STORAGE_KEY = 'studyvault:study-context-handoff:v1';
+/** The source curriculum offered from first-time LSAT setup. */
+export const STUDY_CONTEXT_ORIGIN_STORAGE_KEY = 'studyvault:study-context-origin:v1';
 
 export const DEFAULT_STUDY_CONTEXT: StudyContext = {
   domain: 'cfa',
@@ -27,6 +35,11 @@ const GOALS: readonly StudyGoal[] = ['balanced', 'exam-readiness', 'retention', 
 
 type WorkspaceReturns = Partial<Record<StudyWorkspace, string>>;
 type StudyContextReturns = Partial<Record<StudyDomain, WorkspaceReturns>>;
+
+export interface StudyContextOrigin {
+  context: StudyContext;
+  route: string;
+}
 
 function includes<T extends string>(values: readonly T[], value: unknown): value is T {
   return typeof value === 'string' && values.includes(value as T);
@@ -68,6 +81,38 @@ export function writeStudyContext(
   return next;
 }
 
+/** Stage a chosen context across a host ⇄ LSAT route-tree replacement. */
+export function stageStudyContextHandoff(
+  context: StudyContext,
+  storage: Storage | null | undefined = globalThis?.sessionStorage,
+): void {
+  try {
+    storage?.setItem(STUDY_CONTEXT_HANDOFF_STORAGE_KEY, JSON.stringify(normalizeStudyContext(context)));
+  } catch {
+    // Local storage remains the fallback when session storage is unavailable.
+  }
+}
+
+/**
+ * Consume a staged selection on the destination tree and immediately make it
+ * canonical. Consuming once avoids replaying an old navigation after Back.
+ */
+export function consumeStudyContextHandoff(
+  handoffStorage: Storage | null | undefined = globalThis?.sessionStorage,
+  contextStorage: Storage | null | undefined = globalThis?.localStorage,
+): StudyContext | null {
+  try {
+    const raw = handoffStorage?.getItem(STUDY_CONTEXT_HANDOFF_STORAGE_KEY);
+    handoffStorage?.removeItem(STUDY_CONTEXT_HANDOFF_STORAGE_KEY);
+    if (!raw) return null;
+    const context = normalizeStudyContext(JSON.parse(raw));
+    writeStudyContext(context, contextStorage);
+    return context;
+  } catch {
+    return null;
+  }
+}
+
 export function domainForLocation(pathname: string): StudyDomain | null {
   if (pathname === '/cfa' || pathname.startsWith('/cfa/')) return 'cfa';
   if (pathname === '/lsat' || pathname.startsWith('/lsat/')) return 'lsat';
@@ -95,6 +140,47 @@ export function workspaceHref(workspace: StudyWorkspace, context: StudyContext):
 
 function isSafeLocalRoute(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') && !value.includes('://');
+}
+
+/** Remember the curriculum and exact route that led into first-time LSAT setup. */
+export function stageStudyContextOrigin(
+  context: StudyContext,
+  route: string,
+  storage: Storage | null | undefined = globalThis?.sessionStorage,
+): void {
+  if (!isSafeLocalRoute(route)) return;
+  try {
+    storage?.setItem(
+      STUDY_CONTEXT_ORIGIN_STORAGE_KEY,
+      JSON.stringify({ context: normalizeStudyContext(context), route } satisfies StudyContextOrigin),
+    );
+  } catch {
+    // Returning remains optional when session storage is unavailable.
+  }
+}
+
+export function readStudyContextOrigin(
+  storage: Storage | null | undefined = globalThis?.sessionStorage,
+): StudyContextOrigin | null {
+  try {
+    const raw = storage?.getItem(STUDY_CONTEXT_ORIGIN_STORAGE_KEY);
+    if (!raw) return null;
+    const candidate = JSON.parse(raw) as Partial<StudyContextOrigin>;
+    if (!isSafeLocalRoute(candidate?.route)) return null;
+    return { context: normalizeStudyContext(candidate.context), route: candidate.route };
+  } catch {
+    return null;
+  }
+}
+
+export function clearStudyContextOrigin(
+  storage: Storage | null | undefined = globalThis?.sessionStorage,
+): void {
+  try {
+    storage?.removeItem(STUDY_CONTEXT_ORIGIN_STORAGE_KEY);
+  } catch {
+    // Nothing to clean up in restricted storage contexts.
+  }
 }
 
 function readStudyContextReturns(storage: Storage | null | undefined = globalThis?.localStorage): StudyContextReturns {
@@ -157,7 +243,7 @@ export function contextSwitchHref(
 }
 
 export function useStudyContext(): [StudyContext, (patch: Partial<StudyContext>) => StudyContext] {
-  const [context, setContext] = useState<StudyContext>(() => readStudyContext());
+  const [context, setContext] = useState<StudyContext>(() => consumeStudyContextHandoff() ?? readStudyContext());
 
   useEffect(() => {
     const handleContext = (event: Event) => setContext(normalizeStudyContext((event as CustomEvent).detail));

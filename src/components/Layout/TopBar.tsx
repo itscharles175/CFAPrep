@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, HelpCircle, Menu, Monitor, Moon, RefreshCw, Search, Sun, WifiOff, X } from 'lucide-react';
 import { buildSearchItems } from '../../data/catalog';
@@ -71,6 +71,42 @@ function neutralSearchPlaceholder(context: StudyContext): string {
   if (context.domain === 'cfa') return `Search ${contextLabel(context)} material…`;
   if (context.domain === 'lsat') return 'Search LSAT questions, sources, and notes…';
   return `Search ${contextLabel(context)} material…`;
+}
+
+/** macOS uses Command in both packaged Electron and a browser running on Mac. */
+function usesCommandKey(): boolean {
+  if (getDesktopBridge()) return true;
+  if (typeof navigator === 'undefined') return false;
+  return /mac/i.test(navigator.platform || '') || /macintosh|mac os x/i.test(navigator.userAgent || '');
+}
+
+function cfaLevelForPath(path: string): StudyContext['cfaLevel'] | null {
+  if (path.startsWith('/cfa/level3/')) return 'level3';
+  if (path.startsWith('/cfa/level2/')) return 'level2';
+  if (path.startsWith('/cfa/level1/') || path === '/cfa/mock') return 'level1';
+  return null;
+}
+
+/**
+ * Keep an empty palette context-aware. This is intentionally a rank rather
+ * than a filter: cross-level routes stay discoverable, but the current route,
+ * current level, and selected Level III pathway lead the user’s first view.
+ */
+function contextPriority(item: SearchResultItem, context: StudyContext, pathname: string, pathway: string): number {
+  if (context.domain !== 'cfa' || domainForResult(item) !== 'cfa') return 0;
+  if (item.path === pathname) return 1_000;
+  const level = cfaLevelForPath(item.path);
+  if (level !== context.cfaLevel) return 0;
+  if (level !== 'level3') return 100;
+  const topicId = item.path.split('/').at(-1) ?? '';
+  return level3TopicBelongsToPathway(topicId, pathway) ? 120 : 100;
+}
+
+function sortForContext(items: SearchResultItem[], context: StudyContext, pathname: string, pathway: string): SearchResultItem[] {
+  return items
+    .map((item, index) => ({ item, index, priority: contextPriority(item, context, pathname, pathway) }))
+    .sort((a, b) => b.priority - a.priority || a.index - b.index)
+    .map((row) => row.item);
 }
 
 /**
@@ -188,7 +224,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   const activeDomain = activeDomainForPath(location.pathname);
   const [studyContext] = useStudyContext();
   const compactDesktop = useCompactDesktopTopbar();
-  const nativeShortcut = Boolean(getDesktopBridge());
+  const nativeShortcut = usesCommandKey();
   const selectedContextLabel = contextLabel(studyContext);
   const isNeutralRoute = activeDomain === 'general';
   const searchPlaceholder = isNeutralRoute
@@ -223,6 +259,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   const [contentResults, setContentResults] = useState<SearchResultItem[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLDivElement | null>(null);
+  const paletteReturnFocusRef = useRef<HTMLElement | null>(null);
   const searchItems = useMemo(() => buildSearchItems({ level3Pathway: activePathway }), [activePathway]);
   // K4-cmd — fold the LSAT route vocabulary + the LSAT palette's cmdk Recents
   // into the host palette so ONE ⌘K serves both planes. Test Mode (from the
@@ -259,10 +296,10 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
       // UB6: default list floats the active domain's items to the top so the
       // palette opens with the most relevant context first (stable order within
       // each domain tier preserves the catalog ordering).
-      if (activeDomain === 'general') return commandItems.slice(0, 8);
+      if (activeDomain === 'general') return sortForContext(commandItems, studyContext, location.pathname, activePathway).slice(0, 8);
       const inDomain = commandItems.filter((item) => domainForResult(item) === activeDomain);
       const others = commandItems.filter((item) => domainForResult(item) !== activeDomain);
-      return [...inDomain, ...others].slice(0, 8);
+      return sortForContext([...inDomain, ...others], studyContext, location.pathname, activePathway).slice(0, 8);
     }
     const terms = normalized.split(' ');
     const routeResults = commandItems
@@ -283,7 +320,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
     // alongside the private source matches and route results — content is already
     // active-domain-weighted by searchAllContent, so it leads the route rows.
     return [...sourceResults, ...contentResults, ...routeResults].slice(0, 8);
-  }, [commandItems, query, sourceResults, contentResults, activeDomain]);
+  }, [commandItems, query, sourceResults, contentResults, activeDomain, activePathway, location.pathname, studyContext]);
 
   // UB6: "jump to domain" quick hops — always exclude the domain the user is
   // already in so the section only offers cross-domain moves.
@@ -299,6 +336,23 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
     () => [...results, ...domainJumpRows],
     [results, domainJumpRows],
   );
+
+  const openPaletteFromShortcut = useCallback(() => {
+    const active = document.activeElement;
+    paletteReturnFocusRef.current = active instanceof HTMLElement && active !== inputRef.current ? active : null;
+    setSearchOpen(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  const closePaletteAndRestoreFocus = useCallback(() => {
+    const returnFocus = paletteReturnFocusRef.current;
+    paletteReturnFocusRef.current = null;
+    setSearchOpen(false);
+    requestAnimationFrame(() => {
+      if (returnFocus?.isConnected) returnFocus.focus();
+      else inputRef.current?.focus();
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -388,19 +442,17 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
     function handleKeyDown(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setSearchOpen(true);
-        inputRef.current?.focus();
+        openPaletteFromShortcut();
       }
       if (event.key === 'Escape') {
-        setSearchOpen(false);
+        if (searchOpen) closePaletteAndRestoreFocus();
         setNotificationsOpen(false);
-        inputRef.current?.blur();
       }
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [closePaletteAndRestoreFocus, openPaletteFromShortcut, searchOpen]);
 
   useEffect(() => {
     function handleOnline() {
@@ -604,7 +656,8 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
         className="btn-icon btn-ghost mobile-command-button"
         aria-label="Open search and more commands"
         title="Search and more"
-        onClick={() => {
+        onClick={(event) => {
+          paletteReturnFocusRef.current = event.currentTarget;
           setSearchOpen(true);
           requestAnimationFrame(() => inputRef.current?.focus());
         }}

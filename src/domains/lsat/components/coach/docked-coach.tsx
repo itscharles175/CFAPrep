@@ -104,7 +104,7 @@ export function DockedCoach({ scope = "global" }: { scope?: string }) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-e3 transition-transform hover:-translate-y-0.5 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden"
+          className="lsat-docked-coach-trigger fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-e3 transition-transform hover:-translate-y-0.5 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring print:hidden"
           aria-label="Open coach"
         >
           <Icon as={MessageSquareText} size="md" />
@@ -122,7 +122,7 @@ export function DockedCoach({ scope = "global" }: { scope?: string }) {
             animate={{ x: 0, opacity: 1 }}
             exit={reduce ? { opacity: 0 } : { x: 360, opacity: 0 }}
             transition={{ type: "tween", duration: duration.base, ease: easing.emphasized }}
-            className="fixed bottom-6 right-6 z-40 flex max-h-[80vh] w-80 flex-col overflow-hidden rounded-card border bg-card shadow-e3 print:hidden"
+            className="lsat-docked-coach-panel fixed bottom-6 right-6 z-40 flex max-h-[80vh] w-80 flex-col overflow-hidden rounded-card border bg-card shadow-e3 print:hidden"
             role="complementary"
             aria-label="Coach"
           >

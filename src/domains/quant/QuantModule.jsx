@@ -505,7 +505,8 @@ export default function QuantModule() {
           <SourceRail
             compact
             limit={2}
-            title="CFA Source Context"
+            title="Optional CFA References"
+            subtitle="Supporting material from your private CFA source vault."
             target={{
               kind: 'tool',
               domain: 'quant',

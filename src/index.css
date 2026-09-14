@@ -2852,12 +2852,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   margin: var(--space-3) 0;
   font-size: 1.05em;
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-inline: contain;
-  padding-bottom: 6px;
-  scrollbar-color: color-mix(in srgb, var(--accent) 72%, transparent) transparent;
-  scrollbar-width: thin;
 }
 
 /* KaTeX display math keeps its intrinsic width so long CFA/Excel expressions
@@ -2888,6 +2882,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 
 .formula-render--overflowing {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  padding-bottom: 6px;
+  scrollbar-color: color-mix(in srgb, var(--accent) 72%, transparent) transparent;
+  scrollbar-width: thin;
   outline-offset: 3px;
 }
 
@@ -3370,6 +3370,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .breadcrumb-current {
   display: inline-flex;
   min-height: 40px;
+  min-width: 0;
   align-items: center;
   max-width: 22ch;
   overflow: hidden;
@@ -3377,6 +3378,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   white-space: nowrap;
   color: var(--text-primary);
   font-weight: 600;
+}
+
+.breadcrumb-current-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .breadcrumb-separator {
@@ -3431,6 +3440,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 
 @media (max-width: 900px) {
+  .back-link {
+    min-height: 40px;
+  }
+
   .topbar-mode-toggle {
     display: none;
   }

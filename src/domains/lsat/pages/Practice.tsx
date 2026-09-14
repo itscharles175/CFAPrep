@@ -62,7 +62,7 @@ export default function Practice() {
           section="Practice"
           affectedSections={["PrepTests and timed sections", "Review queue", "SRS workload"]}
           onRetry={() => {
-            void Promise.all([pts.refetch(), primary.refetch(), srs.refetch()]);
+            return Promise.all([pts.refetch(), primary.refetch(), srs.refetch()]).then(() => undefined);
           }}
         />
       </PageLayout>

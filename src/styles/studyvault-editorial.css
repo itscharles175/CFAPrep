@@ -177,11 +177,13 @@ details:not([open]) > :not(summary) {
 }
 
 .quiz-mode-segments {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .quiz-mode-segments .segmented-row {
-  flex-wrap: nowrap;
+  /* Keep every mode reachable in a narrow native content rail. */
+  flex-wrap: wrap;
   margin: 0;
 }
 
@@ -458,6 +460,27 @@ details:not([open]) > :not(summary) {
   max-width: 68ch;
   font-size: clamp(1rem, 1.25vw, 1.125rem);
   line-height: 1.7;
+}
+
+.cfa-module-page .page-header-copy {
+  min-width: 0;
+}
+
+.cfa-module-page .page-header h1 {
+  overflow-wrap: normal;
+  text-wrap: balance;
+  word-break: normal;
+}
+
+@media (max-width: 1180px) {
+  .cfa-module-page .page-header {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .cfa-module-page .page-header .action-bar {
+    justify-content: flex-start;
+  }
 }
 
 .status-badge {
@@ -1922,6 +1945,8 @@ details:not([open]) > :not(summary) {
   .sidebar-section-label,
   .study-context-kicker,
   .study-context-goal,
+  .study-context-action,
+  .study-context-action > span,
   .sidebar-more > summary,
   .study-context-selector label > span {
     color: var(--text-secondary);
@@ -1971,6 +1996,9 @@ details:not([open]) > :not(summary) {
   .sidebar-section-label,
   .study-context-kicker,
   .study-context-goal,
+  .study-context-action,
+  .study-context-action > span,
+  .topbar-neutral-context,
   .study-context-selector > summary strong,
   .sidebar-more > summary,
   .breadcrumb-current,
@@ -1990,6 +2018,10 @@ details:not([open]) > :not(summary) {
   .analytics-head > span,
   .analytics-row > span,
   .qv-text-secondary,
+  .workspace-scope-contract,
+  .workspace-scope-contract strong,
+  .analytics-scope-empty,
+  .analytics-scope-empty p,
   .segmented-tab,
   .study-context-selector label > span {
     color: CanvasText !important;

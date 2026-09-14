@@ -8,7 +8,12 @@ vi.mock('../lib/studyDirector', () => ({
 }));
 
 import { buildStudyPlan } from '../lib/studyDirector';
-import Today, { createDomainFallbackPlan, summarizeTodayWorkload } from './Today';
+import Today, {
+  createDomainFallbackPlan,
+  summarizeTodayWorkload,
+  todayHeroTitle,
+  todayPrimaryActionLabel,
+} from './Today';
 import { StudySessionProvider } from '../components/session';
 
 afterEach(() => {
@@ -30,7 +35,7 @@ describe('Today focus-mode landing', () => {
   it('renders the loading state before the plan resolves', async () => {
     buildStudyPlan.mockReturnValue(new Promise(() => undefined)); // never resolves
     renderToday();
-    expect(await screen.findByText(/Loading your plan/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Loading today’s plan/i)).toBeInTheDocument();
   });
 
   it('renders the headline, dueCount/weakCount badges, and the hero top action', async () => {
@@ -60,6 +65,8 @@ describe('Today focus-mode landing', () => {
     expect(screen.getAllByText(/Topic readiness is only 58%/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Upcoming review spike')).toBeInTheDocument();
     expect(screen.getByText(/Peak 2026-05-30/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Why this plan/i })).toBeInTheDocument();
+    expect(screen.queryByText(/🤖 Why this plan/)).not.toBeInTheDocument();
 
     // Top action card links to the review path
     const reviewLinks = screen.getAllByRole('link').filter((a) => a.getAttribute('href') === '/review');
@@ -80,6 +87,7 @@ describe('Today focus-mode landing', () => {
     renderToday();
     // The hero "continue" action is in the always-visible scrolling content.
     await waitFor(() => expect(screen.getByText('Continue studying')).toBeInTheDocument());
+    expect(screen.getByRole('link', { name: /Open CFA workspace/i })).toBeInTheDocument();
     expect(screen.queryByText('0 reviews due')).not.toBeInTheDocument();
     expect(screen.queryByText('0 weak topics')).not.toBeInTheDocument();
     await userEvent.click(screen.getByText('Full plan'));
@@ -87,10 +95,10 @@ describe('Today focus-mode landing', () => {
   });
 
   it.each([
-    ['lsat', 'Practice an LSAT section', '/lsat/practice'],
-    ['quant', 'Continue Quant practice', '/quant'],
-    ['excel', 'Continue Excel practice', '/excel'],
-  ])('keeps the Today surface scoped to %s', async (domain, title, path) => {
+    ['lsat', 'Practice an LSAT section', '/lsat/practice', 'Start activity'],
+    ['quant', 'Continue Quant practice', '/quant', 'Open Quant workspace'],
+    ['excel', 'Continue Excel practice', '/excel', 'Open Excel workspace'],
+  ])('keeps the Today surface scoped to %s', async (domain, title, path, actionLabel) => {
     window.localStorage.setItem(
       'studyvault:study-context:v1',
       JSON.stringify({ domain, cfaLevel: 'level1', goal: 'balanced' }),
@@ -99,7 +107,7 @@ describe('Today focus-mode landing', () => {
     renderToday();
 
     expect(await screen.findByText(title)).toBeInTheDocument();
-    const primaryLink = screen.getByRole('link', { name: /Start activity/i });
+    const primaryLink = screen.getByRole('link', { name: new RegExp(actionLabel) });
     expect(primaryLink).toHaveAttribute('href', path);
     if (domain === 'lsat') {
       expect(screen.getByText(/About 35 min now · Then 15 min review/)).toBeInTheDocument();
@@ -126,6 +134,31 @@ describe('Today focus-mode landing', () => {
     expect(screen.getByText(/LSAT · Your next exam focused step/i)).toBeInTheDocument();
   });
 
+  it('makes a paused same-domain session the explicit hero action', async () => {
+    window.localStorage.setItem(
+      'studyvault:study-context:v1',
+      JSON.stringify({ domain: 'lsat', cfaLevel: 'level1', goal: 'balanced' }),
+    );
+    window.localStorage.setItem('studyvault.focus-session.v1', JSON.stringify({
+      version: 1,
+      sessionId: 'paused-lsat',
+      status: 'paused',
+      domain: 'lsat',
+      topic: 'lsat:section',
+      startedAt: '2026-09-14T12:00:00.000Z',
+      segmentStartedAtMs: null,
+      accumulatedMs: 420000,
+      questionsAnswered: 7,
+      score: 5,
+      updatedAt: '2026-09-14T12:07:00.000Z',
+      saveError: null,
+    }));
+    renderToday();
+
+    expect(await screen.findByText('Resume LSAT section')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Resume activity/i })).toBeInTheDocument();
+  });
+
   it('builds deterministic non-CFA plans with goal-specific rationale', () => {
     const plan = createDomainFallbackPlan('quant', 'skill-building');
     expect(plan.actions[0]).toMatchObject({
@@ -147,5 +180,23 @@ describe('Today focus-mode landing', () => {
       activityCount: 2,
       totalMinutes: 50,
     });
+  });
+
+  it('names broad workspace destinations honestly and reflects a resumable session', () => {
+    expect(todayPrimaryActionLabel({ domain: 'cfa', path: '/cfa', sessionStatus: 'none' })).toBe('Open CFA workspace');
+    expect(todayPrimaryActionLabel({ domain: 'quant', path: '/quant', sessionStatus: 'none' })).toBe('Open Quant workspace');
+    expect(todayPrimaryActionLabel({ domain: 'lsat', path: '/lsat/practice', sessionStatus: 'none' })).toBe('Start activity');
+    expect(todayHeroTitle({
+      domain: 'lsat',
+      title: 'Practice an LSAT section',
+      sessionStatus: 'paused',
+      sessionDomain: 'lsat',
+    })).toBe('Resume LSAT section');
+    expect(todayHeroTitle({
+      domain: 'cfa',
+      title: 'Continue studying',
+      sessionStatus: 'paused',
+      sessionDomain: 'lsat',
+    })).toBe('Continue studying');
   });
 });

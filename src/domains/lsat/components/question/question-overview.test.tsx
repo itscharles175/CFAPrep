@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QuestionOverview } from "./question-overview";
 import type { NavItem } from "./navigator-strip";
 
@@ -90,6 +90,40 @@ describe("QuestionOverview — Test-Mode integrity", () => {
     );
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("traps keyboard focus inside the modal and restores the summon control", async () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <>
+        <button type="button" data-testid="summon">Open map</button>
+        <QuestionOverview open={false} onClose={onClose} current={0} items={ITEMS} onJump={() => {}} />
+      </>,
+    );
+    const summon = screen.getByTestId('summon');
+    summon.focus();
+    rerender(
+      <>
+        <button type="button" data-testid="summon">Open map</button>
+        <QuestionOverview open onClose={onClose} current={0} items={ITEMS} onJump={() => {}} />
+      </>,
+    );
+    const dialog = screen.getByRole('dialog');
+    const close = within(dialog).getByRole('button', { name: 'Close overview' });
+    await waitFor(() => expect(close).toHaveFocus());
+
+    const tiles = screen.getAllByRole('button', { name: /Question \d/ });
+    tiles[tiles.length - 1].focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(close).toHaveFocus();
+
+    rerender(
+      <>
+        <button type="button" data-testid="summon">Open map</button>
+        <QuestionOverview open={false} onClose={onClose} current={0} items={ITEMS} onJump={() => {}} />
+      </>,
+    );
+    await waitFor(() => expect(screen.getByTestId('summon')).toHaveFocus());
   });
 
   it("renders nothing when closed", () => {

@@ -1,6 +1,7 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 import App from './App';
 
 describe('app shell', () => {
@@ -57,5 +58,43 @@ describe('app shell', () => {
 
     unmount();
     delete window.studyvault;
+  });
+
+  it('contains keyboard focus and the accessibility tree while the mobile drawer is open', async () => {
+    const previousMatchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn((query) => ({
+        matches: query === '(max-width: 900px)',
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        onchange: null,
+        dispatchEvent: vi.fn(),
+      })),
+    });
+
+    try {
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter initialEntries={['/missing-route']}>
+          <App />
+        </MemoryRouter>,
+      );
+      const menu = await screen.findByRole('button', { name: 'Open navigation' });
+      await user.click(menu);
+      await waitFor(() => expect(document.querySelector('#main-sidebar')).not.toHaveAttribute('hidden'));
+      expect(document.querySelector('.topbar')).toHaveAttribute('inert');
+      expect(document.querySelector('#main')).toHaveAttribute('inert');
+      await user.tab();
+      expect(document.querySelector('#main-sidebar')).toContainElement(document.activeElement);
+      await user.keyboard('{Escape}');
+      await waitFor(() => expect(menu).toHaveFocus());
+      expect(document.querySelector('#main')).not.toHaveAttribute('inert');
+    } finally {
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: previousMatchMedia });
+    }
   });
 });

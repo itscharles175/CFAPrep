@@ -29,7 +29,7 @@ vi.mock("@/components/ui/Primitives", () => ({
 }));
 vi.mock("@/components/ui/tabs", () => ({
   Tabs: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TabsList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  TabsList: ({ children, className }: { children: React.ReactNode; className?: string }) => <div className={className}>{children}</div>,
   TabsTrigger: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
   TabsContent: ({ value, children }: { value: string; children: React.ReactNode }) => value === "buckets" ? <div>{children}</div> : null,
 }));
@@ -66,5 +66,12 @@ describe("Review history availability", () => {
     renderPage();
 
     expect(screen.getByRole("button", { name: "Session history" })).toBeInTheDocument();
+  });
+
+  it("marks the five review categories for the compact tab layout", () => {
+    mocks.useSessions.mockReturnValue(query([]));
+    renderPage();
+
+    expect(document.querySelector('.lsat-review-tabs')).toBeInTheDocument();
   });
 });

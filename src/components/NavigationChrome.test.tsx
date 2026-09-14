@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import NavigationBreadcrumb from './NavigationBreadcrumb';
@@ -26,8 +26,11 @@ describe('NavigationBreadcrumb (UX-4)', () => {
     renderAt(<NavigationBreadcrumb />, '/analytics');
     const nav = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(nav).toBeInTheDocument();
-    const current = screen.getByText('Analytics');
-    expect(current).toHaveAttribute('aria-current', 'page');
+    const current = screen.getByText('Analytics').closest('[aria-current="page"]');
+    if (!current) throw new Error('Expected Analytics to have an aria-current breadcrumb parent.');
+    const currentBreadcrumb = current as HTMLElement;
+    expect(currentBreadcrumb).toHaveAttribute('aria-current', 'page');
+    expect(currentBreadcrumb.querySelector('.breadcrumb-current-label')).toHaveTextContent('Analytics');
     // Workspace-first chrome keeps Progress as the ancestor for Analytics.
     expect(screen.getByRole('link', { name: 'Progress' })).toHaveAttribute('href', '/analytics');
     expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
@@ -61,14 +64,15 @@ describe('NavBackButton (UX-4)', () => {
     expect(btn).toBeDisabled();
   });
 
-  it('names the previous destination in its aria-label and calls the same-domain navigator', async () => {
+  it('names the previous destination, calls the same-domain navigator, and restores landmark focus', async () => {
     pushHistory({ path: '/', label: 'Today' });
     pushHistory({ path: '/analytics', label: 'Analytics' });
     const onBack = vi.fn();
-    renderAt(<NavBackButton onSameDomainBack={onBack} />, '/analytics');
+    renderAt(<><main id="main" tabIndex={-1} /><NavBackButton onSameDomainBack={onBack} /></>, '/analytics');
     const btn = screen.getByRole('button', { name: 'Back to Today' });
     expect(btn).toBeEnabled();
     await userEvent.click(btn);
     expect(onBack).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole('main')).toHaveFocus());
   });
 });

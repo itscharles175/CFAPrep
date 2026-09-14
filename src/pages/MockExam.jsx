@@ -175,7 +175,6 @@ function ConstructedItem({ item, response, scores, onResponse, onScore }) {
   return (
     <Surface tone="study" status="exam">
       <StatusBadge tone="exam">Constructed Response</StatusBadge>
-      <h2>{item.title}</h2>
       <p className="qv-text-secondary" style={{ lineHeight: 1.7 }}>{item.prompt}</p>
       <textarea
         aria-label={`${item.title} response`}
@@ -224,7 +223,7 @@ function ConstructedItem({ item, response, scores, onResponse, onScore }) {
         />
       </div>
       <details style={{ marginTop: 'var(--space-5)' }}>
-        <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Model answer</summary>
+        <summary className="mock-model-answer-toggle" style={{ cursor: 'pointer', fontWeight: 700 }}>Model answer</summary>
         <p className="qv-text-secondary qv-mt-3">{item.modelAnswer}</p>
       </details>
     </Surface>

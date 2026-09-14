@@ -65,7 +65,7 @@ export default function Review() {
       <ErrorPatternBanner />
       {!sessionsAreSample && <RecentSessionRecap />}
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
-        <TabsList>
+        <TabsList className="lsat-review-tabs">
           <TabsTrigger value="buckets">Buckets</TabsTrigger>
           <TabsTrigger value="errors">Error log</TabsTrigger>
           <TabsTrigger value="flagged">Flagged</TabsTrigger>

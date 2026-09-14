@@ -1,8 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { SocraticEvidence } from "./Tutor";
+import { SocraticEvidence, TUTOR_EMPTY_STATE } from "./Tutor";
 
 describe("SocraticEvidence", () => {
+  it("uses a clear no-attempt instruction", () => {
+    expect(TUTOR_EMPTY_STATE).toMatch(/Load an attempt/i);
+    expect(TUTOR_EMPTY_STATE).toMatch(/blind review/i);
+  });
+
   it("renders similar-miss and notebook evidence without answer keys", () => {
     render(
       <SocraticEvidence

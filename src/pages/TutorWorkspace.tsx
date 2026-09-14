@@ -339,7 +339,7 @@ export default function TutorWorkspace() {
         ))}
       </nav>
 
-      <main className="tutor-workspace-shell">
+      <div className="tutor-workspace-shell" role="region" aria-label="Tutor workspace">
         <div className="tutor-source-toolbar">
           <button
             type="button"
@@ -414,7 +414,7 @@ export default function TutorWorkspace() {
             </div>
           </div>
         )}
-      </main>
+      </div>
       <CitationPanel citation={citation} onClose={() => setCitation(null)} />
     </div>
   );

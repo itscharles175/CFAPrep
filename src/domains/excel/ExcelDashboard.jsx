@@ -29,7 +29,8 @@ export default function ExcelDashboard() {
       <SourceRail
         compact
         limit={2}
-        title="Excel CFA Source Context"
+        title="Optional CFA References"
+        subtitle="Supporting material from your private CFA source vault. Excel lessons remain available without it."
         target={{
           kind: 'tool',
           domain: 'excel',

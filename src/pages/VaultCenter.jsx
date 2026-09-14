@@ -284,7 +284,7 @@ export default function VaultCenter() {
         <div className="action-row" style={{ marginBottom: 'var(--space-3)' }}>
           <StatusBadge tone="vault"><ShieldCheck size={14} /> Private · local only</StatusBadge>
           <StatusBadge tone="vault">Active study context: {activeDomainLabel}</StatusBadge>
-          <StatusBadge tone="exam">CFA source bundles: {sourceDocuments.length}</StatusBadge>
+          {isCfaContext && <StatusBadge tone="exam">CFA source bundles: {sourceDocuments.length}</StatusBadge>}
         </div>
         {isCfaContext ? (
           <>

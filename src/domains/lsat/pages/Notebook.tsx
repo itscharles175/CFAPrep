@@ -108,6 +108,16 @@ function extensionForExport(format: NotebookExportFormat) {
   return "md";
 }
 
+export const SOURCE_SCOPE_GUIDANCE =
+  "Select a source below before transforming material or starting a cited tutor chat.";
+
+export function sourceScopeActionState(activeCitation: CitationTarget | null) {
+  return {
+    ready: Boolean(activeCitation),
+    guidance: activeCitation ? null : SOURCE_SCOPE_GUIDANCE,
+  };
+}
+
 export default function Notebook() {
   const qc = useQueryClient();
   const location = useLocation();
@@ -301,6 +311,7 @@ export default function Notebook() {
     () => (activeCitation ? [activeCitation.target] : []),
     [activeCitation],
   );
+  const sourceScope = sourceScopeActionState(activeCitation);
   const hasSourcePayload = Boolean(
     sourceContent.trim() || sourceUrl.trim() || sourceFile || activeRefs.length,
   );
@@ -394,6 +405,7 @@ export default function Notebook() {
   }
 
   async function ensureChatSession() {
+    if (!sourceScope.ready) return null;
     if (activeSessionId) return activeSessionId;
     const session = await api.createNotebookChatSession({
       title: "Notebook tutor",
@@ -409,6 +421,7 @@ export default function Notebook() {
   async function sendMessage() {
     if (!chatInput.trim()) return;
     const sessionId = await ensureChatSession();
+    if (!sessionId) return;
     await api.sendNotebookChatMessage(sessionId, {
       content: chatInput,
       mode: contextMode,
@@ -420,6 +433,7 @@ export default function Notebook() {
   }
 
   async function runTransform() {
+    if (!sourceScope.ready) return;
     const result = await api.runTransformation({
       template_key: template,
       provider: "local",
@@ -438,6 +452,7 @@ export default function Notebook() {
   }
 
   async function makePodcast() {
+    if (!sourceScope.ready) return;
     const result = await api.createPodcast({
       title: "Notebook study briefing",
       episode_type: "weekly_briefing",
@@ -550,6 +565,8 @@ export default function Notebook() {
             variant="outline"
             onClick={runTransform}
             aria-label="Transform"
+            aria-describedby={!sourceScope.ready ? "notebook-source-scope-help" : undefined}
+            disabled={!sourceScope.ready}
           >
             <Sparkles className="h-4 w-4" aria-hidden />
             <span className="hidden sm:inline">Transform</span>
@@ -559,6 +576,8 @@ export default function Notebook() {
             variant="outline"
             onClick={makePodcast}
             aria-label="Briefing"
+            aria-describedby={!sourceScope.ready ? "notebook-source-scope-help" : undefined}
+            disabled={!sourceScope.ready}
           >
             <AudioLines className="h-4 w-4" aria-hidden />
             <span className="hidden sm:inline">Briefing</span>
@@ -604,6 +623,11 @@ export default function Notebook() {
             : "Notebook & Curriculum is showing offline fallback data until the backend responds."}
         </div>
       )}
+      {!sourceScope.ready && (
+        <p id="notebook-source-scope-help" className="mb-4 text-sm text-muted-foreground">
+          {SOURCE_SCOPE_GUIDANCE}
+        </p>
+      )}
       <div className="grid min-h-[calc(100vh-13rem)] gap-4 xl:grid-cols-[300px_minmax(0,1fr)_340px]">
         <aside className="space-y-4">
           <Card>
@@ -614,6 +638,9 @@ export default function Notebook() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
+              <p className="text-xs leading-5 text-muted-foreground">
+                Add one source by pasting text, linking a URL, or uploading a file. StudyVault detects the format automatically.
+              </p>
               <Input
                 value={sourceTitle}
                 onChange={(event) => setSourceTitle(event.target.value)}
@@ -665,12 +692,12 @@ export default function Notebook() {
               <div className="flex items-center justify-between gap-3 rounded-md border bg-surface-1 px-3 py-2">
                 <span className="flex min-w-0 items-center gap-2 text-sm">
                   <ShieldCheck className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-                  <span className="truncate">Official/firewalled</span>
+                  <span className="truncate">Official material</span>
                 </span>
                 <Switch
                   checked={sourceOfficialFirewall}
                   onCheckedChange={setSourceOfficialFirewall}
-                  aria-label="Official/firewalled source"
+                  aria-label="Treat source as official material"
                 />
               </div>
               <Button className="w-full" onClick={addSource} disabled={!canAddSource}>
@@ -712,12 +739,12 @@ export default function Notebook() {
                   </span>
                   <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                     <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
-                    Firewall
+                    Protect as official
                   </span>
                   <Switch
                     checked={bundleOfficialFirewall}
                     onCheckedChange={setBundleOfficialFirewall}
-                    aria-label="Import bundle as official/firewalled"
+                    aria-label="Protect imported bundle as official material"
                   />
                 </div>
                 <Button
@@ -879,11 +906,13 @@ export default function Notebook() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Icon as={BrainCircuit} size="sm" />
-                      <span>{sessions.length} scoped chats</span>
+                      <span>{sourceScope.ready ? `${sessions.length} cited chats` : "Choose a source to start a cited chat"}</span>
                     </div>
                     <Button
                       size="sm"
                       variant="outline"
+                      disabled={!sourceScope.ready}
+                      aria-describedby={!sourceScope.ready ? "notebook-source-scope-help" : undefined}
                       onClick={async () => {
                         const session = await api.createNotebookChatSession({
                           title: "Notebook tutor",
@@ -954,7 +983,9 @@ export default function Notebook() {
                     ))}
                     {!messages.length && (
                       <p className="text-sm text-muted-foreground">
-                        Start a local scoped tutor thread.
+                        {sourceScope.ready
+                          ? "Start a local tutor thread grounded in the selected source."
+                          : "Select a source to make this tutor conversation citation-grounded."}
                       </p>
                     )}
                   </div>
@@ -967,7 +998,7 @@ export default function Notebook() {
                       aria-label="Notebook tutor message"
                       className="min-h-20"
                     />
-                    <Button className="sm:self-end" onClick={sendMessage} disabled={!chatInput.trim()}>
+                    <Button className="sm:self-end" onClick={sendMessage} disabled={!sourceScope.ready || !chatInput.trim()}>
                       Send
                     </Button>
                   </div>

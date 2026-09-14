@@ -164,7 +164,7 @@ export function SourceRail({ target, title = 'Source Context', subtitle, limit =
           ))}
         </div>
       ) : (
-        <p className="muted-copy">Import a `.qvsource` bundle or rebuild the source map to show local CFA references here.</p>
+        <p className="muted-copy">Import a `.qvsource` bundle in Library to show optional private CFA references here.</p>
       )}
     </Surface>
   );

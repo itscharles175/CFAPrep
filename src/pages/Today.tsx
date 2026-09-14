@@ -193,6 +193,53 @@ export interface TodayWorkloadSummary {
   totalMinutes: number | null;
 }
 
+const WORKSPACE_ROOTS: Record<StudyDomain, string> = {
+  cfa: '/cfa',
+  lsat: '/lsat',
+  quant: '/quant',
+  excel: '/excel',
+};
+
+type TodaySessionStatus = 'none' | 'running' | 'paused' | 'saving' | 'save-error';
+
+export function isTodayWorkspaceDestination(domain: StudyDomain, path: string): boolean {
+  return path === WORKSPACE_ROOTS[domain];
+}
+
+export function todayPrimaryActionLabel({
+  domain,
+  path,
+  sessionStatus,
+  sessionDomain,
+}: {
+  domain: StudyDomain;
+  path: string;
+  sessionStatus: TodaySessionStatus;
+  sessionDomain?: StudyDomain;
+}): string {
+  const sameDomain = sessionDomain === domain;
+  if (sessionStatus === 'paused' && sameDomain) return 'Resume activity';
+  if (sessionStatus === 'running' && sameDomain) return 'Continue activity';
+  if (sessionStatus === 'save-error' && sameDomain) return 'Open activity';
+  if (isTodayWorkspaceDestination(domain, path)) return `Open ${DOMAIN_LABELS[domain]} workspace`;
+  return 'Start activity';
+}
+
+export function todayHeroTitle({
+  domain,
+  title,
+  sessionStatus,
+  sessionDomain,
+}: {
+  domain: StudyDomain;
+  title: string;
+  sessionStatus: TodaySessionStatus;
+  sessionDomain?: StudyDomain;
+}): string {
+  if (sessionStatus !== 'paused' || sessionDomain !== domain) return title;
+  return domain === 'lsat' ? 'Resume LSAT section' : `Resume ${DOMAIN_LABELS[domain]} session`;
+}
+
 function actionKindLabel(kind: StudyAction['kind']): string {
   if (kind === 'review') return 'review';
   if (kind === 'weak-topic') return 'focused practice';
@@ -307,6 +354,8 @@ export default function Today() {
   const [narrative, setNarrative] = useState<NarrativeState>({ state: 'idle', text: '', error: '' });
   const [examCountdown, setExamCountdown] = useState<ExamCountdown | null>(null);
   const [journal, setJournal] = useState<JournalState>({ text: '', savedAt: null, dirty: false });
+  const [journalSaveState, setJournalSaveState] = useState<'idle' | 'saving' | 'error'>('idle');
+  const [journalSaveError, setJournalSaveError] = useState('');
   const journalKey = `journal:${new Date().toISOString().slice(0, 10)}`;
 
   // LEARN-6 — adaptive next-objective routing over HOST content, scoped to this
@@ -340,10 +389,19 @@ export default function Today() {
   }, []);
 
   async function saveJournal() {
+    if (journalSaveState === 'saving') return;
     const text = journal.text;
     const stamp = new Date().toISOString();
-    await getStorage().settings.put({ key: journalKey, value: { text, savedAt: stamp }, updatedAt: stamp });
-    setJournal({ text, savedAt: stamp, dirty: false });
+    setJournalSaveState('saving');
+    setJournalSaveError('');
+    try {
+      await getStorage().settings.put({ key: journalKey, value: { text, savedAt: stamp }, updatedAt: stamp });
+      setJournal({ text, savedAt: stamp, dirty: false });
+      setJournalSaveState('idle');
+    } catch (error) {
+      setJournalSaveState('error');
+      setJournalSaveError(error instanceof Error ? error.message : 'The local vault could not save this reflection.');
+    }
   }
   function formatTimer(seconds: number): string {
     const m = Math.floor(seconds / 60);
@@ -495,6 +553,15 @@ export default function Today() {
 
   const rest = (plan?.actions || []).slice(1, 5);
   const workload = summarizeTodayWorkload(plan);
+  const sessionStatus: TodaySessionStatus = focusSession.session?.status ?? 'none';
+  const sessionDomain = focusSession.session?.domain;
+  const sameDomainSession = sessionDomain === domain;
+  const heroTitle = top
+    ? todayHeroTitle({ domain, title: top.title, sessionStatus, sessionDomain })
+    : null;
+  const primaryActionLabel = top
+    ? todayPrimaryActionLabel({ domain, path: top.path, sessionStatus, sessionDomain })
+    : 'Start activity';
 
   const timerPanel = (
     <div className="qv-stack-3">
@@ -580,14 +647,14 @@ export default function Today() {
           title="Generate a personalized rationale for today's plan via your local model"
           style={{ flexShrink: 0 }}
         >
-          {narrative.state === 'loading' ? 'Thinking…' : narrative.text ? 'Regenerate narrative' : '🤖 Why this plan'}
+          {narrative.state === 'loading' ? 'Thinking…' : narrative.text ? 'Regenerate narrative' : <><Sparkles size={14} aria-hidden="true" /> Why this plan</>}
         </button>
       </div>
       {narrative.state === 'done' && narrative.text && (
         <p className="qv-callout qv-m-0" style={{ whiteSpace: 'pre-line' }}>{narrative.text}</p>
       )}
       {narrative.state === 'error' && (
-        <p className="qv-text-danger qv-fs-sm qv-m-0">{narrative.error}</p>
+        <p className="qv-text-danger qv-fs-sm qv-m-0" role="alert" aria-live="assertive">{narrative.error}</p>
       )}
     </div>
   );
@@ -601,15 +668,18 @@ export default function Today() {
         <button
           className="btn btn-secondary btn-sm"
           onClick={saveJournal}
-          disabled={!journal.dirty}
-          title={journal.savedAt ? `Last saved ${new Date(journal.savedAt).toLocaleTimeString()}` : 'Save'}
+          disabled={!journal.dirty || journalSaveState === 'saving'}
+          title={journalSaveError || (journal.savedAt ? `Last saved ${new Date(journal.savedAt).toLocaleTimeString()}` : 'Save')}
           style={{ flexShrink: 0 }}
         >
-          {journal.dirty ? 'Save' : journal.savedAt ? 'Saved' : 'Save'}
+          {journalSaveState === 'saving' ? 'Saving…' : journalSaveState === 'error' ? 'Retry save' : journal.dirty ? 'Save' : journal.savedAt ? 'Saved' : 'Save'}
         </button>
       </div>
       <textarea
         className="input"
+        id="today-journal"
+        aria-invalid={journalSaveError ? true : undefined}
+        aria-describedby={journalSaveError ? 'today-journal-error' : undefined}
         rows={4}
         style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
         placeholder="What did I work on? What clicked? What still feels shaky? What is the smallest next step?"
@@ -619,6 +689,11 @@ export default function Today() {
           if (journal.dirty) saveJournal();
         }}
       />
+      {journalSaveError && (
+        <p id="today-journal-error" role="alert" aria-live="assertive" className="qv-text-danger qv-fs-sm qv-m-0">
+          Could not save this reflection. {journalSaveError} Your text is still here; retry when the local vault is available.
+        </p>
+      )}
     </div>
   );
 
@@ -657,8 +732,8 @@ export default function Today() {
         // reserves its height up front and swapping in the real plan doesn't
         // shift content (no CLS). Reuses the shared feedback Skeleton + the
         // shipped `.skeleton*` classes; no new tokens.
-        <div role="status" aria-busy="true" aria-label="Loading your plan">
-          <span className="sr-only">Loading your plan…</span>
+        <div role="status" aria-busy="true" aria-label="Loading today’s plan">
+          <p className="muted-copy qv-m-0" aria-live="polite">Loading today’s plan…</p>
           {/* Hero "do this next" action */}
           <Surface tone="study" status="accent" className="today-primary-action" style={{ marginBottom: 'var(--space-4)' }}>
             <Skeleton height="6rem" />
@@ -678,7 +753,7 @@ export default function Today() {
                 </span>
                 <div className="today-primary-action__copy">
                   <span className="today-eyebrow">Recommended now · {GOAL_LABELS[goal]}</span>
-                  <h2>{top.title}</h2>
+                  <h2>{heroTitle}</h2>
                   <p className="muted-copy qv-m-0">{top.reason}</p>
                   {workload.currentLabel && (
                     <small className="today-primary-action__duration">
@@ -699,18 +774,12 @@ export default function Today() {
                           questionsAnswered: answeredQuestionCount,
                           score: correctAnswerCount,
                         });
-                      } else if (focusSession.session.status === 'paused') {
+                      } else if (focusSession.session.status === 'paused' && sameDomainSession) {
                         focusSession.start();
                       }
                     }}
                   >
-                    {focusSession.session?.status === 'paused'
-                      ? 'Resume activity'
-                      : focusSession.session?.status === 'running'
-                        ? 'Continue activity'
-                        : focusSession.session?.status === 'save-error'
-                          ? 'Open activity'
-                          : 'Start activity'}
+                    {primaryActionLabel}
                     <ChevronRight size={17} aria-hidden="true" />
                   </Link>
                 </div>
@@ -788,7 +857,7 @@ export default function Today() {
               ranked against the unified ability. Fully degrading: an offline
               sidecar shows a graceful note. Selecting a row opens the matching
               host drill keyed by the objective. */}
-          {domain === 'cfa' && (
+          {domain === 'cfa' && nextReport?.reachable !== false && (
             <div style={{ marginBottom: 'var(--space-6)' }}>
               <AdaptiveRecommendationCard
                 report={nextReport}
@@ -821,7 +890,7 @@ export default function Today() {
               </div>
 
               {drill.state === 'error' && (
-                <p className="qv-text-danger qv-mt-2" style={{ marginBottom: 0 }}>{drill.error}</p>
+                <p className="qv-text-danger qv-mt-2" role="alert" aria-live="assertive" style={{ marginBottom: 0 }}>{drill.error}</p>
               )}
 
               {drill.questions.length > 0 && (() => {

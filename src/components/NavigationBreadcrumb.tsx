@@ -64,7 +64,7 @@ export default function NavigationBreadcrumb({ className }: { className?: string
               <li className="breadcrumb-item">
                 {last || !crumb.to ? (
                   <span className="breadcrumb-current" aria-current="page" title={crumb.label}>
-                    {crumb.label}
+                    <span className="breadcrumb-current-label">{crumb.label}</span>
                   </span>
                 ) : (
                   <CrumbLink crumb={crumb} currentDomain={currentDomain} />

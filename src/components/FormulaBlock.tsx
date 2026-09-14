@@ -40,7 +40,10 @@ export default function FormulaBlock({
     // falls back to plain text on failure (never throws).
     const measureOverflow = () => {
       if (!active) return;
-      setOverflowing(target.scrollWidth > target.clientWidth + 1);
+      // Keep the threshold aligned with the browser's scrollability test. A
+      // one-pixel overflow can occur from KaTeX rounding and still triggers
+      // Safari's keyboard-accessibility rule.
+      setOverflowing(target.scrollWidth > target.clientWidth);
     };
     let cleanupObserver = () => {};
     void renderAccessibleMath(latex, target, { displayMode: true }).then(() => {

@@ -30,7 +30,8 @@ export default function QuantDashboard() {
       <SourceRail
         compact
         limit={2}
-        title="Quant CFA Source Context"
+        title="Optional CFA References"
+        subtitle="Supporting material from your private CFA source vault. Quant lessons remain available without it."
         target={{
           kind: 'tool',
           domain: 'quant',

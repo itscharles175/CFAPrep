@@ -25,6 +25,7 @@ import { answerLabelFromAction, getKeyboardMap, resolveExamKey } from '@lsat/lib
 // palette.
 import { useExamCommands } from '@lsat/lib/examCommands';
 import { cn } from '@lsat/lib/utils';
+import { EXAM_RUNNER_HEADER_CLASS } from './sectionRunnerPresentation';
 import {
   adjustedTimeLimitSec,
   getAccommodations,
@@ -732,7 +733,7 @@ export function SectionRunner({
           screen; any input wakes it. The reduced-motion net flattens the fade. */}
       <header
         className={cn(
-          'flex items-center justify-between border-b transition-opacity duration-500',
+          `${EXAM_RUNNER_HEADER_CLASS} flex items-center justify-between border-b transition-opacity duration-500`,
           focusMode ? 'min-h-11 gap-2 px-3 py-1.5' : 'h-14 gap-3 px-6',
           focusMode && !chromeVisible && 'pointer-events-none opacity-0',
         )}

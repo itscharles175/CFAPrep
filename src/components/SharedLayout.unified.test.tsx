@@ -59,6 +59,8 @@ describe('SharedLayout (unified LSAT chrome)', () => {
     // The host TopBar mounted (its command palette input) — proves useTheme()
     // resolved against a provider SharedLayout supplied.
     expect(screen.getByRole('combobox', { name: /command palette/i })).toBeInTheDocument();
+    // The same mobile workspace map follows the LSAT plane through SharedLayout.
+    expect(screen.getByRole('navigation', { name: /study workspaces/i })).toBeInTheDocument();
   });
 
   it('stamps the LSAT domain accent on <body> for /lsat routes', () => {

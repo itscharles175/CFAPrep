@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AnimatePresence, m, useReducedMotion } from "motion/react";
 import { CheckCheck, Flag, Scissors, X } from "lucide-react";
 import { Button } from "@lsat/components/ui/button";
@@ -43,19 +43,57 @@ export function QuestionOverview({
   timed?: boolean;
 }) {
   const reduce = useReducedMotion();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
-  // Close on Escape while open.
+  // R9 a11y — this is a true modal while the timed section may be running:
+  // move focus into it, keep Tab inside its controls, and restore the summon
+  // button when it closes. The scrim is deliberately removed from the tab
+  // order so aria-modal describes the same focus boundary users experience.
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
+    if (!open) return undefined;
+    const previous = document.activeElement as HTMLElement | null;
+    const focusTimer = window.setTimeout(() => {
+      const first = dialogRef.current?.querySelector<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      (first || dialogRef.current)?.focus?.({ preventScroll: true });
+    }, 0);
+
+    function handleFocusKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
       }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ));
+      if (!focusable.length) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    }
+
+    window.addEventListener('keydown', handleFocusKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', handleFocusKeyDown);
+      if (previous && previous.isConnected) previous.focus({ preventScroll: true });
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open]);
 
   const answered = items.filter((it) => it.answered).length;
   const flagged = items.filter((it) => it.flagged).length;
@@ -74,14 +112,17 @@ export function QuestionOverview({
           <button
             type="button"
             aria-label="Close overview"
+            tabIndex={-1}
             className="absolute inset-0 bg-background/70 backdrop-blur-sm"
             onClick={onClose}
           />
 
           <m.div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label="Question overview"
+            tabIndex={-1}
             className="glass relative flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-card border shadow-e4"
             // Modal-enter unified on the shared `scaleIn` variant (R11 5.1).
             variants={scaleIn}

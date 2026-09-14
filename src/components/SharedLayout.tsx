@@ -24,6 +24,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Layout/Sidebar';
 import TopBar, { type LsatShellMode } from './Layout/TopBar';
+import MobileWorkspaceNav from './Layout/MobileWorkspaceNav';
 import { ThemeProvider } from '../context/ThemeContext';
 import { ToastProvider } from '../context/ToastContext';
 import { OfflineProvider } from '../context/OfflineContext';
@@ -227,6 +228,7 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
       >
         {children ?? <Outlet />}
       </main>
+      <MobileWorkspaceNav />
     </div>
     </OfflineProvider>
     </ToastProvider>

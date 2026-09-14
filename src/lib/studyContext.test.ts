@@ -1,17 +1,24 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_STUDY_CONTEXT,
+  consumeStudyContextHandoff,
   contextSwitchHref,
   domainForLocation,
   normalizeStudyContext,
   readStudyContext,
   rememberStudyContextRoute,
   studyContextReturnHref,
+  stageStudyContextHandoff,
+  stageStudyContextOrigin,
+  readStudyContextOrigin,
   workspaceHref,
   writeStudyContext,
 } from './studyContext';
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+});
 
 describe('study context', () => {
   it('normalizes invalid persisted values without discarding valid selections', () => {
@@ -27,6 +34,25 @@ describe('study context', () => {
     writeStudyContext({ cfaLevel: 'level3', goal: 'exam-readiness' });
     writeStudyContext({ domain: 'quant' });
     expect(readStudyContext()).toEqual({ domain: 'quant', cfaLevel: 'level3', goal: 'exam-readiness' });
+  });
+
+  it('keeps an explicitly selected curriculum through a stale cross-plane write', () => {
+    const quant = { domain: 'quant', cfaLevel: 'level1', goal: 'balanced' } as const;
+    stageStudyContextHandoff(quant);
+    // This represents the outgoing LSAT route tree completing an old effect as
+    // the generic host Review/Progress page is mounting.
+    writeStudyContext({ domain: 'lsat' });
+
+    expect(consumeStudyContextHandoff()).toEqual(quant);
+    expect(readStudyContext()).toEqual(quant);
+    expect(consumeStudyContextHandoff()).toBeNull();
+  });
+
+  it('keeps a safe source route available while first-time LSAT setup is open', () => {
+    const cfa = { domain: 'cfa', cfaLevel: 'level3', goal: 'exam-readiness' } as const;
+    stageStudyContextOrigin(cfa, '/cfa/level3/fixed-income');
+
+    expect(readStudyContextOrigin()).toEqual({ context: cfa, route: '/cfa/level3/fixed-income' });
   });
 
   it('builds workspace destinations from the selected track and CFA level', () => {

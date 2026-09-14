@@ -58,12 +58,13 @@ describe('SharedLayout (K4-6) — unified shell', () => {
 
     // Host chrome is present (sidebar brand + main region).
     expect(screen.getByText('Routed content')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Today' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Learn' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Practice' })).toHaveAttribute('href', '/cfa/level1/mock');
-    expect(screen.getByRole('link', { name: 'Review' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Progress' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Library' })).toBeInTheDocument();
+    const primaryNavigation = within(screen.getByRole('navigation', { name: 'Primary navigation' }));
+    expect(primaryNavigation.getByRole('link', { name: 'Today' })).toBeInTheDocument();
+    expect(primaryNavigation.getByRole('link', { name: 'Learn' })).toBeInTheDocument();
+    expect(primaryNavigation.getByRole('link', { name: 'Practice' })).toHaveAttribute('href', '/cfa/level1/mock');
+    expect(primaryNavigation.getByRole('link', { name: 'Review' })).toBeInTheDocument();
+    expect(primaryNavigation.getByRole('link', { name: 'Progress' })).toBeInTheDocument();
+    expect(primaryNavigation.getByRole('link', { name: 'Library' })).toBeInTheDocument();
   });
 
   it('expands the LSAT section to reveal grouped rows from lsatAppRoutes', async () => {
@@ -80,7 +81,7 @@ describe('SharedLayout (K4-6) — unified shell', () => {
     expect(headings.length).toBeGreaterThan(0);
     expect(headings[0]).toHaveClass('sidebar-section-label');
     // The Setup group's 'Settings' row resolves to its /lsat path too.
-    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/lsat/settings');
+    expect(screen.getAllByRole('link', { name: 'Settings' }).find((link) => link.getAttribute('href') === '/lsat/settings')).toBeDefined();
   });
 
   it('renders the TopBar study/test mode toggle and switches mode', async () => {
@@ -100,7 +101,8 @@ describe('SharedLayout (K4-6) — unified shell', () => {
     renderWithShell(<SharedLayout />);
     const user = userEvent.setup();
     await user.selectOptions(screen.getByRole('combobox', { name: 'Level' }), 'level2');
-    expect(screen.getByRole('link', { name: 'Practice' })).toHaveAttribute('href', '/cfa/level2/mock');
+    const primaryNavigation = within(screen.getByRole('navigation', { name: 'Primary navigation' }));
+    expect(primaryNavigation.getByRole('link', { name: 'Practice' })).toHaveAttribute('href', '/cfa/level2/mock');
 
     await user.click(screen.getByRole('link', { name: 'CFA Level II' }));
     const levelTwoTopic = screen.getAllByRole('link').find((link) => link.getAttribute('href')?.startsWith('/cfa/level2/'));
