@@ -187,8 +187,17 @@ export const AccessibleQuestionRunner = forwardRef<
       {/* aria-live feedback: SR users hear the result + explanation on confirm. */}
       <div id={feedbackId} aria-live="polite" role="status" className="aqr-feedback">
         {feedback && (
-          <div className={cn('quiz-explanation', feedback.isCorrect ? 'is-correct' : 'is-incorrect')}>
-            <h4>{feedback.headline}</h4>
+          <div
+            className={cn('quiz-explanation', feedback.isCorrect ? 'is-correct' : 'is-incorrect')}
+            style={{
+              // The shared quiz surface historically defaults every explanation
+              // to green. Keep the feedback tone local to this runner so an
+              // incorrect answer is unmistakable in CFA and other adopters.
+              background: feedback.isCorrect ? 'rgba(16, 185, 129, 0.06)' : 'rgba(239, 68, 68, 0.07)',
+              borderColor: feedback.isCorrect ? 'rgba(16, 185, 129, 0.28)' : 'rgba(239, 68, 68, 0.28)',
+            }}
+          >
+            <h4 style={{ color: feedback.isCorrect ? 'var(--success)' : 'var(--danger)' }}>{feedback.headline}</h4>
             {explanation && (
               <p className="qv-fs-sm qv-text-secondary qv-m-0" style={{ lineHeight: 1.6 }}>
                 {explanation}

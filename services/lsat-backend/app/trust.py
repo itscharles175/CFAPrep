@@ -37,6 +37,7 @@ PACKAGED_CONTRACTS = Path(getattr(sys, "_MEIPASS", config.BASE_DIR)) / "release_
 RELEASE_LOCAL_REPORT_SCHEMA = "lsatlab.release_local_report.v1"
 RELEASE_MANIFEST_SCHEMA = "studyvault.release-manifest.v2"
 SIGNING_EVIDENCE_SCHEMA = "studyvault.signing-evidence.v1"
+PERSONAL_SIGNING_EVIDENCE_SCHEMA = "studyvault.personal-signing-evidence.v1"
 SIDECAR_PROVENANCE_SCHEMA = "studyvault.sidecar-provenance.v1"
 REQUIRED_SIDECAR_PROVENANCE_SERVICES = ("LSAT backend",)
 
@@ -694,6 +695,49 @@ def _signing_asset_binding_errors(
 
 
 def _signing_evidence_errors(signing: dict[str, Any], assets: list[dict[str, Any]]) -> list[str]:
+    if signing.get("schema") == PERSONAL_SIGNING_EVIDENCE_SCHEMA:
+        artifacts = signing.get("artifacts") if isinstance(signing.get("artifacts"), list) else []
+        errors: list[str] = []
+        if _current_signing_platform() != "macos":
+            errors.append("signing_platform_mismatch")
+        if signing.get("platform") != "macos" or signing.get("releaseTier") != "personal":
+            errors.append("personal_signing_policy_invalid")
+        if signing.get("required") is not True or signing.get("status") != "verified":
+            errors.append("platform_signature_unverified")
+        if (
+            signing.get("identity") != "adhoc"
+            or signing.get("strictDeepVerification") is not True
+            or signing.get("developerId") is not False
+            or signing.get("notarized") is not False
+        ):
+            errors.append("personal_signing_policy_invalid")
+        if len(artifacts) != 1:
+            errors.append("personal_signing_artifacts_invalid")
+        elif (
+            not isinstance(artifacts[0], dict)
+            or artifacts[0].get("kind") != "app"
+            or artifacts[0].get("published") is not True
+            or artifacts[0].get("signed") is not True
+            or artifacts[0].get("verified") is not True
+            or artifacts[0].get("identity") != "adhoc"
+            or artifacts[0].get("developer_id") is not False
+            or artifacts[0].get("notarized") is not False
+            or artifacts[0].get("stapled") is not False
+            or artifacts[0].get("timestamped") is not False
+        ):
+            errors.append("personal_signing_artifacts_invalid")
+        artifact = artifacts[0] if len(artifacts) == 1 and isinstance(artifacts[0], dict) else None
+        checksum = str(artifact.get("sha256") or "") if artifact else ""
+        if artifact is None or (
+            _evidence_int(artifact.get("size"), 0) <= 0
+            or len(checksum) != 64
+            or any(character not in "0123456789abcdefABCDEF" for character in checksum)
+            or not str(artifact.get("path") or "")
+        ):
+            errors.append("signing_artifact_digest_missing")
+        errors.extend(_signing_asset_binding_errors("macos", artifacts, assets))
+        return list(dict.fromkeys(errors))
+
     errors: list[str] = []
     if signing.get("schema") != SIGNING_EVIDENCE_SCHEMA:
         return ["signing_evidence_missing"]
@@ -1437,6 +1481,8 @@ def _benchmark_check(session: Session, tier: TrustTier) -> dict[str, Any]:
 
 def _openapi_snapshot_candidates() -> list[Path]:
     return [
+        config.BASE_DIR / "openapi-baseline.json",
+        REPO_ROOT / "src" / "domains" / "lsat" / "_meta" / "openapi.json",
         OPENAPI_SNAPSHOT,
         PACKAGED_CONTRACTS / "openapi.json",
         config.BASE_DIR / "release_contracts" / "openapi.json",

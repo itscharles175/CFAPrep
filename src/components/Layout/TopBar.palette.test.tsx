@@ -47,6 +47,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  delete window.studyvault;
 });
 
 describe('unified palette', () => {
@@ -57,5 +58,50 @@ describe('unified palette', () => {
     const listbox = screen.getByRole('listbox', { name: /command palette results/i });
     // The SRS LSAT route now appears, badged as an LSAT result.
     expect(within(listbox).getByText('SRS')).toBeInTheDocument();
+  });
+
+  it('names the selected curriculum and scopes the palette copy on a neutral route', () => {
+    localStorage.setItem(
+      'studyvault:study-context:v1',
+      JSON.stringify({ domain: 'cfa', cfaLevel: 'level3', goal: 'exam-readiness' }),
+    );
+
+    renderTopBar('/preferences');
+
+    expect(screen.getByRole('status', { name: /selected study context: cfa.*level iii/i })).toHaveTextContent(
+      /studying cfa.*level iii/i,
+    );
+    expect(screen.getByRole('combobox', { name: /command palette/i })).toHaveAttribute(
+      'placeholder',
+      'Search CFA · Level III material…',
+    );
+  });
+
+  it('uses the native Command shortcut glyph when the desktop bridge is present', () => {
+    Object.defineProperty(window, 'studyvault', { configurable: true, value: {} });
+
+    renderTopBar('/cfa');
+
+    expect(screen.getByLabelText('Command K')).toHaveTextContent('⌘K');
+  });
+
+  it('marks the measured 960px desktop range as compact before controls can overlap', () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: query === '(min-width: 901px) and (max-width: 1179px)',
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    });
+
+    const { container, unmount } = renderTopBar('/lsat/practice');
+    expect(container.querySelector('header.topbar')).toHaveClass('topbar--compact');
+    const input = screen.getByRole('combobox', { name: /search modules, formulas, topics with the command palette/i });
+    expect(input).toHaveAttribute('placeholder', 'Search');
+    expect(screen.getByLabelText('Control K')).toBeVisible();
+    unmount();
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia });
   });
 });

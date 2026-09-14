@@ -8,5 +8,5 @@ export type { SessionTab, SessionTabsProps } from './SessionTabs';
 export { OnboardingResume } from './OnboardingResume';
 export type { OnboardingResumeProps } from './OnboardingResume';
 
-export { StudySessionProvider, useStudySession } from './StudySessionProvider';
+export { StudySessionBoundary, StudySessionProvider, useStudySession } from './StudySessionProvider';
 export type { StudySessionContextValue, StudySessionProviderProps } from './StudySessionProvider';

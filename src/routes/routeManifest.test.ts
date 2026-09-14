@@ -92,11 +92,15 @@ describe('route visual metadata', () => {
   it('maps every host route to the six workspaces or utilities', () => {
     expect(workspaceForLocation('/')).toBe('today');
     expect(workspaceForLocation('/cfa/level2/equity')).toBe('learn');
+    expect(workspaceForLocation('/cfa/level2/mock')).toBe('practice');
     expect(workspaceForLocation('/cfa/level3/performance/constructed-response')).toBe('practice');
+    expect(workspaceForLocation('/quant/risk-management')).toBe('practice');
+    expect(workspaceForLocation('/excel/dcf-modeling')).toBe('practice');
     expect(workspaceForLocation('/review')).toBe('review');
     expect(workspaceForLocation('/progress/overview')).toBe('progress');
     expect(workspaceForLocation('/library/tutor')).toBe('library');
     expect(routeForLocation('/cfa/level2/equity')?.id).toBe('cfa-module');
+    expect(routeForLocation('/cfa/level2/mock')?.id).toBe('level-mock');
   });
 
   it('keeps host rendered routes aligned with the typed route manifest', () => {
@@ -187,7 +191,7 @@ describe('K4-5 merged LSAT routes', () => {
   it('resolves merged-tree lookups by path and label', () => {
     expect(routeByPath('/lsat/srs')?.id).toBe('lsat-srs');
     expect(routeByPath('/cfa')?.id).toBe('cfa-dashboard');
-    expect(routeLabel('/lsat/notebook')).toBe('Notebook OS'); // canonical-aware
+    expect(routeLabel('/lsat/notebook')).toBe('Notebook & Curriculum'); // canonical-aware
     expect(routeLabel('/lsat/srs')).toBe('SRS');
   });
 

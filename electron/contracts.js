@@ -73,6 +73,27 @@ function pathPayload(value) {
   return { path: stringValue(object.path, 'payload.path', { min: 1, max: 32_768 }) };
 }
 
+function nativeRoute(value, routePath = 'payload.route') {
+  const route = stringValue(value, routePath, { min: 1, max: 2048 });
+  if (!route.startsWith('/') || route.startsWith('//') || route.includes('\\')) fail(routePath, 'an in-app route');
+  let url;
+  try {
+    url = new URL(route, 'app://studyvault');
+  } catch {
+    fail(routePath, 'an in-app route');
+  }
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(url.pathname);
+  } catch {
+    fail(routePath, 'an in-app route');
+  }
+  if (url.protocol !== 'app:' || url.hostname !== 'studyvault' || decodedPath.split('/').includes('..')) {
+    fail(routePath, 'an in-app route');
+  }
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 function fileDescriptor(value, path = 'result') {
   const object = exactObject(value, path, ['path', 'name', 'extension', 'size']);
   return {
@@ -278,6 +299,39 @@ function pathEvent(value, path = 'event') {
   };
 }
 
+function lifecycleEvent(value, path = 'event') {
+  const object = exactObject(value, path, ['state', 'at']);
+  return {
+    state: stringValue(object.state, `${path}.state`, { min: 4, max: 7, pattern: /^(suspend|resume|lock|unlock)$/ }),
+    at: finiteInteger(object.at, `${path}.at`, 0, Number.MAX_SAFE_INTEGER),
+  };
+}
+
+function nativeNavigationEvent(value, path = 'event') {
+  const object = exactObject(value, path, ['route', 'source']);
+  return {
+    route: nativeRoute(object.route, `${path}.route`),
+    source: stringValue(object.source, `${path}.source`, {
+      min: 4,
+      max: 12,
+      pattern: /^(menu|dock|notification|deep-link)$/,
+    }),
+  };
+}
+
+function sidebarToggleEvent(value, path = 'event') {
+  const object = exactObject(value, path, ['visible']);
+  return { visible: booleanValue(object.visible, `${path}.visible`) };
+}
+
+function beforeQuitEvent(value, path = 'event') {
+  const object = exactObject(value, path, ['requestId', 'at']);
+  return {
+    requestId: stringValue(object.requestId, `${path}.requestId`, { min: 36, max: 36, pattern: /^[0-9a-f-]{36}$/i }),
+    at: finiteInteger(object.at, `${path}.at`, 0, Number.MAX_SAFE_INTEGER),
+  };
+}
+
 function runtimeInfo(value) {
   const object = exactObject(value, 'result', [
     'app_version',
@@ -287,6 +341,8 @@ function runtimeInfo(value) {
     'platform',
     'arch',
     'is_packaged',
+    'native_shell',
+    'release_tier',
   ]);
   return {
     app_version: stringValue(object.app_version, 'result.app_version', { min: 1, max: 64 }),
@@ -306,6 +362,8 @@ function runtimeInfo(value) {
     }),
     arch: stringValue(object.arch, 'result.arch', { min: 3, max: 16 }),
     is_packaged: booleanValue(object.is_packaged, 'result.is_packaged'),
+    native_shell: stringValue(object.native_shell, 'result.native_shell', { pattern: /^macos-unified$/ }),
+    release_tier: stringValue(object.release_tier, 'result.release_tier', { pattern: /^personal$/ }),
   };
 }
 
@@ -327,6 +385,7 @@ function openedResult(value) {
 
 const requestContracts = new Map([
   [CHANNELS.RUNTIME_INFO, noPayload],
+  [CHANNELS.MICROPHONE_LEASE, noPayload],
   [CHANNELS.FILES_PICK_FOLDER, noPayload],
   [CHANNELS.FILES_PICK_FILES, noPayload],
   [
@@ -371,6 +430,23 @@ const requestContracts = new Map([
   [CHANNELS.KEYCHAIN_DELETE, noPayload],
   [CHANNELS.OPEN_PATH, pathPayload],
   [
+    CHANNELS.OPEN_EXTERNAL,
+    (value) => {
+      const object = exactObject(value, 'payload', ['url']);
+      const url = stringValue(object.url, 'payload.url', { min: 1, max: 8192 });
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        fail('payload.url', 'an HTTPS URL');
+      }
+      if (parsed.protocol !== 'https:' || !parsed.hostname || parsed.username || parsed.password) {
+        fail('payload.url', 'an HTTPS URL');
+      }
+      return { url: parsed.toString() };
+    },
+  ],
+  [
     CHANNELS.POPOUT,
     (value) => {
       const object = exactObject(value, 'payload', ['route', 'title', 'width', 'height']);
@@ -386,14 +462,22 @@ const requestContracts = new Map([
   [
     CHANNELS.NOTIFICATION,
     (value) => {
-      const object = exactObject(value, 'payload', ['title', 'body']);
+      const object = exactObject(value, 'payload', ['title', 'body', 'route']);
       return {
         title: stringValue(object.title, 'payload.title', { min: 1, max: 128 }),
         body: stringValue(object.body, 'payload.body', { max: 1024 }),
+        ...(object.route === undefined ? {} : { route: nativeRoute(object.route) }),
       };
     },
   ],
   [CHANNELS.FULLSCREEN_GET, noPayload],
+  [
+    CHANNELS.BEFORE_QUIT_ACK,
+    (value) => {
+      const object = exactObject(value, 'payload', ['requestId']);
+      return { requestId: stringValue(object.requestId, 'payload.requestId', { min: 36, max: 36, pattern: /^[0-9a-f-]{36}$/i }) };
+    },
+  ],
   [
     CHANNELS.FULLSCREEN_SET,
     (value) => {
@@ -447,6 +531,14 @@ const responseContracts = new Map([
   ],
   [CHANNELS.FULLSCREEN_GET, (value) => booleanValue(value, 'result')],
   [CHANNELS.FULLSCREEN_SET, (value) => booleanValue(value, 'result')],
+  [CHANNELS.BEFORE_QUIT_ACK, okResult],
+  [
+    CHANNELS.MICROPHONE_LEASE,
+    (value) => {
+      const object = exactObject(value, 'result', ['expiresAt']);
+      return { expiresAt: finiteInteger(object.expiresAt, 'result.expiresAt', 0, Number.MAX_SAFE_INTEGER) };
+    },
+  ],
 ]);
 
 const eventContracts = new Map([
@@ -454,6 +546,10 @@ const eventContracts = new Map([
   [EVENTS.SECOND_INSTANCE, launchEvent],
   [EVENTS.OPEN_FILE, pathEvent],
   [EVENTS.PDF_DROP, pathEvent],
+  [EVENTS.LIFECYCLE, lifecycleEvent],
+  [EVENTS.NATIVE_NAVIGATE, nativeNavigationEvent],
+  [EVENTS.SIDEBAR_TOGGLE, sidebarToggleEvent],
+  [EVENTS.BEFORE_QUIT, beforeQuitEvent],
 ]);
 
 export const IPC_CHANNELS = CHANNELS;

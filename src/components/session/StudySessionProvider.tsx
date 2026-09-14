@@ -9,7 +9,8 @@ import {
   type ReactNode,
 } from 'react';
 import type { StudySession } from '../../lib/learningTypes';
-import { recordSession } from '../../lib/progressStore';
+import { getDesktopBridge, registerDesktopSubscription } from '../../lib/desktopBridge';
+import { db, recordSession } from '../../lib/progressStore';
 import {
   checkpointFocusSession,
   clearFocusSession,
@@ -45,9 +46,15 @@ export interface StudySessionProviderProps {
   storage?: SessionStorage | null;
   now?: () => number;
   checkpointIntervalMs?: number;
+  flushPendingWrites?: () => Promise<void>;
 }
 
 const StudySessionContext = createContext<StudySessionContextValue | null>(null);
+
+async function flushPendingVaultWrites(): Promise<void> {
+  await db.open();
+  await db.transaction('r', db.tables, async () => undefined);
+}
 
 export function StudySessionProvider({
   children,
@@ -55,6 +62,7 @@ export function StudySessionProvider({
   storage,
   now = Date.now,
   checkpointIntervalMs = 5_000,
+  flushPendingWrites = flushPendingVaultWrites,
 }: StudySessionProviderProps) {
   const [session, setSession] = useState<FocusSession | null>(() => loadFocusSession(storage, now()));
   const [clock, setClock] = useState(() => now());
@@ -100,6 +108,47 @@ export function StudySessionProvider({
     document.addEventListener('visibilitychange', pauseWhenHidden);
     return () => document.removeEventListener('visibilitychange', pauseWhenHidden);
   }, [now, storage]);
+
+  // The main process is authoritative for macOS sleep and screen-lock events.
+  // Only ordinary focus time pauses here; CFA and LSAT assessments own separate
+  // wall-clock deadlines that continue to advance while the Mac sleeps.
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.events?.onLifecycle) return undefined;
+    return registerDesktopSubscription(() => bridge.events.onLifecycle((event) => {
+      if (event.state === 'suspend' || event.state === 'lock') {
+        setClock(event.at);
+        setSession((current) => {
+          if (!current || current.status !== 'running') return current;
+          const next = pauseFocusSession(current, event.at);
+          persistFocusSession(next, storage);
+          return next;
+        });
+        return;
+      }
+    }));
+  }, [storage]);
+
+  // Give the main process a bounded, observable checkpoint before normal Quit.
+  // Main still owns the timeout, so a stuck IndexedDB transaction cannot strand
+  // the macOS lifecycle indefinitely.
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.events?.onBeforeQuit || !bridge.lifecycle?.acknowledgeBeforeQuit) return undefined;
+    return registerDesktopSubscription(() => bridge.events.onBeforeQuit!(event => {
+      const current = session;
+      if (current) {
+        const checkpoint = checkpointFocusSession(current, event.at);
+        persistFocusSession(checkpoint, storage);
+        setSession(checkpoint);
+      }
+      void flushPendingWrites()
+        .catch(() => undefined)
+        .finally(() => {
+          void bridge.lifecycle?.acknowledgeBeforeQuit(event.requestId).catch(() => undefined);
+        });
+    }));
+  }, [flushPendingWrites, session, storage]);
 
   const start = useCallback((activity: FocusSessionActivity = {}) => {
     const nowMs = now();
@@ -180,6 +229,16 @@ export function StudySessionProvider({
   }), [clock, discard, pause, retrySave, session, start, stopAndSave, updateActivity]);
 
   return <StudySessionContext.Provider value={value}>{children}</StudySessionContext.Provider>;
+}
+
+/**
+ * Supplies a session provider for standalone host renders while reusing the
+ * persistent provider owned by UnifiedRoot in the full application.
+ */
+export function StudySessionBoundary(props: StudySessionProviderProps) {
+  const parent = useContext(StudySessionContext);
+  if (parent) return <>{props.children}</>;
+  return <StudySessionProvider {...props} />;
 }
 
 export function useStudySession(): StudySessionContextValue {

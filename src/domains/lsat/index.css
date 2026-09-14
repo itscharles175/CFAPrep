@@ -335,6 +335,49 @@
   }
 }
 
+/*
+ * Unified-shell compact band (901–1100px).
+ *
+ * The host retains its 264px desktop rail until 900px. Without an LSAT-local
+ * compact treatment, a 960px-wide native window gives a page header only about
+ * 648px: its action bar consumes the second grid column and leaves the title
+ * just a few characters wide. Stack the controls under the copy before that
+ * happens, while leaving the shared shell's breakpoint and other domains alone.
+ */
+@media (min-width: 901px) and (max-width: 1100px) {
+  body[data-domain='lsat'] .page-header {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-4);
+  }
+
+  body[data-domain='lsat'] .page-header-copy {
+    min-width: 0;
+    max-width: none;
+  }
+
+  body[data-domain='lsat'] .page-header > .action-bar {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+
+/* First Light must sit above the host rail and top bar; its modal contract
+ * otherwise exposes controls beneath an unrelated navigation surface. */
+.lsat-first-light-stage {
+  z-index: 140;
+}
+
+/* Preserve the 40px interaction floor used by the native shell for compact
+ * LSAT controls without altering shared CFA/Quant/Excel components. */
+body[data-domain='lsat'] .topbar-mode-option,
+body[data-domain='lsat'] .qv-tabs-trigger,
+body[data-domain='lsat'] .qv-select-trigger,
+body[data-domain='lsat'] .qv-btn.btn-sm,
+body[data-domain='lsat'] [role='radio'] {
+  min-height: 40px;
+}
+
 @layer base {
   * {
     @apply border-border;

@@ -86,6 +86,8 @@ import { getStorage } from './storage';
 import type { KeyedTable, StorageTransactionScope } from './storage/types';
 import { db, VAULT_CONTENT_VERSION, VAULT_SCHEMA_HASH, VAULT_SCHEMA_VERSION } from './progressDb';
 import type { QuestionResultRow, QuizAttemptRow, SettingRow } from './progressDb';
+import type { AbilitySnapshot } from './psychometrics/abilitySnapshots';
+import type { StudyTrailEntry } from './studyTrail';
 import {
   decryptSourceChunkForRead,
   decryptSourceChunksForRead,
@@ -184,6 +186,17 @@ export type VaultDataStores = {
   settings: SettingRow[];
 };
 
+/**
+ * Optional, locally persisted history used by release-grade backup/restore.
+ * These stores remain outside the standard portable export because ability
+ * estimates are derivable and the study trail is device-local navigation
+ * history. A personal full-vault backup can opt in explicitly.
+ */
+export type VaultDerivedStores = {
+  abilitySnapshots: AbilitySnapshot[];
+  studyTrail: StudyTrailEntry[];
+};
+
 export type VaultExport = {
   app: 'QuantVault';
   exportId: string;
@@ -199,6 +212,7 @@ export type VaultExport = {
   };
   stores: VaultDataStores;
   sourceVault?: CfaSourceVaultStores;
+  derivedStores?: VaultDerivedStores;
 };
 
 export type EncryptedVaultExport = Omit<VaultExport, 'stores' | 'encryption'> & {
@@ -219,6 +233,7 @@ export type VaultExportOptions = {
     passphrase: string;
   };
   includeSourceVault?: boolean;
+  includeDerivedStores?: boolean;
 };
 
 export type VaultImportOptions = {
@@ -226,6 +241,7 @@ export type VaultImportOptions = {
   passphrase?: string;
   conflictPolicy?: 'keep-existing' | 'prefer-import' | 'replace';
   includeSourceVault?: boolean;
+  includeDerivedStores?: boolean;
 };
 
 const STORE_NAMES = [
@@ -277,11 +293,10 @@ const AUTO_ID_STORES = new Set<(typeof STORE_NAMES)[number]>([
 
 const SOURCE_STORE_NAMES = ['sourceDocuments', 'sourceChunks', 'sourceIndexes', 'sourceIngestionRuns', 'sourceLinks', 'sourceLinkOverrides'] as const;
 
-// DATA-1 Phase 3 — registered-but-NOT-exported derived stores. They persist via
-// getStorage().table(name) (PSY-11 ability snapshots, NAV-1 study trail) but are
-// excluded from the canonical vault export/import/validate surface (STORE_NAMES)
-// because they are recomputable / ephemeral. A 'full' resetVaultData still wipes
-// them, the same way it wipes the unexported source* stores.
+// DATA-1 Phase 3 — registered derived stores. They remain outside STORE_NAMES
+// and therefore outside standard portable exports because they are recomputable
+// or device-local. Personal release backups can include them explicitly; a
+// 'full' resetVaultData always wipes them.
 const DERIVED_STORE_NAMES = ['abilitySnapshots', 'studyTrail'] as const;
 
 export type VaultImportPreviewBase = {
@@ -1651,6 +1666,7 @@ function isEncryptedVaultExport(payload: unknown): payload is EncryptedVaultExpo
 export async function exportVaultData(): Promise<VaultExport>;
 export async function exportVaultData(options: { encryption: { passphrase: string } }): Promise<EncryptedVaultExport>;
 export async function exportVaultData(options: { includeSourceVault: true }): Promise<VaultExport>;
+export async function exportVaultData(options: { includeDerivedStores: true }): Promise<VaultExport>;
 export async function exportVaultData(options: VaultExportOptions): Promise<VaultExport | EncryptedVaultExport>;
 export async function exportVaultData(options: VaultExportOptions = {}): Promise<VaultExport | EncryptedVaultExport> {
   const [
@@ -1727,6 +1743,12 @@ export async function exportVaultData(options: VaultExportOptions = {}): Promise
         sourceLinkOverrides: await vaultTable<CfaSourceLinkOverride>('sourceLinkOverrides').toArray(),
       }
     : undefined;
+  const derivedStores: VaultDerivedStores | undefined = options.includeDerivedStores
+    ? {
+        abilitySnapshots: await vaultTable<AbilitySnapshot>('abilitySnapshots').toArray(),
+        studyTrail: await vaultTable<StudyTrailEntry>('studyTrail').toArray(),
+      }
+    : undefined;
 
   const vaultExport = buildVaultExport({
     lessonProgress,
@@ -1761,9 +1783,15 @@ export async function exportVaultData(options: VaultExportOptions = {}): Promise
     settings,
   });
   const { checksum: _checksum, ...vaultExportPayload } = vaultExport;
-  const exportWithSource = sourceVault ? withChecksum({ ...vaultExportPayload, sourceVault }) : vaultExport;
-  if (options.encryption) return encryptVaultExport(exportWithSource, options.encryption.passphrase);
-  return exportWithSource;
+  const extendedExport = sourceVault || derivedStores
+    ? withChecksum({
+        ...vaultExportPayload,
+        ...(sourceVault ? { sourceVault } : {}),
+        ...(derivedStores ? { derivedStores } : {}),
+      })
+    : vaultExport;
+  if (options.encryption) return encryptVaultExport(extendedExport, options.encryption.passphrase);
+  return extendedExport;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -1872,6 +1900,17 @@ export function migrateVaultData(payload: unknown): VaultExport {
           : [],
       }
     : undefined;
+  const derivedStoresPayload = isObject(payload.derivedStores) ? payload.derivedStores : undefined;
+  const derivedStores: VaultDerivedStores | undefined = derivedStoresPayload
+    ? {
+        abilitySnapshots: Array.isArray(derivedStoresPayload.abilitySnapshots)
+          ? (derivedStoresPayload.abilitySnapshots as AbilitySnapshot[])
+          : [],
+        studyTrail: Array.isArray(derivedStoresPayload.studyTrail)
+          ? (derivedStoresPayload.studyTrail as StudyTrailEntry[])
+          : [],
+      }
+    : undefined;
   const baseExport: Omit<VaultExport, 'checksum'> = {
     app: payload.app === 'QuantVault' ? 'QuantVault' : 'QuantVault',
     exportId: typeof payload.exportId === 'string' ? payload.exportId : exportIdFor(exportedAt),
@@ -1891,6 +1930,7 @@ export function migrateVaultData(payload: unknown): VaultExport {
     },
     stores: storesWithV6Defaults,
     ...(sourceVault ? { sourceVault } : {}),
+    ...(derivedStores ? { derivedStores } : {}),
   };
 
   const hasCurrentShaChecksum =
@@ -1980,6 +2020,11 @@ export function validateVaultData(payload: unknown): { valid: boolean; errors: s
     if (orphanedSourceOverrides.length) {
       errors.push(`${orphanedSourceOverrides.length} source override rows reference unknown source chunks.`);
     }
+  }
+  if (migrated.derivedStores) {
+    DERIVED_STORE_NAMES.forEach((storeName) => {
+      if (!Array.isArray(migrated.derivedStores?.[storeName])) errors.push(`${storeName} must be an array.`);
+    });
   }
 
   const invalidQuestionResults = migrated.stores.questionResults.filter(
@@ -2076,10 +2121,15 @@ function remapMergeIds(stores: VaultDataStores): VaultDataStores {
   );
 }
 
-function normalizeVaultImportOptions(options: 'merge' | 'replace' | VaultImportOptions = 'merge'): Required<Pick<VaultImportOptions, 'mode' | 'conflictPolicy' | 'includeSourceVault'>> &
+function normalizeVaultImportOptions(options: 'merge' | 'replace' | VaultImportOptions = 'merge'): Required<Pick<VaultImportOptions, 'mode' | 'conflictPolicy' | 'includeSourceVault' | 'includeDerivedStores'>> &
   Pick<VaultImportOptions, 'passphrase'> {
   if (typeof options === 'string') {
-    return { mode: options, conflictPolicy: options === 'replace' ? 'replace' : 'prefer-import', includeSourceVault: false };
+    return {
+      mode: options,
+      conflictPolicy: options === 'replace' ? 'replace' : 'prefer-import',
+      includeSourceVault: false,
+      includeDerivedStores: false,
+    };
   }
   const conflictPolicy = options.conflictPolicy || (options.mode === 'replace' ? 'replace' : 'prefer-import');
   return {
@@ -2087,6 +2137,7 @@ function normalizeVaultImportOptions(options: 'merge' | 'replace' | VaultImportO
     conflictPolicy,
     passphrase: options.passphrase,
     includeSourceVault: options.includeSourceVault === true,
+    includeDerivedStores: options.includeDerivedStores === true,
   };
 }
 
@@ -2355,12 +2406,16 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
     [
       ...STORE_NAMES,
       ...(importOptions.includeSourceVault ? SOURCE_STORE_NAMES : []),
+      ...(importOptions.includeDerivedStores ? DERIVED_STORE_NAMES : []),
     ],
     async (tx) => {
       if (importOptions.mode === 'replace') {
         await Promise.all(STORE_NAMES.map((storeName) => tx.table(storeName).clear()));
         if (importOptions.includeSourceVault) {
           await Promise.all(SOURCE_STORE_NAMES.map((storeName) => tx.table(storeName).clear()));
+        }
+        if (importOptions.includeDerivedStores) {
+          await Promise.all(DERIVED_STORE_NAMES.map((storeName) => tx.table(storeName).clear()));
         }
       }
 
@@ -2403,6 +2458,12 @@ export async function importVaultData(payload: unknown, options: 'merge' | 'repl
               tx.table<CfaSourceIngestionRun>('sourceIngestionRuns').bulkPut(exportPayload.sourceVault.sourceIngestionRuns),
               tx.table<CfaSourceLink>('sourceLinks').bulkPut(exportPayload.sourceVault.sourceLinks || []),
               tx.table<CfaSourceLinkOverride>('sourceLinkOverrides').bulkPut(exportPayload.sourceVault.sourceLinkOverrides || []),
+            ]
+          : []),
+        ...(importOptions.includeDerivedStores && exportPayload.derivedStores
+          ? [
+              tx.table<AbilitySnapshot>('abilitySnapshots').bulkPut(exportPayload.derivedStores.abilitySnapshots),
+              tx.table<StudyTrailEntry>('studyTrail').bulkPut(exportPayload.derivedStores.studyTrail),
             ]
           : []),
       ]);

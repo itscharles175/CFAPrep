@@ -125,6 +125,39 @@ describe('buildVaultArchive + verifyVaultArchive', () => {
     expect(verifyVaultArchive(archive).ok).toBe(true);
   });
 
+  it('seals all six private source stores and derived history without exposing row content in the manifest', () => {
+    const host = makeHostExport({
+      sourceVault: {
+        sourceDocuments: [{ id: 'doc-1', privateUseOnly: true }],
+        sourceChunks: [{ id: 'chunk-1', documentId: 'doc-1', text: 'private source excerpt' }],
+        sourceIndexes: [],
+        sourceIngestionRuns: [],
+        sourceLinks: [],
+        sourceLinkOverrides: [],
+      } as unknown as VaultExport['sourceVault'],
+      derivedStores: {
+        abilitySnapshots: [{ id: 'ability-1', theta: 0.7 }],
+        studyTrail: [{ id: 'trail-1', route: '/learn' }],
+      } as VaultExport['derivedStores'],
+    });
+    const archive = buildVaultArchive(host);
+    const names = archive.manifest.stores.map((store) => store.name);
+
+    expect(names.filter((name) => name.startsWith('host-source:'))).toEqual([
+      'host-source:sourceChunks',
+      'host-source:sourceDocuments',
+      'host-source:sourceIndexes',
+      'host-source:sourceIngestionRuns',
+      'host-source:sourceLinkOverrides',
+      'host-source:sourceLinks',
+    ]);
+    expect(names).toContain('host-derived:abilitySnapshots');
+    expect(names).toContain('host-derived:studyTrail');
+    expect(JSON.stringify(archive.manifest)).not.toContain('private source excerpt');
+    expect(JSON.stringify(archive.manifest)).not.toContain('/learn');
+    expect(verifyVaultArchive(archive).ok).toBe(true);
+  });
+
   it('is deterministic: identical inputs yield identical per-store digests', () => {
     const a = buildVaultArchive(makeHostExport());
     const b = buildVaultArchive(makeHostExport());

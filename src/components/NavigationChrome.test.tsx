@@ -28,8 +28,9 @@ describe('NavigationBreadcrumb (UX-4)', () => {
     expect(nav).toBeInTheDocument();
     const current = screen.getByText('Analytics');
     expect(current).toHaveAttribute('aria-current', 'page');
-    // The Today root is a link, not the current page.
-    expect(screen.getByRole('link', { name: 'Today' })).toBeInTheDocument();
+    // Workspace-first chrome keeps Progress as the ancestor for Analytics.
+    expect(screen.getByRole('link', { name: 'Progress' })).toHaveAttribute('href', '/analytics');
+    expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
   });
 
   it('renders nothing at the host root (single crumb)', () => {

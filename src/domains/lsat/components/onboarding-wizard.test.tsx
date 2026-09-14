@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { OnboardingOllamaStep } from "./onboarding-wizard";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { OnboardingOllamaStep, examCountdownPresentation, onboardingAppliesToRoute, setFirstLightChromeState } from "./onboarding-wizard";
 
 const mocks = vi.hoisted(() => ({
   useAiHealth: vi.fn(),
@@ -81,3 +81,38 @@ describe("OnboardingOllamaStep provider selection", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("onboarding route eligibility", () => {
+  it("keeps first-light setup on LSAT learn surfaces without covering deep links", () => {
+    expect(onboardingAppliesToRoute("/")).toBe(true);
+    expect(onboardingAppliesToRoute("/dashboard")).toBe(true);
+    expect(onboardingAppliesToRoute("/tutor")).toBe(false);
+    expect(onboardingAppliesToRoute("/practice")).toBe(false);
+  });
+
+  it("does not invent a zero-day deadline before an exam date is chosen", () => {
+    expect(examCountdownPresentation(null)).toEqual({
+      label: "Exam date",
+      value: null,
+      status: "Not set",
+    });
+    expect(examCountdownPresentation(27)).toMatchObject({
+      label: "Days to exam",
+      value: 27,
+    });
+    expect(examCountdownPresentation(-2)).toMatchObject({
+      label: "Exam date passed",
+      value: 0,
+    });
+  });
+
+  it("marks first light as the active screen so background diagnostics can be suppressed", () => {
+    setFirstLightChromeState(true);
+    expect(document.documentElement.dataset.lsatFirstLight).toBe("active");
+
+    setFirstLightChromeState(false);
+    expect(document.documentElement.dataset.lsatFirstLight).toBeUndefined();
+  });
+});
+
+afterEach(() => setFirstLightChromeState(false));

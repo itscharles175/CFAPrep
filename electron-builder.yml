@@ -3,6 +3,7 @@ productName: StudyVault
 copyright: Copyright StudyVault contributors. Personal use only.
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 asar: true
+beforePack: scripts/build-native-watchdog.mjs
 afterPack: scripts/apply-electron-fuses.mjs
 npmRebuild: false
 forceCodeSigning: true
@@ -27,6 +28,10 @@ extraResources:
     to: services
     filter:
       - '**/*'
+  - from: electron/resources/bin
+    to: bin
+    filter:
+      - studyvault-watchdog
 protocols:
   - name: StudyVault
     schemes:

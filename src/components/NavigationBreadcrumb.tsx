@@ -63,7 +63,7 @@ export default function NavigationBreadcrumb({ className }: { className?: string
             <Fragment key={`${crumb.label}-${index}`}>
               <li className="breadcrumb-item">
                 {last || !crumb.to ? (
-                  <span className="breadcrumb-current" aria-current="page">
+                  <span className="breadcrumb-current" aria-current="page" title={crumb.label}>
                     {crumb.label}
                   </span>
                 ) : (

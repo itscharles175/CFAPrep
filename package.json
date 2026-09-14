@@ -14,6 +14,7 @@
   "scripts": {
     "dev": "vite",
     "electron:dev": "node scripts/electron-dev.mjs",
+    "build:native-watchdog": "node scripts/build-native-watchdog.mjs",
     "electron:build": "npm run build && electron-builder",
     "electron:build:dir": "npm run build && electron-builder --dir",
     "electron:build:debug": "npm run build && electron-builder --dir --config.directories.output=release-debug --config.forceCodeSigning=false",
@@ -33,6 +34,10 @@
     "doctor": "node scripts/stack-doctor.mjs",
     "release:local": "python scripts/release_local.py",
     "release:local:dry-run": "python scripts/release_local.py --dry-run",
+    "release:macos:personal": "python3 scripts/macos_personal_release.py",
+    "release:macos:personal:check": "python3 scripts/macos_personal_release.py --dry-run --no-install",
+    "release:macos:acceptance": "python3 scripts/finalize_macos_acceptance.py",
+    "test:release:macos": "python3 -m unittest discover -s scripts -p 'test_macos_personal_release.py' -v",
     "release:manifest": "node scripts/release-manifest.mjs write --require-assets --require-sidecar-provenance",
     "audit": "npm audit --omit=dev",
     "content:validate": "node --import ./scripts/register-ts-loader.mjs scripts/content-validate.mjs",

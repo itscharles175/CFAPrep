@@ -22,7 +22,11 @@ export function registerIpcHandlers({
   devServerUrl,
   emitEvent,
   createPopout,
+  navigateNative,
+  acknowledgeBeforeQuit,
+  microphoneLease,
 }) {
+  const activeNotifications = new Set();
   const handlers = new Map([
     [
       IPC_CHANNELS.RUNTIME_INFO,
@@ -34,7 +38,20 @@ export function registerIpcHandlers({
         platform: process.platform,
         arch: process.arch,
         is_packaged: app.isPackaged,
+        native_shell: 'macos-unified',
+        release_tier: 'personal',
       }),
+    ],
+    [
+      IPC_CHANNELS.MICROPHONE_LEASE,
+      async (_payload, event) => {
+        if (typeof event.sender.executeJavaScript !== 'function') {
+          throw new Error('Microphone activation verification is unavailable');
+        }
+        const userActivated = await event.sender.executeJavaScript('navigator.userActivation?.isActive === true');
+        if (userActivated !== true) throw new Error('Microphone access requires an active user gesture');
+        return { expiresAt: microphoneLease.grant(event.sender.id) };
+      },
     ],
     [
       IPC_CHANNELS.FILES_PICK_FOLDER,
@@ -80,12 +97,27 @@ export function registerIpcHandlers({
         return { opened: error === '', error };
       },
     ],
+    [
+      IPC_CHANNELS.OPEN_EXTERNAL,
+      async ({ url }) => {
+        await shell.openExternal(url);
+        return { opened: true };
+      },
+    ],
     [IPC_CHANNELS.POPOUT, async (payload, event) => createPopout(payload, event.sender)],
     [
       IPC_CHANNELS.NOTIFICATION,
-      async ({ title, body }) => {
+      async ({ title, body, route }) => {
         if (!Notification.isSupported()) return { shown: false };
-        new Notification({ title, body, silent: false }).show();
+        const notification = new Notification({ title, body, silent: false });
+        activeNotifications.add(notification);
+        const release = () => activeNotifications.delete(notification);
+        notification.once('close', release);
+        notification.once('click', () => {
+          if (route) navigateNative(route, 'notification');
+          release();
+        });
+        notification.show();
         return { shown: true };
       },
     ],
@@ -106,6 +138,13 @@ export function registerIpcHandlers({
         return window.isFullScreen();
       },
     ],
+    [
+      IPC_CHANNELS.BEFORE_QUIT_ACK,
+      async ({ requestId }) => {
+        acknowledgeBeforeQuit(requestId);
+        return { ok: true };
+      },
+    ],
   ]);
 
   const allowed = new Set(ALLOWED_INVOKE_CHANNELS);
@@ -124,5 +163,7 @@ export function registerIpcHandlers({
 
   return () => {
     for (const channel of handlers.keys()) ipcMain.removeHandler(channel);
+    for (const notification of activeNotifications) notification.close();
+    activeNotifications.clear();
   };
 }

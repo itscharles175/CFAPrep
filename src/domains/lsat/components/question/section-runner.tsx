@@ -618,7 +618,10 @@ export function SectionRunner({
 
   const stimulusBlock = (
     <PassageScrollPane scrollRef={passageScrollRef}>
-      <div ref={passagePaneRef} className="relative p-8">
+      <div
+        ref={passagePaneRef}
+        className={cn('relative', isRC ? 'p-8' : focusMode ? 'p-4 sm:p-5' : 'p-5 sm:p-6')}
+      >
         <div className="type-overline mb-2 flex items-center justify-between gap-2 text-muted-foreground">
           <span>{isRC ? `Passage${passage?.topic ? ` · ${passage.topic}` : ''}` : 'Stimulus'}</span>
           <div className="flex items-center gap-2">
@@ -666,8 +669,8 @@ export function SectionRunner({
   );
 
   const questionBlock = (
-    <div className={cn('p-8', isRC && 'sticky top-0')}>
-      <div className="mx-auto max-w-2xl space-y-5">
+    <div className={cn(isRC ? 'p-8' : focusMode ? 'p-4 sm:p-5' : 'p-5 sm:p-6', isRC && 'sticky top-0')}>
+      <div className={cn('mx-auto max-w-2xl', focusMode ? 'space-y-4' : 'space-y-5')}>
         {q && (
           <>
             <div className="flex items-center gap-2">
@@ -729,13 +732,14 @@ export function SectionRunner({
           screen; any input wakes it. The reduced-motion net flattens the fade. */}
       <header
         className={cn(
-          'flex h-14 items-center justify-between border-b px-6 transition-opacity duration-500',
+          'flex items-center justify-between border-b transition-opacity duration-500',
+          focusMode ? 'min-h-11 gap-2 px-3 py-1.5' : 'h-14 gap-3 px-6',
           focusMode && !chromeVisible && 'pointer-events-none opacity-0',
         )}
       >
-        <div className="flex items-center gap-2 text-sm font-medium">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <Logo className="h-5 w-5" />
-          <span>
+          <span className="truncate">
             {headerLabel} · Q {index + 1} of {questions.length}
           </span>
           {sampleBadge && (
@@ -744,7 +748,7 @@ export function SectionRunner({
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-1 sm:gap-3">
           {!focusMode && (
             <ClockPaceBar clock={clock} total={questions.length} answered={answeredCount} totalSec={limitSec} />
           )}
@@ -862,7 +866,8 @@ export function SectionRunner({
           page except the question and the ambient hairline. */}
       <footer
         className={cn(
-          'flex items-center gap-4 border-t px-6 py-3 transition-opacity duration-500',
+          'flex items-center border-t transition-opacity duration-500',
+          focusMode ? 'gap-2 px-3 py-2' : 'gap-4 px-6 py-3',
           focusMode && !chromeVisible && 'pointer-events-none opacity-0',
         )}
       >

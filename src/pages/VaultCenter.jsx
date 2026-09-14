@@ -21,6 +21,7 @@ import {
   searchCfaSourceVault,
 } from '../lib/cfaSourceVault';
 import { SourceLinkManager, SourceMapStatus } from '../components/SourceContext';
+import { useStudyContext } from '../lib/studyContext';
 
 const filters = [
   { value: 'all', label: 'All' },
@@ -40,8 +41,30 @@ function matchesQuery(row, query) {
   return query.toLowerCase().split(/\s+/).filter(Boolean).every((term) => haystack.includes(term));
 }
 
+const domainLabels = {
+  cfa: 'CFA',
+  lsat: 'LSAT',
+  quant: 'Quant',
+  excel: 'Excel',
+};
+
+const sourceKindLabels = {
+  'official-curriculum': 'Official curriculum',
+  'prep-provider': 'Prep provider',
+  'reference-book': 'Reference',
+  'archive-metadata': 'Archive metadata',
+  'user-source': 'Personal import',
+};
+
+function DomainBadge({ domain }) {
+  const label = domainLabels[domain] || 'Local library';
+  const tone = domain === 'cfa' ? 'exam' : domain === 'quant' ? 'quant' : 'vault';
+  return <StatusBadge tone={tone}>{label}</StatusBadge>;
+}
+
 export default function VaultCenter() {
   const [searchParams] = useSearchParams();
+  const [studyContext] = useStudyContext();
   const [notes, setNotes] = useState([]);
   const [bookmarks, setBookmarks] = useState([]);
   const [artifacts, setArtifacts] = useState([]);
@@ -124,6 +147,8 @@ export default function VaultCenter() {
   );
   const hasSavedLibraryItems = notes.length > 0 || bookmarks.length > 0 || artifacts.length > 0;
   const hasAnyVaultItems = hasSavedLibraryItems || sourceDocuments.length > 0;
+  const isCfaContext = studyContext.domain === 'cfa';
+  const activeDomainLabel = domainLabels[studyContext.domain];
   const sourceMapTargets = useMemo(
     () =>
       [...new Set(sourceDocuments.flatMap((document) => document.topicIds || []))].slice(0, 28).map((topicId) => {
@@ -208,8 +233,8 @@ export default function VaultCenter() {
     <div className="page-container vault-page">
       <PageHeader
         badge="LOCAL VAULT"
-        title="Notes, Bookmarks & Artifacts"
-        subtitle="Search, edit, backlink, and manage your local study vault across lessons, formulas, questions, and tool outputs."
+        title="Library: Notes, Sources & Artifacts"
+        subtitle="A private, local library shared across your study tracks. Sources keep their domain and provenance so every answer stays grounded in the material that supports it."
       />
 
       {pendingDelete && (
@@ -255,75 +280,98 @@ export default function VaultCenter() {
       {message && <p className="muted-copy">{message}</p>}
 
       <Panel tone="vault" className="vault-wide-panel">
-        <h2 className="vault-panel-title">CFA Source Vault</h2>
-        <div className="action-row" style={{ marginBottom: 'var(--space-4)' }}>
-          <label className="btn btn-primary">
-            <FileUp size={16} /> Import .qvsource
-            <input type="file" accept=".qvsource,application/json" onChange={handleSourceBundleImport} style={{ display: 'none' }} />
-          </label>
-          <button className="btn btn-secondary" onClick={handleDeleteAllSources} disabled={sourceBusy || sourceDocuments.length === 0}>
-            <Trash2 size={16} /> Clear Sources
-          </button>
-          <StatusBadge tone="success"><ShieldCheck size={14} /> private local only</StatusBadge>
+        <h2 className="vault-panel-title">Source Scope & Provenance</h2>
+        <div className="action-row" style={{ marginBottom: 'var(--space-3)' }}>
+          <StatusBadge tone="vault"><ShieldCheck size={14} /> Private · local only</StatusBadge>
+          <StatusBadge tone="vault">Active study context: {activeDomainLabel}</StatusBadge>
+          <StatusBadge tone="exam">CFA source bundles: {sourceDocuments.length}</StatusBadge>
         </div>
-        <div className="action-row source-map-actions">
-          <SourceLinkManager
-            targets={sourceMapTargets}
-            onRebuilt={(result) => {
-              setMessage(`Source map rebuilt for ${result.targets} target(s) with ${result.links} link(s).`);
-              refresh();
-            }}
-          />
-          <SourceMapStatus />
-        </div>
-        <label className="vault-search">
-          <Search size={16} />
-          <input
-            aria-label="Search private CFA source vault"
-            value={sourceQuery}
-            onChange={(event) => setSourceQuery(event.target.value)}
-            placeholder="Search imported CFA source text..."
-          />
-        </label>
-        <div className="coverage-grid" style={{ marginTop: 'var(--space-4)' }}>
-          <div>
-            <strong>{sourceCoverage?.documentCount || 0} documents</strong>
-            <small>{sourceCoverage?.chunkCount || 0} chunks · {sourceMapStatus?.linkCount || 0} native source links · standard vault exports omit source text</small>
-          </div>
-          <div>
-            <strong>{sourceCoverage?.levelCounts?.level1 || 0} Level I · {sourceCoverage?.levelCounts?.level2 || 0} Level II · {sourceCoverage?.levelCounts?.level3 || 0} Level III</strong>
-            <small>Coverage is built from imported private bundles on this device.</small>
-          </div>
-        </div>
-        {sourceResults.length > 0 && (
-          <div className="vault-list" style={{ marginTop: 'var(--space-4)' }}>
-            {sourceResults.map((result) => (
-              <div key={result.chunk.id} className={`vault-row ${focusedChunk === result.chunk.id ? 'source-focused-row' : ''}`}>
-                <div>
-                  <StatusBadge tone="vault">{result.document.level}</StatusBadge>
-                  <h4>{result.document.title}</h4>
-                  <p>{result.preview}</p>
-                  <small className="muted-copy">{result.chunk.locator} · {result.document.publisher}</small>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="vault-list" style={{ marginTop: 'var(--space-4)' }}>
-          {sourceDocuments.slice(0, 8).map((document) => (
-            <div key={document.id} className="vault-row">
-              <div>
-                <StatusBadge tone="exam">{document.level}</StatusBadge>
-                <h4>{document.title}</h4>
-                <p>{document.publisher} · {document.year || 'n/a'} · {document.chunkCount} chunks · {document.canonical ? 'canonical' : 'duplicate/reference'}</p>
-              </div>
-              <button className="btn-icon btn-ghost" title="Delete source document" onClick={() => setPendingDelete({ kind: 'source-document', row: document })}>
-                <Trash2 size={16} />
+        {isCfaContext ? (
+          <>
+            <p className="muted-copy">CFA source bundles are private imports on this device. Their publisher, level, source type, and local citation location stay attached whenever StudyVault uses them.</p>
+            <div className="action-row" style={{ marginBlock: 'var(--space-4)' }}>
+              <label className="btn btn-primary">
+                <FileUp size={16} /> Import CFA source bundle
+                <input type="file" accept=".qvsource,application/json" onChange={handleSourceBundleImport} style={{ display: 'none' }} />
+              </label>
+              <button className="btn btn-secondary" onClick={handleDeleteAllSources} disabled={sourceBusy || sourceDocuments.length === 0}>
+                <Trash2 size={16} /> Clear CFA sources
               </button>
             </div>
-          ))}
-          {!sourceDocuments.length && <p className="muted-copy">Import a `.qvsource` bundle created by `npm run cfa:source:ingest` to search local CFA materials privately.</p>}
-        </div>
+            <div className="action-row source-map-actions">
+              <SourceLinkManager
+                targets={sourceMapTargets}
+                onRebuilt={(result) => {
+                  setMessage(`Source map rebuilt for ${result.targets} target(s) with ${result.links} link(s).`);
+                  refresh();
+                }}
+              />
+              <SourceMapStatus />
+            </div>
+            <label className="vault-search">
+              <Search size={16} />
+              <input
+                aria-label="Search private CFA curriculum sources"
+                value={sourceQuery}
+                onChange={(event) => setSourceQuery(event.target.value)}
+                placeholder="Search imported CFA curriculum text..."
+              />
+            </label>
+            <div className="coverage-grid" style={{ marginTop: 'var(--space-4)' }}>
+              <div>
+                <strong>{sourceCoverage?.documentCount || 0} CFA documents</strong>
+                <small>{sourceCoverage?.chunkCount || 0} chunks · {sourceMapStatus?.linkCount || 0} source links · standard vault exports omit source text</small>
+              </div>
+              <div>
+                <strong>{sourceCoverage?.levelCounts?.level1 || 0} Level I · {sourceCoverage?.levelCounts?.level2 || 0} Level II · {sourceCoverage?.levelCounts?.level3 || 0} Level III</strong>
+                <small>Coverage is limited to imported private CFA bundles on this device.</small>
+              </div>
+            </div>
+            {sourceResults.length > 0 && (
+              <div className="vault-list" style={{ marginTop: 'var(--space-4)' }}>
+                {sourceResults.map((result) => (
+                  <div key={result.chunk.id} className={`vault-row ${focusedChunk === result.chunk.id ? 'source-focused-row' : ''}`}>
+                    <div>
+                      <InlineCluster>
+                        <DomainBadge domain="cfa" />
+                        <StatusBadge tone="vault">{sourceKindLabels[result.document.sourceKind] || 'Imported source'}</StatusBadge>
+                        <StatusBadge tone="vault">{result.document.level}</StatusBadge>
+                      </InlineCluster>
+                      <h4>{result.document.title}</h4>
+                      <p>{result.preview}</p>
+                      <small className="muted-copy">{result.chunk.locator} · {result.document.publisher} · private import</small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="vault-list" style={{ marginTop: 'var(--space-4)' }}>
+              {sourceDocuments.slice(0, 8).map((document) => (
+                <div key={document.id} className="vault-row">
+                  <div>
+                    <InlineCluster>
+                      <DomainBadge domain="cfa" />
+                      <StatusBadge tone="vault">{sourceKindLabels[document.sourceKind] || 'Imported source'}</StatusBadge>
+                      <StatusBadge tone="exam">{document.level}</StatusBadge>
+                    </InlineCluster>
+                    <h4>{document.title}</h4>
+                    <p>{document.publisher} · {document.year || 'n/a'} · {document.chunkCount} chunks · {document.canonical ? 'canonical' : 'duplicate/reference'} · private import</p>
+                  </div>
+                  <button className="btn-icon btn-ghost" title="Delete CFA source document" onClick={() => setPendingDelete({ kind: 'source-document', row: document })}>
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+              {!sourceDocuments.length && <p className="muted-copy">No CFA source bundle is imported yet. Import a `.qvsource` bundle to make private CFA citations and curriculum search available.</p>}
+            </div>
+          </>
+        ) : (
+          <div className="vault-scope-empty">
+            <p>This Library keeps your notes, bookmarks, and generated artifacts local across every track. CFA curriculum bundles are kept in a separate CFA-only citation scope, so they are never presented as LSAT, Quant, or Excel evidence.</p>
+            <p className="muted-copy">Open your {activeDomainLabel} workspace to work with that track’s learning materials. CFA source import, search, deletion, and source-map tools appear only while CFA is the selected study context.</p>
+            <Link className="btn btn-secondary btn-sm" to={`/${studyContext.domain}`}>Open {activeDomainLabel} workspace</Link>
+          </div>
+        )}
       </Panel>
 
       {hasSavedLibraryItems && (
@@ -335,7 +383,7 @@ export default function VaultCenter() {
               filteredNotes.map((note) => (
                 <div key={note.id} className="vault-row">
                   <div style={{ flex: 1 }}>
-                    <StatusBadge tone="vault">{note.type}</StatusBadge>
+                    <InlineCluster><DomainBadge domain={note.domain} /><StatusBadge tone="vault">{note.type}</StatusBadge><StatusBadge tone="vault">Local note</StatusBadge></InlineCluster>
                     <h4>{note.title}</h4>
                     {editingNote?.id === note.id ? (
                       <div>
@@ -375,7 +423,7 @@ export default function VaultCenter() {
               filteredBookmarks.map((bookmark) => (
                 <div key={bookmark.id} className="vault-row">
                   <div>
-                    <StatusBadge tone="quant">{bookmark.type}</StatusBadge>
+                    <InlineCluster><DomainBadge domain={bookmark.domain} /><StatusBadge tone="quant">{bookmark.type}</StatusBadge><StatusBadge tone="vault">Saved link</StatusBadge></InlineCluster>
                     <h4>{bookmark.title}</h4>
                     <Link to={bookmark.path}>Open source</Link>
                   </div>
@@ -397,7 +445,7 @@ export default function VaultCenter() {
                 filteredArtifacts.map((artifact) => (
                   <div key={artifact.id} className="vault-row">
                     <div>
-                      <StatusBadge tone="exam">{artifact.type}</StatusBadge>
+                      <InlineCluster><DomainBadge domain={artifact.domain} /><StatusBadge tone="exam">{artifact.type}</StatusBadge><StatusBadge tone="vault">Generated locally</StatusBadge></InlineCluster>
                       <h4>{artifact.title}</h4>
                       <p>{artifact.summary}</p>
                       {artifact.path && <Link to={artifact.path}>Open tool</Link>}

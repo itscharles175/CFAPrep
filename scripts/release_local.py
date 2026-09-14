@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import platform
@@ -40,6 +41,7 @@ PACKAGED_SMOKE_HEALTH_URL = "http://127.0.0.1:8100/api/health"
 # git state). CI uses the runner temp dir for the same reason.
 WINDOWS_SIGNING_CONFIG = Path(tempfile.gettempdir()) / "studyvault-release" / "windows-signing-config.json"
 SIGNING_EVIDENCE = DIST_DIR / "signing-evidence-local.json"
+PERSONAL_APP_EVIDENCE = DIST_DIR / "personal-macos-app-evidence.json"
 
 REQUIRED_RELEASE_LOCAL_LABELS = (
     "backend compile",
@@ -122,6 +124,98 @@ def _backend_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 def _py_code(source: str) -> str:
     return textwrap.dedent(source).strip()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _personal_bundle_assets(app_path: Path) -> tuple[list[dict[str, Any]], str, int]:
+    assets: list[dict[str, Any]] = []
+    digest = hashlib.sha256()
+    total = 0
+    for path in sorted(item for item in app_path.rglob("*") if item.is_file() and not item.is_symlink()):
+        relative = path.relative_to(app_path).as_posix()
+        size = path.stat().st_size
+        checksum = _sha256_file(path)
+        assets.append({"path": f"{app_path.name}/{relative}", "sha256": checksum, "size": size})
+        digest.update(f"{relative}\0{checksum}\0{size}\n".encode())
+        total += size
+    return assets, digest.hexdigest(), total
+
+
+def _verify_personal_macos_app(app_path: Path) -> dict[str, Any]:
+    if sys.platform != "darwin" or not app_path.is_dir() or app_path.suffix != ".app":
+        raise RuntimeError("personal macOS external artifact must be an existing .app on macOS")
+    from macos_personal_release import packaged_sidecar_provenance, verify_arm64_tree, verify_ats, verify_fuses
+
+    signature = subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", "--verbose=4", str(app_path)],
+        check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    if signature.returncode != 0:
+        raise RuntimeError(f"personal macOS app failed strict signature verification: {signature.stdout[-2000:]}")
+    architecture = verify_arm64_tree(app_path)
+    provenance = packaged_sidecar_provenance(app_path, architecture)
+    verify_fuses(app_path)
+    verify_ats(app_path)
+    assets, tree_sha256, size = _personal_bundle_assets(app_path)
+    evidence = {
+        "schema": "studyvault.personal-macos-app-evidence.v1", "generated_at": datetime.now(timezone.utc).isoformat(),
+        "app": {"name": app_path.name, "tree_sha256": tree_sha256, "size": size, "asset_count": len(assets)},
+        "executable": architecture["application"], "sidecar": provenance, "strict_deep_verification": True,
+        "identity": "adhoc", "developer_id": False, "notarized": False,
+    }
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
+    PERSONAL_APP_EVIDENCE.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+    return evidence
+
+
+def _write_personal_release_manifest(app_path: Path) -> dict[str, Any]:
+    evidence = _verify_personal_macos_app(app_path)
+    assets, tree_sha256, total_size = _personal_bundle_assets(app_path)
+    package = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
+    package_lock = json.loads((REPO_ROOT / "package-lock.json").read_text(encoding="utf-8"))
+    uv_lock_path = BACKEND_DIR / "uv.lock"
+    sidecar_path = app_path / "Contents" / "Resources" / "services" / "sidecar-provenance.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    lockfiles = []
+    for path in (REPO_ROOT / "package-lock.json", uv_lock_path, BACKEND_DIR / "pyproject.toml", REPO_ROOT / "electron-builder.personal.yml"):
+        lockfiles.append({"path": path.relative_to(REPO_ROOT).as_posix(), "required": True, "present": True, "sha256": _sha256_file(path), "size": path.stat().st_size})
+    npm_count = sum(1 for path, item in package_lock.get("packages", {}).items() if path.startswith("node_modules/") and item.get("version"))
+    pypi_count = uv_lock_path.read_text(encoding="utf-8").count("[[package]]")
+    artifact = {
+        "kind": "app", "path": app_path.name, "published": True, "signed": True, "verified": True,
+        "sha256": tree_sha256, "size": total_size, "identity": "adhoc", "developer_id": False,
+        "notarized": False, "stapled": False, "timestamped": False,
+    }
+    manifest = {
+        "schema": "studyvault.release-manifest.v2", "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "repository": {"head": _git_value("rev-parse", "HEAD"), "branch": _git_value("branch", "--show-current"), "dirty": bool(_git_value("status", "--porcelain"))},
+        "versions": {"package": package.get("version"), "electron": package.get("devDependencies", {}).get("electron"), "consistent": True},
+        "lockfiles": lockfiles, "sbom": {"counts": {"npm": npm_count, "pypi": pypi_count, "total": npm_count + pypi_count}},
+        "sidecarProvenance": {"present": True, "path": sidecar_path.name, "sha256": _sha256_file(sidecar_path), "schema": sidecar.get("schema"), "entries": sidecar.get("entries", [])},
+        "bundleAssets": assets,
+        "signing": {
+            "schema": "studyvault.personal-signing-evidence.v1", "releaseTier": "personal", "platform": "macos",
+            "required": True, "status": "verified", "identity": "adhoc", "strictDeepVerification": True,
+            "developerId": False, "notarized": False, "artifacts": [artifact],
+        },
+        "attestation": {"type": "local-personal-release-manifest", "predicateType": "studyvault.release-manifest.v2"},
+        "personalMacosAppEvidence": evidence,
+    }
+    path = DIST_DIR / "studyvault-release-manifest.json"
+    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return manifest
+
+
+def _git_value(*args: str) -> str:
+    result = subprocess.run(["git", *args], cwd=REPO_ROOT, check=False, text=True, stdout=subprocess.PIPE)
+    return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def _base_checks(py: str, node: str, npm: str) -> list[Check]:
@@ -280,6 +374,24 @@ def _optional_checks(args: argparse.Namespace, py: str, node: str, npm: str) -> 
     if not args.skip_e2e:
         checks.append(Check("frontend playwright e2e", [Step([node, "scripts/e2e-integration.mjs"])]))
     if not args.skip_electron:
+        if args.personal_macos_app:
+            app_path = str(Path(args.personal_macos_app).resolve())
+            verify = [py, str(Path(__file__).resolve()), "_personal_app_verify", "--personal-macos-app", app_path]
+            checks.extend(
+                [
+                    Check("backend sidecar build", [Step(verify)]),
+                    Check("electron build", [Step(verify)]),
+                    Check(
+                        "packaged app smoke",
+                        [Step([py, str(Path(__file__).resolve()), "_packaged_smoke_personal", "--personal-macos-app", app_path])],
+                    ),
+                    Check(
+                        "release manifest/SBOM",
+                        [Step([py, str(Path(__file__).resolve()), "_personal_manifest", "--personal-macos-app", app_path])],
+                    ),
+                ]
+            )
+            return checks
         if not args.skip_sidecar_build:
             checks.append(
                 Check(
@@ -521,8 +633,18 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def write_trust_snapshot(report_path: Path, trust_path: Path, tier: str, py: str, timeout: int) -> dict[str, Any]:
+def write_trust_snapshot(
+    report_path: Path,
+    trust_path: Path,
+    tier: str,
+    py: str,
+    timeout: int,
+    *,
+    sidecar_provenance: Path | None = None,
+) -> dict[str, Any]:
     env = {"PYTHONPATH": str(BACKEND_DIR), "LSATLAB_RELEASE_LOCAL_REPORT": str(report_path)}
+    if sidecar_provenance is not None:
+        env["STUDYVAULT_SIDECAR_PROVENANCE"] = str(sidecar_provenance)
     step = Step(
         [py, "-m", "app.trust", "--tier", tier, "--output", str(trust_path), "--check"],
         cwd=BACKEND_DIR,
@@ -699,6 +821,10 @@ PACKAGED_SMOKE_FATAL_LOG_MARKERS = (
 PACKAGED_SMOKE_STARTUP_SETTLE_SECONDS = 3
 
 
+def _packaged_smoke_launch_args(executable: Path, user_data_dir: Path) -> list[str]:
+    return [str(executable), f"--user-data-dir={user_data_dir}", "--use-mock-keychain"]
+
+
 def _packaged_smoke_log_failure(stdout: str, stderr: str) -> str | None:
     combined = f"{stdout}\n{stderr}"
     for marker in PACKAGED_SMOKE_FATAL_LOG_MARKERS:
@@ -707,13 +833,17 @@ def _packaged_smoke_log_failure(stdout: str, stderr: str) -> str | None:
     return None
 
 
-def _packaged_smoke(debug: bool = False) -> int:
+def _packaged_smoke(debug: bool = False, external_app: Path | None = None) -> int:
     busy_ports = [port for port in PACKAGED_SMOKE_PORTS if _is_port_open(port)]
     if busy_ports:
         print(f"packaged smoke: ports already in use: {busy_ports}")
         return 1
 
-    services_dir = _packaged_services_dir(debug)
+    services_dir = (
+        external_app / "Contents" / "Resources" / "services"
+        if external_app is not None
+        else _packaged_services_dir(debug)
+    )
     sidecar = _lsat_sidecar_path(services_dir)
     provenance = services_dir / "sidecar-provenance.json"
     missing = [path for path in (services_dir, sidecar, provenance) if not path.exists()]
@@ -721,20 +851,30 @@ def _packaged_smoke(debug: bool = False) -> int:
     if missing or empty:
         print("packaged smoke: packaged service resources are incomplete")
         for path in missing:
-            print(f"  missing: {path.relative_to(REPO_ROOT)}")
+            print(f"  missing: {path}")
         for path in empty:
-            print(f"  empty: {path.relative_to(REPO_ROOT)}")
+            print(f"  empty: {path}")
         return 1
 
-    artifacts = _non_empty_bundle_artifacts(debug)
+    artifacts = (
+        [path for path in external_app.rglob("*") if path.is_file() and path.stat().st_size > 0]
+        if external_app is not None
+        else _non_empty_bundle_artifacts(debug)
+    )
     if not artifacts:
         print("packaged smoke: no non-empty bundle artifacts found")
         return 1
     print(f"packaged smoke: {len(artifacts)} non-empty bundle artifact(s)")
     for item in artifacts[:20]:
-        print(f"  - {item.relative_to(REPO_ROOT)} ({item.stat().st_size} bytes)")
+        print(f"  - {item} ({item.stat().st_size} bytes)")
 
-    exe_path = _resolve_electron_executable(debug)
+    exe_path = (
+        external_app / "Contents" / "MacOS" / "StudyVault"
+        if external_app is not None
+        else _resolve_electron_executable(debug)
+    )
+    if exe_path is not None and not exe_path.is_file():
+        exe_path = None
     if exe_path is None:
         print("packaged smoke: no unpacked Electron executable found")
         for candidate in _electron_executable_candidates(debug)[:10]:
@@ -743,11 +883,16 @@ def _packaged_smoke(debug: bool = False) -> int:
 
     data_parent = DIST_DIR if DIST_DIR.exists() else None
     data_dir = Path(tempfile.mkdtemp(prefix="packaged-smoke-lsat-", dir=str(data_parent) if data_parent else None))
+    user_data_dir = data_dir / "user-data"
+    isolated_home = data_dir / "home"
+    user_data_dir.mkdir()
+    isolated_home.mkdir()
     env = os.environ.copy()
     env.pop("QV_SERVICES_DIR", None)
     env["LSATLAB_DATA_DIR"] = str(data_dir)
+    env["HOME"] = str(isolated_home)
     proc = subprocess.Popen(
-        [str(exe_path)],
+        _packaged_smoke_launch_args(exe_path, user_data_dir),
         cwd=exe_path.parent,
         env=env,
         stdout=subprocess.PIPE,
@@ -811,6 +956,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--skip-sidecar-build", action="store_true")
     parser.add_argument("--skip-packaged-smoke", action="store_true")
     parser.add_argument("--electron-debug", action="store_true", help="Use the unpacked Electron build for the desktop leg.")
+    parser.add_argument("--personal-macos-app", default="", help="Validate an already built and signed personal macOS app.")
     parser.add_argument("--dry-run", action="store_true", help="Print the planned labels and exit without writing reports.")
     return parser.parse_args(argv)
 
@@ -819,8 +965,20 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     if args._internal in {"_packaged_smoke", "_packaged_smoke_debug"}:
         return _packaged_smoke(debug=args._internal == "_packaged_smoke_debug")
+    if args._internal == "_packaged_smoke_personal":
+        return _packaged_smoke(external_app=Path(args.personal_macos_app).resolve())
+    if args._internal == "_personal_app_verify":
+        _verify_personal_macos_app(Path(args.personal_macos_app).resolve())
+        return 0
+    if args._internal == "_personal_manifest":
+        _write_personal_release_manifest(Path(args.personal_macos_app).resolve())
+        return 0
     if args._internal:
         raise SystemExit(f"unknown internal command: {args._internal}")
+    if args.personal_macos_app and (
+        args.skip_e2e or args.skip_electron or args.skip_sidecar_build or args.skip_packaged_smoke or args.electron_debug
+    ):
+        raise SystemExit("--personal-macos-app requires the complete non-debug Electron gate without skip flags")
 
     checks = planned_checks(args, py=args.python, node=args.node, npm=args.npm, npx=args.npx)
     if args.dry_run:
@@ -844,6 +1002,7 @@ def main(argv: list[str] | None = None) -> int:
         "skip_electron": bool(args.skip_electron),
         "skip_sidecar_build": bool(args.skip_sidecar_build),
         "skip_packaged_smoke": bool(args.skip_packaged_smoke),
+        "personal_macos_app": bool(args.personal_macos_app),
     }
     report = report_payload(
         checks=results,
@@ -857,7 +1016,19 @@ def main(argv: list[str] | None = None) -> int:
     write_json(report_path, report)
     print(f"\nwrote {report_path}")
 
-    trust_result = write_trust_snapshot(report_path, trust_path, args.trust_tier, args.python, args.timeout)
+    sidecar_provenance = (
+        Path(args.personal_macos_app).resolve() / "Contents" / "Resources" / "services" / "sidecar-provenance.json"
+        if args.personal_macos_app
+        else None
+    )
+    trust_result = write_trust_snapshot(
+        report_path,
+        trust_path,
+        args.trust_tier,
+        args.python,
+        args.timeout,
+        sidecar_provenance=sidecar_provenance,
+    )
     if trust_path.exists():
         print(f"wrote {trust_path}")
     if trust_result["exit_code"] != 0:

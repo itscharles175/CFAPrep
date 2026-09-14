@@ -33,6 +33,24 @@ describe('focus study-session checkpoints', () => {
     expect(restored).toMatchObject({ status: 'paused', accumulatedMs: 20_000, topic: 'cfa:ethics' });
   });
 
+  it('persists and resumes LSAT attribution with its domain-specific fallback topic', () => {
+    const storage = memoryStorage();
+    const start = Date.parse('2026-09-14T12:00:00.000Z');
+    const session = createFocusSession({ domain: 'lsat' }, start);
+    persistFocusSession(session, storage);
+
+    expect(session).toMatchObject({ domain: 'lsat', topic: 'lsat:today' });
+    expect(loadFocusSession(storage, start + 30_000)).toMatchObject({
+      domain: 'lsat',
+      topic: 'lsat:today',
+      status: 'paused',
+    });
+    expect(toStudySession(session, start + 30_000)).toMatchObject({
+      domain: 'lsat',
+      topic: 'lsat:today',
+    });
+  });
+
   it('counts submitted answers rather than generated questions', () => {
     const start = Date.parse('2026-09-14T12:00:00.000Z');
     let session = createFocusSession({}, start);

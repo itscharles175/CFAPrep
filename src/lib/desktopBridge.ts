@@ -27,6 +27,8 @@ export interface StudyVaultRuntimeInfo {
   platform: 'win32' | 'darwin' | 'linux';
   arch: string;
   is_packaged: boolean;
+  native_shell: 'macos-unified';
+  release_tier: 'personal';
 }
 
 export interface StudyVaultSidecarStatus {
@@ -77,9 +79,33 @@ export interface StudyVaultPathEvent {
   paths: string[];
 }
 
+export type StudyVaultLifecycleState = 'suspend' | 'resume' | 'lock' | 'unlock';
+
+export interface StudyVaultLifecycleEvent {
+  state: StudyVaultLifecycleState;
+  at: number;
+}
+
+export type StudyVaultNativeNavigationSource = 'menu' | 'dock' | 'notification' | 'deep-link';
+
+export interface StudyVaultNativeNavigationEvent {
+  route: string;
+  source: StudyVaultNativeNavigationSource;
+}
+
+export interface StudyVaultSidebarToggleEvent {
+  visible: boolean;
+}
+
+export interface StudyVaultBeforeQuitEvent {
+  requestId: string;
+  at: number;
+}
+
 export interface StudyVaultNotificationOptions {
   title: string;
   body: string;
+  route?: string;
 }
 
 export interface StudyVaultBridge {
@@ -110,11 +136,21 @@ export interface StudyVaultBridge {
     get(): Promise<boolean>;
     set(value: boolean): Promise<boolean>;
   };
+  lifecycle?: {
+    acknowledgeBeforeQuit(requestId: string): Promise<{ ok: true }>;
+  };
+  permissions?: {
+    requestMicrophoneLease(): Promise<{ expiresAt: number }>;
+  };
   events: {
     onBootStatus(handler: (status: StudyVaultBootStatus) => void): DesktopUnsubscribe;
     onSecondInstance(handler: (event: StudyVaultSecondInstanceEvent) => void): DesktopUnsubscribe;
     onOpenFile(handler: (event: StudyVaultPathEvent) => void): DesktopUnsubscribe;
     onPdfDrop(handler: (event: StudyVaultPathEvent) => void): DesktopUnsubscribe;
+    onLifecycle(handler: (event: StudyVaultLifecycleEvent) => void): DesktopUnsubscribe;
+    onNativeNavigate(handler: (event: StudyVaultNativeNavigationEvent) => void): DesktopUnsubscribe;
+    onSidebarToggle?(handler: (event: StudyVaultSidebarToggleEvent) => void): DesktopUnsubscribe;
+    onBeforeQuit?(handler: (event: StudyVaultBeforeQuitEvent) => void): DesktopUnsubscribe;
   };
 }
 

@@ -1,0 +1,140 @@
+/* Assessment-local density tuning. The shared shell and other domains keep
+ * their existing editorial spacing. Level III needs its setup context to stay
+ * visible while yielding the first task earlier on a short native window. */
+.mock-exam-level3 .page-header {
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+}
+
+.mock-exam-level3 .page-header-copy {
+  gap: var(--space-2);
+}
+
+.mock-exam-level3 .page-header h1 {
+  font-size: var(--fs-2xl);
+}
+
+.mock-exam-level3 .page-header p {
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.mock-exam-level3 .mock-source-panel,
+.mock-exam-level3 .mock-pathway-panel {
+  margin-bottom: var(--space-3) !important;
+  padding: var(--space-3);
+}
+
+.mock-exam-level3 .mock-source-panel .muted-copy,
+.mock-exam-level3 .mock-pathway-panel .muted-copy {
+  line-height: 1.4;
+}
+
+.mock-exam-level3 .mock-metrics {
+  margin-bottom: var(--space-3);
+}
+
+.mock-exam-level3 .mock-progress-rail {
+  margin-bottom: var(--space-3) !important;
+}
+
+.mock-finish-hint {
+  max-width: 15rem;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+}
+
+@media (max-width: 1100px) {
+  .mock-exam-level3 .page-header {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+
+  .mock-exam-level3 .page-header-copy {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    gap: var(--space-1);
+  }
+
+  .mock-exam-level3 .page-header h1,
+  .mock-exam-level3 .page-header p {
+    max-width: none;
+  }
+
+  .mock-exam-level3 .page-header > .action-bar {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    gap: var(--space-2);
+  }
+
+  /* At 960px the native sidebar leaves a narrow content rail. Keep the four
+   * progress signals on one compact row so the first task is reachable without
+   * sacrificing the denominator labels. */
+  .mock-exam-level3 .mock-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+
+  .mock-exam-level3 .mock-metrics .metric-tile {
+    gap: var(--space-2);
+    min-height: 80px;
+  }
+
+  .mock-exam-level3 .mock-metrics .metric-tile-icon {
+    width: 30px;
+    height: 30px;
+    flex-basis: 30px;
+  }
+
+  .mock-exam-level3 .mock-metrics .metric-tile-copy strong {
+    font-size: var(--fs-xl);
+  }
+
+  .mock-exam-level3 .mock-metrics .metric-tile-copy small {
+    font-size: var(--fs-xs);
+    line-height: 1.25;
+  }
+
+  .mock-exam-level3 .mock-source-panel,
+  .mock-exam-level3 .mock-pathway-panel {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .mock-exam-level3 .mock-source-panel > .inline-cluster-between,
+  .mock-exam-level3 .mock-pathway-panel > .inline-cluster-between {
+    gap: var(--space-2);
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1100px) {
+  /* A 960px native window has roughly 614px after the persistent rail. Both
+   * setup panels still fit as concise two-column rows at that width; below the
+   * rail breakpoint they return to the normal wrapping treatment. */
+  .mock-exam-level3 .mock-source-panel > .inline-cluster-between,
+  .mock-exam-level3 .mock-pathway-panel > .inline-cluster-between {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  .mock-exam-level3 .mock-source-panel > .inline-cluster-between > :first-child,
+  .mock-exam-level3 .mock-pathway-panel > .inline-cluster-between > :first-child {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .mock-exam-level3 .mock-source-panel > .inline-cluster-between > .inline-cluster,
+  .mock-exam-level3 .mock-pathway-panel > .inline-cluster-between > .inline-cluster {
+    flex: 0 0 auto;
+  }
+
+  /* The selector is the last control in its setup panel, so the shared
+   * segmented row's default bottom breathing room only pushes the task away. */
+  .mock-exam-level3 .mock-source-panel .segmented-row,
+  .mock-exam-level3 .mock-pathway-panel .segmented-row {
+    margin-bottom: 0;
+  }
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from argparse import Namespace
 from datetime import datetime, timezone
@@ -26,6 +27,7 @@ def _args(**overrides):
         "skip_sidecar_build": False,
         "skip_packaged_smoke": False,
         "electron_debug": False,
+        "personal_macos_app": "",
     }
     base.update(overrides)
     return Namespace(**base)
@@ -127,6 +129,50 @@ def test_release_local_required_labels_match_trust_manifest_contract():
     release_local = _load_release_local()
 
     assert tuple(release_local.REQUIRED_RELEASE_LOCAL_LABELS) == trust_mod.REQUIRED_RELEASE_LOCAL_LABELS
+
+
+def test_personal_macos_external_plan_uses_exact_app_without_developer_id_workflow(tmp_path):
+    release_local = _load_release_local()
+    app_path = tmp_path / "Signed StudyVault.app"
+    checks = release_local.planned_checks(
+        _args(personal_macos_app=str(app_path)), py="python", node="node", npm="npm"
+    )
+    labels = [check.label for check in checks]
+
+    assert "backend sidecar build" in labels
+    assert "electron build" in labels
+    assert "packaged app smoke" in labels
+    assert "release manifest/SBOM" in labels
+    assert "release signing preflight" not in labels
+    assert "release signing evidence" not in labels
+    desktop_steps = [step.args for check in checks for step in check.steps if check.label in {
+        "backend sidecar build", "electron build", "packaged app smoke", "release manifest/SBOM"
+    }]
+    assert all(str(app_path.resolve()) in step for step in desktop_steps)
+    assert not any("electron:build" in argument for step in desktop_steps for argument in step)
+    assert not any("release-signing.mjs" in argument for step in desktop_steps for argument in step)
+
+    completed = subprocess.run(
+        [sys.executable, str(Path(release_local.__file__)), "--dry-run", "--personal-macos-app", str(app_path)],
+        check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert completed.returncode == 0, completed.stderr
+    planned = completed.stdout.splitlines()
+    assert "electron build" in planned
+    assert "release signing preflight" not in planned
+    assert "release signing evidence" not in planned
+
+
+def test_personal_macos_external_plan_rejects_every_skip_flag(tmp_path):
+    release_local = _load_release_local()
+    app_path = tmp_path / "Signed StudyVault.app"
+    for flag in ("--skip-e2e", "--skip-electron", "--skip-sidecar-build", "--skip-packaged-smoke"):
+        completed = subprocess.run(
+            [sys.executable, str(Path(release_local.__file__)), "--dry-run", "--personal-macos-app", str(app_path), flag],
+            check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert completed.returncode != 0
+        assert "complete non-debug Electron gate without skip flags" in completed.stderr
 
 
 def test_release_local_skip_flags_omit_only_optional_heavy_legs():
@@ -232,6 +278,24 @@ def test_release_local_trust_snapshot_runs_check_mode(monkeypatch, tmp_path):
     assert captured["step"].env["LSATLAB_RELEASE_LOCAL_REPORT"].endswith("release_local_report.json")
 
 
+def test_personal_trust_snapshot_binds_packaged_sidecar_provenance(monkeypatch, tmp_path):
+    release_local = _load_release_local()
+    captured = {}
+    monkeypatch.setattr(
+        release_local,
+        "_run_step",
+        lambda step, timeout: captured.setdefault("step", step) or {"exit_code": 0},
+    )
+    provenance = tmp_path / "StudyVault.app" / "Contents" / "Resources" / "services" / "sidecar-provenance.json"
+
+    release_local.write_trust_snapshot(
+        tmp_path / "report.json", tmp_path / "trust.json", "packaged", "python", 30,
+        sidecar_provenance=provenance,
+    )
+
+    assert captured["step"].env["STUDYVAULT_SIDECAR_PROVENANCE"] == str(provenance)
+
+
 def test_release_local_run_check_records_spawn_failure():
     release_local = _load_release_local()
 
@@ -256,6 +320,16 @@ def test_packaged_smoke_uses_electron_resources_layout():
     assert services_dir == release_local.REPO_ROOT / "release" / "resources" / "services"
     assert release_local._lsat_sidecar_path(services_dir).parent.name == "lsat-backend"
     assert "release/*.msi" in release_local._packaged_bundle_patterns(False)
+
+
+def test_packaged_smoke_launch_isolates_chromium_profile_and_keychain(tmp_path):
+    release_local = _load_release_local()
+    executable = tmp_path / "StudyVault"
+    user_data = tmp_path / "user-data"
+
+    command = release_local._packaged_smoke_launch_args(executable, user_data)
+
+    assert command == [str(executable), f"--user-data-dir={user_data}", "--use-mock-keychain"]
 
 
 def test_packaged_smoke_log_failure_catches_startup_errors():

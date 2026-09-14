@@ -22,6 +22,7 @@ import {
 } from "@lsat/lib/hooks";
 import { StudyPtWizard } from "@lsat/components/practice/study-pt-wizard";
 import { formatClock } from "@lsat/lib/utils";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 
 /** R4-B1 — unified practice hub. */
 export default function Practice() {
@@ -29,7 +30,7 @@ export default function Practice() {
   const qc = useQueryClient();
   const pts = usePrepTests();
   const srs = useSrsDue();
-  const due = srs.data?.data?.due_count ?? 0;
+  const srsIsSample = srs.data?.usingSample ?? false;
   const list = pts.data?.data ?? [];
   const primaryId = list[0]?.id ?? 1;
   const primary = usePrepTest(primaryId);
@@ -42,6 +43,28 @@ export default function Practice() {
     return (
       <PageLayout title="Practice" width="lg">
         <ErrorState error={pts.error} onRetry={pts.refetch} />
+      </PageLayout>
+    );
+  }
+
+  // A fallback PrepTest/SRS envelope is useful to exercise the renderer, not
+  // evidence that the learner has a due queue or a diagnostic. Keep the hub
+  // recoverable and quiet until the sidecar returns real data.
+  const prepTestsAreSample = pts.data?.usingSample || primary.data?.usingSample;
+  if (prepTestsAreSample) {
+    return (
+      <PageLayout
+        title="Practice"
+        description="Timed sections, drills, SRS, and blind review — one place to start."
+        width="lg"
+      >
+        <SampleDataRecovery
+          section="Practice"
+          affectedSections={["PrepTests and timed sections", "Review queue", "SRS workload"]}
+          onRetry={() => {
+            void Promise.all([pts.refetch(), primary.refetch(), srs.refetch()]);
+          }}
+        />
       </PageLayout>
     );
   }
@@ -76,8 +99,12 @@ export default function Practice() {
         <ActionCard
           icon={<Flag className="h-5 w-5" />}
           title="Review queue"
-          description="Buckets, error log, SRS."
-          action={due > 0 ? `${due} SRS due · Review` : "Open review"}
+          description={
+            srsIsSample
+              ? "SRS workload is unavailable until the LSAT backend reconnects."
+              : "Buckets, error log, SRS."
+          }
+          action="Open review"
           onClick={() => navigate("/review")}
         />
       </div>

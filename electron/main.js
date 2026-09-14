@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -8,10 +9,13 @@ import {
   crashReporter,
   dialog,
   ipcMain,
+  Menu,
   net,
   Notification,
+  powerMonitor,
   protocol,
   safeStorage,
+  screen,
   session,
   shell,
 } from 'electron';
@@ -24,19 +28,25 @@ import { APP_ORIGIN, installAppProtocol, registerAppScheme } from './protocol.js
 import { installLsatAuthorization } from './session-auth.js';
 import { buildServiceSpecs, resolveServicesDirectory } from './service-specs.js';
 import { createLsatToken, SidecarManager } from './sidecar-manager.js';
+import { SidecarOwnershipLedger } from './sidecar-ownership.js';
 import {
   configureSessionSecurity,
   hardenWebContents,
   normalizePopoutUrl,
   validatedDevServerUrl,
+  MicrophonePermissionLease,
 } from './window-security.js';
 import { OwnedChildWatchdog } from './watchdog.js';
+import { installNativeMenus, nativeRouteFromDeepLink } from './native-shell.js';
+import { installWindowStatePersistence, readWindowState } from './window-state.js';
 
 const electronDirectory = path.dirname(fileURLToPath(import.meta.url));
 const preloadPath = path.join(electronDirectory, 'preload.cjs');
 const distRoot = path.join(app.getAppPath(), 'dist');
 
 registerAppScheme(protocol);
+app.setName('StudyVault');
+if (app.isPackaged) app.setAsDefaultProtocolClient('studyvault');
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -50,6 +60,10 @@ if (!hasSingleInstanceLock) {
   let allowQuit = false;
   let logger = null;
   let watchdog = null;
+  let removeWindowStatePersistence = null;
+  let sidebarVisible = true;
+  let pendingQuitCheckpoint = null;
+  const microphoneLease = new MicrophonePermissionLease();
   const rendererEventQueue = [];
   const pendingOpenFiles = [];
   const popouts = new Set();
@@ -90,6 +104,9 @@ if (!hasSingleInstanceLock) {
       show: false,
       backgroundColor: '#ffffff',
       title: 'StudyVault',
+      ...(process.platform === 'darwin'
+        ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 18 } }
+        : {}),
       ...overrides,
       webPreferences: {
         preload: preloadPath,
@@ -123,12 +140,25 @@ if (!hasSingleInstanceLock) {
   }
 
   async function createMainWindow() {
-    const window = new BrowserWindow(browserWindowOptions());
+    const restoredState = readWindowState(app.getPath('userData'), screen.getAllDisplays(), logger);
+    const window = new BrowserWindow(browserWindowOptions(restoredState?.bounds));
     mainWindow = window;
+    removeWindowStatePersistence?.();
+    removeWindowStatePersistence = installWindowStatePersistence(window, {
+      userDataPath: app.getPath('userData'),
+      screen,
+      logger,
+    });
     window.webContents.on('did-finish-load', flushRendererEvents);
     window.on('closed', () => {
-      if (mainWindow === window) mainWindow = null;
+      if (mainWindow === window) {
+        removeWindowStatePersistence?.();
+        removeWindowStatePersistence = null;
+        mainWindow = null;
+      }
     });
+    if (restoredState?.maximized) window.maximize();
+    if (restoredState?.fullscreen) window.setFullScreen(true);
     await loadStudyVaultWindow(window, devServerUrl ?? `${APP_ORIGIN}/`);
     return window;
   }
@@ -160,6 +190,48 @@ if (!hasSingleInstanceLock) {
     mainWindow.focus();
   }
 
+  function navigateNative(route, source) {
+    focusMainWindow();
+    emitEvent(IPC_EVENTS.NATIVE_NAVIGATE, { route, source });
+  }
+
+  function toggleSidebar() {
+    sidebarVisible = !sidebarVisible;
+    emitEvent(IPC_EVENTS.SIDEBAR_TOGGLE, { visible: sidebarVisible });
+  }
+
+  async function openStudyDocument() {
+    if (!mainWindow || mainWindow.isDestroyed() || !nativeFiles) return;
+    const files = await nativeFiles.pickFiles(mainWindow);
+    if (files.length > 0) emitEvent(IPC_EVENTS.OPEN_FILE, { paths: files.map((file) => file.path) });
+  }
+
+  function acknowledgeBeforeQuit(requestId) {
+    if (pendingQuitCheckpoint?.requestId === requestId) pendingQuitCheckpoint.resolve(true);
+  }
+
+  async function waitForRendererCheckpoint(timeoutMs = 2500) {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoadingMainFrame()) return false;
+    const requestId = randomUUID();
+    const acknowledged = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      pendingQuitCheckpoint = {
+        requestId,
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+      };
+      emitEvent(IPC_EVENTS.BEFORE_QUIT, { requestId, at: Date.now() });
+    });
+    pendingQuitCheckpoint = null;
+    logger?.[acknowledged ? 'info' : 'warn'](
+      acknowledged ? 'renderer_checkpoint_acknowledged' : 'renderer_checkpoint_timeout',
+      { timeout_ms: timeoutMs },
+    );
+    return acknowledged;
+  }
+
   async function authorizeLaunchPaths(paths) {
     const authorized = [];
     for (const candidate of paths) {
@@ -179,6 +251,7 @@ if (!hasSingleInstanceLock) {
       pendingOpenFiles.push({ type: 'second-instance', argv, cwd });
       return;
     }
+    forwardDeepLinks(argv);
     const paths = await authorizeLaunchPaths(extractLaunchFilePaths(argv));
     emitEvent(IPC_EVENTS.SECOND_INSTANCE, { argv, cwd, paths });
     if (paths.length > 0) emitEvent(IPC_EVENTS.OPEN_FILE, { paths });
@@ -190,7 +263,11 @@ if (!hasSingleInstanceLock) {
     const links = extractDeepLinks(argv);
     if (links.length === 0) return false;
     focusMainWindow();
-    for (const link of links) emitEvent(IPC_EVENTS.SECOND_INSTANCE, { argv: [link.href], cwd: '', paths: [] });
+    for (const link of links) {
+      emitEvent(IPC_EVENTS.SECOND_INSTANCE, { argv: [link.href], cwd: '', paths: [] });
+      const route = nativeRouteFromDeepLink(link);
+      if (route) navigateNative(route, 'deep-link');
+    }
     return true;
   }
 
@@ -207,6 +284,7 @@ if (!hasSingleInstanceLock) {
     if (shutdownPromise) return shutdownPromise;
     shutdownPromise = (async () => {
       logger?.info('shutdown_started', { reason });
+      await waitForRendererCheckpoint();
       removeIpcHandlers?.();
       removeIpcHandlers = null;
       await sidecars?.stopAll();
@@ -264,7 +342,7 @@ if (!hasSingleInstanceLock) {
       app.on('child-process-gone', (_event, details) => logger.crash('electron_child_process_gone', details));
 
       installAppProtocol({ protocol, net, distRoot, logger });
-      configureSessionSecurity(session.defaultSession, { devServerUrl });
+      configureSessionSecurity(session.defaultSession, { devServerUrl, microphoneLease });
 
       const token = createLsatToken();
       const keyStoreOptions = { safeStorage, userDataPath: app.getPath('userData') };
@@ -280,9 +358,15 @@ if (!hasSingleInstanceLock) {
       }
 
       try {
+        const nativeWatchdogExecutable = path.join(
+          app.isPackaged ? process.resourcesPath : path.join(electronDirectory, 'resources'),
+          'bin',
+          'studyvault-watchdog',
+        );
         watchdog = await OwnedChildWatchdog.start({
           scriptPath: path.join(electronDirectory, 'child-watchdog.cjs'),
           logger,
+          nativeExecutable: process.platform === 'darwin' ? nativeWatchdogExecutable : null,
         });
       } catch (error) {
         logger.crash('watchdog_start_failed', { error });
@@ -310,6 +394,7 @@ if (!hasSingleInstanceLock) {
         lsatToken: token,
         logger,
         watchdog,
+        ownershipLedger: new SidecarOwnershipLedger({ userDataPath: app.getPath('userData'), logger }),
       });
       watchdog?.onFailure(() => {
         logger.crash('watchdog_guard_lost');
@@ -329,9 +414,53 @@ if (!hasSingleInstanceLock) {
         devServerUrl,
         emitEvent,
         createPopout,
+        navigateNative,
+        acknowledgeBeforeQuit,
+        microphoneLease,
       });
 
       await createMainWindow();
+      installNativeMenus({
+        app,
+        Menu,
+        navigate: navigateNative,
+        openDocument: () => void openStudyDocument(),
+        toggleSidebar,
+        development: !app.isPackaged,
+      });
+
+      let wakeRecoveryPromise = null;
+      const quiesceForSleep = (state) => {
+        sidecars.quiesce(state);
+        emitEvent(IPC_EVENTS.LIFECYCLE, { state, at: Date.now() });
+      };
+      const recoverAfterWake = async (state) => {
+        emitEvent(IPC_EVENTS.LIFECYCLE, { state, at: Date.now() });
+        if (wakeRecoveryPromise) return wakeRecoveryPromise;
+        wakeRecoveryPromise = (async () => {
+          try {
+            try {
+              const refreshedKey = await lsatDbKeyStore.getOrCreate();
+              sidecars.setLsatEncryptionKey(refreshedKey, null);
+            } catch (error) {
+              const reason = `LSAT DB encryption key unavailable: ${error.message}`;
+              sidecars.setLsatEncryptionKey(null, reason);
+              logger.error('lsat_db_key_recovery_failed', { error });
+            }
+            const bootStatus = await sidecars.recover(state);
+            emitEvent(IPC_EVENTS.BOOT_STATUS, bootStatus);
+          } catch (error) {
+            logger.error('sidecar_wake_recovery_failed', { state, error });
+          } finally {
+            wakeRecoveryPromise = null;
+          }
+        })();
+        return wakeRecoveryPromise;
+      };
+      powerMonitor.on('suspend', () => quiesceForSleep('suspend'));
+      powerMonitor.on('lock-screen', () => quiesceForSleep('lock'));
+      powerMonitor.on('resume', () => void recoverAfterWake('resume'));
+      powerMonitor.on('unlock-screen', () => void recoverAfterWake('unlock'));
       await forwardOpenFiles(extractLaunchFilePaths(process.argv));
       // Windows delivers a deep link as an argv entry rather than via `open-url`,
       // and a cold launch has no second-instance event to carry it.

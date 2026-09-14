@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_STUDY_CONTEXT,
+  contextSwitchHref,
   domainForLocation,
   normalizeStudyContext,
   readStudyContext,
+  rememberStudyContextRoute,
+  studyContextReturnHref,
   workspaceHref,
   writeStudyContext,
 } from './studyContext';
@@ -33,8 +36,24 @@ describe('study context', () => {
 
     const lsat = { ...cfa, domain: 'lsat' } as const;
     expect(workspaceHref('practice', lsat)).toBe('/lsat/practice');
+    expect(workspaceHref('learn', lsat)).toBe('/lsat/dashboard');
     expect(workspaceHref('review', lsat)).toBe('/lsat/review');
     expect(workspaceHref('progress', lsat)).toBe('/lsat/analytics');
+
+    expect(workspaceHref('practice', { ...cfa, domain: 'quant' })).toBe('/quant/risk-management');
+    expect(workspaceHref('practice', { ...cfa, domain: 'excel' })).toBe('/excel/dcf-modeling');
+  });
+
+  it('keeps a separate return point for each curriculum and workspace', () => {
+    rememberStudyContextRoute('lsat', 'learn', '/lsat/rc-lab');
+    rememberStudyContextRoute('lsat', 'practice', '/lsat/drills');
+    rememberStudyContextRoute('cfa', 'learn', '/cfa/level2/equity');
+
+    const lsat = { domain: 'lsat', cfaLevel: 'level1', goal: 'balanced' } as const;
+    expect(studyContextReturnHref('lsat', 'learn')).toBe('/lsat/rc-lab');
+    expect(contextSwitchHref('learn', lsat)).toBe('/lsat/rc-lab');
+    expect(contextSwitchHref('practice', lsat)).toBe('/lsat/drills');
+    expect(contextSwitchHref('learn', { ...lsat, domain: 'cfa' })).toBe('/cfa/level2/equity');
   });
 
   it('recognizes domains from existing deep links', () => {

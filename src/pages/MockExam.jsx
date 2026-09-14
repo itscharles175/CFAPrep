@@ -17,6 +17,8 @@ import {
 import { SourceRail } from '../components/SourceContext';
 import { critiqueConstructedResponse, explainWrongAnswer, getLlmSettings } from '../lib/localLlm';
 import { generateMockExam, getCachedGeneratedMock, saveCachedGeneratedMock, toSyntheticMockContent } from '../lib/mockGenerator';
+import { getFinishSectionHint, getMockExamProgress } from './mockExamPresentation';
+import './mockExamPresentation.css';
 
 function nowMs() {
   return Date.now();
@@ -293,6 +295,15 @@ export default function MockExam() {
   const answeredQuestions = questionRows.filter((question) => selected[question.id] !== undefined).length;
   const answeredConstructed = constructedItems.filter((constructed) => constructedResponses[constructed.id]?.trim()).length;
   const answered = answeredQuestions + answeredConstructed;
+  const totalResponses = questionRows.length + constructedItems.length;
+  const currentItem = safeCurrent + 1;
+  const progressCopy = getMockExamProgress({
+    answered,
+    totalResponses,
+    currentItem,
+    totalItems: items.length,
+  });
+  const finishSectionHint = getFinishSectionHint(answered);
   const score = questionRows.filter((question) => selected[question.id] === question.correct).length;
   const unansweredItems = items.filter((mockItem) => {
     if (mockItem.type === 'constructed-response') return !constructedResponses[mockItem.constructed.id]?.trim();
@@ -732,7 +743,7 @@ export default function MockExam() {
   }
 
   return (
-    <div className="page-container">
+    <div className={`page-container mock-exam-page ${level === 'level3' ? 'mock-exam-level3' : ''}`}>
       <PageHeader
         badge="MOCK SECTION"
         title={mock.title}
@@ -740,12 +751,25 @@ export default function MockExam() {
         actions={
           <>
             <button className="btn btn-secondary" onClick={togglePause}>{paused ? 'Resume' : 'Pause'}</button>
-            <button className="btn btn-primary" onClick={handleFinishRequest} disabled={answered === 0}>Finish Section</button>
+            {finishSectionHint && (
+              <span id="finish-section-hint" className="mock-finish-hint" role="status">
+                {finishSectionHint}
+              </span>
+            )}
+            <button
+              className="btn btn-primary"
+              onClick={handleFinishRequest}
+              disabled={answered === 0}
+              aria-describedby={finishSectionHint ? 'finish-section-hint' : undefined}
+              title={finishSectionHint || undefined}
+            >
+              Finish Section
+            </button>
           </>
         }
       />
 
-      <Surface density="compact" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+      <Surface density="compact" status="accent" className="mock-source-panel" style={{ marginBottom: 'var(--space-6)' }}>
         <InlineCluster align="between">
           <div>
             <StatusBadge tone="accent">Mock source</StatusBadge>
@@ -822,7 +846,7 @@ export default function MockExam() {
       </Surface>
 
       {level === 'level3' && (
-        <Surface density="compact" status="exam" style={{ marginBottom: 'var(--space-6)' }}>
+        <Surface density="compact" status="exam" className="mock-pathway-panel" style={{ marginBottom: 'var(--space-6)' }}>
           <InlineCluster align="between">
             <div>
               <StatusBadge tone="exam">Level III pathway exam mode</StatusBadge>
@@ -849,14 +873,14 @@ export default function MockExam() {
         </Surface>
       )}
 
-      <div className="grid-4 page-metrics">
-        <MetricCard label="Answered" value={`${answered}/${questionRows.length + constructedItems.length}`} detail="Question and response items" icon={ListChecks} />
+      <div className="grid-4 page-metrics mock-metrics">
+        <MetricCard label="Answered responses" value={progressCopy.answered} detail={progressCopy.answeredDetail} icon={ListChecks} />
         <MetricCard label="Flagged" value={flags.size} detail="Marked for review" icon={Flag} tone="warning" />
-        <MetricCard label="Item" value={current + 1} detail={topicTitleMap.get(itemTopic(item)) || itemTopic(item)} icon={Timer} tone="success" />
-        <MetricCard label="Progress" value={`${Math.round(((current + 1) / items.length) * 100)}%`} detail="Section navigation" icon={Trophy} />
+        <MetricCard label="Section item" value={progressCopy.item} detail={topicTitleMap.get(itemTopic(item)) || progressCopy.itemDetail} icon={Timer} tone="success" />
+        <MetricCard label="Item progress" value={progressCopy.progress} detail={progressCopy.progressDetail} icon={Trophy} />
       </div>
-      <div style={{ marginBottom: 'var(--space-6)' }}>
-        <ProgressRail value={current + 1} max={items.length} label="Mock navigation" detail={`${current + 1}/${items.length}`} tone="exam" />
+      <div className="mock-progress-rail" style={{ marginBottom: 'var(--space-6)' }}>
+        <ProgressRail value={currentItem} max={items.length} label="Section item progress" detail={progressCopy.railDetail} tone="exam" />
       </div>
 
       {paused && (

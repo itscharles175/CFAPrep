@@ -310,8 +310,23 @@ const routeActionsByRoute: Partial<Record<AppRouteId, AppRoute['routeActions']>>
 };
 
 function breadcrumbsFor(route: BaseAppRoute) {
-  const root = [{ label: 'Today', path: '/' }];
-  if (route.id === 'today' || route.id === 'today-alias') return root;
+  if (route.id === 'today' || route.id === 'today-alias') return [{ label: 'Today', path: '/' }];
+  const workspaceCrumb = {
+    label: route.workspace === 'today'
+      ? 'Today'
+      : route.workspace === 'learn'
+        ? 'Learn'
+        : route.workspace === 'practice'
+          ? 'Practice'
+          : route.workspace === 'review'
+            ? 'Review'
+            : route.workspace === 'progress'
+              ? 'Progress'
+              : route.workspace === 'library'
+                ? 'Library'
+                : 'Utilities',
+    path: route.path,
+  };
   const domainCrumb =
     route.domain === 'cfa'
       ? { label: 'CFA', path: '/cfa' }
@@ -322,9 +337,13 @@ function breadcrumbsFor(route: BaseAppRoute) {
           : route.domain === 'ops'
             ? { label: 'Operations', path: '/system' }
             : route.domain === 'vault'
-              ? { label: 'Vault', path: '/vault' }
-              : null;
-  return [...root, ...(domainCrumb && domainCrumb.path !== route.path ? [domainCrumb] : []), { label: routeLabels[route.id] || route.expectedText, path: route.smokeRoute || route.screenshotRoute || route.path }];
+            ? { label: 'Vault', path: '/vault' }
+            : null;
+  return [
+    workspaceCrumb,
+    ...(domainCrumb && domainCrumb.path !== route.path ? [domainCrumb] : []),
+    { label: routeLabels[route.id] || route.expectedText, path: route.smokeRoute || route.screenshotRoute || route.path },
+  ];
 }
 
 function keyboardHelpFor(route: { id: AppRouteId }, scopes: string[]): AppRoute['keyboardHelp'] {
@@ -533,7 +552,7 @@ const LSAT_ROUTE_PREFIX = '/lsat';
 // included in the gates; one absent (or that maps to a non-stable heading) is
 // skipped. Keyed by the LSAT-manifest path (app-relative, no /lsat prefix).
 const lsatRouteExpectedText: Record<string, string> = {
-  '/': 'Notebook OS',
+  '/': 'Notebook & Curriculum',
   '/practice': 'Practice',
   '/preptests': 'PrepTests',
   '/drills': 'Drills',
@@ -679,7 +698,7 @@ const lsatIconKeys = new Map<LsatRouteManifestEntry['icon'], string>([
 // entries never enter the screenshot/smoke sets (they need a started session).
 const lsatDynamicExpectedText: Record<string, string> = {
   '/dashboard': 'Dashboard',
-  '/notebook': 'Notebook OS',
+  '/notebook': 'Notebook & Curriculum',
   '/tutor': 'Tutor',
   '/review/history': 'Session history',
   '/bank/tag-review': 'Tag review',
@@ -860,15 +879,29 @@ export function routeForLocation(pathname: string): AppRoute | undefined {
   const exact = routeTreeByPath.get(cleanPath);
   if (exact) return exact;
   const inputSegments = cleanPath.split('/').filter(Boolean);
-  return routeTree.find((route) => {
+  const matches = routeTree.filter((route) => {
     const patternSegments = route.path.split('/').filter(Boolean);
     if (patternSegments.length !== inputSegments.length) return false;
     return patternSegments.every((segment, index) => segment.startsWith(':') || segment === inputSegments[index]);
   });
+  // A generic dynamic route (for example /cfa/:level/:topic) must not eclipse a
+  // more specific one (/cfa/:level/mock). Sorting by static segments makes the
+  // workspace highlight describe the activity actually on screen.
+  return matches.sort((left, right) => {
+    const leftSegments = left.path.split('/').filter(Boolean);
+    const rightSegments = right.path.split('/').filter(Boolean);
+    const leftStatic = leftSegments.filter((segment) => !segment.startsWith(':')).length;
+    const rightStatic = rightSegments.filter((segment) => !segment.startsWith(':')).length;
+    return rightStatic - leftStatic || rightSegments.length - leftSegments.length;
+  })[0];
 }
 
 /** Resolve the primary workspace highlighted by a concrete URL. */
 export function workspaceForLocation(pathname: string): StudyWorkspace {
+  // Quant and Excel do not expose a separate assessment router. These named
+  // labs/exercises are their honest practice entry points and must retain the
+  // Practice workspace state instead of competing with Learn.
+  if (pathname === '/quant/risk-management' || pathname === '/excel/dcf-modeling') return 'practice';
   return routeForLocation(pathname)?.workspace ?? 'learn';
 }
 

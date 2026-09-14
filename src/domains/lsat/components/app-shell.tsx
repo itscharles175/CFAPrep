@@ -30,7 +30,7 @@ function MainScrollArea({
   pathname: string;
   children: React.ReactNode;
 }) {
-  const ref = useRef<HTMLElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const prevPath = useRef(pathname);
 
   useEffect(() => {
@@ -54,13 +54,15 @@ function MainScrollArea({
   }, [pathname]);
 
   return (
-    <main
+    <div
       ref={ref}
       id="main-content"
       className="scroll-thin flex-1 overflow-y-auto p-3 sm:p-6"
+      role="region"
+      aria-label="LSAT content"
       tabIndex={-1}
     >
       {children}
-    </main>
+    </div>
   );
 }

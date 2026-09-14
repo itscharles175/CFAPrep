@@ -97,6 +97,12 @@ describe('AccessibleQuestionRunner (A11Y-2)', () => {
     const status = screen.getByRole('status');
     expect(status).toHaveTextContent('Incorrect');
     expect(status).toHaveTextContent('Beta is the second letter.');
+    const feedback = status.querySelector('.quiz-explanation');
+    expect(feedback).toHaveStyle({
+      background: 'rgba(239, 68, 68, 0.07)',
+      borderColor: 'rgba(239, 68, 68, 0.28)',
+    });
+    expect(screen.getByRole('heading', { name: 'Incorrect' })).toHaveStyle({ color: 'var(--danger)' });
   });
 
   it('locks options once confirmed (no further selection)', () => {

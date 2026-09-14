@@ -27,6 +27,7 @@ import TopBar, { type LsatShellMode } from './Layout/TopBar';
 import { ThemeProvider } from '../context/ThemeContext';
 import { ToastProvider } from '../context/ToastContext';
 import { OfflineProvider } from '../context/OfflineContext';
+import { getDesktopBridge, registerDesktopSubscription } from '../lib/desktopBridge';
 
 interface SharedLayoutProps {
   /** Optional content. When omitted, a routed <Outlet/> is rendered (so this can
@@ -36,7 +37,9 @@ interface SharedLayoutProps {
 
 function focusFirstVisibleSidebarTarget() {
   const targets = Array.from(
-    document.querySelectorAll<HTMLElement>('#main-sidebar a[href], #main-sidebar button:not([disabled])'),
+    document.querySelectorAll<HTMLElement>(
+      '#main-sidebar a[href], #main-sidebar button:not([disabled]), #main-sidebar input:not([disabled]), #main-sidebar select:not([disabled]), #main-sidebar textarea:not([disabled]), #main-sidebar summary, #main-sidebar [tabindex]:not([tabindex="-1"])',
+    ),
   );
   const visibleTarget = targets.find((element) => {
     const style = window.getComputedStyle(element);
@@ -50,6 +53,21 @@ function focusFirstVisibleSidebarTarget() {
   }
 }
 
+function visibleSidebarFocusTargets(): HTMLElement[] {
+  return Array.from(
+    document.querySelectorAll<HTMLElement>(
+      '#main-sidebar a[href], #main-sidebar button:not([disabled]), #main-sidebar input:not([disabled]), #main-sidebar select:not([disabled]), #main-sidebar textarea:not([disabled]), #main-sidebar summary, #main-sidebar [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => {
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && !element.hasAttribute('hidden')
+      && (!element.closest('details:not([open])') || element.matches('summary'))
+      && !element.closest('[inert]');
+  });
+}
+
 export default function SharedLayout({ children }: SharedLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -60,6 +78,16 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
   const [lsatMode, setLsatMode] = useState<LsatShellMode>('study');
   const location = useLocation();
   const mobileNavHidden = mobileViewport && !mobileNavOpen;
+  const mobileDrawerOpen = mobileViewport && mobileNavOpen;
+
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.events?.onSidebarToggle) return undefined;
+    return registerDesktopSubscription(() => bridge.events.onSidebarToggle!(() => {
+      setSidebarCollapsed((collapsed) => !collapsed);
+      setMobileNavOpen(false);
+    }));
+  }, []);
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return undefined;
@@ -72,7 +100,7 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
 
   useEffect(() => {
     if (typeof document === 'undefined' || typeof window === 'undefined') return undefined;
-    if (!mobileNavOpen) {
+    if (!mobileDrawerOpen) {
       if (mobileNavWasOpen.current) {
         (document.querySelector('.mobile-menu-button') as HTMLElement | null)?.focus?.();
       }
@@ -87,6 +115,28 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') setMobileNavOpen(false);
+      if (event.key !== 'Tab') return;
+
+      const targets = visibleSidebarFocusTargets();
+      if (!targets.length) {
+        event.preventDefault();
+        return;
+      }
+
+      const active = document.activeElement as HTMLElement | null;
+      const sidebar = document.querySelector('#main-sidebar');
+      const first = targets[0];
+      const last = targets[targets.length - 1];
+      if (!active || !sidebar?.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus({ preventScroll: true });
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown);
@@ -94,7 +144,26 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
       window.clearTimeout(focusTimer);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [mobileNavOpen]);
+  }, [mobileDrawerOpen]);
+
+  // Keep the page behind the off-canvas drawer out of the accessibility tree
+  // and keyboard order. The drawer is a transient navigation surface; allowing
+  // focus to continue into the obscured page makes keyboard navigation feel as
+  // if it has escaped the current task.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const background = [
+      document.querySelector<HTMLElement>('.skip-to-main'),
+      document.querySelector<HTMLElement>('.topbar'),
+      document.querySelector<HTMLElement>('#main'),
+    ].filter((element): element is HTMLElement => Boolean(element));
+    if (mobileDrawerOpen) {
+      background.forEach((element) => element.setAttribute('inert', ''));
+    } else {
+      background.forEach((element) => element.removeAttribute('inert'));
+    }
+    return () => background.forEach((element) => element.removeAttribute('inert'));
+  }, [mobileDrawerOpen]);
 
   // Per-domain accent: mirror App.jsx — drive a `data-domain` body attribute from
   // the URL so tokens.css re-tints chips/buttons. The unified shell adds `lsat`.
@@ -140,6 +209,7 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
         type="button"
         className={`mobile-scrim ${mobileNavOpen ? 'open' : ''}`}
         aria-label="Close navigation"
+        tabIndex={-1}
         onClick={() => setMobileNavOpen(false)}
       />
       <TopBar

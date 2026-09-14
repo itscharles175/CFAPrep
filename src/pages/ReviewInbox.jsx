@@ -23,6 +23,7 @@ import { recordStudyContext, getResumeTarget, clearResumeHandle } from '../lib/s
 // degrades to overdue-only when no snapshot is available).
 import { readLatestAbilitySnapshot } from '../lib/psychometrics/abilitySnapshots';
 import { useStudyContext, workspaceHref } from '../lib/studyContext';
+import './reviewProgressScope.css';
 
 const filters = [
   { value: 'all', label: 'All' },
@@ -40,6 +41,26 @@ const filters = [
 // from the same `filters` list the SegmentedControl renders so the URL contract
 // and the UI can't drift. An unknown / absent param falls back to "all".
 const VALID_FILTERS = new Set(filters.map((f) => f.value));
+
+function contextLabel(context) {
+  if (context?.domain === 'cfa') {
+    const level = { level1: 'Level I', level2: 'Level II', level3: 'Level III' }[context.cfaLevel] || 'CFA Program';
+    return `CFA ${level}`;
+  }
+  if (context?.domain === 'lsat') return 'LSAT';
+  if (context?.domain === 'quant') return 'Quant';
+  if (context?.domain === 'excel') return 'Excel';
+  return 'StudyVault';
+}
+
+function itemDomain(item) {
+  const domain = String(item?.domain || '').toLowerCase();
+  if (domain === 'lsat') return { label: 'LSAT', tone: 'study' };
+  if (domain === 'quant') return { label: 'Quant', tone: 'accent' };
+  if (domain === 'excel') return { label: 'Excel', tone: 'accent' };
+  if (domain === 'cfa') return { label: 'CFA', tone: 'vault' };
+  return { label: 'Host study', tone: 'vault' };
+}
 
 export default function ReviewInbox() {
   const [activePathway] = useLevel3Pathway();
@@ -282,6 +303,7 @@ export default function ReviewInbox() {
   const combinedQueueCount = items.length + lsatDueCount;
   const forecastHasWork = forecast.some((day) => day.count > 0);
   const practicePath = workspaceHref('practice', studyContext);
+  const selectedContext = contextLabel(studyContext);
 
   // PSY-13 — ONE global ranking over BOTH planes. Replaces the host-first
   // concatenation (host items, then LSAT appended) with a single pure ranker by
@@ -310,7 +332,13 @@ export default function ReviewInbox() {
       <PageHeader
         badge="REVIEW INBOX"
         title="Review"
-        subtitle="Clear the work that will improve retention next."
+        subtitle="One priority inbox across your local study work."
+        meta={
+          <div className="workspace-scope-contract" aria-label="Review scope">
+            <StatusBadge tone="vault">Global inbox</StatusBadge>
+            <span>Shows available CFA, LSAT, Quant, and Excel review work. Current context: <strong>{selectedContext}</strong>.</span>
+          </div>
+        }
       />
 
       {/* NAV-1 — cross-restart "resume where you left off". Surfaces the most
@@ -355,7 +383,7 @@ export default function ReviewInbox() {
           <div>
             {combinedQueueCount > 0 && <StatusBadge tone="vault">Next up</StatusBadge>}
             <h2 id="review-queue-title">Your review queue</h2>
-            <p>Ordered work from due reviews, mistakes, weak objectives, and unfinished study.</p>
+            <p>Ordered across available domains by due date, mistakes, weak objectives, and unfinished study.</p>
           </div>
           {combinedQueueCount > 0 && (
             <div className="review-primary-actions">
@@ -381,20 +409,31 @@ export default function ReviewInbox() {
           {studyPlan == null ? (
             <SkeletonList rows={4} />
           ) : visibleItems.length ? (
-            visibleItems.map((item) =>
+            visibleItems.map((item) => {
+              const domain = itemDomain(item);
+              const card = (
+                <>
+                  <div className="review-item-domain" aria-label={`Domain: ${domain.label}`}>
+                    <StatusBadge tone={domain.tone}>{domain.label}</StatusBadge>
+                  </div>
+                  <ReviewItemCard item={item} />
+                </>
+              );
+              return (
               item.id === deepLinkItemId ? (
                 <div key={item.id} ref={deepLinkRef} className="review-item-deeplink-target">
-                  <ReviewItemCard item={item} />
+                  {card}
                 </div>
               ) : (
-                <ReviewItemCard key={item.id} item={item} />
-              ),
-            )
+                <div key={item.id} className="review-item-with-domain">{card}</div>
+              )
+              );
+            })
           ) : (
             <div className="review-empty-state">
               <h2>{filter === 'all' ? "You're caught up" : 'Nothing in this view'}</h2>
-              <p>{filter === 'all' ? 'Build momentum with a short practice set.' : 'Try another filter or start practice to create fresh review evidence.'}</p>
-              <Link className="btn btn-primary" to={practicePath}>Start practice</Link>
+              <p>{filter === 'all' ? `No review work is due in the available inbox. Build evidence in ${selectedContext} with a short practice set.` : 'Try another filter or start practice to create fresh review evidence.'}</p>
+              <Link className="btn btn-primary" to={practicePath}>Start {selectedContext} practice</Link>
             </div>
           )}
         </div>

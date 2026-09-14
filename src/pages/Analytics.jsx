@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Activity, BarChart3, Clock, Gauge, Layers, Target } from 'lucide-react';
 // ANL-5 — migrated off bare recharts onto the shared, host-styled @visx viz
 // barrel (src/domains/shared/components/viz). K4-3 completed the migration of
@@ -10,7 +11,7 @@ import {
   BarSeriesChart,
   CalibrationScatter,
 } from '../domains/shared/components/viz';
-import { PageHeader, MetricCard, Panel, SegmentedControl } from '../components/ui/Primitives';
+import { PageHeader, MetricCard, Panel, SegmentedControl, StatusBadge } from '../components/ui/Primitives';
 import { getAnalyticsSummary } from '../lib/learning';
 import { db, forecastReviewLoad } from '../lib/progressStore';
 import { predictRetention } from '../lib/scheduler';
@@ -26,26 +27,39 @@ import { recommendFromAttribution } from '../lib/psychometrics/recommendations';
 import { getStorage } from '../lib/storage';
 import { getLsatActivity, getLsatCalibration } from '../lib/lsatAnalyticsBridge';
 import { getLsatCrossDomain } from '../lib/lsatCrossDomainBridge';
+import { useStudyContext, workspaceHref } from '../lib/studyContext';
+import './reviewProgressScope.css';
 
-// ANL-6 — cross-domain color coding. CFA reuses the host accent (blue, the
-// analytics default); LSAT gets a distinct violet so the two series read apart
-// in the heatmap legend, the calibration scatter, and the domain toggle.
+// ANL-6 — cross-domain color coding. Host Study is the local, shared store for
+// CFA, Quant, and Excel; LSAT remains a separate sidecar plane.
 const DOMAIN_COLOR = {
-  cfa: 'var(--accent, #60a5fa)',
+  host: 'var(--accent, #60a5fa)',
   lsat: 'var(--quant, #c084fc)',
 };
 
-// CFA | LSAT | All toggle options (All = combined per-day activity / both
-// calibration series overlaid).
+// "Host Study" is intentionally not labelled CFA: the local host store carries
+// CFA, Quant, and Excel results. Keeping that distinction visible prevents the
+// selected curriculum from promising a filter this dashboard does not provide.
 const DOMAIN_OPTIONS = [
   { value: 'all', label: 'All' },
-  { value: 'cfa', label: 'CFA' },
+  { value: 'host', label: 'Host Study' },
   { value: 'lsat', label: 'LSAT' },
 ];
 
 // LSAT confidence bands map to a 0–100 x position for the calibration scatter,
 // parallel to the host's low/medium/high (sure≈high, likely≈medium, guess≈low).
 const LSAT_CONFIDENCE_X = { sure: 75, likely: 50, guess: 25 };
+
+function contextLabel(context) {
+  if (context?.domain === 'cfa') {
+    const level = { level1: 'Level I', level2: 'Level II', level3: 'Level III' }[context.cfaLevel] || 'CFA Program';
+    return `CFA ${level}`;
+  }
+  if (context?.domain === 'lsat') return 'LSAT';
+  if (context?.domain === 'quant') return 'Quant';
+  if (context?.domain === 'excel') return 'Excel';
+  return 'StudyVault';
+}
 
 function pct(value) {
   return Number.isFinite(value) ? `${value}%` : '-';
@@ -127,8 +141,8 @@ const LEGEND_SAMPLE_COUNT = [0, 1, 3, 6, 11];
  * ANL-6 — unified study-streak heatmap. The parent (`Analytics`) owns the data
  * + domain toggle: `cfaCounts` is the host Dexie per-day map; `lsatCounts` is
  * the LSAT sidecar per-day map (empty when the sidecar is unreachable). `domain`
- * is "cfa" | "lsat" | "all"; "all" sums both domains per day. Cell color is keyed
- * to the active domain so CFA reads blue and LSAT reads violet; "all" uses the
+ * is "host" | "lsat" | "all"; "all" sums both domains per day. Cell color is keyed
+ * to the active domain so Host Study reads blue and LSAT reads violet; "all" uses the
  * CFA accent ramp to match the surrounding analytics charts.
  */
 function StudyStreakHeatmap({ cfaCounts, lsatCounts, domain, lsatReachable }) {
@@ -142,7 +156,7 @@ function StudyStreakHeatmap({ cfaCounts, lsatCounts, domain, lsatReachable }) {
   function countFor(dateStr) {
     const c = cfa.get(dateStr) || 0;
     const l = lsat.get(dateStr) || 0;
-    if (domain === 'cfa') return c;
+    if (domain === 'host') return c;
     if (domain === 'lsat') return l;
     return c + l; // all
   }
@@ -188,7 +202,7 @@ function StudyStreakHeatmap({ cfaCounts, lsatCounts, domain, lsatReachable }) {
   const svgWidth = COLS * (CELL + GAP) - GAP;
   const svgHeight = ROWS * (CELL + GAP) - GAP;
 
-  const domainLabel = domain === 'cfa' ? 'CFA' : domain === 'lsat' ? 'LSAT' : 'all domains';
+  const domainLabel = domain === 'host' ? 'Host Study' : domain === 'lsat' ? 'LSAT' : 'all domains';
 
   return (
     <Panel
@@ -196,10 +210,10 @@ function StudyStreakHeatmap({ cfaCounts, lsatCounts, domain, lsatReachable }) {
       title="Study Streak Heatmap"
       subtitle={
         domain === 'all'
-          ? 'Combined daily activity across CFA + LSAT (CFA local telemetry + LSAT sidecar).'
+          ? 'Combined daily activity across Host Study and LSAT (local CFA, Quant, and Excel telemetry plus the LSAT sidecar).'
           : domain === 'lsat'
             ? 'Daily LSAT activity from the LSAT sidecar.'
-            : 'Daily CFA / Quant / Excel activity from local telemetry.'
+            : 'Daily Host Study activity from local CFA, Quant, and Excel telemetry.'
       }
     >
       {loading ? (
@@ -215,9 +229,9 @@ function StudyStreakHeatmap({ cfaCounts, lsatCounts, domain, lsatReachable }) {
           <p className="qv-fs-sm qv-text-secondary" style={{ marginBottom: 12 }}>
             <strong>{total12w}</strong> question{total12w !== 1 ? 's' : ''} answered in the last 12 weeks ({domainLabel})
           </p>
-          {domain !== 'cfa' && !lsatReachable && (
+          {domain !== 'host' && !lsatReachable && (
             <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
-              LSAT sidecar unreachable — showing CFA activity only.
+              LSAT sidecar unreachable — showing Host Study activity only.
             </p>
           )}
           <svg
@@ -285,7 +299,7 @@ function StudyStreakHeatmap({ cfaCounts, lsatCounts, domain, lsatReachable }) {
  */
 function CrossDomainSummary({ report, domain, lsatReachable }) {
   const subtitle =
-    'One bidirectional rollup: combined study time, accuracy by domain, the longest active streak, and the weakest types across CFA + LSAT (host numbers merged with the LSAT sidecar).';
+    'One local rollup across Host Study (CFA, Quant, and Excel) plus LSAT whenever its sidecar is available.';
 
   if (report === null) {
     return (
@@ -296,7 +310,7 @@ function CrossDomainSummary({ report, domain, lsatReachable }) {
   }
 
   const byDomain = report.accuracyByDomain || [];
-  const showLsatRow = domain !== 'cfa';
+  const showLsatRow = domain !== 'host';
   const showHostRow = domain !== 'lsat';
   const rows = byDomain.filter(
     (row) => (row.domain === 'lsat' ? showLsatRow : showHostRow),
@@ -312,18 +326,18 @@ function CrossDomainSummary({ report, domain, lsatReachable }) {
     questions: row.questions,
   }));
 
-  const domainLabel = (d) => (d === 'lsat' ? 'LSAT' : 'CFA / Quant');
+  const domainLabel = (d) => (d === 'lsat' ? 'LSAT' : 'Host Study');
 
   return (
     <Panel tone="analytics" title="Cross-Domain Summary" subtitle={subtitle}>
       {!report.reachable && !lsatReachable && (
         <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
-          LSAT sidecar unreachable — start StudyVault’s LSAT backend on :8100 to combine LSAT analytics with your CFA telemetry.
+          LSAT sidecar unreachable — start StudyVault’s LSAT backend on :8100 to add LSAT analytics to your local Host Study telemetry.
         </p>
       )}
       {!report.reachable && lsatReachable && (
         <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
-          Showing the host (CFA / Quant) summary — the LSAT cross-domain rollup didn’t respond this time.
+          Showing Host Study (CFA, Quant, and Excel) — the LSAT cross-domain rollup didn’t respond this time.
         </p>
       )}
       <div className="qv-row-2 qv-mb-3" style={{ flexWrap: 'wrap', gap: 'var(--space-3)' }}>
@@ -341,7 +355,7 @@ function CrossDomainSummary({ report, domain, lsatReachable }) {
         {rows.length ? (
           rows.map((row) => (
             <div className="analytics-row" key={row.domain}>
-              <span style={{ color: DOMAIN_COLOR[row.domain === 'lsat' ? 'lsat' : 'cfa'] }}>
+              <span style={{ color: DOMAIN_COLOR[row.domain === 'lsat' ? 'lsat' : 'host'] }}>
                 {domainLabel(row.domain)}
               </span>
               <strong>{row.attempts}</strong>
@@ -365,7 +379,7 @@ function CrossDomainSummary({ report, domain, lsatReachable }) {
                 key={`${row.domain}:${row.label}`}
                 className="qv-chip qv-text-muted"
                 title={`${domainLabel(row.domain)} · ${row.attempts} attempts`}
-                style={{ borderColor: DOMAIN_COLOR[row.domain === 'lsat' ? 'lsat' : 'cfa'] }}
+                style={{ borderColor: DOMAIN_COLOR[row.domain === 'lsat' ? 'lsat' : 'host'] }}
               >
                 {row.label}
                 {row.accuracy !== null && ` · ${Math.round(row.accuracy * 100)}%`}
@@ -391,6 +405,7 @@ function CrossDomainSummary({ report, domain, lsatReachable }) {
 
 export default function Analytics() {
   const [activePathway] = useLevel3Pathway();
+  const [studyContext] = useStudyContext();
   const [summary, setSummary] = useState(null);
   const [forecast, setForecast] = useState([]);
   const [masteryTrend, setMasteryTrend] = useState([]);
@@ -588,13 +603,28 @@ export default function Analytics() {
   }));
 
   const topWeakTopics = [...(summary?.byTopic || [])].sort((a, b) => a.accuracy - b.accuracy).slice(0, 8);
+  const selectedContext = contextLabel(studyContext);
+  const practicePath = workspaceHref('practice', studyContext);
+  const hostAttempts = summary?.totals.questionsAnswered ?? 0;
+  const hasLsatEvidence = Boolean(
+    lsatCalibration.some((row) => (row.attempts ?? 0) > 0)
+      || crossDomain?.accuracyByDomain?.some((row) => row.domain === 'lsat' && (row.attempts ?? 0) > 0)
+      || lsatHeatCounts.size > 0,
+  );
+  const hasAnalyticsEvidence = hostAttempts > 0 || hasLsatEvidence;
 
   return (
     <div className="page-container">
       <PageHeader
         badge="ANALYTICS"
         title="Learning Analytics"
-        subtitle="Local-only performance telemetry by topic, difficulty, error type, confidence, and recent trend."
+        subtitle="A clear rollup of recorded study evidence — never a proxy for the curriculum selector."
+        meta={
+          <div className="workspace-scope-contract" aria-label="Analytics scope">
+            <StatusBadge tone="vault">{domain === 'all' ? 'Global rollup' : domain === 'host' ? 'Host Study' : 'LSAT'}</StatusBadge>
+            <span>Host Study includes CFA, Quant, and Excel. Current context: <strong>{selectedContext}</strong>.</span>
+          </div>
+        }
         actions={
           <SegmentedControl
             label="Analytics domain"
@@ -613,8 +643,23 @@ export default function Analytics() {
         <MetricCard label="Artifacts" value={summary?.totals.artifacts ?? 0} detail="Calculator/lab outputs" icon={Layers} />
       </div>
 
-      <CrossDomainSummary report={crossDomain} domain={domain} lsatReachable={lsatReachable} />
+      {!summary ? (
+        <Panel tone="analytics" title="Loading study evidence">
+          <p className="muted-copy">Reading your local study records…</p>
+        </Panel>
+      ) : !hasAnalyticsEvidence ? (
+        <Panel tone="analytics" title="No study evidence yet">
+          <div className="analytics-scope-empty">
+            <p>No scores, forecasts, or recommendations are shown until StudyVault has recorded real attempts. Host Study will include CFA, Quant, and Excel; LSAT remains separate until its local sidecar is available.</p>
+            <Link className="btn btn-primary" to={practicePath}>Start {selectedContext} practice</Link>
+          </div>
+        </Panel>
+      ) : (
+        <>
+          <CrossDomainSummary report={crossDomain} domain={domain} lsatReachable={lsatReachable} />
 
+          {hostAttempts > 0 ? (
+            <>
       <div className="grid-2 analytics-section-grid">
         <Panel tone="analytics" title="Readiness By Level">
           <div className="analytics-table">
@@ -795,10 +840,10 @@ export default function Analytics() {
         )}
       </Panel>
 
-      {/* Confidence vs Accuracy Calibration scatter (ANL-6: CFA + LSAT overlay) */}
+      {/* Confidence vs Accuracy Calibration scatter (ANL-6: Host Study + LSAT overlay) */}
       {(() => {
         const CONFIDENCE_X = { low: 25, medium: 50, high: 75 };
-        // CFA: host confidence buckets (low/medium/high), accuracy already 0–100.
+        // Host Study: local confidence buckets (low/medium/high), accuracy already 0–100.
         // audit (LOW) — skip zero-attempt buckets like the LSAT series below;
         // confidenceCalibrationSummary always returns all three bands, and an
         // unused band plots at (conf%, 0%) — a phantom point far below the 1:1
@@ -806,7 +851,7 @@ export default function Analytics() {
         const cfaData = (summary?.confidenceCalibration || [])
           .filter((row) => (row.attempts ?? 0) > 0)
           .map((row) => ({
-            label: `CFA · ${row.confidence}`,
+            label: `Host Study · ${row.confidence}`,
             x: CONFIDENCE_X[row.confidence] ?? 50,
             y: row.accuracy ?? 0,
             attempts: row.attempts ?? 0,
@@ -822,11 +867,11 @@ export default function Analytics() {
             attempts: row.attempts ?? 0,
           }));
         const showCfa = domain !== 'lsat';
-        const showLsat = domain !== 'cfa';
+        const showLsat = domain !== 'host';
         const hasCfa = showCfa && cfaData.length > 0;
         const hasLsat = showLsat && lsatData.length > 0;
         const scatterSeries = [
-          hasCfa && { name: 'CFA confidence bucket', color: DOMAIN_COLOR.cfa, points: cfaData },
+          hasCfa && { name: 'Host Study confidence bucket', color: DOMAIN_COLOR.host, points: cfaData },
           hasLsat && { name: 'LSAT confidence band', color: DOMAIN_COLOR.lsat, points: lsatData },
         ].filter(Boolean);
         return (
@@ -835,7 +880,7 @@ export default function Analytics() {
             title="Confidence vs Accuracy Calibration"
             subtitle={
               domain === 'all'
-                ? 'Each marker is a confidence bucket — CFA (blue) vs LSAT (violet). Above the 1:1 diagonal = underconfident; below = overconfident.'
+                ? 'Each marker is a confidence bucket — Host Study (blue) vs LSAT (violet). Above the 1:1 diagonal = underconfident; below = overconfident.'
                 : domain === 'lsat'
                   ? 'Each marker is an LSAT confidence band (sure/likely/guess). Perfect calibration is a 1:1 diagonal.'
                   : 'Each marker is a confidence bucket; perfect calibration is a 1:1 diagonal.'
@@ -851,7 +896,7 @@ export default function Analytics() {
               <>
                 {showLsat && !lsatReachable && (
                   <p className="qv-fs-sm qv-text-muted" style={{ marginBottom: 12 }}>
-                    LSAT sidecar unreachable — showing CFA calibration only.
+                    LSAT sidecar unreachable — showing Host Study calibration only.
                   </p>
                 )}
                 <CalibrationScatter
@@ -859,7 +904,7 @@ export default function Analytics() {
                   xLabel="Confidence %"
                   yLabel="Accuracy %"
                   height={240}
-                  ariaLabel={`Confidence calibration (${domain === 'cfa' ? 'CFA' : domain === 'lsat' ? 'LSAT' : 'all domains'}): each marker plots confidence % against accuracy %, with a 1:1 diagonal marking perfect calibration.`}
+                  ariaLabel={`Confidence calibration (${domain === 'host' ? 'Host Study' : domain === 'lsat' ? 'LSAT' : 'all domains'}): each marker plots confidence % against accuracy %, with a 1:1 diagonal marking perfect calibration.`}
                 />
               </>
             )}
@@ -1065,6 +1110,17 @@ export default function Analytics() {
           Positive calibration gaps mean confidence is running ahead of accuracy. Formula dependency and time-pressure errors help identify whether to drill calculations, reread concepts, or slow down on mock review.
         </p>
       </Panel>
+            </>
+          ) : (
+            <Panel tone="analytics" title="LSAT evidence is available">
+              <div className="analytics-scope-empty">
+                <p>StudyVault has LSAT evidence, but no local Host Study attempts yet. Open LSAT Analytics for its timed, blind-review, and question-type diagnostics.</p>
+                <Link className="btn btn-secondary" to="/lsat/analytics">Open LSAT Analytics</Link>
+              </div>
+            </Panel>
+          )}
+        </>
+      )}
     </div>
   );
 }

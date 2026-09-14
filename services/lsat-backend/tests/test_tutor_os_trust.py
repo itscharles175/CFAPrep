@@ -140,6 +140,15 @@ def test_release_trust_default_report_path_is_repo_dist(monkeypatch):
     assert trust_mod._release_manifest_candidates()[0] == trust_mod.RELEASE_MANIFEST
 
 
+def test_openapi_snapshot_candidates_prefer_committed_contracts():
+    repo_root = Path(__file__).resolve().parents[3]
+
+    assert trust_mod._openapi_snapshot_candidates()[:2] == [
+        repo_root / "services" / "lsat-backend" / "openapi-baseline.json",
+        repo_root / "src" / "domains" / "lsat" / "_meta" / "openapi.json",
+    ]
+
+
 def test_release_trust_blocks_invalid_release_local_schema(db_session, monkeypatch, tmp_path):
     report = tmp_path / "release_local_report.json"
     report.write_text(
@@ -431,6 +440,38 @@ def test_release_manifest_trust_accepts_complete_macos_evidence(monkeypatch, tmp
     monkeypatch.setenv("STUDYVAULT_RELEASE_MANIFEST", str(manifest))
 
     assert trust_mod._release_manifest_check("release")["status"] == "ok"
+
+
+def test_personal_macos_signing_schema_accepts_adhoc_app_without_weakening_developer_id_policy(monkeypatch):
+    monkeypatch.setattr(trust_mod.platform, "system", lambda: "Darwin")
+    child_hash = "e" * 64
+    child_size = 50
+    digest = trust_mod.hashlib.sha256()
+    digest.update(f"Contents/MacOS/StudyVault\0{child_hash}\0{child_size}\n".encode())
+    app_hash = digest.hexdigest()
+    assets = [{
+        "path": "StudyVault.app/Contents/MacOS/StudyVault",
+        "sha256": child_hash,
+        "size": child_size,
+    }]
+    artifact = {
+        "kind": "app", "path": "StudyVault.app", "size": child_size, "sha256": app_hash,
+        "published": True, "signed": True, "verified": True, "identity": "adhoc",
+        "developer_id": False, "notarized": False, "stapled": False, "timestamped": False,
+    }
+    personal = {
+        "schema": trust_mod.PERSONAL_SIGNING_EVIDENCE_SCHEMA, "releaseTier": "personal",
+        "platform": "macos", "required": True, "status": "verified", "identity": "adhoc",
+        "strictDeepVerification": True, "developerId": False, "notarized": False,
+        "artifacts": [artifact],
+    }
+    assert trust_mod._signing_evidence_errors(personal, assets) == []
+
+    developer_id = {**personal, "schema": trust_mod.SIGNING_EVIDENCE_SCHEMA}
+    errors = trust_mod._signing_evidence_errors(developer_id, assets)
+    assert "macos_signing_artifacts_incomplete" in errors
+    assert "macos_notarization_missing" in errors
+    assert "macos_timestamp_missing" in errors
 
 
 def test_release_trust_manifest_and_diagnostics(client):

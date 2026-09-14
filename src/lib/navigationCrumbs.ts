@@ -18,8 +18,7 @@
  * host manifest already imports type-safely.
  */
 
-import { matchPath } from 'react-router-dom';
-import { appRoutes } from '../routes/routeManifest';
+import { appRoutes, routeForLocation } from '../routes/routeManifest';
 import { routeManifest as lsatRouteManifest } from '../domains/lsat/lib/routeManifest';
 import { domainForPath } from './domainNav';
 
@@ -31,6 +30,11 @@ export interface Crumb {
 }
 
 const LSAT_PREFIX = '/lsat';
+const CFA_LEVEL_BREADCRUMB_LABELS = {
+  level1: 'Level I',
+  level2: 'Level II',
+  level3: 'Level III',
+} as const;
 
 // LSAT manifest label lookup (canonical-aware, mirrors routeManifest helpers).
 const lsatLabels = new Map(lsatRouteManifest.map((e) => [e.path, e.label]));
@@ -76,8 +80,33 @@ function lsatCrumbs(fullPath: string): Crumb[] {
 }
 
 function hostCrumbs(fullPath: string): Crumb[] {
-  // Find the host manifest route whose (possibly dynamic) path matches.
-  const matched = appRoutes.find((route) => matchPath({ path: route.path, end: true }, fullPath));
+  const cfaMock = fullPath.match(/^\/cfa\/(level[123])\/mock$/);
+  if (cfaMock) {
+    const level = CFA_LEVEL_BREADCRUMB_LABELS[cfaMock[1] as keyof typeof CFA_LEVEL_BREADCRUMB_LABELS];
+    return [
+      { label: 'Practice', to: fullPath },
+      { label: `CFA ${level}`, to: fullPath },
+      { label: 'Mixed Mock' },
+    ];
+  }
+  if (fullPath === '/quant/risk-management') {
+    return [
+      { label: 'Practice', to: fullPath },
+      { label: 'Quant', to: fullPath },
+      { label: 'Risk Management' },
+    ];
+  }
+  if (fullPath === '/excel/dcf-modeling') {
+    return [
+      { label: 'Practice', to: fullPath },
+      { label: 'Excel', to: fullPath },
+      { label: 'DCF Modeling' },
+    ];
+  }
+
+  // Resolve concrete paths through the manifest's specificity-aware matcher so
+  // generic dynamic modules never eclipse mock, quiz, or drill destinations.
+  const matched = routeForLocation(fullPath);
   if (!matched) {
     // Unknown host route (for example, a 404) — degrade to the Today root
     // so the chrome still anchors the user.

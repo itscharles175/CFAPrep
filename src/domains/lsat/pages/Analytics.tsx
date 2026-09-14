@@ -64,6 +64,7 @@ import { WidgetBoundary } from "@lsat/components/error-boundary";
 import { toast } from "@lsat/lib/toast";
 import { getGoal, type SavedAnalyticsView } from "@lsat/lib/prefs";
 import type { QType } from "@lsat/lib/types";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 
 
 /**
@@ -306,7 +307,37 @@ export default function Analytics() {
     toast.success("Report downloaded");
   }
 
-  const usingSample = dashboard.data?.usingSample || byType.data?.usingSample;
+  // Analytics used to mix local fallback rows into KPI, forecast, and readiness
+  // claims. A sample row is useful for development but is never evidence about
+  // this learner, so this page stays in an explicit recovery state until every
+  // progress-bearing source is live again.
+  const sampleSections = [
+    ["Score history", dashboard.data?.usingSample],
+    ["Question accuracy", byType.data?.usingSample],
+    ["Blind-review gap", gap.data?.usingSample],
+    ["Difficulty and trap analysis", difficulty.data?.usingSample || traps.data?.usingSample],
+    ["Session consistency", sessions.data?.usingSample],
+    ["SRS and readiness", srs.data?.usingSample || readinessStatus.data?.usingSample],
+    ["Forecast", forecast.data?.usingSample],
+    ["Plan feedback", feedbackCohorts.data?.usingSample || feedbackOutcomes.data?.usingSample],
+  ].filter(([, usingSample]) => usingSample).map(([section]) => section as string);
+  const hasSampleAnalytics = sampleSections.length > 0;
+
+  function retryAnalytics() {
+    void Promise.all([
+      dashboard.refetch(),
+      byType.refetch(),
+      gap.refetch(),
+      difficulty.refetch(),
+      traps.refetch(),
+      sessions.refetch(),
+      srs.refetch(),
+      readinessStatus.refetch(),
+      feedbackCohorts.refetch(),
+      feedbackOutcomes.refetch(),
+      forecast.refetch(),
+    ]);
+  }
 
   // A2.4 — memoize the tabbed deep-dives' context value. Built inline it was a
   // fresh object every render, so any filter/brush/cross-filter change (or even
@@ -355,6 +386,24 @@ export default function Analytics() {
             void dashboard.refetch();
             void byType.refetch();
           }}
+        />
+      </PageLayout>
+    );
+  }
+
+  if (hasSampleAnalytics) {
+    return (
+      <PageLayout
+        title="Analytics"
+        eyebrow="DIAGNOSTICS"
+        icon={BarChart3}
+        description="Your diagnostic picture — where the clock dies and where understanding holds."
+        width="2xl"
+      >
+        <SampleDataRecovery
+          section="Analytics"
+          affectedSections={sampleSections}
+          onRetry={retryAnalytics}
         />
       </PageLayout>
     );
@@ -418,7 +467,6 @@ export default function Analytics() {
             source={source}
             range={range}
             comparePrior={comparePrior}
-            usingSample={!!usingSample}
             onSourceChange={setSource}
             onRangeChange={setRange}
             onCompareChange={setComparePrior}

@@ -8,7 +8,7 @@
  * study/test mode toggle, and renders its children.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import SharedLayout from './SharedLayout';
@@ -46,6 +46,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete window.studyvault;
   localStorage.clear();
   clearHistory();
   vi.restoreAllMocks();
@@ -132,12 +133,51 @@ describe('SharedLayout (K4-6) — unified shell', () => {
 
     const openSidebar = screen.getByRole('complementary', { name: /main navigation sidebar/i });
     expect(openSidebar).not.toHaveAttribute('hidden');
+    expect(document.querySelector('.topbar')).toHaveAttribute('inert');
+    expect(document.querySelector('#main')).toHaveAttribute('inert');
     await waitFor(() => expect(openSidebar.contains(document.activeElement)).toBe(true));
+
+    const drawerTargets = Array.from(openSidebar.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => !element.closest('details:not([open])') || element.matches('summary'));
+    const firstDrawerTarget = drawerTargets[0];
+    const lastDrawerTarget = drawerTargets[drawerTargets.length - 1];
+    expect(firstDrawerTarget).toBeDefined();
+    expect(lastDrawerTarget).toBeDefined();
+    lastDrawerTarget?.focus();
+    await user.keyboard('{Tab}');
+    expect(firstDrawerTarget).toHaveFocus();
+    firstDrawerTarget?.focus();
+    await user.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(lastDrawerTarget).toHaveFocus();
 
     await user.keyboard('{Escape}');
 
     expect(menuButton).toHaveAttribute('aria-expanded', 'false');
     expect(document.querySelector('#main-sidebar')).toHaveAttribute('hidden');
+    expect(document.querySelector('.topbar')).not.toHaveAttribute('inert');
+    expect(document.querySelector('#main')).not.toHaveAttribute('inert');
     expect(menuButton).toHaveFocus();
+  });
+
+  it('toggles the actual LSAT sidebar state from the native View menu', () => {
+    installMatchMedia(false);
+    let toggleSidebar: ((event: { visible: boolean }) => void) | undefined;
+    window.studyvault = {
+      events: {
+        onSidebarToggle(handler: (event: { visible: boolean }) => void) {
+          toggleSidebar = handler;
+          return () => { toggleSidebar = undefined; };
+        },
+      },
+    } as unknown as Window['studyvault'];
+    renderWithShell(<SharedLayout />, '/lsat/srs');
+    expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
+
+    act(() => toggleSidebar?.({ visible: true }));
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
+
+    act(() => toggleSidebar?.({ visible: false }));
+    expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
   });
 });

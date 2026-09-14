@@ -30,6 +30,8 @@ function createBridge(
         platform: 'win32',
         arch: 'x64',
         is_packaged: false,
+        native_shell: 'macos-unified',
+        release_tier: 'personal',
       }),
     },
     files: {
@@ -69,6 +71,8 @@ function createBridge(
       onSecondInstance: () => unsubscribe,
       onOpenFile: () => unsubscribe,
       onPdfDrop: () => unsubscribe,
+      onLifecycle: () => unsubscribe,
+      onNativeNavigate: () => unsubscribe,
       ...overrides.events,
     },
   };

@@ -6,6 +6,16 @@
  */
 
 import { stripThink } from './stripThink';
+import { getDesktopBridge } from './desktopBridge';
+
+async function requestDesktopMicrophoneLease() {
+  const requestLease = getDesktopBridge()?.permissions?.requestMicrophoneLease;
+  if (!requestLease) return;
+  const lease = await requestLease();
+  if (!lease || !Number.isFinite(lease.expiresAt) || lease.expiresAt <= Date.now()) {
+    throw new Error('Microphone permission lease was not granted.');
+  }
+}
 
 /** Detect whether the runtime supports SpeechRecognition (Chrome/Edge/Safari/Electron). */
 export function hasSpeechRecognition() {
@@ -29,14 +39,12 @@ export function hasSpeechSynthesis() {
  * @param {{ lang?: string, signal?: AbortSignal }} options
  * @returns {Promise<{ transcript: string; engine: 'browser-native' | 'unknown' }>}
  */
-export function recognizeOnce({ lang = 'en-US', signal } = {}) {
-  return new Promise((resolve, reject) => {
-    const Ctor = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
-    if (!Ctor) {
-      reject(new Error('Speech recognition is not supported'));
-      return;
-    }
+export async function recognizeOnce({ lang = 'en-US', signal } = {}) {
+  const Ctor = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+  if (!Ctor) throw new Error('Speech recognition is not supported');
+  await requestDesktopMicrophoneLease();
 
+  return new Promise((resolve, reject) => {
     const recognition = new Ctor();
     recognition.continuous = false;
     recognition.interimResults = false;
@@ -202,6 +210,7 @@ export async function recordAudioForOfflineStt({ durationMs = 8000, signal } = {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
     throw new Error('Microphone access is not available in this environment.');
   }
+  await requestDesktopMicrophoneLease();
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   try {
     const chunks = [];

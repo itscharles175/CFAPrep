@@ -5,8 +5,10 @@ updates:
     schedule:
       interval: weekly
       day: monday
-      time: "09:00"
-    open-pull-requests-limit: 5
+      time: '09:00'
+    # Dependency vulnerabilities remain enforced by the CI audit gate. Keep the
+    # ecosystem inventory without allowing version-update branches or PRs.
+    open-pull-requests-limit: 0
     groups:
       runtime:
         patterns:
@@ -17,19 +19,20 @@ updates:
       build-tooling:
         patterns:
           - vite
-          - "@vitejs/*"
+          - '@vitejs/*'
           - vite-plugin-pwa
           - typescript
           - vitest
       test-and-lint:
         patterns:
           - eslint
-          - "@eslint/*"
-          - "@testing-library/*"
+          - '@eslint/*'
+          - '@testing-library/*'
           - playwright-core
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
-      time: "09:00"
+      time: '09:00'
+    open-pull-requests-limit: 0

@@ -7,9 +7,9 @@
 // Two deliberate departures from the Rust original, both toward safety:
 //   * Discovery and kill sit behind an injectable sweeper so the orchestration
 //     is unit-tested without touching the real process table.
-//   * The Rust sweep killed ANY squatter on an owned port. Here a listener is
-//     only reclaimed when it answers the service's own readiness identity, so an
-//     unrelated user process on :8000 is reported and left running.
+//   * A readiness response proves service identity, not process ownership. A
+//     listener is reclaimed only when its PID is in the caller's durable owned
+//     process set; every unknown listener is reported and left running.
 //
 // The sweep never throws. A failure to enumerate or kill must not block launch.
 
@@ -100,7 +100,7 @@ export function createSystemSweeper({
   };
 }
 
-async function sweepTarget(target, { sweeper, identityProbe, protectedPids }) {
+async function sweepTarget(target, { sweeper, identityProbe, protectedPids, ownedPids }) {
   const result = { name: target.name ?? null, port: target.port, outcome: SWEEP_OUTCOMES.FREE, pids: [] };
   const listeners = await sweeper.pidsOnPort(target.port);
   if (listeners === null || listeners === undefined) {
@@ -118,12 +118,14 @@ async function sweepTarget(target, { sweeper, identityProbe, protectedPids }) {
   }
   result.pids = foreign;
 
-  if (!target.identity || !identityProbe) {
-    result.outcome = SWEEP_OUTCOMES.UNIDENTIFIED;
-    return result;
-  }
-  if (!(await identityProbe(target.identity, target.port))) {
-    result.outcome = SWEEP_OUTCOMES.FOREIGN;
+  if (foreign.some((pid) => !ownedPids.has(pid))) {
+    if (!target.identity || !identityProbe) {
+      result.outcome = SWEEP_OUTCOMES.UNIDENTIFIED;
+      return result;
+    }
+    result.outcome = (await identityProbe(target.identity, target.port))
+      ? SWEEP_OUTCOMES.UNIDENTIFIED
+      : SWEEP_OUTCOMES.FOREIGN;
     return result;
   }
 
@@ -140,10 +142,12 @@ export async function sweepOwnedPorts({
   sweeper = null,
   identityProbe = null,
   selfPids = [process.pid],
+  ownedPids = [],
   logger = null,
 } = {}) {
   const resolvedSweeper = sweeper ?? createSystemSweeper();
   const protectedPids = new Set(selfPids.filter((pid) => Number.isSafeInteger(pid) && pid > 0));
+  const reclaimablePids = new Set(ownedPids.filter((pid) => Number.isSafeInteger(pid) && pid > 0));
   const results = [];
   const seen = new Set();
   for (const target of targets) {
@@ -151,7 +155,12 @@ export async function sweepOwnedPorts({
     seen.add(target.port);
     let result;
     try {
-      result = await sweepTarget(target, { sweeper: resolvedSweeper, identityProbe, protectedPids });
+      result = await sweepTarget(target, {
+        sweeper: resolvedSweeper,
+        identityProbe,
+        protectedPids,
+        ownedPids: reclaimablePids,
+      });
     } catch (error) {
       // Isolated per port: one unusable platform tool cannot abort the rest, and
       // no sweep failure is ever allowed to reach the launch path.

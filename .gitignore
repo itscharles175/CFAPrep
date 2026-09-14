@@ -8,12 +8,14 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+electron/resources/bin/studyvault-watchdog
 dist
 dist-ssr
 release/
 release-debug/
 release-ci/
 release-config-check/
+/release-personal/
 *.local
 .env
 .env.*

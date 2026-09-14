@@ -3,9 +3,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -38,6 +39,9 @@ jobs:
 
       - name: TypeScript check
         run: npx tsc --noEmit
+
+      - name: Electron security and runtime tests
+        run: npm run test:electron
 
       # TEST-5 (Wave 2 measurement substrate): run the host suite WITH v8 coverage so
       # the non-decreasing coverage floor configured in vite.config.js
@@ -676,3 +680,31 @@ jobs:
           $sidecar = 'release-ci/win-unpacked/resources/services/lsat-backend/lsatlab-backend.exe'
           if (-not (Test-Path -LiteralPath $sidecar -PathType Leaf)) { throw "Missing $sidecar" }
           if ((Get-Item -LiteralPath $sidecar).Length -le 0) { throw "Empty $sidecar" }
+
+  personal-macos-release:
+    name: Personal macOS Release — Contract + Preflight
+    runs-on: macos-15
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Personal release contract tests
+        run: python3 -m unittest discover -s scripts -p 'test_macos_personal_release.py' -v
+
+      # Dry-run is deliberately non-installing and performs no profile backup.
+      # The physical package/profile/install acceptance remains a local M3 Max gate.
+      - name: Personal release dry-run preflight
+        run: python3 scripts/macos_personal_release.py --dry-run --no-install

@@ -7,6 +7,7 @@
 :root {
   --sidebar-width: 264px;
   --topbar-height: 68px;
+  --native-titlebar-inset: 0px;
   --accent-strong: #315ee8;
   --accent: #6f91ff;
   --accent-hover: #a9bdff;
@@ -39,6 +40,73 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.18);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.2);
   --shadow-lg: 0 18px 52px rgba(0, 0, 0, 0.26);
+}
+
+/* Electron's hiddenInset title bar keeps the system traffic lights while the
+   editorial shell becomes a unified Mac toolbar. The open chrome is draggable;
+   every interactive descendant remains an ordinary click target. */
+:root[data-native-shell='macos-unified'] {
+  --native-titlebar-inset: 24px;
+  --topbar-height: 88px;
+}
+
+:root[data-native-shell='macos-unified'] .topbar,
+:root[data-native-shell='macos-unified'] .sidebar-header {
+  padding-top: var(--native-titlebar-inset);
+  -webkit-app-region: drag;
+}
+
+:root[data-native-shell='macos-unified'] .sidebar-header .sidebar-logo {
+  margin-left: 58px;
+}
+
+:root[data-native-shell='macos-unified'] .sidebar.collapsed .sidebar-header {
+  justify-content: center;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+:root[data-native-shell='macos-unified'] .sidebar.collapsed .sidebar-header .sidebar-logo,
+:root[data-native-shell='macos-unified'] .sidebar.collapsed .sidebar-header .sidebar-title {
+  display: none;
+}
+
+:root[data-native-shell='macos-unified'] button,
+:root[data-native-shell='macos-unified'] a,
+:root[data-native-shell='macos-unified'] input,
+:root[data-native-shell='macos-unified'] select,
+:root[data-native-shell='macos-unified'] textarea,
+:root[data-native-shell='macos-unified'] label,
+:root[data-native-shell='macos-unified'] summary,
+:root[data-native-shell='macos-unified'] details,
+:root[data-native-shell='macos-unified'] [role='button'],
+:root[data-native-shell='macos-unified'] [role='link'],
+:root[data-native-shell='macos-unified'] [role='combobox'],
+:root[data-native-shell='macos-unified'] [role='listbox'],
+:root[data-native-shell='macos-unified'] [role='menu'],
+:root[data-native-shell='macos-unified'] [popover],
+:root[data-native-shell='macos-unified'] [contenteditable='true'] {
+  -webkit-app-region: no-drag;
+}
+
+/* Popovers can extend over an otherwise draggable toolbar. Their whole painted
+   surface must remain interactive so an empty area cannot start a window drag. */
+:root[data-native-shell='macos-unified'] .topbar-search,
+:root[data-native-shell='macos-unified'] .search-popover,
+:root[data-native-shell='macos-unified'] .notifications-popover,
+:root[data-native-shell='macos-unified'] .topbar-actions {
+  -webkit-app-region: no-drag;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-native-shell='macos-unified'] .topbar,
+  :root[data-native-shell='macos-unified'] .sidebar,
+  :root[data-native-shell='macos-unified'] .sidebar * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 :root[data-theme="light"] {
@@ -207,6 +275,10 @@ details:not([open]) > :not(summary) {
   line-height: 1.2;
 }
 
+.vault-page .page-header h1 {
+  line-height: 1.2;
+}
+
 /* The CFA cockpit predates the editorial shell. Collapse its almost-identical
    panel neutrals into one deliberate surface and keep its dense controls and
    labels on the same readable scale as the rest of StudyVault. */
@@ -239,6 +311,10 @@ details:not([open]) > :not(summary) {
   }
 
   .quiz-primary-action {
+    position: static !important;
+    z-index: auto !important;
+    padding-top: 0 !important;
+    background: none !important;
     margin-bottom: var(--space-6) !important;
   }
 
@@ -707,17 +783,31 @@ details:not([open]) > :not(summary) {
   display: none;
 }
 
-.study-context-selector > summary::after {
-  content: '+';
+.study-context-action {
+  display: inline-flex;
   grid-column: 2;
   grid-row: 1 / span 2;
+  gap: 4px;
   align-self: center;
+  align-items: center;
   color: #969891;
-  font: 500 1rem/1 var(--font-mono);
+  font: 650 0.59rem/1.2 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.study-context-selector[open] > summary::after {
-  content: '−';
+.study-context-action svg {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.study-context-selector[open] .study-context-action svg {
+  transform: rotate(180deg);
+}
+
+.study-context-selector > summary:hover .study-context-action,
+.study-context-selector > summary:focus-visible .study-context-action {
+  color: #f2efe7;
 }
 
 .study-context-kicker {
@@ -858,6 +948,120 @@ details:not([open]) > :not(summary) {
 
   .topbar-actions {
     justify-self: end;
+  }
+
+  /* On neutral routes the page heading already names the location. Replacing
+     the redundant StudyVault badge with the selected curriculum makes the
+     shared Today/settings/diagnostics surfaces carry useful context. */
+  .topbar--neutral .topbar-breadcrumb {
+    display: none;
+  }
+}
+
+.topbar-neutral-context {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font: 650 0.68rem/1 var(--font-mono);
+  letter-spacing: 0.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The 960px desktop minimum still keeps the 264px sidebar. This is a compact
+   desktop shell, not the mobile drawer breakpoint: retain the important
+   controls, constrain every flex/grid child, and collapse redundant trail
+   segments before they can overlap the palette or icons. */
+@media (min-width: 901px) and (max-width: 1179px) {
+  .topbar.topbar--compact {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(210px, 250px) auto;
+    gap: 8px;
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .topbar--compact .topbar-nav {
+    min-width: 0;
+    gap: 4px;
+    overflow: hidden;
+  }
+
+  .topbar--compact .topbar-breadcrumb {
+    min-width: 0;
+  }
+
+  .topbar--compact .topbar-breadcrumb .breadcrumb-item:not(:last-child),
+  .topbar--compact .topbar-breadcrumb .breadcrumb-separator {
+    display: none;
+  }
+
+  .topbar--compact .topbar-breadcrumb .breadcrumb-current,
+  .topbar--compact .topbar-breadcrumb .breadcrumb-link {
+    display: block;
+    min-width: 0;
+    max-width: 13ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar--compact.topbar--neutral .topbar-breadcrumb {
+    display: none;
+  }
+
+  .topbar--compact .topbar-search {
+    width: 100%;
+    min-width: 0;
+    gap: 6px;
+    padding-inline: 10px;
+  }
+
+  .topbar--compact .topbar-search input {
+    min-width: 0;
+    letter-spacing: 0.01em;
+  }
+
+  .topbar--compact .topbar-actions {
+    gap: 2px;
+  }
+
+  .topbar--compact .topbar-actions > .badge {
+    display: none;
+  }
+
+  .topbar--compact .topbar-actions .btn-icon {
+    width: 40px;
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  /* Two cards retain usable measure in the 696px content column. */
+  .main-content .cockpit-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Keep values legible instead of fitting Level III pathway and goal labels
+     into 114px selects. Track/level remain a quick paired row. */
+  .study-context-fields label:nth-child(3):not(:last-child),
+  .study-context-fields label:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .study-context-selector select {
+    font-size: 0.78rem;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 940px) {
+  .topbar--compact .topbar-mode-toggle {
+    display: none;
   }
 }
 

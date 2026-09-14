@@ -49,9 +49,12 @@ describe("AppShell chromeless (K4-13)", () => {
 
     // The routed page content still renders (scroll region preserved).
     expect(screen.getByTestId("page-content")).toBeInTheDocument();
-    // The scrollable main region (MainScrollArea) is preserved for scroll
-    // restoration; SharedLayout's chrome wraps it in the real app.
-    expect(screen.getByRole("main")).toBeInTheDocument();
+    // The host SharedLayout owns the single main landmark. The LSAT scroll
+    // region remains focusable and labelled without creating a nested <main>.
+    expect(screen.queryByRole("main")).not.toBeInTheDocument();
+    const scrollRegion = screen.getByRole("region", { name: "LSAT content" });
+    expect(scrollRegion).toBeInTheDocument();
+    expect(scrollRegion).toHaveAttribute("id", "main-content");
 
     // NONE of the LSAT shell's own chrome is rendered — SharedLayout supplies it.
     expect(

@@ -19,7 +19,13 @@ import {
 import { JsonLogger } from '../logging.js';
 import { APP_ORIGIN } from '../protocol.js';
 import { probeHttpServiceIdentity } from '../sidecar-manager.js';
-import { isAllowedPermission, isSafeRendererUrl, normalizePopoutUrl } from '../window-security.js';
+import {
+  MicrophonePermissionLease,
+  isAllowedPermission,
+  isAllowedSessionRequest,
+  isSafeRendererUrl,
+  normalizePopoutUrl,
+} from '../window-security.js';
 
 // electron/ipc.js and electron/preload.cjs both bind to the `electron` module,
 // which outside an Electron runtime resolves to a path string with no named
@@ -99,7 +105,12 @@ async function temporaryDirectory(t) {
   return directory;
 }
 
-function createIpcHarness({ devServerUrl = null, aggregateResult = VALID_AGGREGATE } = {}) {
+function createIpcHarness({
+  devServerUrl = null,
+  aggregateResult = VALID_AGGREGATE,
+  notificationClass = null,
+  navigateNative = () => {},
+} = {}) {
   const registered = new Map();
   const removed = [];
   let aggregateCalls = 0;
@@ -114,8 +125,8 @@ function createIpcHarness({ devServerUrl = null, aggregateResult = VALID_AGGREGA
       },
     },
     app: { getVersion: () => '0.9.0', isPackaged: true },
-    shell: { openPath: async () => '' },
-    Notification: { isSupported: () => false },
+    shell: { openPath: async () => '', openExternal: async () => {} },
+    Notification: notificationClass ?? { isSupported: () => false },
     nativeFiles: {
       pickFolder: async () => null,
       pickFiles: async () => [],
@@ -140,6 +151,9 @@ function createIpcHarness({ devServerUrl = null, aggregateResult = VALID_AGGREGA
     devServerUrl,
     emitEvent: () => {},
     createPopout: async () => ({ id: 1 }),
+    navigateNative,
+    acknowledgeBeforeQuit: () => {},
+    microphoneLease: { grant: () => Date.now() + 5000 },
   });
   return { registered, removed, dispose, calls: () => aggregateCalls };
 }
@@ -152,7 +166,7 @@ function frameEvent(url) {
 test('IPC registration covers exactly the stable allowlist and is fully reversible', () => {
   const harness = createIpcHarness();
   assert.deepEqual([...harness.registered.keys()].sort(), [...ALLOWED_INVOKE_CHANNELS].sort());
-  assert.equal(harness.registered.has(IPC_CHANNELS.OPEN_EXTERNAL), false);
+  assert.equal(harness.registered.has(IPC_CHANNELS.OPEN_EXTERNAL), true);
   harness.dispose();
   assert.deepEqual([...harness.removed].sort(), [...ALLOWED_INVOKE_CHANNELS].sort());
 });
@@ -229,6 +243,60 @@ test('IPC sender trust follows the configured dev server origin exactly', async 
     await assert.rejects(() => handler(frameEvent(hostileUrl), undefined), /main frame/, hostileUrl);
   }
   assert.equal(harness.calls(), 2);
+});
+
+test('microphone lease IPC requires a live renderer user activation', async () => {
+  const harness = createIpcHarness();
+  const handler = harness.registered.get(IPC_CHANNELS.MICROPHONE_LEASE);
+  const frame = { url: `${APP_ORIGIN}/` };
+  const executeCalls = [];
+  const event = {
+    senderFrame: frame,
+    sender: {
+      id: 42,
+      mainFrame: frame,
+      executeJavaScript: async (...args) => {
+        executeCalls.push(args);
+        return true;
+      },
+    },
+  };
+  const granted = await handler(event, undefined);
+  assert.equal(typeof granted.expiresAt, 'number');
+  assert.deepEqual(executeCalls, [['navigator.userActivation?.isActive === true']]);
+  assert.equal(executeCalls[0][1], undefined, 'executeJavaScript must not synthesize a user gesture');
+  event.sender.executeJavaScript = async () => false;
+  await assert.rejects(() => handler(event, undefined), /active user gesture/);
+});
+
+test('notification clicks route once and outstanding notifications close on disposal', async () => {
+  const instances = [];
+  class FakeNotification {
+    static isSupported() { return true; }
+    constructor(options) {
+      this.options = options;
+      this.listeners = new Map();
+      this.closed = false;
+      instances.push(this);
+    }
+    once(event, listener) { this.listeners.set(event, listener); }
+    show() {}
+    close() { this.closed = true; this.listeners.get('close')?.(); }
+    emit(event) { const listener = this.listeners.get(event); this.listeners.delete(event); listener?.(); }
+  }
+  const navigations = [];
+  const harness = createIpcHarness({
+    notificationClass: FakeNotification,
+    navigateNative: (...args) => navigations.push(args),
+  });
+  const handler = harness.registered.get(IPC_CHANNELS.NOTIFICATION);
+  assert.deepEqual(await handler(frameEvent(`${APP_ORIGIN}/`), { title: 'Review due', body: 'One item', route: '/review' }), { shown: true });
+  instances[0].emit('click');
+  instances[0].emit('click');
+  assert.deepEqual(navigations, [['/review', 'notification']]);
+  await handler(frameEvent(`${APP_ORIGIN}/`), { title: 'Saved', body: 'Ready' });
+  harness.dispose();
+  assert.equal(instances[1].closed, true);
 });
 
 test('structured logs redact sensitive keys and bound their own size', async (t) => {
@@ -431,6 +499,27 @@ test('renderer URL policy admits only the bare app origin', () => {
   assert.equal(isSafeRendererUrl(undefined), false);
 });
 
+test('session egress policy permits app assets and loopback services only', () => {
+  for (const url of [
+    `${APP_ORIGIN}/assets/app.js`,
+    'data:image/png;base64,AA==',
+    'blob:app://studyvault/id',
+    'http://127.0.0.1:8100/api/health',
+    'http://localhost:1234/v1/models',
+    'ws://127.0.0.1:5055/events',
+    'http://[::1]:11434/api/tags',
+  ]) assert.equal(isAllowedSessionRequest(url), true, url);
+  for (const url of [
+    'https://example.com/content',
+    'wss://example.com/socket',
+    'http://192.168.1.4:8100/api',
+    'file:///etc/passwd',
+    'ftp://127.0.0.1/file',
+    'http://user:pass@127.0.0.1:8100/api',
+  ]) assert.equal(isAllowedSessionRequest(url), false, url);
+  assert.equal(isAllowedSessionRequest('/relative'), false);
+});
+
 test('popout normalization cannot escape the app origin', () => {
   assert.equal(normalizePopoutUrl('/lsat/practice', null), `${APP_ORIGIN}/lsat/practice`);
   assert.equal(normalizePopoutUrl('lsat', null), `${APP_ORIGIN}/lsat`);
@@ -460,12 +549,13 @@ test('popout normalization cannot escape the app origin', () => {
   assert.throws(() => normalizePopoutUrl('/lsat', 'https://example.com'), /loopback/);
 });
 
-test('permission policy denies everything except main-frame clipboard writes and audio', () => {
-  const trusted = { requestingUrl: `${APP_ORIGIN}/`, isMainFrame: true, mediaTypes: [] };
+test('permission policy denies everything except main-frame clipboard writes and leased audio', () => {
+  const trusted = { requestingUrl: `${APP_ORIGIN}/`, isMainFrame: true, mediaTypes: [], microphoneLeaseValid: true };
 
   assert.equal(isAllowedPermission({ ...trusted, permission: 'clipboard-sanitized-write' }), true);
   assert.equal(isAllowedPermission({ ...trusted, permission: 'media', mediaTypes: ['audio'] }), true);
   assert.equal(isAllowedPermission({ ...trusted, permission: 'media', mediaTypes: ['audio', 'audio'] }), true);
+  assert.equal(isAllowedPermission({ ...trusted, microphoneLeaseValid: false, permission: 'media', mediaTypes: ['audio'] }), false);
 
   for (const permission of [
     'media',
@@ -517,6 +607,20 @@ test('permission policy denies everything except main-frame clipboard writes and
       requestingUrl,
     );
   }
+});
+
+test('microphone permission leases are renderer-bound, short-lived, and one-shot', () => {
+  let now = 1000;
+  const leases = new MicrophonePermissionLease({ ttlMs: 5000, now: () => now });
+  assert.equal(leases.grant(42), 6000);
+  assert.equal(leases.valid(41), false);
+  assert.equal(leases.valid(42), true);
+  assert.equal(leases.consume(42), true);
+  assert.equal(leases.consume(42), false);
+  leases.grant(42);
+  now = 6001;
+  assert.equal(leases.consume(42), false);
+  assert.throws(() => leases.grant(0), /Invalid webContents/);
 });
 
 test('every allow-listed invoke channel has both a request and a response contract', () => {
@@ -574,10 +678,14 @@ test('preload exposes an exact frozen surface with no arbitrary-channel passthro
   };
   walk(api, '');
   assert.deepEqual(paths.sort(), [
+    'events.onBeforeQuit',
     'events.onBootStatus',
+    'events.onLifecycle',
+    'events.onNativeNavigate',
     'events.onOpenFile',
     'events.onPdfDrop',
     'events.onSecondInstance',
+    'events.onSidebarToggle',
     'files.listPdfs',
     'files.pickFiles',
     'files.pickFolder',
@@ -587,9 +695,11 @@ test('preload exposes an exact frozen surface with no arbitrary-channel passthro
     'keychain.delete',
     'keychain.get',
     'keychain.set',
+    'lifecycle.acknowledgeBeforeQuit',
     'notification',
     'openExternal',
     'openPath',
+    'permissions.requestMicrophoneLease',
     'popout',
     'runtime.info',
     'sidecar.aggregate',
@@ -629,16 +739,8 @@ test('preload exposes an exact frozen surface with no arbitrary-channel passthro
     'no exposed function may take a caller-supplied channel',
   );
 
-  // Known gap: OPEN_EXTERNAL is exposed and typed but has no request contract
-  // and no ipcMain handler, so it is the one channel the preload can invoke
-  // that the main process will not answer. This pins the gap at exactly that
-  // channel so a second unhandled channel cannot be introduced silently.
   const unhandled = invokedChannels.filter((channel) => !ALLOWED_INVOKE_CHANNELS.includes(channel));
-  assert.equal(
-    unhandled.every((channel) => channel === IPC_CHANNELS.OPEN_EXTERNAL),
-    true,
-    `preload invokes channels with no main-process contract: ${unhandled.join(', ')}`,
-  );
+  assert.deepEqual(unhandled, [], `preload invokes channels with no main-process contract: ${unhandled.join(', ')}`);
 });
 
 test('preload event subscriptions hide the IPC event object and unsubscribe cleanly', () => {

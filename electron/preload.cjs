@@ -44,11 +44,21 @@ const api = Object.freeze({
     get: () => invoke(CHANNELS.FULLSCREEN_GET),
     set: (value) => invoke(CHANNELS.FULLSCREEN_SET, { value }),
   }),
+  lifecycle: Object.freeze({
+    acknowledgeBeforeQuit: (requestId) => invoke(CHANNELS.BEFORE_QUIT_ACK, { requestId }),
+  }),
+  permissions: Object.freeze({
+    requestMicrophoneLease: () => invoke(CHANNELS.MICROPHONE_LEASE),
+  }),
   events: Object.freeze({
     onBootStatus: (listener) => subscribe(EVENTS.BOOT_STATUS, listener),
     onSecondInstance: (listener) => subscribe(EVENTS.SECOND_INSTANCE, listener),
     onOpenFile: (listener) => subscribe(EVENTS.OPEN_FILE, listener),
     onPdfDrop: (listener) => subscribe(EVENTS.PDF_DROP, listener),
+    onLifecycle: (listener) => subscribe(EVENTS.LIFECYCLE, listener),
+    onNativeNavigate: (listener) => subscribe(EVENTS.NATIVE_NAVIGATE, listener),
+    onSidebarToggle: (listener) => subscribe(EVENTS.SIDEBAR_TOGGLE, listener),
+    onBeforeQuit: (listener) => subscribe(EVENTS.BEFORE_QUIT, listener),
   }),
 });
 

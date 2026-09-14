@@ -19,9 +19,10 @@ import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
 import { OfflineProvider } from './context/OfflineContext';
 import OfflineBanner from './components/OfflineBanner';
-import { StudySessionProvider } from './components/session';
+import { StudySessionBoundary } from './components/session';
 import { appRoutes } from './routes/routeManifest';
 import { prefersReducedMotion } from './lib/viewTransitions';
+import { getDesktopBridge, registerDesktopSubscription } from './lib/desktopBridge';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const CfaDashboard = lazy(() => import('./domains/cfa/CfaDashboard'));
@@ -279,6 +280,15 @@ export default function App() {
   const mobileNavHidden = mobileViewport && !mobileNavOpen;
 
   useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.events?.onSidebarToggle) return undefined;
+    return registerDesktopSubscription(() => bridge.events.onSidebarToggle(() => {
+      setSidebarCollapsed((collapsed) => !collapsed);
+      setMobileNavOpen(false);
+    }));
+  }, []);
+
+  useEffect(() => {
     if (typeof window.matchMedia !== 'function') return undefined;
     const query = window.matchMedia('(max-width: 900px)');
     const update = () => setMobileViewport(query.matches);
@@ -335,7 +345,7 @@ export default function App() {
     <ThemeProvider>
       <ToastProvider>
         <OfflineProvider>
-        <StudySessionProvider>
+        <StudySessionBoundary>
         <div className="app-layout">
           {/* BA3: RAG/sidecar-aware offline banner — visible only when degraded,
               sits above the shell so the user knows AI/search is unavailable
@@ -418,7 +428,7 @@ export default function App() {
             </Suspense>
           </ErrorBoundary>
         </div>
-        </StudySessionProvider>
+        </StudySessionBoundary>
         </OfflineProvider>
       </ToastProvider>
     </ThemeProvider>

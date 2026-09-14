@@ -229,6 +229,7 @@ export class SidecarManager {
     identityProbe = probeHttpServiceIdentity,
     portSweep = sweepOwnedPorts,
     watchdog = null,
+    ownershipLedger = null,
     readinessTimeoutMs = DEFAULT_READINESS_TIMEOUT_MS,
     maxRespawns = DEFAULT_MAX_RESPAWNS,
     maxPortRetries = DEFAULT_MAX_PORT_RETRIES,
@@ -253,6 +254,7 @@ export class SidecarManager {
     this.identityProbe = identityProbe;
     this.portSweep = portSweep;
     this.watchdog = watchdog;
+    this.ownershipLedger = ownershipLedger;
     this.readinessTimeoutMs = readinessTimeoutMs;
     this.maxRespawns = maxRespawns;
     this.maxPortRetries = maxPortRetries;
@@ -263,6 +265,7 @@ export class SidecarManager {
     this.stopping = false;
     this.healthTimer = null;
     this.healthTickRunning = false;
+    this.quiesced = false;
   }
 
   getAuthorizationTokenForRequest() {
@@ -273,10 +276,79 @@ export class SidecarManager {
 
   async startAll() {
     this.stopping = false;
+    this.quiesced = false;
     await this.#sweepStalePorts();
     for (const record of this.records.values()) await this.#startRecord(record, false);
     this.#startHealthSupervisor();
     return this.getBootStatus();
+  }
+
+  async recover(reason = 'resume') {
+    this.stopping = false;
+    this.quiesced = false;
+    this.logger.info('sidecar_recovery_started', { reason });
+    for (const record of this.records.values()) {
+      if (record.respawnTimer) clearTimeout(record.respawnTimer);
+      record.respawnTimer = null;
+      const child = record.child;
+      if (record.spec.launchBlockReason) {
+        record.child = null;
+        if (child && child.exitCode === null) {
+          await this.watchdog?.untrack(child.pid).catch((error) => {
+            this.logger.error('watchdog_untrack_failed', { name: record.spec.name, pid: child.pid, error });
+          });
+          await this.ownershipLedger?.untrack(child.pid).catch((error) => {
+            this.logger.error('sidecar_ownership_untrack_failed', { name: record.spec.name, pid: child.pid, error });
+          });
+          await this.terminateTree(child);
+        }
+        record.state = 'pending';
+        record.blockReason = null;
+        record.portRetryCount = 0;
+        await this.#startRecord(record, true);
+        continue;
+      }
+      if (child && child.exitCode === null) {
+        const healthy = record.spec.readyPort === null || (await this.readinessProbe(record.spec, 1000));
+        if (healthy) {
+          record.state = 'ready';
+          this.#markHealthy(record);
+          continue;
+        }
+        record.child = null;
+        await this.watchdog?.untrack(child.pid).catch((error) => {
+          this.logger.error('watchdog_untrack_failed', { name: record.spec.name, pid: child.pid, error });
+        });
+        await this.ownershipLedger?.untrack(child.pid).catch((error) => {
+          this.logger.error('sidecar_ownership_untrack_failed', { name: record.spec.name, pid: child.pid, error });
+        });
+        await this.terminateTree(child);
+      }
+      record.state = 'pending';
+      record.blockReason = null;
+      record.portRetryCount = 0;
+      await this.#startRecord(record, true);
+    }
+    this.#startHealthSupervisor();
+    const status = await this.getBootStatus();
+    this.logger.info('sidecar_recovery_completed', { reason, status: status.status });
+    return status;
+  }
+
+  quiesce(reason = 'suspend') {
+    this.quiesced = true;
+    if (this.healthTimer) clearInterval(this.healthTimer);
+    this.healthTimer = null;
+    this.logger.info('sidecar_supervisor_quiesced', { reason });
+  }
+
+  setLsatEncryptionKey(keyB64, blockReason = null) {
+    const record = this.records.get(SERVICE_NAMES.LSAT);
+    if (!record) return false;
+    if (keyB64) record.spec.env.LSATLAB_DB_KEY_B64 = keyB64;
+    else delete record.spec.env.LSATLAB_DB_KEY_B64;
+    record.spec.launchBlockReason = keyB64 ? null : blockReason;
+    return true;
   }
 
   #ownPids() {
@@ -301,10 +373,12 @@ export class SidecarManager {
     }
     if (targets.length === 0) return;
     try {
+      const ownedPids = this.ownershipLedger ? await this.ownershipLedger.verifiedPids([...this.records.values()].map((record) => record.spec)) : [];
       await this.portSweep({
         targets,
         identityProbe: (identity, port) => this.identityProbe(identity, port, 750),
         selfPids: this.#ownPids(),
+        ownedPids,
         logger: this.logger,
       });
     } catch (error) {
@@ -365,6 +439,9 @@ export class SidecarManager {
       });
     }
 
+    if (spec.dataDirectory && spec.dataRoot) {
+      await ensureDirectoryWithinRoot(spec.dataDirectory, spec.dataRoot);
+    }
     if (spec.name === SERVICE_NAMES.LSAT) {
       await ensureDirectoryWithinRoot(spec.env.LSATLAB_DATA_DIR, spec.dataRoot);
     }
@@ -450,9 +527,19 @@ export class SidecarManager {
         throw new Error(`Crash guard refused child PID ${child.pid}`, { cause: error });
       }
     }
+    if (this.ownershipLedger) {
+      try {
+        await this.ownershipLedger.track({ pid: child.pid, service: spec.name, executable: spec.program });
+      } catch (error) {
+        await this.watchdog?.untrack(child.pid).catch(() => {});
+        await this.terminateTree(child);
+        throw new Error(`Ownership ledger refused child PID ${child.pid}`, { cause: error });
+      }
+    }
     child.off('exit', captureEarlyExit);
     if (earlyExit || child.exitCode !== null) {
       await this.watchdog?.untrack(child.pid);
+      await this.ownershipLedger?.untrack(child.pid);
       const exit = earlyExit ?? { code: child.exitCode, signal: child.signalCode };
       throw new Error(`Child exited before crash-guard registration completed (${exit.code ?? exit.signal})`);
     }
@@ -519,6 +606,9 @@ export class SidecarManager {
     void this.watchdog?.untrack(child.pid).catch((error) => {
       this.logger.error('watchdog_untrack_failed', { name: record.spec.name, pid: child.pid, error });
     });
+    void this.ownershipLedger?.untrack(child.pid).catch((error) => {
+      this.logger.error('sidecar_ownership_untrack_failed', { name: record.spec.name, pid: child.pid, error });
+    });
     this.logger.warn('sidecar_exited', { name: record.spec.name, pid: child.pid, code, signal });
     if (this.stopping) {
       record.state = 'stopped';
@@ -556,12 +646,12 @@ export class SidecarManager {
   }
 
   async #healthTick() {
-    if (this.stopping || this.healthTickRunning) return;
+    if (this.stopping || this.quiesced || this.healthTickRunning) return;
     this.healthTickRunning = true;
     try {
       for (const record of this.records.values()) {
         const child = record.child;
-        if (record.state !== 'ready' || !child || child.exitCode !== null) continue;
+        if (this.quiesced || record.state !== 'ready' || !child || child.exitCode !== null) continue;
         if (record.spec.readyPort === null) {
           this.#markHealthy(record);
           continue;
@@ -671,6 +761,13 @@ export class SidecarManager {
       }
     }
     await Promise.all(terminations);
+    const ownedChildren = [...this.records.values()]
+      .filter((record) => Number.isSafeInteger(record.child?.pid))
+      .map((record) => ({ name: record.spec.name, pid: record.child.pid }));
+    await Promise.all(ownedChildren.map(({ name, pid }) =>
+      this.ownershipLedger?.untrack(pid).catch((error) => {
+        this.logger.error('sidecar_ownership_untrack_failed', { name, pid, error });
+      })));
     for (const record of this.records.values()) {
       record.child = null;
       if (record.everLaunched) record.state = 'stopped';

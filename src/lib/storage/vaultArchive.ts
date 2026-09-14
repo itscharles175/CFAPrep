@@ -118,11 +118,16 @@ export interface VaultArchiveVerification {
 // --- store extraction --------------------------------------------------------
 
 const HOST_STORE_PREFIX = 'host:';
+const HOST_SOURCE_STORE_PREFIX = 'host-source:';
+const HOST_DERIVED_STORE_PREFIX = 'host-derived:';
 const LSAT_STORE_PREFIX = 'lsat:';
 
 /**
  * The canonical, name->rows view the archive digests. Every top-level entry of
- * the host `VaultExport.stores` is included (each is an array of rows), plus —
+ * the host `VaultExport.stores` is included (each is an array of rows). Explicit
+ * full-vault exports also include every array store under `sourceVault` and
+ * `derivedStores`; the manifest exposes only store identity, row count, and a
+ * digest, never source text or study history. Finally —
  * when present — each top-level ARRAY of the LSAT bank payload. Non-array LSAT
  * fields (scalars like `schema_version`, nested objects) are intentionally NOT
  * per-store digested: the LSAT half's own whole-artifact integrity is the
@@ -141,6 +146,22 @@ function collectStores(
     const value = hostStores[key];
     if (Array.isArray(value)) {
       out.push({ name: `${HOST_STORE_PREFIX}${key}`, rows: value });
+    }
+  }
+
+  const sourceStores = (host.sourceVault ?? {}) as Record<string, unknown>;
+  for (const key of Object.keys(sourceStores)) {
+    const value = sourceStores[key];
+    if (Array.isArray(value)) {
+      out.push({ name: `${HOST_SOURCE_STORE_PREFIX}${key}`, rows: value });
+    }
+  }
+
+  const derivedStores = (host.derivedStores ?? {}) as Record<string, unknown>;
+  for (const key of Object.keys(derivedStores)) {
+    const value = derivedStores[key];
+    if (Array.isArray(value)) {
+      out.push({ name: `${HOST_DERIVED_STORE_PREFIX}${key}`, rows: value });
     }
   }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, m, useReducedMotion } from "motion/react";
 import { CircleCheck, CircleX, Keyboard, Loader2, PlayCircle } from "lucide-react";
 import { KEYBOARD_HELP_EVENT } from "@lsat/components/keyboard-help";
@@ -34,16 +34,45 @@ import {
  * import/sample → baseline → keyboard) are staged as calm cross-fades on one
  * canvas. SAME data / flow / persistence as before — purely a visual reskin.
  */
+export function onboardingAppliesToRoute(pathname: string) {
+  return pathname === "/" || pathname === "/dashboard";
+}
+
+export function setFirstLightChromeState(active: boolean) {
+  if (typeof document === "undefined") return;
+  if (active) {
+    document.documentElement.dataset.lsatFirstLight = "active";
+  } else {
+    delete document.documentElement.dataset.lsatFirstLight;
+  }
+}
+
+export function examCountdownPresentation(days: number | null) {
+  if (days == null) {
+    return { label: "Exam date", value: null, status: "Not set" };
+  }
+  return {
+    label: days < 0 ? "Exam date passed" : "Days to exam",
+    value: Math.max(0, days),
+    status: undefined,
+  };
+}
+
 export function OnboardingWizard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const reduce = useReducedMotion();
   // UX-3: also suppress when onboarding was settled on ANOTHER plane (the host
   // wizard sets the shared cross-domain dismiss flag). This is the LSAT → host
   // half of the two-way sync: a user who dismissed setup on the host never gets
   // the "First Light" wizard the first time they hop into /lsat.
-  const [open, setOpen] = useState(
-    () => !isOnboardingDone() && getGoal() == null && !isUnifiedOnboardingDismissed(),
-  );
+  const [dismissedForSession, setDismissedForSession] = useState(false);
+  const open =
+    onboardingAppliesToRoute(location.pathname) &&
+    !dismissedForSession &&
+    !isOnboardingDone() &&
+    getGoal() == null &&
+    !isUnifiedOnboardingDismissed();
   const [step, setStep] = useState(0);
   const [targetScore, setTargetScore] = useState(165);
   const [examDate, setExamDate] = useState("");
@@ -63,7 +92,7 @@ export function OnboardingWizard() {
       // for the host, so the host wizard never auto-opens afterwards. Paired with
       // the suppression in the `open` gate above, this is the two-way dismiss sync.
       setUnifiedOnboardingDismissed();
-      setOpen(false);
+      setDismissedForSession(true);
     },
     [targetScore, examDate],
   );
@@ -78,12 +107,21 @@ export function OnboardingWizard() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, finish]);
 
+  // Diagnostics can be useful once the workspace is visible, but a background
+  // toast must not read as part of first-run setup or cover its primary action.
+  // The stage's local style hides Sonner only while this modal owns the screen.
+  useEffect(() => {
+    setFirstLightChromeState(open);
+    return () => setFirstLightChromeState(false);
+  }, [open]);
+
   if (!open) return null;
 
   const days = daysUntil(examDate);
+  const examCountdown = examCountdownPresentation(days);
 
   return (
-    <FirstLightStage reduce={!!reduce}>
+    <FirstLightStage reduce={!!reduce} onSkip={() => finish(true)}>
       <AnimatePresence mode="wait" initial={false}>
         {step === 0 && (
           <Scene key="goal" reduce={!!reduce}>
@@ -102,24 +140,25 @@ export function OnboardingWizard() {
                 voice="numeric"
                 aurora
               />
-              <StatNumber
-                label={
-                  days == null
-                    ? "Days to exam"
-                    : days < 0
-                      ? "Exam date passed"
-                      : "Days to exam"
-                }
-                value={days != null ? Math.max(0, days) : 0}
-                size="stat-xl"
-                voice="numeric"
-                aurora
-                subline={
-                  examDate ? undefined : (
-                    <span className="text-muted-foreground">No date set yet</span>
-                  )
-                }
-              />
+              {examCountdown.value == null ? (
+                <div className="flex flex-col gap-1">
+                  <span className="type-overline text-muted-foreground">{examCountdown.label}</span>
+                  <div className="aurora">
+                    <span className="stat type-numeric text-stat-xl leading-none font-semibold tabular-nums">—</span>
+                  </div>
+                  <p className="type-counsel mt-1 max-w-prose text-sm text-muted-foreground">
+                    {examCountdown.status}
+                  </p>
+                </div>
+              ) : (
+                <StatNumber
+                  label={examCountdown.label}
+                  value={examCountdown.value}
+                  size="stat-xl"
+                  voice="numeric"
+                  aurora
+                />
+              )}
             </div>
 
             <div className="space-y-5">
@@ -259,21 +298,35 @@ export function OnboardingWizard() {
 function FirstLightStage({
   children,
   reduce,
+  onSkip,
 }: {
   children: ReactNode;
   reduce: boolean;
+  onSkip: () => void;
 }) {
   return (
     <m.div
       role="dialog"
       aria-modal="true"
-      aria-label="Welcome to LSAT Lab"
+      aria-label="StudyVault LSAT setup"
       initial={reduce ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       // The whole stage is the dark "observatory" floor — token-driven so it
       // re-themes across light / dark / focus-paper / high-contrast.
-      className="bg-surface-0 fixed inset-0 z-50 flex flex-col items-center justify-center overflow-y-auto p-6 print:hidden"
+      className="lsat-first-light-stage bg-surface-0 fixed inset-0 z-50 flex flex-col items-center justify-center overflow-y-auto p-6 print:hidden"
     >
+      <style>{'html[data-lsat-first-light="active"] [data-sonner-toaster]{display:none!important}'}</style>
+      <header className="absolute inset-x-0 top-0 flex items-center justify-between border-b border-border/70 bg-surface-0/90 px-5 py-3 backdrop-blur-sm sm:px-8">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <Logo className="h-6 w-6 shrink-0" />
+          <span className="type-overline truncate text-foreground">StudyVault</span>
+          <span aria-hidden className="text-muted-foreground">/</span>
+          <span className="truncate text-xs text-muted-foreground">LSAT setup</span>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onSkip}>
+          Skip setup
+        </Button>
+      </header>
       {/* Brand mark catching the breathing aurora. */}
       <div className="aurora mb-8 flex items-center justify-center">
         <Logo className="h-14 w-14" />

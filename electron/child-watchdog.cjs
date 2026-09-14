@@ -5,6 +5,8 @@ const { readFileSync, writeSync } = require('node:fs');
 const readline = require('node:readline');
 const { setInterval } = require('node:timers');
 
+const utilityParentPort = process.parentPort ?? null;
+
 const parentPid = Number(process.argv[2]);
 if (!Number.isSafeInteger(parentPid) || parentPid < 1 || parentPid === process.pid) process.exit(2);
 
@@ -34,21 +36,35 @@ function writeDiagnostic(line) {
   }
 }
 
-// PID-reuse fingerprint for POSIX, captured at track time and re-read before the
-// kill. Linux publishes the process start time as field 22 of /proc/<pid>/stat;
-// the comm field can itself contain spaces and parentheses, so the numeric
-// fields only start after the LAST ')'. macOS and the BSDs expose no comparably
-// cheap source (`ps -o lstart=` costs a process spawn per tracked pid), so they
-// return null, which disables the guard and keeps the pre-existing residual
-// risk: a stale entry could SIGKILL an unrelated process that reused the pid.
-function posixStartFingerprint(pid) {
-  if (process.platform !== 'linux') return null;
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] ?? null;
-  } catch {
-    return null;
+// Capture both parentage and a process-start fingerprint before accepting an
+// owned PID. The same start fingerprint is checked immediately before reap, so
+// PID reuse can never redirect a kill to an unrelated process.
+function posixProcessIdentity(pid) {
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      return { parentPid: Number(fields[1]), startFingerprint: fields[19] ?? null };
+    } catch {
+      return null;
+    }
   }
+  if (process.platform === 'darwin') {
+    const result = spawnSync('ps', ['-o', 'ppid=', '-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+    });
+    if (result.status !== 0 || !result.stdout.trim()) return null;
+    const match = result.stdout.trim().match(/^(\d+)\s+(.+)$/);
+    if (!match) return null;
+    return { parentPid: Number(match[1]), startFingerprint: match[2] };
+  }
+  return null;
+}
+
+function posixStartFingerprint(pid) {
+  return posixProcessIdentity(pid)?.startFingerprint ?? null;
 }
 
 function windowsProcessSnapshot() {
@@ -183,17 +199,15 @@ function parentIsAlive() {
 
 function respond(id, ok, callback) {
   if (!Number.isSafeInteger(id) || id < 1) return;
+  if (utilityParentPort) {
+    utilityParentPort.postMessage({ id, ok });
+    callback?.();
+    return;
+  }
   process.stdout.write(`${JSON.stringify({ id, ok })}\n`, callback);
 }
 
-const reader = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-reader.on('line', (line) => {
-  let message;
-  try {
-    message = JSON.parse(line);
-  } catch {
-    return;
-  }
+function handleMessage(message) {
   if (message?.op === 'track' && isAllowedPid(message.pid)) {
     if (process.platform === 'win32') {
       if (!isProcessAlive(message.pid)) {
@@ -202,8 +216,13 @@ reader.on('line', (line) => {
       }
       ownedProcesses.set(message.pid, { startFingerprint: null, rootPid: message.pid });
     } else {
+      const identity = posixProcessIdentity(message.pid);
+      if (!identity || identity.parentPid !== parentPid || identity.startFingerprint === null) {
+        respond(message.id, false);
+        return;
+      }
       ownedProcesses.set(message.pid, {
-        startFingerprint: posixStartFingerprint(message.pid),
+        startFingerprint: identity.startFingerprint,
         rootPid: message.pid,
       });
     }
@@ -218,10 +237,23 @@ reader.on('line', (line) => {
   } else {
     respond(message?.id, false);
   }
-});
-reader.on('close', reapAndExit);
-process.stdin.on('end', reapAndExit);
-process.stdin.on('error', reapAndExit);
+}
+
+if (utilityParentPort) {
+  utilityParentPort.on('message', (event) => handleMessage(event?.data ?? event));
+} else {
+  const reader = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  reader.on('line', (line) => {
+    try {
+      handleMessage(JSON.parse(line));
+    } catch {
+      // Ignore malformed control lines.
+    }
+  });
+  reader.on('close', reapAndExit);
+  process.stdin.on('end', reapAndExit);
+  process.stdin.on('error', reapAndExit);
+}
 
 if (process.platform === 'win32' && windowsProcessSnapshot() === null) process.exit(3);
 
@@ -234,4 +266,5 @@ const parentProbe = setInterval(() => {
 }, 1500);
 parentProbe.unref?.();
 
-process.stdout.write('STUDYVAULT_WATCHDOG_READY\n');
+if (utilityParentPort) utilityParentPort.postMessage({ type: 'ready' });
+else process.stdout.write('STUDYVAULT_WATCHDOG_READY\n');

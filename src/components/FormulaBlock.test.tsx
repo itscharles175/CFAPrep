@@ -64,4 +64,32 @@ describe('FormulaBlock — GAP-MATHA11Y-1 accessible math', () => {
     const utterance = speak.mock.calls[0][0] as { text: string };
     expect(utterance.text).toContain('a over b');
   });
+
+  it('exposes a keyboard-scroll affordance when the rendered formula overflows', async () => {
+    const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    const scrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth');
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get() {
+        return (this as HTMLElement).classList.contains('formula-render') ? 120 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+      configurable: true,
+      get() {
+        return (this as HTMLElement).classList.contains('formula-render') ? 280 : 0;
+      },
+    });
+
+    try {
+      render(<FormulaBlock latex="\\frac{a+b}{c+d}" name="Ratio" />);
+      await waitFor(() => {
+        expect(screen.getByText(/Scroll horizontally to view the full formula/)).toBeInTheDocument();
+      });
+      expect(document.querySelector('.formula-render')).toHaveAttribute('tabindex', '0');
+    } finally {
+      if (clientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidth);
+      if (scrollWidth) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', scrollWidth);
+    }
+  });
 });

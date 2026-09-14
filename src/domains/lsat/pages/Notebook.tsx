@@ -537,11 +537,11 @@ export default function Notebook() {
 
   return (
     <PageLayout
-      title="Notebook OS"
+      title="Notebook & Curriculum"
       eyebrow={workspace.data?.data.key ?? "local workspace"}
       icon={BookOpen}
       width="full"
-      description={workspace.data?.data.description || "Sources, notes, tutor chat, citations, and local-first study transformations."}
+      description={workspace.data?.data.description || "Your LSAT source study space for curriculum notes, tutor chat, citations, and local-first transformations."}
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <SourceStatusPill status={workbenchStatus} official={Boolean(activeCitation?.official_firewall)} />
@@ -600,8 +600,8 @@ export default function Notebook() {
           }
         >
           {hasQueryError
-            ? "Notebook OS could not load current backend evidence. Actions may fail until the backend recovers."
-            : "Notebook OS is showing offline fallback data until the backend responds."}
+            ? "Notebook & Curriculum could not load current backend evidence. Actions may fail until the backend recovers."
+            : "Notebook & Curriculum is showing offline fallback data until the backend responds."}
         </div>
       )}
       <div className="grid min-h-[calc(100vh-13rem)] gap-4 xl:grid-cols-[300px_minmax(0,1fr)_340px]">

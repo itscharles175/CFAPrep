@@ -69,7 +69,9 @@ describe('ReviewInbox focus hierarchy', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: "You're caught up" })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Start practice' })).toHaveAttribute('href', '/cfa/level2/mock');
+    expect(screen.getByLabelText('Review scope')).toHaveTextContent('Global inbox');
+    expect(screen.getByLabelText('Review scope')).toHaveTextContent('Current context: CFA Level II');
+    expect(screen.getByRole('link', { name: 'Start CFA Level II practice' })).toHaveAttribute('href', '/cfa/level2/mock');
     expect(screen.queryByLabelText('Review status')).not.toBeInTheDocument();
     expect(screen.queryByText('Repair Vault')).not.toBeInTheDocument();
     expect(screen.queryByText('Review Forecast')).not.toBeInTheDocument();
@@ -79,6 +81,7 @@ describe('ReviewInbox focus hierarchy', () => {
     arrange({
       items: [{
         id: 'fixed-income-duration',
+        domain: 'quant',
         type: 'weak-objective',
         title: 'Revisit duration',
         subtitle: 'Fixed income',
@@ -87,6 +90,8 @@ describe('ReviewInbox focus hierarchy', () => {
       nextActions: [{ label: 'Review', title: 'Revisit duration', path: '/cfa/level2/fixed-income', reason: 'Low retention' }],
     });
     renderPage();
+
+    expect(await screen.findByLabelText('Domain: Quant')).toBeInTheDocument();
 
     const planDisclosure = await screen.findByText('Plan and follow-up');
     expect(planDisclosure.closest('details')).not.toHaveAttribute('open');

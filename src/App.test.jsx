@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import App from './App';
@@ -28,5 +28,34 @@ describe('app shell', () => {
     );
 
     expect(await screen.findByText('Page not found')).toBeInTheDocument();
+  });
+
+  it('applies the native View menu sidebar command', async () => {
+    let toggleSidebar;
+    window.studyvault = {
+      events: {
+        onSidebarToggle(handler) {
+          toggleSidebar = handler;
+          return () => { toggleSidebar = undefined; };
+        },
+      },
+    };
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/missing-route']}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
+
+    // Main's visibility hint may be stale after restored renderer state. Each
+    // menu command must invert the actual renderer state.
+    act(() => toggleSidebar?.({ visible: true }));
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
+
+    act(() => toggleSidebar?.({ visible: false }));
+    expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
+
+    unmount();
+    delete window.studyvault;
   });
 });

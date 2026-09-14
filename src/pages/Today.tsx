@@ -14,6 +14,8 @@ import { generateQuestionsFromCurriculum, getLlmSettings, narrateStudyPlan } fro
 import { getCfaSourceReadingForTopic } from '../lib/cfaSourceVault';
 import { getStorage } from '../lib/storage';
 import { useScrollRestoration } from '../lib/scrollRestore';
+import { useStudyContext } from '../lib/studyContext';
+import type { StudyDomain, StudyGoal } from '../lib/studyContext';
 
 interface TopicPath {
   level: string;
@@ -126,9 +128,175 @@ interface JournalRowValue {
   savedAt?: string | null;
 }
 
+const DOMAIN_LABELS: Record<StudyDomain, string> = {
+  cfa: 'CFA',
+  lsat: 'LSAT',
+  quant: 'Quant',
+  excel: 'Excel',
+};
+
+const GOAL_LABELS: Record<StudyGoal, string> = {
+  balanced: 'Balanced',
+  'exam-readiness': 'Exam readiness',
+  retention: 'Retention',
+  'skill-building': 'Skill building',
+};
+
+function goalSubtitle(goal: StudyGoal): string {
+  if (goal === 'exam-readiness') return 'Your next exam focused step, based on readiness and remaining time.';
+  if (goal === 'retention') return 'Your next retention pass, based on memory strength and due work.';
+  if (goal === 'skill-building') return 'Your next skill building step, based on productive practice value.';
+  return 'Your highest-value next step, based on due work and current readiness.';
+}
+
+interface FallbackDomainConfig {
+  title: string;
+  path: string;
+  followUpTitle: string;
+  followUpPath: string;
+  minutes: number;
+  objective: string;
+}
+
+const FALLBACK_DOMAIN_CONFIG: Record<Exclude<StudyDomain, 'cfa'>, FallbackDomainConfig> = {
+  lsat: {
+    title: 'Practice an LSAT section',
+    path: '/lsat/practice',
+    followUpTitle: 'Review your LSAT work',
+    followUpPath: '/lsat/review',
+    minutes: 35,
+    objective: 'lsat:section',
+  },
+  quant: {
+    title: 'Continue Quant practice',
+    path: '/quant',
+    followUpTitle: 'Review Quant concepts',
+    followUpPath: '/review',
+    minutes: 30,
+    objective: 'quant:practice',
+  },
+  excel: {
+    title: 'Continue Excel practice',
+    path: '/excel',
+    followUpTitle: 'Review Excel concepts',
+    followUpPath: '/review',
+    minutes: 30,
+    objective: 'excel:practice',
+  },
+};
+
+export interface TodayWorkloadSummary {
+  currentLabel: string | null;
+  remainderLabel: string | null;
+  totalLabel: string;
+  activityCount: number;
+  totalMinutes: number | null;
+}
+
+function actionKindLabel(kind: StudyAction['kind']): string {
+  if (kind === 'review') return 'review';
+  if (kind === 'weak-topic') return 'focused practice';
+  if (kind === 'forecast-spike') return 'review ahead';
+  return 'study';
+}
+
+/**
+ * Formats the ordered shortlist as now → remainder → total. Durations are
+ * shown only when every relevant action carries a real estimate, so mocked or
+ * partially populated plans never imply work that the plan did not schedule.
+ */
+export function summarizeTodayWorkload(plan: Pick<StudyPlan, 'actions'> | null | undefined): TodayWorkloadSummary {
+  const actions = plan?.actions ?? [];
+  const hasDuration = (action: StudyAction | undefined): action is StudyAction & { estimatedMinutes: number } =>
+    Boolean(action && Number.isFinite(action.estimatedMinutes) && action.estimatedMinutes > 0);
+  const current = actions[0];
+  const remainder = actions.slice(1);
+  const allDurationsKnown = actions.length > 0 && actions.every(hasDuration);
+  const remainderDurationsKnown = remainder.length > 0 && remainder.every(hasDuration);
+  const totalMinutes = allDurationsKnown
+    ? actions.reduce((sum, action) => sum + action.estimatedMinutes, 0)
+    : null;
+  const remainderMinutes = remainderDurationsKnown
+    ? remainder.reduce((sum, action) => sum + action.estimatedMinutes, 0)
+    : 0;
+
+  return {
+    currentLabel: hasDuration(current) ? `About ${current.estimatedMinutes} min now` : null,
+    remainderLabel: remainderDurationsKnown
+      ? remainder.length === 1
+        ? `Then ${remainderMinutes} min ${actionKindLabel(remainder[0].kind)}`
+        : `Then ${remainderMinutes} min across ${remainder.length} more activities`
+      : null,
+    totalLabel: totalMinutes != null
+      ? `${actions.length} ${actions.length === 1 ? 'activity' : 'activities'} · ${totalMinutes} min total`
+      : `${actions.length} ${actions.length === 1 ? 'activity' : 'activities'}`,
+    activityCount: actions.length,
+    totalMinutes,
+  };
+}
+
+/** Deterministic plan used when a non-CFA curriculum has no local planner yet. */
+export function createDomainFallbackPlan(domain: Exclude<StudyDomain, 'cfa'>, goal: StudyGoal): StudyPlan {
+  const config = FALLBACK_DOMAIN_CONFIG[domain];
+  const label = DOMAIN_LABELS[domain];
+  const goalLabel = GOAL_LABELS[goal];
+  const reason = goal === 'exam-readiness'
+    ? `A focused ${label} session builds the readiness signal for your exam goal.`
+    : goal === 'retention'
+      ? `A focused ${label} session strengthens recall before the next review.`
+      : goal === 'skill-building'
+        ? `A focused ${label} session builds fluency through deliberate practice.`
+        : `A focused ${label} session keeps your study momentum moving.`;
+  const followUpReason = domain === 'lsat'
+    ? 'Close the loop after timed work with blind review.'
+    : 'Use a short review pass to reinforce the concepts you just practiced.';
+  const actions: StudyAction[] = [
+    {
+      kind: 'continue',
+      title: config.title,
+      path: config.path,
+      reason,
+      priority: 60,
+      domain,
+      objective: config.objective,
+      estimatedMinutes: config.minutes,
+      availability: 'ready',
+      rationale: reason,
+    },
+    {
+      kind: 'review',
+      title: config.followUpTitle,
+      path: config.followUpPath,
+      reason: followUpReason,
+      priority: 40,
+      domain,
+      objective: `${domain}:review`,
+      estimatedMinutes: 15,
+      availability: 'ready',
+      rationale: followUpReason,
+    },
+  ];
+  return {
+    generatedAt: new Date().toISOString(),
+    headline: `${label} · ${goalLabel}`,
+    actions,
+    backlogActions: [],
+    totalActionCount: actions.length,
+    totalEstimatedMinutes: actions.reduce((sum, action) => sum + action.estimatedMinutes, 0),
+    scheduledMinutes: actions.reduce((sum, action) => sum + action.estimatedMinutes, 0),
+    dueCount: 0,
+    weakCount: 0,
+    peakReviewDay: null,
+    interleaving: null,
+    rationale: `${label} plan is using a deterministic local fallback while its adaptive planner is unavailable.`,
+  };
+}
+
 export default function Today() {
   const navigate = useNavigate();
   const focusSession = useStudySession();
+  const [studyContext] = useStudyContext();
+  const { domain, goal, cfaLevel } = studyContext;
   const [activePathway] = useLevel3Pathway() as [string, (next: string) => void];
   const [plan, setPlan] = useState<StudyPlan | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -148,6 +316,7 @@ export default function Today() {
   const { report: nextReport, loading: nextLoading, refresh: refreshNext } = useNextQuestions({
     domain: 'cfa',
     count: 5,
+    enabled: domain === 'cfa',
   });
 
   // UX-1: restore the document scroll position when returning to /today (incl.
@@ -221,7 +390,9 @@ export default function Today() {
   async function refresh() {
     setRefreshing(true);
     try {
-      const next = await buildStudyPlan({ pathway: activePathway });
+      const next = domain === 'cfa'
+        ? await buildStudyPlan({ pathway: activePathway })
+        : createDomainFallbackPlan(domain, goal);
       setPlan(next);
     } finally {
       setRefreshing(false);
@@ -230,7 +401,11 @@ export default function Today() {
 
   useEffect(() => {
     let active = true;
-    buildStudyPlan({ pathway: activePathway })
+    setPlan(null);
+    const nextPlan = domain === 'cfa'
+      ? buildStudyPlan({ pathway: activePathway })
+      : Promise.resolve(createDomainFallbackPlan(domain, goal));
+    nextPlan
       .then((next) => {
         if (!active) return;
         setPlan(next);
@@ -261,12 +436,13 @@ export default function Today() {
     return () => {
       active = false;
     };
-  }, [activePathway]);
+  }, [activePathway, domain, goal]);
 
   // First weak-topic action, used by the targeted-drill panel.
   const weakAction = plan?.actions?.find((a) => a.kind === 'weak-topic');
   const weakTopic = weakAction ? parseTopicPath(weakAction.path) : null;
-
+  const top = plan?.actions?.[0];
+  const activityTopic = weakAction?.objective || top?.objective || `${domain}:today`;
   const answeredQuestionCount = Object.keys(drillAnswers).length;
   const correctAnswerCount = drill.questions.filter((question) => drillAnswers[question.id] === question.correct).length;
   useEffect(() => {
@@ -274,8 +450,8 @@ export default function Today() {
     // its persisted totals with Today's freshly-mounted empty drill state.
     if (drill.state !== 'done') return;
     focusSession.updateActivity({
-      domain: 'cfa',
-      topic: weakAction ? `cfa:${weakTopic?.topic || 'today'}` : 'cfa:today',
+      domain,
+      topic: activityTopic,
       questionsAnswered: answeredQuestionCount,
       score: correctAnswerCount,
     });
@@ -317,8 +493,8 @@ export default function Today() {
     }
   }
 
-  const top = plan?.actions?.[0];
   const rest = (plan?.actions || []).slice(1, 5);
+  const workload = summarizeTodayWorkload(plan);
 
   const timerPanel = (
     <div className="qv-stack-3">
@@ -353,8 +529,8 @@ export default function Today() {
           <button
             className="btn btn-primary btn-sm"
             onClick={() => focusSession.start({
-              domain: 'cfa',
-              topic: weakAction ? `cfa:${weakTopic?.topic || 'today'}` : 'cfa:today',
+              domain,
+              topic: activityTopic,
               questionsAnswered: answeredQuestionCount,
               score: correctAnswerCount,
             })}
@@ -451,10 +627,15 @@ export default function Today() {
       <PageHeader
         tone="study"
         title="Today"
-        subtitle="Your highest-value next step, based on due work and current readiness."
+        subtitle={`${DOMAIN_LABELS[domain]} · ${goalSubtitle(goal)}`}
         meta={
           plan ? (
             <>
+              <StatusBadge tone="accent">
+                {DOMAIN_LABELS[domain]} · {domain === 'cfa'
+                  ? (cfaLevel === 'level1' ? 'Level I' : cfaLevel === 'level2' ? 'Level II' : 'Level III')
+                  : GOAL_LABELS[goal]}
+              </StatusBadge>
               {plan.dueCount > 0 && <StatusBadge tone="warning">{plan.dueCount} review{plan.dueCount === 1 ? '' : 's'} due</StatusBadge>}
               {plan.weakCount > 0 && <StatusBadge tone="danger">{plan.weakCount} weak topic{plan.weakCount === 1 ? '' : 's'}</StatusBadge>}
               {plan.peakReviewDay && <StatusBadge tone="exam">Peak {plan.peakReviewDay.date} · {plan.peakReviewDay.count}</StatusBadge>}
@@ -496,10 +677,15 @@ export default function Today() {
                   <ActionIconRender kind={top.kind} size={40} />
                 </span>
                 <div className="today-primary-action__copy">
-                  <span className="today-eyebrow">Recommended now</span>
+                  <span className="today-eyebrow">Recommended now · {GOAL_LABELS[goal]}</span>
                   <h2>{top.title}</h2>
                   <p className="muted-copy qv-m-0">{top.reason}</p>
-                  {top.estimatedMinutes && <small className="today-primary-action__duration">About {top.estimatedMinutes} min</small>}
+                  {workload.currentLabel && (
+                    <small className="today-primary-action__duration">
+                      {workload.currentLabel}
+                      {workload.remainderLabel && <> · {workload.remainderLabel}</>}
+                    </small>
+                  )}
                 </div>
                 <div className="today-primary-action__actions">
                   <Link
@@ -508,8 +694,8 @@ export default function Today() {
                     onClick={() => {
                       if (!focusSession.session) {
                         focusSession.start({
-                          domain: 'cfa',
-                          topic: top.objective || weakTopic?.topic || 'today',
+                          domain,
+                          topic: activityTopic,
                           questionsAnswered: answeredQuestionCount,
                           score: correctAnswerCount,
                         });
@@ -561,7 +747,7 @@ export default function Today() {
               <summary>
                 <span>Full plan</span>
                 <span className="today-disclosure__meta">
-                  {plan.scheduledMinutes != null ? `${plan.scheduledMinutes} min scheduled` : `${plan.actions.length} activities`}
+                  {workload.totalLabel}
                 </span>
               </summary>
               <div className="today-disclosure__body qv-stack-4">
@@ -596,23 +782,25 @@ export default function Today() {
               host CFA/Quant/Excel, reranked by one utility). Self-fetching and
               fully degrading: renders nothing when the sidecar is offline or has
               no host evidence to merge, so the local plan above is never blocked. */}
-          <UnifiedPlanSection variant="full" />
+          {domain === 'cfa' && <UnifiedPlanSection variant="full" />}
 
           {/* LEARN-6 — adaptive "what to study next" over host (CFA) content,
               ranked against the unified ability. Fully degrading: an offline
               sidecar shows a graceful note. Selecting a row opens the matching
               host drill keyed by the objective. */}
-          <div style={{ marginBottom: 'var(--space-6)' }}>
-            <AdaptiveRecommendationCard
-              report={nextReport}
-              loading={nextLoading}
-              onRefresh={refreshNext}
-              onSelect={(candidate) =>
-                navigate(`/cfa/drills?topic=${encodeURIComponent(candidate.key || candidate.contentId)}`)
-              }
-              maxItems={5}
-            />
-          </div>
+          {domain === 'cfa' && (
+            <div style={{ marginBottom: 'var(--space-6)' }}>
+              <AdaptiveRecommendationCard
+                report={nextReport}
+                loading={nextLoading}
+                onRefresh={refreshNext}
+                onSelect={(candidate) =>
+                  navigate(`/cfa/drills?topic=${encodeURIComponent(candidate.key || candidate.contentId)}`)
+                }
+                maxItems={5}
+              />
+            </div>
+          )}
 
           {weakAction && (
             <Surface tone="study" status="warning">

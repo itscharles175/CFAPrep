@@ -2810,7 +2810,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   border-radius: var(--radius-md);
   padding: var(--space-5);
   margin: var(--space-6) 0;
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .formula-block,
@@ -2821,7 +2821,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   border-radius: var(--radius-md);
   padding: var(--space-5);
   margin: var(--space-4) 0;
-  overflow-x: auto;
+  overflow: visible;
 }
 
 :root[data-theme="light"] .formula-block,
@@ -2851,6 +2851,44 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .formula-render {
   margin: var(--space-3) 0;
   font-size: 1.05em;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  padding-bottom: 6px;
+  scrollbar-color: color-mix(in srgb, var(--accent) 72%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+/* KaTeX display math keeps its intrinsic width so long CFA/Excel expressions
+   remain intact. The formula-render scrollport owns overflow, allowing the
+   surrounding card and description to stay within the reading measure. */
+.formula-render > .katex,
+.formula-render > .katex-display {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  margin-inline: 0;
+}
+
+.formula-overflow-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: calc(var(--space-2) * -1);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+}
+
+.formula-overflow-hint span {
+  color: var(--accent);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.formula-render--overflowing {
+  outline-offset: 3px;
 }
 
 .formula-description {
@@ -3421,6 +3459,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .search-popover {
   left: 0;
   width: min(520px, calc(100vw - 2rem));
+  /* Keep the full command surface reachable at minimum/native window sizes.
+     The palette is anchored below the topbar, so its own scrollport prevents
+     the last result rows from falling below the viewport. */
+  max-height: min(680px, calc(100dvh - 88px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-2);
 }
 

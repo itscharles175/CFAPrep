@@ -105,6 +105,8 @@ export function buildServiceSpecs({
   const lsatData = resolveLsatDataDir({ userDataPath, platform, env, logger });
   const surrealProgram = path.join(servicesDirectory, 'bin', executable('surreal2', platform));
   const lsatProgram = path.join(servicesDirectory, 'lsat-backend', executable('lsatlab-backend', platform));
+  const servicesDataDirectory = path.join(userDataPath, 'services');
+  const surrealDataDirectory = path.join(servicesDataDirectory, 'surreal');
 
   return [
     {
@@ -116,7 +118,7 @@ export function buildServiceSpecs({
         'root',
         '--pass',
         'root',
-        `rocksdb:${path.join(servicesDirectory, 'surreal_data', 'db')}`,
+        `rocksdb:${path.join(surrealDataDirectory, 'db')}`,
       ],
       env: {},
       readyPort: 8000,
@@ -124,7 +126,9 @@ export function buildServiceSpecs({
       optional: true,
       resourcePath: surrealProgram,
       provenanceRequired: true,
-      cwd: servicesDirectory,
+      cwd: servicesDataDirectory,
+      dataDirectory: surrealDataDirectory,
+      dataRoot: userDataPath,
     },
     {
       name: SERVICE_NAMES.NOTEBOOK_API,

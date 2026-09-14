@@ -13,6 +13,7 @@ export interface StudyContext {
 
 export const STUDY_CONTEXT_STORAGE_KEY = 'studyvault:study-context:v1';
 export const STUDY_CONTEXT_EVENT = 'studyvault:study-context-change';
+export const STUDY_CONTEXT_RETURN_STORAGE_KEY = 'studyvault:study-context-returns:v1';
 
 export const DEFAULT_STUDY_CONTEXT: StudyContext = {
   domain: 'cfa',
@@ -23,6 +24,9 @@ export const DEFAULT_STUDY_CONTEXT: StudyContext = {
 const DOMAINS: readonly StudyDomain[] = ['cfa', 'lsat', 'quant', 'excel'];
 const CFA_LEVELS: readonly CfaTargetLevel[] = ['level1', 'level2', 'level3'];
 const GOALS: readonly StudyGoal[] = ['balanced', 'exam-readiness', 'retention', 'skill-building'];
+
+type WorkspaceReturns = Partial<Record<StudyWorkspace, string>>;
+type StudyContextReturns = Partial<Record<StudyDomain, WorkspaceReturns>>;
 
 function includes<T extends string>(values: readonly T[], value: unknown): value is T {
   return typeof value === 'string' && values.includes(value as T);
@@ -80,13 +84,79 @@ export function workspaceHref(workspace: StudyWorkspace, context: StudyContext):
   if (workspace === 'practice') {
     if (context.domain === 'cfa') return `/cfa/${context.cfaLevel}/mock`;
     if (context.domain === 'lsat') return '/lsat/practice';
-    return context.domain === 'quant' ? '/quant' : '/excel';
+    // These are real, saved-attempt practice surfaces — not the dashboard that
+    // the Learn workspace already owns. Keeping the destinations distinct makes
+    // the workspace labels honest for the applied Quant and Excel tracks.
+    return context.domain === 'quant' ? '/quant/risk-management' : '/excel/dcf-modeling';
   }
-  if (workspace === 'learn') return `/${context.domain}`;
+  if (workspace === 'learn') return context.domain === 'lsat' ? '/lsat/dashboard' : `/${context.domain}`;
   return '/preferences';
 }
 
-export function useStudyContext(): [StudyContext, (patch: Partial<StudyContext>) => void] {
+function isSafeLocalRoute(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') && !value.includes('://');
+}
+
+function readStudyContextReturns(storage: Storage | null | undefined = globalThis?.localStorage): StudyContextReturns {
+  try {
+    const raw = storage?.getItem(STUDY_CONTEXT_RETURN_STORAGE_KEY);
+    if (!raw) return {};
+    const candidate = JSON.parse(raw);
+    if (!candidate || typeof candidate !== 'object') return {};
+    return Object.fromEntries(
+      DOMAINS.flatMap((domain) => {
+        const entries = candidate[domain];
+        if (!entries || typeof entries !== 'object') return [];
+        const safeEntries = Object.entries(entries).filter(
+          ([workspace, path]) => workspace in ({ today: true, learn: true, practice: true, review: true, progress: true, library: true, utility: true }) && isSafeLocalRoute(path),
+        );
+        return safeEntries.length ? [[domain, Object.fromEntries(safeEntries)]] : [];
+      }),
+    ) as StudyContextReturns;
+  } catch {
+    return {};
+  }
+}
+
+/** Remember the last concrete route for one domain/workspace pair. */
+export function rememberStudyContextRoute(
+  domain: StudyDomain,
+  workspace: StudyWorkspace,
+  path: string,
+  storage: Storage | null | undefined = globalThis?.localStorage,
+): void {
+  if (!isSafeLocalRoute(path)) return;
+  const current = readStudyContextReturns(storage);
+  const next: StudyContextReturns = {
+    ...current,
+    [domain]: { ...current[domain], [workspace]: path },
+  };
+  try {
+    storage?.setItem(STUDY_CONTEXT_RETURN_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Route return points are a convenience; navigation remains deterministic.
+  }
+}
+
+/** Return a saved route only when it belongs to the requested curriculum/workspace. */
+export function studyContextReturnHref(
+  domain: StudyDomain,
+  workspace: StudyWorkspace,
+  storage: Storage | null | undefined = globalThis?.localStorage,
+): string | null {
+  return readStudyContextReturns(storage)[domain]?.[workspace] ?? null;
+}
+
+/** Resolve a curriculum switch to the same workspace, preferring its last route. */
+export function contextSwitchHref(
+  workspace: StudyWorkspace,
+  context: StudyContext,
+  storage: Storage | null | undefined = globalThis?.localStorage,
+): string {
+  return studyContextReturnHref(context.domain, workspace, storage) ?? workspaceHref(workspace, context);
+}
+
+export function useStudyContext(): [StudyContext, (patch: Partial<StudyContext>) => StudyContext] {
   const [context, setContext] = useState<StudyContext>(() => readStudyContext());
 
   useEffect(() => {
@@ -102,6 +172,10 @@ export function useStudyContext(): [StudyContext, (patch: Partial<StudyContext>)
     };
   }, []);
 
-  const update = useCallback((patch: Partial<StudyContext>) => setContext(writeStudyContext(patch)), []);
+  const update = useCallback((patch: Partial<StudyContext>) => {
+    const next = writeStudyContext(patch);
+    setContext(next);
+    return next;
+  }, []);
   return [context, update];
 }

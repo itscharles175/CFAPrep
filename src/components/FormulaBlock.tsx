@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Volume2 } from 'lucide-react';
 import {
   renderAccessibleMath,
@@ -27,19 +27,34 @@ export default function FormulaBlock({
 }: FormulaBlockProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const overflowHintId = useId();
 
   useEffect(() => {
     let active = true;
     const target = ref.current;
     if (!target) return;
+    setOverflowing(false);
     // GAP-MATHA11Y-1 — render with htmlAndMathml + role/aria so screen readers
     // announce the formula semantically. Helper handles the lazy katex import and
     // falls back to plain text on failure (never throws).
+    const measureOverflow = () => {
+      if (!active) return;
+      setOverflowing(target.scrollWidth > target.clientWidth + 1);
+    };
+    let cleanupObserver = () => {};
     void renderAccessibleMath(latex, target, { displayMode: true }).then(() => {
       if (!active) return;
+      measureOverflow();
+      if (typeof ResizeObserver !== 'undefined') {
+        const observer = new ResizeObserver(measureOverflow);
+        observer.observe(target);
+        cleanupObserver = () => observer.disconnect();
+      }
     });
     return () => {
       active = false;
+      cleanupObserver();
     };
   }, [latex]);
 
@@ -64,6 +79,7 @@ export default function FormulaBlock({
       role="group"
       tabIndex={0}
       aria-label={name ? `${name} formula` : 'Formula'}
+      aria-describedby={overflowing ? overflowHintId : undefined}
     >
       {(name || speakable) && (
         <div className="formula-title-row">
@@ -81,7 +97,17 @@ export default function FormulaBlock({
           )}
         </div>
       )}
-      <div ref={ref} className="formula-render" />
+      <div
+        ref={ref}
+        className={`formula-render${overflowing ? ' formula-render--overflowing' : ''}`}
+        tabIndex={overflowing ? 0 : undefined}
+        aria-label={overflowing ? 'Scrollable formula' : undefined}
+      />
+      {overflowing && (
+        <div id={overflowHintId} className="formula-overflow-hint" role="status">
+          <span aria-hidden="true">↔</span> Scroll horizontally to view the full formula
+        </div>
+      )}
       {description && <div className="formula-description">{description}</div>}
     </div>
   );

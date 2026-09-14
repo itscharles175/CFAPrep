@@ -19,6 +19,8 @@ const CHANNELS = Object.freeze({
   NOTIFICATION: 'studyvault:notification:show',
   FULLSCREEN_GET: 'studyvault:window:fullscreen:get',
   FULLSCREEN_SET: 'studyvault:window:fullscreen:set',
+  BEFORE_QUIT_ACK: 'studyvault:lifecycle:before-quit-ack',
+  MICROPHONE_LEASE: 'studyvault:permission:microphone-lease',
 });
 
 const EVENTS = Object.freeze({
@@ -26,6 +28,10 @@ const EVENTS = Object.freeze({
   SECOND_INSTANCE: 'studyvault:event:second-instance',
   OPEN_FILE: 'studyvault:event:open-file',
   PDF_DROP: 'studyvault:event:pdf-drop',
+  LIFECYCLE: 'studyvault:event:lifecycle',
+  NATIVE_NAVIGATE: 'studyvault:event:native-navigate',
+  SIDEBAR_TOGGLE: 'studyvault:event:sidebar-toggle',
+  BEFORE_QUIT: 'studyvault:event:before-quit',
 });
 
 module.exports = Object.freeze({ CHANNELS, EVENTS });

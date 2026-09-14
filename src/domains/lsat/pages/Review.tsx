@@ -20,13 +20,14 @@ import { AnnotationInlineEditor } from "@lsat/components/review/annotation-inlin
 import { searchAnnotationsKb } from "@lsat/lib/annotationsHub";
 import type { AnnotationSearchHit } from "@lsat/lib/types";
 import { DockedCoach } from "@lsat/components/coach/docked-coach";
-import { useSessionResults, useSessions, useSrsDue } from "@lsat/lib/hooks";
+import { useErrorLog, useSessionResults, useSessions, useSrsDue } from "@lsat/lib/hooks";
 import { api } from "@lsat/lib/api";
 import { enqueue } from "@lsat/lib/offlineQueue";
 import { toast } from "@lsat/lib/toast";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import type { SrsDue } from "@lsat/lib/types";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 
 /** R4-B5 — unified review inbox. */
 export default function Review() {
@@ -34,7 +35,13 @@ export default function Review() {
   const tab = params.get("tab") ?? "buckets";
   const navigate = useNavigate();
   const srs = useSrsDue();
-  const due = srs.data?.data.due_count ?? 0;
+  const sessions = useSessions();
+  const errorLog = useErrorLog();
+  const srsIsSample = srs.data?.usingSample ?? false;
+  const sessionsAreSample = sessions.data?.usingSample ?? false;
+  const errorLogIsSample = errorLog.data?.usingSample ?? false;
+  const hasRealSessionHistory = !sessionsAreSample && Boolean(sessions.data?.data?.length);
+  const due = srsIsSample ? 0 : (srs.data?.data.due_count ?? 0);
 
   return (
     // K4-8 — host chrome bridge: the LSAT `PageLayout` wrapper is swapped for the
@@ -48,13 +55,15 @@ export default function Review() {
         title="Review"
         subtitle="Blind-review buckets, error log, and SRS — close the loop after timed work."
         actions={
-          <Button variant="outline" size="sm" onClick={() => navigate("/review/history")}>
-            Session history
-          </Button>
+          hasRealSessionHistory ? (
+            <Button variant="outline" size="sm" onClick={() => navigate("/review/history")}>
+              Session history
+            </Button>
+          ) : undefined
         }
       />
       <ErrorPatternBanner />
-      <RecentSessionRecap />
+      {!sessionsAreSample && <RecentSessionRecap />}
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
         <TabsList>
           <TabsTrigger value="buckets">Buckets</TabsTrigger>
@@ -64,19 +73,35 @@ export default function Review() {
           <TabsTrigger value="srs">SRS {due > 0 ? `(${due})` : ""}</TabsTrigger>
         </TabsList>
         <TabsContent value="buckets">
-          <BucketQueue />
+          {sessionsAreSample ? (
+            <SampleDataRecovery section="Review buckets" onRetry={() => void sessions.refetch()} />
+          ) : (
+            <BucketQueue />
+          )}
         </TabsContent>
         <TabsContent value="errors">
-          <ErrorLogWorkspace />
+          {errorLogIsSample ? (
+            <SampleDataRecovery section="Error log" onRetry={() => void errorLog.refetch()} />
+          ) : (
+            <ErrorLogWorkspace />
+          )}
         </TabsContent>
         <TabsContent value="flagged">
-          <FlaggedQueue />
+          {sessionsAreSample ? (
+            <SampleDataRecovery section="Flagged questions" onRetry={() => void sessions.refetch()} />
+          ) : (
+            <FlaggedQueue />
+          )}
         </TabsContent>
         <TabsContent value="annotations">
           <AnnotationsTab />
         </TabsContent>
         <TabsContent value="srs">
-          <SrsInlineQueue />
+          {srsIsSample ? (
+            <SampleDataRecovery section="SRS queue" onRetry={() => void srs.refetch()} />
+          ) : (
+            <SrsInlineQueue />
+          )}
         </TabsContent>
       </Tabs>
       <DockedCoach scope="review" />

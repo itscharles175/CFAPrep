@@ -117,9 +117,11 @@ test('packaging prunes node_modules from the asar', async () => {
 
 test('packaging enables hardened fuses without requiring an absent browser snapshot', async () => {
   const builderConfig = await readFile(path.join(repoRoot, 'electron-builder.yml'), 'utf8');
+  assert.match(builderConfig, /^beforePack: scripts\/build-native-watchdog\.mjs$/m);
   assert.match(builderConfig, /^afterPack: scripts\/apply-electron-fuses\.mjs$/m);
+  assert.match(builderConfig, /^\s+- studyvault-watchdog$/m);
   assert.equal(ELECTRON_FUSE_CONFIG.strictlyRequireAllFuses, true);
-  assert.equal(ELECTRON_FUSE_CONFIG[FuseV1Options.RunAsNode], true);
+  assert.equal(ELECTRON_FUSE_CONFIG[FuseV1Options.RunAsNode], false);
   assert.equal(ELECTRON_FUSE_CONFIG[FuseV1Options.EnableCookieEncryption], true);
   assert.equal(ELECTRON_FUSE_CONFIG[FuseV1Options.EnableNodeOptionsEnvironmentVariable], false);
   assert.equal(ELECTRON_FUSE_CONFIG[FuseV1Options.EnableNodeCliInspectArguments], false);
@@ -514,6 +516,11 @@ test('LSAT service receives only supplied main-process token and DB key values',
     path.join(path.resolve('services-root'), 'sidecar-provenance.json'),
   );
   assert.deepEqual(lsat.readinessIdentity, { path: '/api/health', service: 'lsat-backend' });
+  const surreal = specs.find((spec) => spec.name === 'SurrealDB');
+  const userDataPath = path.resolve('user-data');
+  assert.equal(surreal.dataRoot, userDataPath);
+  assert.equal(surreal.dataDirectory.startsWith(userDataPath + path.sep), true);
+  assert.equal(surreal.args.some((arg) => arg.includes(path.resolve('services-root', 'surreal_data'))), false);
 });
 
 test('safeStorage rejects basic-text Linux and stores only encrypted bytes', async (t) => {
@@ -836,8 +843,9 @@ test('window URL predicates allow only app/loopback renderer routes and HTTPS ex
 });
 
 test('permission policy allows only trusted audio and sanitized clipboard writes', () => {
-  const base = { requestingUrl: 'app://studyvault/', isMainFrame: true };
+  const base = { requestingUrl: 'app://studyvault/', isMainFrame: true, microphoneLeaseValid: true };
   assert.equal(isAllowedPermission({ ...base, permission: 'media', mediaTypes: ['audio'] }), true);
+  assert.equal(isAllowedPermission({ ...base, microphoneLeaseValid: false, permission: 'media', mediaTypes: ['audio'] }), false);
   assert.equal(isAllowedPermission({ ...base, permission: 'media', mediaTypes: ['video'] }), false);
   assert.equal(isAllowedPermission({ ...base, permission: 'clipboard-sanitized-write', mediaTypes: [] }), true);
   assert.equal(isAllowedPermission({ ...base, permission: 'geolocation', mediaTypes: [] }), false);
@@ -988,7 +996,89 @@ test('free-port launch degrades instead of blocking when the crash guard is unav
   await manager.stopAll();
 });
 
-test('boot sweep reclaims our own stale listener and leaves a foreign one alone', async () => {
+test('resume recovery keeps healthy owned sidecars and restarts an unhealthy owned child', async () => {
+  let spawnCount = 0;
+  let probeCount = 0;
+  let terminateCount = 0;
+  const manager = stubManager({
+    specs: [sidecarSpec({ readyPort: 8100 })],
+    spawnProcess: () => stubChild(5000 + ++spawnCount),
+    portProbe: async () => false,
+    readinessProbe: async () => {
+      probeCount += 1;
+      return probeCount !== 3;
+    },
+    terminateTree: async () => {
+      terminateCount += 1;
+    },
+  });
+  await manager.startAll();
+  assert.equal(spawnCount, 1);
+  manager.quiesce('suspend');
+  assert.equal(manager.quiesced, true);
+  assert.equal(manager.healthTimer, null);
+  const recovered = await manager.recover('resume');
+  assert.equal(manager.quiesced, false);
+  assert.equal(spawnCount, 2);
+  assert.equal(terminateCount, 1);
+  assert.match(recovered.status, /^(ok|degraded)$/);
+  await manager.stopAll();
+});
+
+test('LSAT encryption failure stays blocked until a refreshed key is supplied', async () => {
+  const manager = stubManager({
+    specs: [
+      sidecarSpec({
+        name: 'LSAT backend',
+        launchBlockReason: 'safeStorage unavailable',
+        env: { LSATLAB_DATA_DIR: os.tmpdir() },
+        dataRoot: os.tmpdir(),
+      }),
+    ],
+    spawnProcess: () => stubChild(6001),
+    portProbe: async () => false,
+    readinessProbe: async () => true,
+  });
+  const blocked = await manager.startAll();
+  assert.equal(blocked.status, 'error');
+  assert.equal(manager.records.get('LSAT backend').spec.env.LSATLAB_DB_KEY_B64, undefined);
+  assert.equal(manager.setLsatEncryptionKey('secure-key', null), true);
+  const recovered = await manager.recover('unlock');
+  assert.match(recovered.status, /^(ok|degraded)$/);
+  assert.equal(manager.records.get('LSAT backend').spec.env.LSATLAB_DB_KEY_B64, 'secure-key');
+  await manager.stopAll();
+});
+
+test('resume blocks and terminates an existing LSAT sidecar when encryption becomes unavailable', async () => {
+  let terminateCount = 0;
+  const manager = stubManager({
+    specs: [
+      sidecarSpec({
+        name: 'LSAT backend',
+        env: { LSATLAB_DATA_DIR: os.tmpdir(), LSATLAB_DB_KEY_B64: 'initial-key' },
+        dataRoot: os.tmpdir(),
+      }),
+    ],
+    spawnProcess: () => stubChild(6002),
+    portProbe: async () => false,
+    readinessProbe: async () => true,
+    terminateTree: async () => { terminateCount += 1; },
+  });
+  await manager.startAll();
+  assert.equal(manager.records.get('LSAT backend').state, 'ready');
+  manager.quiesce('suspend');
+  manager.setLsatEncryptionKey(null, 'safeStorage unavailable after wake');
+  const recovered = await manager.recover('resume');
+  const record = manager.records.get('LSAT backend');
+  assert.equal(terminateCount, 1);
+  assert.equal(record.child, null);
+  assert.equal(record.state, 'blocked');
+  assert.equal(record.blockReason, 'safeStorage unavailable after wake');
+  assert.equal(recovered.status, 'error');
+  await manager.stopAll();
+});
+
+test('boot sweep reclaims only a durably owned stale listener and leaves every unknown process alone', async () => {
   const killed = [];
   const sweeper = {
     async pidsOnPort(port) {
@@ -1014,6 +1104,7 @@ test('boot sweep reclaims our own stale listener and leaves a foreign one alone'
     sweeper,
     identityProbe: async (_identity, port) => port === 8100,
     selfPids: [process.pid],
+    ownedPids: [4242],
     logger: quietLogger,
   });
   assert.deepEqual(
@@ -1160,6 +1251,37 @@ test('owned-child watchdog reaps an explicitly tracked disposable process', asyn
     }),
   ]);
   assert.equal(child.exitCode !== null || child.signalCode !== null, true);
+});
+
+test('owned-child watchdog speaks the utilityProcess message protocol without RunAsNode', async () => {
+  const messages = [];
+  const forkProcess = () => {
+    const child = new EventEmitter();
+    child.pid = 7001;
+    child.stdout = null;
+    child.stderr = null;
+    child.postMessage = (message) => {
+      messages.push(message);
+      queueMicrotask(() => {
+        child.emit('message', { data: { id: message.id, ok: true } });
+        if (message.op === 'shutdown') child.emit('exit', 0, null);
+      });
+    };
+    child.kill = () => child.emit('exit', null, 'SIGKILL');
+    queueMicrotask(() => child.emit('message', { data: { type: 'ready' } }));
+    return child;
+  };
+  const watchdog = await OwnedChildWatchdog.start({
+    scriptPath: '/unused/utility-watchdog.cjs',
+    logger: quietLogger,
+    parentPid: 7000,
+    forkProcess,
+  });
+  await watchdog.track(7002);
+  await watchdog.untrack(7002);
+  await watchdog.close();
+  assert.deepEqual(messages.map((message) => message.op), ['track', 'untrack', 'shutdown']);
+  assert.equal(watchdog.healthy, false);
 });
 
 const SNAPSHOT_DIAGNOSTIC = 'watchdog_snapshot_unavailable';

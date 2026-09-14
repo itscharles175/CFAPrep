@@ -570,6 +570,49 @@ describe('local vault progress store', () => {
     expect(encryptedPreview.sourceCounts.sourceChunks).toBe(1);
   });
 
+  it('opts release-grade backups into source, ability, and study-history round trips while legacy defaults stay portable', async () => {
+    await importCfaSourceBundle(buildCfaSourceBundle({ documents: [sourceDocumentRow()], chunks: [sourceChunkRow()] }));
+    await db.abilitySnapshots.put({
+      id: 'cfa::2026-09-14T12:00:00.000Z',
+      domain: 'cfa',
+      theta: 0.72,
+      uncertainty: 0.18,
+      difficultyMapping: { model: 'test', items: [] },
+      calibrationResiduals: [],
+      modelVersion: 'test-v1',
+      at: '2026-09-14T12:00:00.000Z',
+    });
+    await db.studyTrail.put({
+      id: '2026-09-14T12:05:00.000Z',
+      domain: 'cfa',
+      route: '/learn',
+      label: 'Ethics reading',
+      recordedAt: '2026-09-14T12:05:00.000Z',
+    });
+
+    const standardExport = await exportVaultData();
+    const releaseExport = await exportVaultData({ includeSourceVault: true, includeDerivedStores: true });
+
+    expect(standardExport.sourceVault).toBeUndefined();
+    expect(standardExport.derivedStores).toBeUndefined();
+    expect(releaseExport.sourceVault?.sourceChunks).toHaveLength(1);
+    expect(releaseExport.derivedStores?.abilitySnapshots).toHaveLength(1);
+    expect(releaseExport.derivedStores?.studyTrail).toHaveLength(1);
+    expect(validateVaultData(releaseExport)).toEqual({ valid: true, errors: [] });
+
+    await resetVaultData('full');
+    await importVaultData(releaseExport, {
+      mode: 'replace',
+      includeSourceVault: true,
+      includeDerivedStores: true,
+    });
+
+    expect(await db.sourceDocuments.count()).toBe(1);
+    expect(await db.sourceChunks.count()).toBe(1);
+    expect(await db.abilitySnapshots.get('cfa::2026-09-14T12:00:00.000Z')).toMatchObject({ theta: 0.72 });
+    expect(await db.studyTrail.get('2026-09-14T12:05:00.000Z')).toMatchObject({ route: '/learn' });
+  });
+
   it('previews encrypted imports after decryption and reports merge conflicts', async () => {
     await saveStudyPlanSettings({ dailyTargetMinutes: 45, targetLevel: 'level1' });
     const encrypted = await exportVaultData({ encryption: { passphrase: 'preview passphrase' } });

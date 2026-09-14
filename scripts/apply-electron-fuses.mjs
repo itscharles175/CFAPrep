@@ -5,18 +5,9 @@ export const ELECTRON_FUSE_CONFIG = Object.freeze({
   version: FuseVersion.V1,
   strictlyRequireAllFuses: true,
   resetAdHocDarwinSignature: false,
-  // SECURITY DEBT, deliberately not flipped here: RunAsNode leaves the signed
-  // app usable as a general-purpose script host (relaunching it with
-  // ELECTRON_RUN_AS_NODE can read its own safeStorage keys). It cannot be
-  // disabled on its own because the PACKAGED crash guard depends on it:
-  // electron/main.js starts OwnedChildWatchdog unconditionally, and
-  // electron/watchdog.js spawns `process.execPath` (the fused StudyVault
-  // binary) with ELECTRON_RUN_AS_NODE=1 to run child-watchdog.cjs. With the
-  // fuse off that spawn boots a second app instance, loses the single-instance
-  // lock, exits, and every sidecar launches with crashGuardDegraded set.
-  // Flip this to false only together with moving the watchdog child onto
-  // Electron's utilityProcess.fork(), which needs no fuse.
-  [FuseV1Options.RunAsNode]: true,
+  // The owned-child watchdog runs through Electron utilityProcess.fork, so the
+  // signed application never needs to expose Electron's Node CLI mode.
+  [FuseV1Options.RunAsNode]: false,
   [FuseV1Options.EnableCookieEncryption]: true,
   [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
   [FuseV1Options.EnableNodeCliInspectArguments]: false,

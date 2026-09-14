@@ -1,4 +1,4 @@
-import type { DomainId, StudySession } from './learningTypes';
+import type { StudySession, StudySessionDomain } from './learningTypes';
 
 export const FOCUS_SESSION_STORAGE_KEY = 'studyvault.focus-session.v1';
 
@@ -8,7 +8,7 @@ export interface FocusSession {
   version: 1;
   sessionId: string;
   status: FocusSessionStatus;
-  domain: DomainId;
+  domain: StudySessionDomain;
   topic: string;
   startedAt: string;
   segmentStartedAtMs: number | null;
@@ -20,7 +20,7 @@ export interface FocusSession {
 }
 
 export interface FocusSessionActivity {
-  domain?: DomainId;
+  domain?: StudySessionDomain;
   topic?: string;
   questionsAnswered?: number;
   score?: number;
@@ -32,8 +32,8 @@ function finiteNonNegative(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
-function validDomain(value: unknown): value is DomainId {
-  return value === 'cfa' || value === 'quant' || value === 'excel';
+function validDomain(value: unknown): value is StudySessionDomain {
+  return value === 'cfa' || value === 'quant' || value === 'excel' || value === 'lsat';
 }
 
 function makeSessionId(nowMs: number): string {
@@ -54,7 +54,7 @@ export function createFocusSession(
     sessionId: makeSessionId(nowMs),
     status: 'running',
     domain: activity.domain ?? 'cfa',
-    topic: activity.topic?.trim() || 'cfa:today',
+    topic: activity.topic?.trim() || `${activity.domain ?? 'cfa'}:today`,
     startedAt: new Date(nowMs).toISOString(),
     segmentStartedAtMs: nowMs,
     accumulatedMs: 0,

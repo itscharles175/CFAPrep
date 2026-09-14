@@ -22,6 +22,7 @@ import { CommandHint, EmptyPanel, ProgressRail, QuestionStage, SegmentedControl,
 import { SourceRail } from '../../components/SourceContext';
 import AccessibleQuestionRunner from '../../components/a11y/AccessibleQuestionRunner';
 import HandsFreeController from '../../components/a11y/HandsFreeController';
+import { CFA_QUIZ_ACTION_STYLE } from './cfaQuizPresentation';
 
 function currentTimestampMs() {
   return Date.now();
@@ -527,7 +528,18 @@ export default function CfaQuiz() {
           key={`${mode}-${safeCurrent}`}
           question={q.question}
           status={confirmed ? (selected === q.correct ? 'success' : 'danger') : 'exam'}
-          footer={<CommandHint keys={['A-D', 'Enter']} label="select and confirm" />}
+          footer={
+            <CommandHint
+              keys={confirmed ? ['Enter'] : ['A-D', 'Enter']}
+              label={
+                confirmed
+                  ? safeCurrent < questions.length - 1
+                    ? 'next question'
+                    : 'view results'
+                  : 'select and confirm'
+              }
+            />
+          }
         >
 
           {/* A11Y-2: the shared accessible radiogroup primitive replaces the
@@ -550,7 +562,13 @@ export default function CfaQuiz() {
             letters={letters}
           >
             {confirmed && (
-              <div className="quiz-explanation">
+              <div
+                className={`quiz-explanation ${selected === q.correct ? 'is-correct' : 'is-incorrect'}`}
+                style={{
+                  background: selected === q.correct ? 'rgba(16, 185, 129, 0.06)' : 'rgba(239, 68, 68, 0.07)',
+                  borderColor: selected === q.correct ? 'rgba(16, 185, 129, 0.28)' : 'rgba(239, 68, 68, 0.28)',
+                }}
+              >
                 {q.formula && <StatusBadge tone="accent" style={{ marginTop: 'var(--space-3)' }}>Related formula: {q.formula}</StatusBadge>}
                 <SourceRail
                   compact
@@ -624,7 +642,10 @@ export default function CfaQuiz() {
           )}
         </QuestionStage>
 
-        <div className="qv-row-3 quiz-primary-action" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-6)' }}>
+        <div
+          className="qv-row-3 quiz-primary-action"
+          style={{ ...CFA_QUIZ_ACTION_STYLE, justifyContent: 'flex-end', marginTop: 'var(--space-6)' }}
+        >
           {!confirmed ? (
             <button className="btn btn-primary btn-lg" onClick={handleConfirm} disabled={selected === null} style={{ opacity: selected === null ? 0.5 : 1 }}>
               Confirm Answer

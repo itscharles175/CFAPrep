@@ -25,12 +25,21 @@
  * legacy `startStyleIsolation` helper was removed in the K4-13 cutover.
  */
 
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { runHostStartupOnce } from '../lib/hostStartup';
 import ErrorBoundary from './ErrorBoundary';
+import { StudySessionProvider } from './session';
 import { DOMAIN_NAV_EVENT } from '../lib/domainNav';
+import { getDesktopBridge, registerDesktopSubscription } from '../lib/desktopBridge';
+import {
+  dispatchNativeRecovery,
+  isNativeNavigationEvent,
+  NATIVE_RECOVERY_EVENT,
+  resolveNativeRoute,
+} from '../lib/nativeShell';
+import { useStudyContext } from '../lib/studyContext';
 import { fetchDataSchemaAlignment } from '../lib/dataDictionary';
 import {
   reconcileStoredRemediationAttempts,
@@ -57,31 +66,66 @@ import 'katex/dist/katex.min.css';
 const HostShell = lazy(() => import('../App'));
 const LsatUnifiedMount = lazy(() => import('./LsatUnifiedMount'));
 
-function RootFallback() {
-  // A calm centered spinner (not a bare blank div) so the on-demand load of the
-  // host shell or the LSAT plane reads as "loading", never as a blank/broken
-  // screen — the symptom reported on first navigation into /lsat/* before that
-  // chunk has compiled. Self-contained inline + one-off keyframe so it renders
-  // identically whether or not app CSS has finished loading.
+export const ROUTE_RECOVERY_DELAY_MS = 6_000;
+
+export function RootFallback() {
+  // The root boundary can appear before either shell's CSS or chrome has loaded.
+  // Give that brief interval a recognisable StudyVault surface, then make a
+  // stalled dynamic import recoverable instead of leaving a silent spinner.
+  const [showRecovery, setShowRecovery] = useState(false);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setShowRecovery(true), ROUTE_RECOVERY_DELAY_MS);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
   return (
     <div
       role="status"
-      aria-label="Loading"
-      style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg-primary, #080B10)' }}
+      aria-label="Opening StudyVault"
+      aria-live="polite"
+      style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg-primary, #080B10)', color: 'var(--text-primary, #F8FAFC)', padding: 24 }}
     >
       <style>{'@keyframes qv-route-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.qv-route-ring{animation:none!important}}'}</style>
-      <span
-        className="qv-route-ring"
-        aria-hidden="true"
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: '50%',
-          border: '3px solid rgba(148,163,184,0.25)',
-          borderTopColor: 'var(--accent-strong, #2563EB)',
-          animation: 'qv-route-spin 0.8s linear infinite',
-        }}
-      />
+      <div style={{ display: 'grid', justifyItems: 'center', gap: 16, maxWidth: 400, textAlign: 'center' }}>
+        <span
+          aria-hidden="true"
+          style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent-strong, #60A5FA)' }}
+        >
+          StudyVault
+        </span>
+        <span
+          className="qv-route-ring"
+          aria-hidden="true"
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            border: '3px solid rgba(148,163,184,0.25)',
+            borderTopColor: 'var(--accent-strong, #2563EB)',
+            animation: 'qv-route-spin 0.8s linear infinite',
+          }}
+        />
+        <div style={{ display: 'grid', gap: 4 }}>
+          <strong style={{ fontSize: 18, lineHeight: 1.25 }}>Opening your workspace</strong>
+          <span style={{ color: 'var(--text-secondary, #94A3B8)', fontSize: 14 }}>
+            Loading your local study tools
+          </span>
+        </div>
+        {showRecovery && (
+          <div style={{ display: 'grid', justifyItems: 'center', gap: 12, marginTop: 8 }}>
+            <span style={{ color: 'var(--text-secondary, #94A3B8)', fontSize: 14 }}>
+              This is taking longer than expected. Your study data is still on this Mac.
+            </span>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{ border: '1px solid var(--accent-strong, #60A5FA)', borderRadius: 8, background: 'transparent', color: 'inherit', cursor: 'pointer', font: 'inherit', fontWeight: 600, padding: '9px 14px' }}
+            >
+              Reload StudyVault
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -96,6 +140,9 @@ function RootFallback() {
 // correct plane immediately and stays the authority for history state.
 function CrossDomainNavBridge() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [studyContext] = useStudyContext();
+  const [nativeFocusRequest, setNativeFocusRequest] = useState(0);
   useEffect(() => {
     const handler = () => {
       navigate(window.location.pathname + window.location.search + window.location.hash, { replace: true });
@@ -103,6 +150,35 @@ function CrossDomainNavBridge() {
     window.addEventListener(DOMAIN_NAV_EVENT, handler);
     return () => window.removeEventListener(DOMAIN_NAV_EVENT, handler);
   }, [navigate]);
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.events?.onNativeNavigate) return undefined;
+    return registerDesktopSubscription(() => bridge.events.onNativeNavigate((event) => {
+      if (!isNativeNavigationEvent(event)) return;
+      const route = resolveNativeRoute(event.route, studyContext);
+      if (route) {
+        setNativeFocusRequest((request) => request + 1);
+        navigate(route);
+      }
+    }));
+  }, [navigate, studyContext]);
+  useEffect(() => {
+    if (!nativeFocusRequest) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const main = document.getElementById('main');
+      main?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash, location.pathname, location.search, nativeFocusRequest]);
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.events?.onLifecycle) return undefined;
+    return registerDesktopSubscription(() => bridge.events.onLifecycle((event) => {
+      if (event.state === 'resume' || event.state === 'unlock') {
+        dispatchNativeRecovery({ state: event.state, at: event.at });
+      }
+    }));
+  }, []);
   return null;
 }
 
@@ -128,6 +204,15 @@ export default function UnifiedRoot() {
     void reconcileStoredRemediationAttempts()
       .then(() => recoverRemediationWork())
       .catch(() => undefined);
+  }, []);
+
+  useLayoutEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge) return undefined;
+    document.documentElement.dataset.nativeShell = 'macos-unified';
+    return () => {
+      delete document.documentElement.dataset.nativeShell;
+    };
   }, []);
 
   // Cross-domain sync feed (AUDIT-1). Mounted once at the root so the host plane's
@@ -156,15 +241,24 @@ export default function UnifiedRoot() {
         });
     void check();
     const id = setInterval(check, 5 * 60 * 1000);
+    const recover = () => {
+      void check();
+      void reconcileStoredRemediationAttempts()
+        .then(() => recoverRemediationWork())
+        .catch(() => undefined);
+    };
+    window.addEventListener(NATIVE_RECOVERY_EVENT, recover);
     return () => {
       active = false;
       clearInterval(id);
+      window.removeEventListener(NATIVE_RECOVERY_EVENT, recover);
     };
   }, []);
   useSyncProgress({ enabled: crossDomainWritesEnabled });
   useSyncFsrsWriteBack({ enabled: crossDomainWritesEnabled });
 
   return (
+    <StudySessionProvider>
     <BrowserRouter>
       <CrossDomainNavBridge />
       <Suspense fallback={<RootFallback />}>
@@ -182,5 +276,6 @@ export default function UnifiedRoot() {
         </Routes>
       </Suspense>
     </BrowserRouter>
+    </StudySessionProvider>
   );
 }

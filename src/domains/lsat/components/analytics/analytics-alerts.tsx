@@ -23,6 +23,8 @@ export function AnalyticsAlerts() {
       shown.current ||
       gap.isLoading ||
       regressions.isLoading ||
+      gap.data?.usingSample ||
+      regressions.data?.usingSample ||
       !gap.data?.data ||
       !regressions.data?.data
     )

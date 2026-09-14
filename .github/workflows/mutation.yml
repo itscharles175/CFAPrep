@@ -1,9 +1,17 @@
 name: Mutation floor
 
 on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
   schedule:
     - cron: '17 8 * * *'
   workflow_dispatch:
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   mutation:

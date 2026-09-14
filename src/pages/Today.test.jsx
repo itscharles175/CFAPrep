@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -8,8 +8,13 @@ vi.mock('../lib/studyDirector', () => ({
 }));
 
 import { buildStudyPlan } from '../lib/studyDirector';
-import Today from './Today';
+import Today, { createDomainFallbackPlan, summarizeTodayWorkload } from './Today';
 import { StudySessionProvider } from '../components/session';
+
+afterEach(() => {
+  window.localStorage.removeItem('studyvault:study-context:v1');
+  window.localStorage.removeItem('studyvault.focus-session.v1');
+});
 
 function renderToday() {
   return render(
@@ -79,5 +84,68 @@ describe('Today focus-mode landing', () => {
     expect(screen.queryByText('0 weak topics')).not.toBeInTheDocument();
     await userEvent.click(screen.getByText('Full plan'));
     expect(screen.getByText('No urgent items — great progress!')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['lsat', 'Practice an LSAT section', '/lsat/practice'],
+    ['quant', 'Continue Quant practice', '/quant'],
+    ['excel', 'Continue Excel practice', '/excel'],
+  ])('keeps the Today surface scoped to %s', async (domain, title, path) => {
+    window.localStorage.setItem(
+      'studyvault:study-context:v1',
+      JSON.stringify({ domain, cfaLevel: 'level1', goal: 'balanced' }),
+    );
+
+    renderToday();
+
+    expect(await screen.findByText(title)).toBeInTheDocument();
+    const primaryLink = screen.getByRole('link', { name: /Start activity/i });
+    expect(primaryLink).toHaveAttribute('href', path);
+    if (domain === 'lsat') {
+      expect(screen.getByText(/About 35 min now · Then 15 min review/)).toBeInTheDocument();
+      expect(screen.getByText('2 activities · 50 min total')).toBeInTheDocument();
+    }
+    expect(screen.getAllByText(new RegExp(`${domain === 'lsat' ? 'LSAT' : domain[0].toUpperCase() + domain.slice(1)} ·`)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Cross-domain plan unavailable/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/What to study next/i)).not.toBeInTheDocument();
+  });
+
+  it('attributes a focus session to the selected non-CFA curriculum', async () => {
+    window.localStorage.setItem(
+      'studyvault:study-context:v1',
+      JSON.stringify({ domain: 'lsat', cfaLevel: 'level1', goal: 'exam-readiness' }),
+    );
+    renderToday();
+
+    const primaryLink = await screen.findByRole('link', { name: /Start activity/i });
+    await userEvent.click(primaryLink);
+
+    const persisted = JSON.parse(window.localStorage.getItem('studyvault.focus-session.v1'));
+    expect(persisted.domain).toBe('lsat');
+    expect(persisted.topic).toBe('lsat:section');
+    expect(screen.getByText(/LSAT · Your next exam focused step/i)).toBeInTheDocument();
+  });
+
+  it('builds deterministic non-CFA plans with goal-specific rationale', () => {
+    const plan = createDomainFallbackPlan('quant', 'skill-building');
+    expect(plan.actions[0]).toMatchObject({
+      domain: 'quant',
+      path: '/quant',
+      estimatedMinutes: 30,
+    });
+    expect(plan.headline).toBe('Quant · Skill building');
+    expect(plan.rationale).toMatch(/deterministic local fallback/i);
+    expect(plan.actions[0].reason).toMatch(/fluency/i);
+  });
+
+  it('explains the ordered shortlist as now, remainder, and total', () => {
+    const plan = createDomainFallbackPlan('lsat', 'balanced');
+    expect(summarizeTodayWorkload(plan)).toMatchObject({
+      currentLabel: 'About 35 min now',
+      remainderLabel: 'Then 15 min review',
+      totalLabel: '2 activities · 50 min total',
+      activityCount: 2,
+      totalMinutes: 50,
+    });
   });
 });

@@ -19,6 +19,8 @@ import NavBackButton from '../NavBackButton';
 import { pushHistory } from '../../lib/navigationHistory';
 import { labelForPath } from '../../lib/navigationCrumbs';
 import { lsatRecentEntries, lsatRouteEntries } from '../../lib/lsatPaletteEntries';
+import { getDesktopBridge } from '../../lib/desktopBridge';
+import { type StudyContext, useStudyContext } from '../../lib/studyContext';
 
 // K4-6: the LSAT shell's study/test mode, surfaced in the unified TopBar.
 export type LsatShellMode = 'study' | 'test';
@@ -54,6 +56,46 @@ const domainBadgeLabel: Record<PaletteDomain, string> = {
   vault: 'Vault',
   general: 'App',
 };
+
+const COMPACT_DESKTOP_QUERY = '(min-width: 901px) and (max-width: 1179px)';
+
+function contextLabel(context: StudyContext): string {
+  if (context.domain === 'cfa') {
+    const level = context.cfaLevel === 'level1' ? 'Level I' : context.cfaLevel === 'level2' ? 'Level II' : 'Level III';
+    return `CFA · ${level}`;
+  }
+  return context.domain === 'lsat' ? 'LSAT' : context.domain === 'quant' ? 'Quant Finance' : 'Excel Training';
+}
+
+function neutralSearchPlaceholder(context: StudyContext): string {
+  if (context.domain === 'cfa') return `Search ${contextLabel(context)} material…`;
+  if (context.domain === 'lsat') return 'Search LSAT questions, sources, and notes…';
+  return `Search ${contextLabel(context)} material…`;
+}
+
+/**
+ * The 960×640 native minimum keeps the desktop sidebar, leaving a 696px
+ * toolbar. Expose that measured range to both the component and the CSS so the
+ * header can deliberately compact before any of its controls start clipping.
+ */
+function useCompactDesktopTopbar(): boolean {
+  const [compact, setCompact] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(COMPACT_DESKTOP_QUERY).matches
+      : false,
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia(COMPACT_DESKTOP_QUERY);
+    const update = () => setCompact(query.matches);
+    update();
+    query.addEventListener?.('change', update);
+    return () => query.removeEventListener?.('change', update);
+  }, []);
+
+  return compact;
+}
 
 // Resolve the study domain a search result belongs to from its path (the most
 // reliable signal — ids and types vary across catalog/command sources).
@@ -144,6 +186,20 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   const navigate = useNavigate();
   const location = useLocation();
   const activeDomain = activeDomainForPath(location.pathname);
+  const [studyContext] = useStudyContext();
+  const compactDesktop = useCompactDesktopTopbar();
+  const nativeShortcut = Boolean(getDesktopBridge());
+  const selectedContextLabel = contextLabel(studyContext);
+  const isNeutralRoute = activeDomain === 'general';
+  const searchPlaceholder = isNeutralRoute
+    ? neutralSearchPlaceholder(studyContext)
+    : 'Search modules, formulas, topics…';
+  // The toolbar has only about 430px after the persistent sidebar at the
+  // native 960px minimum. A truncated sentence reads like a rendering fault;
+  // use a purposeful compact label while retaining the complete scope for
+  // assistive technology. The shortcut remains visible beside the field.
+  const renderedSearchPlaceholder = compactDesktop ? 'Search' : searchPlaceholder;
+  const compactSearchLabel = `Search ${searchPlaceholder.replace(/…$/, '')} with the command palette`;
   // K4-6: the LSAT study/test mode toggle renders only where the unified shell
   // (<SharedLayout>) passes the mode props — i.e. it is shown for the LSAT plane
   // and omitted everywhere the host App renders TopBar without them.
@@ -430,7 +486,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   }
 
   return (
-    <header className={`topbar ${collapsed ? 'collapsed' : ''}`}>
+    <header className={`topbar ${collapsed ? 'collapsed' : ''} ${isNeutralRoute ? 'topbar--neutral' : ''} ${compactDesktop ? 'topbar--compact' : ''}`.trim()}>
       <button
         className="btn-icon btn-ghost mobile-menu-button"
         title="Open navigation"
@@ -443,7 +499,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
       </button>
 
       <span className="mobile-topbar-context" aria-label={`Current page: ${labelForPath(location.pathname)}`}>
-        {activeDomain === 'general' ? 'StudyVault' : domainBadgeLabel[activeDomain]} · {labelForPath(location.pathname)}
+        {isNeutralRoute ? selectedContextLabel : domainBadgeLabel[activeDomain]} · {labelForPath(location.pathname)}
       </span>
 
       {/* UX-4 — shared shell chrome: history-aware Back + unified breadcrumb +
@@ -452,7 +508,13 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
       <div className="topbar-nav">
         <NavBackButton onSameDomainBack={() => navigate(-1)} />
         <NavigationBreadcrumb className="topbar-breadcrumb" />
-        <DomainIndicator className="topbar-domain" />
+        {isNeutralRoute ? (
+          <span className="topbar-neutral-context" role="status" aria-label={`Selected study context: ${selectedContextLabel}`}>
+            Studying {selectedContextLabel}
+          </span>
+        ) : (
+          <DomainIndicator className="topbar-domain" />
+        )}
         {/* K4-6: unified-shell study/test mode toggle, living in the host TopBar.
             Props-gated (see `showModeToggle`) so it shows only where SharedLayout
             passes the LSAT mode. A segmented radio group: each button toggles the
@@ -483,8 +545,8 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
           ref={inputRef}
           id="command-palette-input"
           type="text"
-          placeholder="Search modules, formulas, topics..."
-          aria-label="Command palette"
+          placeholder={renderedSearchPlaceholder}
+          aria-label={compactDesktop ? compactSearchLabel : 'Command palette'}
           role="combobox"
           aria-expanded={searchOpen}
           aria-haspopup="listbox"
@@ -510,11 +572,11 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
           }}
         />
         {query ? (
-          <button className="btn-icon btn-ghost search-clear" title="Clear search" onClick={() => setQuery('')}>
+          <button className="btn-icon btn-ghost search-clear" title="Clear search" aria-label="Clear search" onClick={() => setQuery('')}>
             <X size={14} />
           </button>
         ) : (
-          <kbd>Ctrl+K</kbd>
+          <kbd aria-label={nativeShortcut ? 'Command K' : 'Control K'}>{nativeShortcut ? '⌘K' : 'Ctrl+K'}</kbd>
         )}
 
         {searchOpen && (

@@ -33,8 +33,8 @@ export type AppMode = "study" | "test";
 export const routeManifest: RouteManifestEntry[] = [
   {
     path: "/",
-    label: "Notebook OS",
-    commandLabel: "Go to Notebook OS",
+    label: "Notebook & Curriculum",
+    commandLabel: "Go to Notebook & Curriculum",
     group: "Insight",
     icon: BookOpen,
     keywords: ["home", "notebook", "sources", "chat", "notes", "knowledge"],
@@ -55,7 +55,7 @@ export const routeManifest: RouteManifestEntry[] = [
   { path: "/drills", label: "Drills", commandLabel: "Go to Drills", group: "Practice", icon: Target, keywords: ["adaptive", "questions"] },
   { path: "/playlists", label: "Smart sets", commandLabel: "Go to Smart sets", group: "Practice", icon: ListMusic, keywords: ["playlists", "custom sets", "problem sets"] },
   { path: "/tutor", label: "Tutor", commandLabel: "Go to Tutor", group: "Insight", icon: BrainCircuit, keywords: ["socratic", "blind review", "why loop"], hideInTest: true },
-  { path: "/notebook", label: "Notebook OS", commandLabel: "Go to Notebook OS", group: "Insight", icon: BookOpen, keywords: ["wiki", "notes", "sources", "study sheet"], hideInTest: true, capability: "notebook_os", canonicalPath: "/" },
+  { path: "/notebook", label: "Notebook & Curriculum", commandLabel: "Go to Notebook & Curriculum", group: "Insight", icon: BookOpen, keywords: ["notebook", "curriculum", "wiki", "notes", "sources", "study sheet"], hideInTest: true, capability: "notebook_os", canonicalPath: "/" },
   { path: "/rc-lab", label: "RC Lab", commandLabel: "Go to RC Lab", group: "Insight", icon: BookMarked, keywords: ["reading comprehension", "passage maps"], hideInTest: true },
   { path: "/review", label: "Review", commandLabel: "Go to Review", group: "Insight", icon: Flag, keywords: ["blind review", "missed"], hideInTest: true },
   { path: "/review/history", label: "Session history", commandLabel: "Go to Session history", group: "Insight", icon: Clock, keywords: ["past", "compare", "history"], hideInTest: true },

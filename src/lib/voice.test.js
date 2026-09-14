@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   hasSpeechRecognition,
   hasSpeechSynthesis,
@@ -10,6 +10,12 @@ import {
 } from './voice.js';
 
 // jsdom does not provide SpeechRecognition or speechSynthesis by default.
+
+afterEach(() => {
+  delete window.studyvault;
+  delete navigator.mediaDevices;
+  vi.unstubAllGlobals();
+});
 
 describe('hasSpeechRecognition', () => {
   it('returns false in jsdom (no SpeechRecognition global)', () => {
@@ -118,6 +124,41 @@ describe('recognizeOnce', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('requests a desktop microphone lease before starting recognition', async () => {
+    const order = [];
+    window.studyvault = {
+      permissions: {
+        requestMicrophoneLease: vi.fn(async () => {
+          order.push('lease');
+          return { expiresAt: Date.now() + 5_000 };
+        }),
+      },
+    };
+    class MockRecognition {
+      start() {
+        order.push('start');
+        this.onresult?.({ results: [[{ transcript: 'leased' }]] });
+      }
+      abort() {}
+    }
+    vi.stubGlobal('SpeechRecognition', MockRecognition);
+    await expect(recognizeOnce()).resolves.toMatchObject({ transcript: 'leased' });
+    expect(order).toEqual(['lease', 'start']);
+  });
+
+  it('does not start recognition when the desktop lease fails', async () => {
+    const start = vi.fn();
+    window.studyvault = {
+      permissions: { requestMicrophoneLease: vi.fn().mockRejectedValue(new Error('Microphone blocked')) },
+    };
+    vi.stubGlobal('SpeechRecognition', class {
+      constructor() { this.start = start; }
+      abort() {}
+    });
+    await expect(recognizeOnce()).rejects.toThrow('Microphone blocked');
+    expect(start).not.toHaveBeenCalled();
+  });
 });
 
 describe('recognizeOnceOffline', () => {
@@ -169,6 +210,39 @@ describe('recordAudioForOfflineStt', () => {
         delete navigator.mediaDevices;
       }
     }
+  });
+
+  it('requests a desktop lease before opening the media stream', async () => {
+    const order = [];
+    window.studyvault = {
+      permissions: {
+        requestMicrophoneLease: vi.fn(async () => {
+          order.push('lease');
+          return { expiresAt: Date.now() + 5_000 };
+        }),
+      },
+    };
+    const getUserMedia = vi.fn(async () => {
+      order.push('capture');
+      throw new Error('capture stopped for test');
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia }, writable: true, configurable: true,
+    });
+    await expect(recordAudioForOfflineStt()).rejects.toThrow('capture stopped for test');
+    expect(order).toEqual(['lease', 'capture']);
+  });
+
+  it('does not call getUserMedia when the desktop lease fails', async () => {
+    const getUserMedia = vi.fn();
+    window.studyvault = {
+      permissions: { requestMicrophoneLease: vi.fn().mockRejectedValue(new Error('lease denied')) },
+    };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia }, writable: true, configurable: true,
+    });
+    await expect(recordAudioForOfflineStt()).rejects.toThrow('lease denied');
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 });
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent, type SVGProps } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   BookOpen, TrendingUp, Table2,
   Calculator, Library, ChevronDown, ChevronRight,
@@ -19,7 +19,14 @@ import { useLevel3Pathway } from '../../domains/cfa/useLevel3Pathway';
 import { appRoutes, workspaceForLocation } from '../../routes/routeManifest';
 import type { AppRoute, StudyWorkspace } from '../../routes/routeManifest';
 import { buildLsatNavGroups, type LsatNavMode } from '../../lib/lsatNavSection';
-import { domainForLocation, useStudyContext, workspaceHref } from '../../lib/studyContext';
+import {
+  contextSwitchHref,
+  domainForLocation,
+  rememberStudyContextRoute,
+  type StudyDomain,
+  useStudyContext,
+  workspaceHref,
+} from '../../lib/studyContext';
 import StudyContextSelector from './StudyContextSelector';
 
 type LucideIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
@@ -266,6 +273,33 @@ interface SidebarProps {
 // component) dismisses the off-canvas drawer. Tuned to feel intentional without
 // fighting vertical nav scrolling.
 const SWIPE_CLOSE_THRESHOLD = 56;
+const CONTEXT_NAVIGATION_ANNOUNCEMENT_KEY = 'studyvault:context-navigation-announcement:v1';
+
+function readContextNavigationAnnouncement(): string {
+  try {
+    const message = window.sessionStorage.getItem(CONTEXT_NAVIGATION_ANNOUNCEMENT_KEY) || '';
+    window.sessionStorage.removeItem(CONTEXT_NAVIGATION_ANNOUNCEMENT_KEY);
+    return message;
+  } catch {
+    return '';
+  }
+}
+
+function persistContextNavigationAnnouncement(message: string) {
+  try {
+    window.sessionStorage.setItem(CONTEXT_NAVIGATION_ANNOUNCEMENT_KEY, message);
+  } catch {
+    // The mounted sidebar still announces in restrictive storage contexts.
+  }
+}
+
+function clearContextNavigationAnnouncement() {
+  try {
+    window.sessionStorage.removeItem(CONTEXT_NAVIGATION_ANNOUNCEMENT_KEY);
+  } catch {
+    // This is only a cross-plane accessibility enhancement.
+  }
+}
 
 export default function Sidebar({
   collapsed,
@@ -277,13 +311,23 @@ export default function Sidebar({
   lsatMode = 'study',
 }: SidebarProps) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [studyContext, updateStudyContext] = useStudyContext();
   const [activePathway, setActivePathway] = useLevel3Pathway();
   const activeWorkspace = workspaceForLocation(location.pathname);
+  const pendingRouteSync = useRef<{ domain: StudyDomain; level?: typeof studyContext.cfaLevel } | null>(null);
+  const [navigationAnnouncement, setNavigationAnnouncement] = useState(readContextNavigationAnnouncement);
 
   useEffect(() => {
     const routeDomain = domainForLocation(location.pathname);
     const levelMatch = location.pathname.match(/^\/cfa\/(level[123])(?:\/|$)/)?.[1];
+    const pending = pendingRouteSync.current;
+    if (pending) {
+      const pendingDomainReached = routeDomain === pending.domain;
+      const pendingLevelReached = !pending.level || levelMatch === pending.level;
+      if (!pendingDomainReached || !pendingLevelReached) return;
+      pendingRouteSync.current = null;
+    }
     const patch = {
       ...(routeDomain && routeDomain !== studyContext.domain ? { domain: routeDomain } : {}),
       ...(levelMatch && levelMatch !== studyContext.cfaLevel ? { cfaLevel: levelMatch as typeof studyContext.cfaLevel } : {}),
@@ -291,10 +335,64 @@ export default function Sidebar({
     if (Object.keys(patch).length) updateStudyContext(patch);
   }, [location.pathname, studyContext.cfaLevel, studyContext.domain, updateStudyContext]);
 
+  useEffect(() => {
+    const routeDomain = domainForLocation(location.pathname) ?? studyContext.domain;
+    rememberStudyContextRoute(routeDomain, activeWorkspace, location.pathname + location.search + location.hash);
+  }, [activeWorkspace, location.hash, location.pathname, location.search, studyContext.domain]);
+
   const selectedCfaLevel = cfaLevels.find((level) => level.id === studyContext.cfaLevel) || cfaLevels[0];
   const selectedCfaTopics = selectedCfaLevel.topics.filter(
     (topic) => studyContext.cfaLevel !== 'level3' || level3TopicBelongsToPathway(topic.id, activePathway),
   );
+
+  function focusMainAfterNavigation() {
+    window.requestAnimationFrame(() => document.getElementById('main')?.focus({ preventScroll: true }));
+  }
+
+  function announceAndNavigate(destination: string, message: string, pending: { domain: StudyDomain; level?: typeof studyContext.cfaLevel } | null) {
+    pendingRouteSync.current = pending;
+    const sourceIsLsat = domainForLocation(location.pathname) === 'lsat';
+    const destinationIsLsat = domainForLocation(destination) === 'lsat';
+    if (sourceIsLsat !== destinationIsLsat) persistContextNavigationAnnouncement(message);
+    else clearContextNavigationAnnouncement();
+    setNavigationAnnouncement(message);
+    navigate(destination);
+    onNavigate?.();
+    focusMainAfterNavigation();
+  }
+
+  function handleDomainChange(domain: StudyDomain) {
+    if (domain === studyContext.domain) return;
+    rememberStudyContextRoute(studyContext.domain, activeWorkspace, location.pathname + location.search + location.hash);
+    const nextContext = updateStudyContext({ domain });
+    const destination = contextSwitchHref(activeWorkspace, nextContext);
+    const destinationDomain = domainForLocation(destination);
+    announceAndNavigate(
+      destination,
+      `Switched to ${domain === 'cfa' ? 'CFA' : domain === 'lsat' ? 'LSAT' : domain === 'quant' ? 'Quant' : 'Excel'} ${activeWorkspace}.`,
+      destinationDomain ? { domain } : null,
+    );
+  }
+
+  function handleCfaLevelChange(level: typeof studyContext.cfaLevel) {
+    if (level === studyContext.cfaLevel) return;
+    const nextLevel = cfaLevels.find((candidate) => candidate.id === level) || cfaLevels[0];
+    const firstTopic = nextLevel.topics.find(
+      (topic) => level !== 'level3' || level3TopicBelongsToPathway(topic.id, activePathway),
+    );
+    const destination = activeWorkspace === 'practice'
+      ? `/cfa/${level}/mock`
+      : firstTopic
+        ? `/cfa/${level}/${firstTopic.id}`
+        : '/cfa';
+    rememberStudyContextRoute('cfa', activeWorkspace, location.pathname + location.search + location.hash);
+    updateStudyContext({ domain: 'cfa', cfaLevel: level });
+    announceAndNavigate(
+      destination,
+      `Switched to CFA ${level === 'level1' ? 'Level I' : level === 'level2' ? 'Level II' : 'Level III'} ${activeWorkspace}.`,
+      { domain: 'cfa', level },
+    );
+  }
   // UB4: swipe-to-close. We track the pointer-down origin and, on release,
   // close the drawer when the gesture is a deliberate leftward swipe. Falls back
   // to `onNavigate` so the current shell (which uses onNavigate to close) works
@@ -334,6 +432,7 @@ export default function Sidebar({
         swipeOrigin.current = null;
       }}
     >
+      <p className="sr-only" role="status" aria-live="polite">{navigationAnnouncement}</p>
       <div className="sidebar-header">
         <div className="sidebar-logo">S</div>
         {!collapsed && <span className="sidebar-title">StudyVault</span>}
@@ -353,6 +452,8 @@ export default function Sidebar({
           context={studyContext}
           pathway={activePathway}
           onContextChange={updateStudyContext}
+          onDomainChange={handleDomainChange}
+          onLevelChange={handleCfaLevelChange}
           onPathwayChange={setActivePathway}
         />
       )}

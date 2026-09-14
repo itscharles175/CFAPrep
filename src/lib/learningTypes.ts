@@ -1,5 +1,8 @@
 export type DomainId = 'cfa' | 'quant' | 'excel';
 
+/** Domains that can own a persisted focus session, including the LSAT sidecar. */
+export type StudySessionDomain = DomainId | 'lsat';
+
 export type Difficulty = 'foundation' | 'intermediate' | 'advanced';
 
 export type Confidence = 'low' | 'medium' | 'high';
@@ -428,7 +431,7 @@ export interface SkillLabAttempt {
 
 export interface StudySession {
   id?: number;
-  domain: DomainId;
+  domain: StudySessionDomain;
   topic: string;
   mode: StudySessionMode;
   startedAt: string;

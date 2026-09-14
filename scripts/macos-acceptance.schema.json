@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://studyvault.local/schemas/macos-acceptance.v1.json",
+  "title": "StudyVault Personal macOS Acceptance",
+  "type": "object",
+  "required": [
+    "schema",
+    "verdict",
+    "generated_at",
+    "commit",
+    "versions",
+    "architecture",
+    "release_tier",
+    "application_identity",
+    "artifacts",
+    "signing",
+    "sidecar_provenance",
+    "profile_migration",
+    "test_results",
+    "visual_runs",
+    "packaged_visual",
+    "performance",
+    "manual_checks"
+  ],
+  "properties": {
+    "schema": { "const": "studyvault.macos-acceptance.v1" },
+    "verdict": { "enum": ["pending_manual_acceptance", "pass", "fail"] },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "versions": { "type": "object" },
+    "architecture": { "const": "arm64" },
+    "release_tier": { "const": "personal" },
+    "application_identity": {
+      "type": "object",
+      "required": ["commit", "app_tree_sha256", "executable_sha256"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "app_tree_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "executable_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "artifacts": { "type": "array" },
+    "signing": { "type": "object" },
+    "sidecar_provenance": { "type": "object" },
+    "profile_migration": { "type": "object" },
+    "test_results": { "type": "array" },
+    "visual_runs": { "type": "array" },
+    "packaged_visual": { "type": "object" },
+    "performance": { "type": "object" },
+    "manual_checks": { "type": "array" }
+  },
+  "additionalProperties": false
+}

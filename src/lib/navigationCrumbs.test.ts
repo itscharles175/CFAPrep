@@ -6,20 +6,31 @@ describe('crumbsForPath — host plane', () => {
     expect(crumbsForPath('/')).toEqual([{ label: 'Today', to: undefined }]);
   });
 
-  it('uses the manifest breadcrumbs for a static host route, last crumb un-linked', () => {
+  it('uses workspace-first manifest breadcrumbs for a static host route, last crumb un-linked', () => {
     const crumbs = crumbsForPath('/analytics');
-    expect(crumbs[0]).toEqual({ label: 'Today', to: '/' });
+    expect(crumbs[0]).toEqual({ label: 'Progress', to: '/analytics' });
     expect(crumbs[crumbs.length - 1].to).toBeUndefined();
     expect(crumbs[crumbs.length - 1].label).toBe('Analytics');
   });
 
-  it('matches a DYNAMIC host route (/cfa/:level/:topic) via matchPath', () => {
+  it('matches a DYNAMIC host route via the manifest specificity matcher', () => {
     const crumbs = crumbsForPath('/cfa/level1/fixed-income');
     const labels = crumbs.map((c) => c.label);
-    // Today > CFA > CFA Module
-    expect(labels[0]).toBe('Today');
+    expect(labels[0]).toBe('Learn');
     expect(labels).toContain('CFA');
     expect(labels[labels.length - 1]).toBe('CFA Module');
+  });
+
+  it('uses workspace-first, concrete labels for cross-curriculum practice destinations', () => {
+    expect(crumbsForPath('/cfa/level3/mock').map((crumb) => crumb.label)).toEqual([
+      'Practice', 'CFA Level III', 'Mixed Mock',
+    ]);
+    expect(crumbsForPath('/quant/risk-management').map((crumb) => crumb.label)).toEqual([
+      'Practice', 'Quant', 'Risk Management',
+    ]);
+    expect(crumbsForPath('/excel/dcf-modeling').map((crumb) => crumb.label)).toEqual([
+      'Practice', 'Excel', 'DCF Modeling',
+    ]);
   });
 
   it('degrades gracefully for an unknown host route', () => {

@@ -1,0 +1,27 @@
+extends: electron-builder.yml
+
+# Personal Apple Silicon builds are signed after packaging with the ad-hoc
+# identity. They are intentionally neither Developer ID signed nor notarized.
+forceCodeSigning: false
+afterPack: scripts/prepare-personal-macos-bundle.mjs
+directories:
+  output: release-personal
+mac:
+  target:
+    - dir
+  identity: null
+  notarize: false
+  gatekeeperAssess: false
+  extendInfo:
+    NSAppTransportSecurity:
+      NSAllowsArbitraryLoads: false
+      NSExceptionDomains:
+        localhost:
+          NSExceptionAllowsInsecureHTTPLoads: true
+          NSIncludesSubdomains: false
+        127.0.0.1:
+          NSExceptionAllowsInsecureHTTPLoads: true
+          NSIncludesSubdomains: false
+    NSMicrophoneUsageDescription: StudyVault uses the microphone only when you start voice study.
+dmg:
+  sign: false

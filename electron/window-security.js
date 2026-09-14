@@ -1,6 +1,33 @@
 import { APP_HOST, APP_ORIGIN } from './protocol.js';
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+export const MICROPHONE_LEASE_MS = 5000;
+
+export class MicrophonePermissionLease {
+  constructor({ ttlMs = MICROPHONE_LEASE_MS, now = Date.now } = {}) {
+    this.ttlMs = ttlMs;
+    this.now = now;
+    this.leases = new Map();
+  }
+
+  grant(webContentsId) {
+    if (!Number.isSafeInteger(webContentsId) || webContentsId < 1) throw new Error('Invalid webContents ID');
+    const expiresAt = this.now() + this.ttlMs;
+    this.leases.set(webContentsId, expiresAt);
+    return expiresAt;
+  }
+
+  valid(webContentsId) {
+    const expiresAt = this.leases.get(webContentsId);
+    return typeof expiresAt === 'number' && expiresAt >= this.now();
+  }
+
+  consume(webContentsId) {
+    const valid = this.valid(webContentsId);
+    this.leases.delete(webContentsId);
+    return valid;
+  }
+}
 
 export function validatedDevServerUrl(input) {
   if (!input) return null;
@@ -35,6 +62,23 @@ export function isAllowedExternalHttpsUrl(input) {
   }
 }
 
+export function isAllowedSessionRequest(input, devServerUrl = null) {
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    return false;
+  }
+  if (['app:', 'data:', 'blob:', 'devtools:'].includes(url.protocol)) return true;
+  if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) return false;
+  if (!LOOPBACK_HOSTS.has(url.hostname) || url.username || url.password) return false;
+  if (devServerUrl) {
+    const dev = validatedDevServerUrl(devServerUrl);
+    if (url.origin === dev.origin) return true;
+  }
+  return true;
+}
+
 export function normalizePopoutUrl(route, devServerUrl = null) {
   if (typeof route !== 'string' || route.length === 0 || route.length > 2048) {
     throw new Error('Popout route is invalid');
@@ -47,13 +91,25 @@ export function normalizePopoutUrl(route, devServerUrl = null) {
   return url.toString();
 }
 
-export function isAllowedPermission({ permission, requestingUrl, isMainFrame, mediaTypes = [], devServerUrl = null }) {
+export function isAllowedPermission({
+  permission,
+  requestingUrl,
+  isMainFrame,
+  mediaTypes = [],
+  microphoneLeaseValid = false,
+  devServerUrl = null,
+}) {
   if (!isMainFrame || !isSafeRendererUrl(requestingUrl, devServerUrl)) return false;
   if (permission === 'clipboard-sanitized-write') return true;
-  return permission === 'media' && mediaTypes.length > 0 && mediaTypes.every((type) => type === 'audio');
+  return (
+    permission === 'media' &&
+    microphoneLeaseValid === true &&
+    mediaTypes.length > 0 &&
+    mediaTypes.every((type) => type === 'audio')
+  );
 }
 
-export function configureSessionSecurity(session, { devServerUrl = null } = {}) {
+export function configureSessionSecurity(session, { devServerUrl = null, microphoneLease = null } = {}) {
   const trustedWebContents = (webContents) =>
     webContents !== null &&
     !webContents.isDestroyed() &&
@@ -67,6 +123,7 @@ export function configureSessionSecurity(session, { devServerUrl = null } = {}) 
         requestingUrl: details.requestingUrl || details.securityOrigin || requestingOrigin,
         isMainFrame: details.isMainFrame,
         mediaTypes: details.mediaType ? [details.mediaType] : [],
+        microphoneLeaseValid: microphoneLease?.valid(webContents?.id) === true,
         devServerUrl,
       }),
   );
@@ -78,11 +135,19 @@ export function configureSessionSecurity(session, { devServerUrl = null } = {}) 
           requestingUrl: details.requestingUrl,
           isMainFrame: details.isMainFrame,
           mediaTypes: details.mediaTypes ?? [],
+          microphoneLeaseValid:
+            permission === 'media' && (details.mediaTypes ?? []).every((type) => type === 'audio')
+              ? microphoneLease?.consume(webContents?.id) === true
+              : false,
           devServerUrl,
         }),
     );
   });
   session.setDevicePermissionHandler?.(() => false);
+  session.webRequest.onBeforeRequest(
+    { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
+    (details, callback) => callback({ cancel: !isAllowedSessionRequest(details.url, devServerUrl) }),
+  );
 
   // Belt-and-braces for the offline invariant: even if a window is created with
   // spellcheck enabled, point the dictionary fetch at a non-resolving loopback

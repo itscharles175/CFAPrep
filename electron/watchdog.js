@@ -17,7 +17,7 @@ export function isOwnedChildPid(pid, parentPid = process.pid, watchdogPid = null
 }
 
 function waitForExit(child, timeoutMs) {
-  if (child.exitCode !== null) return Promise.resolve(true);
+  if (child.exitCode !== undefined && child.exitCode !== null) return Promise.resolve(true);
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(false), timeoutMs);
     child.once('exit', () => {
@@ -31,9 +31,11 @@ export class OwnedChildWatchdog {
   static async start({
     scriptPath,
     logger,
+    nativeExecutable = null,
     executable = process.execPath,
     parentPid = process.pid,
     spawnProcess = spawn,
+    forkProcess = null,
     // The child gates its own readiness on a full Win32_Process CIM query
     // (spawnSync timeout 8s), and end-to-end readiness measured 2.8-4.9s on an
     // IDLE machine. A 10s budget leaves almost no headroom once the machine is
@@ -42,12 +44,23 @@ export class OwnedChildWatchdog {
     // case rather than the observed happy path.
     readyTimeoutMs = 30_000,
   }) {
-    const child = spawnProcess(executable, [scriptPath, String(parentPid)], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      detached: true,
-    });
+    const child = nativeExecutable
+      ? spawnProcess(nativeExecutable, [String(parentPid)], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+          detached: true,
+        })
+      : forkProcess
+      ? forkProcess(scriptPath, [String(parentPid)], {
+          serviceName: 'StudyVault Sidecar Watchdog',
+          stdio: 'pipe',
+        })
+      : spawnProcess(executable, [scriptPath, String(parentPid)], {
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+          detached: true,
+        });
     const watchdog = new OwnedChildWatchdog({ child, logger, parentPid });
     try {
       await watchdog.waitUntilReady(readyTimeoutMs);
@@ -63,22 +76,26 @@ export class OwnedChildWatchdog {
     this.logger = logger;
     this.parentPid = parentPid;
     this.healthy = false;
+    this.exited = false;
     this.closing = false;
     this.failureHandlers = new Set();
     this.trackedPids = new Set();
     this.readyWaiters = new Set();
     this.pendingMessages = new Map();
     this.nextMessageId = 1;
+    this.usesUtilityProcess = typeof child.postMessage === 'function';
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (data) => logger.warn('watchdog_stderr', { message: String(data) }));
     this.outputReader = child.stdout ? readline.createInterface({ input: child.stdout, crlfDelay: Infinity }) : null;
     this.outputReader?.on('line', (line) => this.#handleOutputLine(line));
+    child.on?.('message', (event) => this.#handleMessage(event?.data ?? event));
     child.on('error', (error) => {
       logger.crash('watchdog_process_error', { error });
       this.#rejectWaiters(error);
       if (!this.closing) for (const handler of this.failureHandlers) handler();
     });
     child.once('exit', (code, signal) => {
+      this.exited = true;
       const unexpected = !this.closing;
       this.healthy = false;
       this.#rejectWaiters(new Error(`Owned-child watchdog exited (${code ?? signal ?? 'unknown'})`));
@@ -91,7 +108,7 @@ export class OwnedChildWatchdog {
 
   waitUntilReady(timeoutMs) {
     if (this.healthy) return Promise.resolve();
-    if (this.child.exitCode !== null) {
+    if (this.exited || (this.child.exitCode !== undefined && this.child.exitCode !== null)) {
       return Promise.reject(new Error('Owned-child watchdog exited before ready'));
     }
     return new Promise((resolve, reject) => {
@@ -124,6 +141,16 @@ export class OwnedChildWatchdog {
     try {
       message = JSON.parse(line);
     } catch {
+      return;
+    }
+    this.#handleMessage(message);
+  }
+
+  #handleMessage(message) {
+    if (message?.type === 'ready') {
+      this.healthy = true;
+      for (const waiter of this.readyWaiters) waiter.resolve();
+      this.readyWaiters.clear();
       return;
     }
     const pending = this.pendingMessages.get(message?.id);
@@ -170,14 +197,16 @@ export class OwnedChildWatchdog {
       await this.#send({ op: 'shutdown' }).catch(() => {});
     }
     this.child.stdin?.end();
-    if (!(await waitForExit(this.child, REAP_GRACE_MS)) && this.child.exitCode === null) this.child.kill();
+    if (!this.exited && !(await waitForExit(this.child, REAP_GRACE_MS)) && this.child.exitCode == null) this.child.kill();
     this.healthy = false;
     this.trackedPids.clear();
     this.outputReader?.close();
   }
 
   #send(message) {
-    if (!this.child.stdin?.writable) return Promise.reject(new Error('Watchdog pipe is closed'));
+    if (!this.usesUtilityProcess && !this.child.stdin?.writable) {
+      return Promise.reject(new Error('Watchdog pipe is closed'));
+    }
     const id = this.nextMessageId;
     this.nextMessageId += 1;
     return new Promise((resolve, reject) => {
@@ -186,7 +215,18 @@ export class OwnedChildWatchdog {
         reject(new Error('Owned-child watchdog operation timed out'));
       }, 10_000);
       this.pendingMessages.set(id, { resolve, reject, timer });
-      this.child.stdin.write(`${JSON.stringify({ ...message, id })}\n`, (error) => {
+      const payload = { ...message, id };
+      if (this.usesUtilityProcess) {
+        try {
+          this.child.postMessage(payload);
+        } catch (error) {
+          clearTimeout(timer);
+          this.pendingMessages.delete(id);
+          reject(error);
+        }
+        return;
+      }
+      this.child.stdin.write(`${JSON.stringify(payload)}\n`, (error) => {
         if (!error) return;
         clearTimeout(timer);
         this.pendingMessages.delete(id);
