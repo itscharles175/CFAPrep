@@ -80,7 +80,10 @@ function makeSurrealReadThrough(surreal: StorageDriver): ReadThroughDriver {
         try {
           await dexieDriver.questionResults?.clear();
         } catch {
-          /* if the cache clear fails we skip the re-warm entirely below */
+          // The append-only log could not be reset, so copying into it would
+          // duplicate attempts. Leave every cache namespace untouched and try
+          // again on a later recovery instead.
+          return;
         }
         await migrateData(surreal, dexieDriver, { migrateChunks: false });
       })().catch(() => {

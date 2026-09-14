@@ -77,7 +77,14 @@ function parseArgs(argv) {
  * with cwd = the backend dir so `from app.main import app` resolves the package.
  */
 function dumpLiveSpec(python) {
-  const py = 'import json,sys; from app.main import app; json.dump(app.openapi(), sys.stdout)';
+  const py = [
+    'import json,sys',
+    '_contract_stdout=sys.stdout',
+    'sys.stdout=sys.stderr',
+    'from app.main import app',
+    'sys.stdout=_contract_stdout',
+    'json.dump(app.openapi(), sys.stdout)',
+  ].join('; ');
   const res = spawnSync(python, ['-c', py], {
     cwd: BACKEND_DIR,
     encoding: 'utf8',

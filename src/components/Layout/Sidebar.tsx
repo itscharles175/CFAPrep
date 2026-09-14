@@ -1,7 +1,7 @@
-import { useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent, type SVGProps } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent, type SVGProps } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  Home, BookOpen, TrendingUp, Table2,
+  BookOpen, TrendingUp, Table2,
   Calculator, Library, ChevronDown, ChevronRight,
   PanelLeftClose, PanelLeft,
   GraduationCap, BarChart3, Shield, DollarSign,
@@ -10,11 +10,17 @@ import {
   FileSpreadsheet, Code, Gauge,
   Inbox, NotebookTabs, BadgeCheck, ClipboardList, FileSearch, HardDrive, Sun, Network,
   Scale, BookMarked, Clock, Database, Download, Flag, ListMusic, RotateCcw, Settings, ShieldCheck,
+  Compass, Dumbbell, RefreshCw, ChartNoAxesCombined,
 } from 'lucide-react';
-import { cfaTopics, excelModules, quantModules } from '../../data/catalog';
-import { appRoutes } from '../../routes/routeManifest';
-import type { AppRoute } from '../../routes/routeManifest';
+import { excelModules, quantModules } from '../../data/catalog';
+import { cfaLevels } from '../../domains/cfa/cfaLevels';
+import { level3TopicBelongsToPathway } from '../../domains/cfa/cfaLevel3Pathways';
+import { useLevel3Pathway } from '../../domains/cfa/useLevel3Pathway';
+import { appRoutes, workspaceForLocation } from '../../routes/routeManifest';
+import type { AppRoute, StudyWorkspace } from '../../routes/routeManifest';
 import { buildLsatNavGroups, type LsatNavMode } from '../../lib/lsatNavSection';
+import { domainForLocation, useStudyContext, workspaceHref } from '../../lib/studyContext';
+import StudyContextSelector from './StudyContextSelector';
 
 type LucideIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
 
@@ -77,10 +83,19 @@ const routeIconMap: Record<string, LucideIcon> = {
   target: Target,
 };
 
-const sidebarToolRouteIds = ['today', 'review', 'flashcards', 'vault', 'mock', 'analytics', 'knowledge-graph', 'calculators', 'formulas', 'content-ops', 'system', 'preferences'];
+const sidebarToolRouteIds = ['flashcards', 'mock', 'leeches', 'vault', 'tutor-workspace', 'formulas', 'calculators', 'knowledge-graph', 'content-ops', 'system', 'preferences'];
 const sidebarToolRoutes: AppRoute[] = appRoutes
   .filter((route) => sidebarToolRouteIds.includes(route.id))
   .sort((a, b) => sidebarToolRouteIds.indexOf(a.id) - sidebarToolRouteIds.indexOf(b.id));
+
+const primaryWorkspaces: Array<{ id: Exclude<StudyWorkspace, 'utility'>; label: string; icon: LucideIcon }> = [
+  { id: 'today', label: 'Today', icon: Sun },
+  { id: 'learn', label: 'Learn', icon: Compass },
+  { id: 'practice', label: 'Practice', icon: Dumbbell },
+  { id: 'review', label: 'Review', icon: RefreshCw },
+  { id: 'progress', label: 'Progress', icon: ChartNoAxesCombined },
+  { id: 'library', label: 'Library', icon: Library },
+];
 
 interface SidebarSubItem {
   id: string;
@@ -261,6 +276,25 @@ export default function Sidebar({
   onClose,
   lsatMode = 'study',
 }: SidebarProps) {
+  const location = useLocation();
+  const [studyContext, updateStudyContext] = useStudyContext();
+  const [activePathway, setActivePathway] = useLevel3Pathway();
+  const activeWorkspace = workspaceForLocation(location.pathname);
+
+  useEffect(() => {
+    const routeDomain = domainForLocation(location.pathname);
+    const levelMatch = location.pathname.match(/^\/cfa\/(level[123])(?:\/|$)/)?.[1];
+    const patch = {
+      ...(routeDomain && routeDomain !== studyContext.domain ? { domain: routeDomain } : {}),
+      ...(levelMatch && levelMatch !== studyContext.cfaLevel ? { cfaLevel: levelMatch as typeof studyContext.cfaLevel } : {}),
+    };
+    if (Object.keys(patch).length) updateStudyContext(patch);
+  }, [location.pathname, studyContext.cfaLevel, studyContext.domain, updateStudyContext]);
+
+  const selectedCfaLevel = cfaLevels.find((level) => level.id === studyContext.cfaLevel) || cfaLevels[0];
+  const selectedCfaTopics = selectedCfaLevel.topics.filter(
+    (topic) => studyContext.cfaLevel !== 'level3' || level3TopicBelongsToPathway(topic.id, activePathway),
+  );
   // UB4: swipe-to-close. We track the pointer-down origin and, on release,
   // close the drawer when the gesture is a deliberate leftward swipe. Falls back
   // to `onNavigate` so the current shell (which uses onNavigate to close) works
@@ -313,62 +347,78 @@ export default function Sidebar({
         </button>
       </div>
 
+      {!collapsed && (
+        <StudyContextSelector
+          context={studyContext}
+          pathway={activePathway}
+          onContextChange={updateStudyContext}
+          onPathwayChange={setActivePathway}
+        />
+      )}
+
       <nav className="sidebar-nav" aria-label="Primary navigation">
-        <div className="sidebar-section">
-          <NavLink to="/" end onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <Home />
-            {!collapsed && <span>Dashboard</span>}
-          </NavLink>
-        </div>
-
-        {!collapsed && <div className="sidebar-section-label">Domains</div>}
-
-        <SidebarSection
-          label="CFA Program"
-          icon={GraduationCap}
-          basePath="/cfa"
-          items={cfaTopics.map((t) => ({ id: `level1/${t.id}`, label: t.label, icon: cfaIconMap[t.id] || BookOpen }))}
-          collapsed={collapsed}
-          onNavigate={onNavigate}
-        />
-
-        <SidebarSection
-          label="Quant Finance"
-          icon={BrainCircuit}
-          basePath="/quant"
-          items={quantModules.map((module) => ({ id: module.id, label: module.label, icon: quantIconMap[module.id] || Cpu }))}
-          collapsed={collapsed}
-          onNavigate={onNavigate}
-        />
-
-        <SidebarSection
-          label="Excel Training"
-          icon={Table2}
-          basePath="/excel"
-          items={excelModules.map((module) => ({ id: module.id, label: module.label, icon: excelIconMap[module.id] || GitBranch }))}
-          collapsed={collapsed}
-          onNavigate={onNavigate}
-        />
-
-        {!collapsed && <div className="sidebar-section-label">Tools</div>}
-
-        <div className="sidebar-section">
-          {sidebarToolRoutes.map((route) => {
-            const Icon = routeIconMap[route.iconKey] || Gauge;
+        <div className="sidebar-section workspace-nav">
+          {primaryWorkspaces.map((workspace) => {
+            const Icon = workspace.icon;
+            const active = activeWorkspace === workspace.id;
             return (
-              <NavLink key={route.id} to={route.path} onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+              <NavLink
+                key={workspace.id}
+                to={workspaceHref(workspace.id, studyContext)}
+                end={workspace.id === 'today'}
+                onClick={onNavigate}
+                aria-current={active ? 'page' : undefined}
+                className={`sidebar-link ${active ? 'active' : ''}`}
+              >
                 <Icon />
-                {!collapsed && <span>{route.navLabel}</span>}
+                {!collapsed && <span>{workspace.label}</span>}
               </NavLink>
             );
           })}
         </div>
 
-        {/* K4: the unified shell's 4th nav section — the merged LSAT surface.
-            Always rendered (the unified shell is the only shell as of the K4-13
-            cutover). */}
-        {!collapsed && <div className="sidebar-section-label">LSAT Lab</div>}
-        <LsatSidebarSection collapsed={collapsed} mode={lsatMode} onNavigate={onNavigate} />
+        {!collapsed && (
+          <details className="sidebar-more">
+            <summary>
+              <Settings aria-hidden="true" />
+              <span>Utilities &amp; more</span>
+              <ChevronDown className="sidebar-more-chevron" aria-hidden="true" />
+            </summary>
+            <div className="sidebar-more-panel">
+              <div className="sidebar-section-label">Current track</div>
+              {studyContext.domain === 'cfa' && (
+                <SidebarSection
+                  label={`CFA ${studyContext.cfaLevel === 'level1' ? 'Level I' : studyContext.cfaLevel === 'level2' ? 'Level II' : 'Level III'}`}
+                  icon={GraduationCap}
+                  basePath="/cfa"
+                  items={selectedCfaTopics.map((topic) => ({ id: `${studyContext.cfaLevel}/${topic.id}`, label: topic.label, icon: cfaIconMap[topic.id] || BookOpen }))}
+                  onNavigate={onNavigate}
+                />
+              )}
+              {studyContext.domain === 'quant' && (
+                <SidebarSection label="Quant Finance" icon={BrainCircuit} basePath="/quant" items={quantModules.map((module) => ({ id: module.id, label: module.label, icon: quantIconMap[module.id] || Cpu }))} onNavigate={onNavigate} />
+              )}
+              {studyContext.domain === 'excel' && (
+                <SidebarSection label="Excel Training" icon={Table2} basePath="/excel" items={excelModules.map((module) => ({ id: module.id, label: module.label, icon: excelIconMap[module.id] || GitBranch }))} onNavigate={onNavigate} />
+              )}
+              {studyContext.domain === 'lsat' && <LsatSidebarSection mode={lsatMode} onNavigate={onNavigate} />}
+
+              <div className="sidebar-section-label">Specialized</div>
+              <div className="sidebar-section sidebar-utility-links">
+                {sidebarToolRoutes.map((route) => {
+                  const Icon = routeIconMap[route.iconKey] || Gauge;
+                  const path = route.id === 'mock' ? `/cfa/${studyContext.cfaLevel}/mock` : route.path;
+                  return (
+                    <NavLink key={route.id} to={path} onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+                      <Icon />
+                      <span>{route.navLabel}</span>
+                    </NavLink>
+                  );
+                })}
+              </div>
+            </div>
+          </details>
+        )}
       </nav>
     </aside>
   );

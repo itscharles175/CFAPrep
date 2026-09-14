@@ -52,19 +52,23 @@ afterEach(() => {
 });
 
 describe('SharedLayout (K4-6) — unified shell', () => {
-  it('mounts the host shell with the LSAT section and renders children', () => {
+  it('mounts the host shell with the six workspace links and renders children', () => {
     renderWithShell(<SharedLayout>{<div>Routed content</div>}</SharedLayout>);
 
     // Host chrome is present (sidebar brand + main region).
     expect(screen.getByText('Routed content')).toBeInTheDocument();
-    // The LSAT 4th section header (collapsed-by-default toggle) is rendered.
-    expect(screen.getByRole('link', { name: /LSAT/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Today' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Learn' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Practice' })).toHaveAttribute('href', '/cfa/level1/mock');
+    expect(screen.getByRole('link', { name: 'Review' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Progress' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Library' })).toBeInTheDocument();
   });
 
   it('expands the LSAT section to reveal grouped rows from lsatAppRoutes', async () => {
     renderWithShell(<SharedLayout />);
     const user = userEvent.setup();
-    // Expand the section (collapsed by default off the /lsat plane).
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Track' }), 'lsat');
     await user.click(screen.getByRole('link', { name: /^LSAT/i }));
     // A representative LSAT row from the merged manifest appears, /lsat-prefixed.
     const srs = await screen.findByRole('link', { name: 'SRS' });
@@ -91,14 +95,28 @@ describe('SharedLayout (K4-6) — unified shell', () => {
     expect(study).toHaveAttribute('aria-pressed', 'false');
   });
 
+  it('routes CFA practice and topic links through the selected target level', async () => {
+    renderWithShell(<SharedLayout />);
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Level' }), 'level2');
+    expect(screen.getByRole('link', { name: 'Practice' })).toHaveAttribute('href', '/cfa/level2/mock');
+
+    await user.click(screen.getByRole('link', { name: 'CFA Level II' }));
+    const levelTwoTopic = screen.getAllByRole('link').find((link) => link.getAttribute('href')?.startsWith('/cfa/level2/'));
+    expect(levelTwoTopic).toBeDefined();
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Level' }), 'level3');
+    expect(screen.getByRole('combobox', { name: 'Pathway' })).toBeInTheDocument();
+  });
+
   it('Test Mode hides the LSAT hideInTest rows in the Sidebar section', async () => {
     renderWithShell(<SharedLayout />);
     const user = userEvent.setup();
-    // Switch to Test Mode, then expand the LSAT section.
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Track' }), 'lsat');
     await user.click(within(screen.getByRole('group', { name: 'App mode' })).getByRole('button', { name: 'Test' }));
     await user.click(screen.getByRole('link', { name: /^LSAT/i }));
     // 'Practice' (not hideInTest) survives; 'SRS' (hideInTest) is hidden.
-    expect(await screen.findByRole('link', { name: 'Practice' })).toBeInTheDocument();
+    expect((await screen.findAllByRole('link', { name: 'Practice' })).length).toBeGreaterThan(0);
     expect(screen.queryByRole('link', { name: 'SRS' })).toBeNull();
   });
 

@@ -33,6 +33,18 @@ export default defineConfig({
     port: 5173,
     open: process.env.VITE_OPEN_BROWSER !== '0',
   },
+  // Visual QA builds point the LSAT client at this same-origin path. Proxying
+  // here avoids Chromium's private-network prompt while still exercising the
+  // real local sidecar and its API contracts.
+  preview: {
+    proxy: {
+      '/lsat-api': {
+        target: 'http://127.0.0.1:8100',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/lsat-api/, ''),
+      },
+    },
+  },
   build: {
     rollupOptions: {
       output: {

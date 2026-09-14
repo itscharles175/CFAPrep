@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDualWriteDriver } from './dualWriteDriver';
+import { db } from '../progressStore';
 import {
   abortDualWriteSoak,
   commitDualWriteSoak,
@@ -173,6 +174,79 @@ describe('dual-write soak lifecycle (DATA-5b)', () => {
     // No longer a dual-write soak; preference is now SurrealDB.
     expect(isDualWriteSoak()).toBe(false);
     expect(getStoredStoragePreference()).toBe('surrealdb');
+  });
+
+  it('does not re-warm the append-only attempt cache when clearing it fails', async () => {
+    await db.questionResults.clear();
+
+    let primaryDown = false;
+    const primaryAttempt = {
+      domain: 'cfa' as const,
+      topic: 'Ethics',
+      questionId: 'recovery-attempt',
+      learningObjective: 'standards',
+      correct: false,
+      confidence: 'low' as const,
+      errorCategory: 'concept' as const,
+      difficulty: 'foundation' as const,
+    };
+    const primary: StorageDriver = {
+      name: 'surrealdb',
+      async ready() {
+        return true;
+      },
+      settings: {
+        async get() {
+          if (primaryDown) throw new Error('sidecar unavailable');
+          return undefined;
+        },
+        async put() {},
+        async delete() {},
+        async bulkDelete() {},
+        async clear() {},
+        async toArray() {
+          return [];
+        },
+      },
+      questionResults: {
+        async add() {},
+        async bulkAdd() {},
+        async toArray() {
+          return [primaryAttempt];
+        },
+        async byTopic() {
+          return [primaryAttempt];
+        },
+        async clear() {},
+      },
+    };
+
+    const previousSurreal = storageRegistry.drivers['surrealdb'];
+    storageRegistry.drivers['surrealdb'] = primary;
+    const cacheAttempts = storageRegistry.drivers['dexie'].questionResults!;
+    const clearSpy = vi.spyOn(cacheAttempts, 'clear').mockRejectedValueOnce(new Error('IndexedDB clear failed'));
+    const bulkAddSpy = vi.spyOn(cacheAttempts, 'bulkAdd');
+
+    try {
+      expect((await storageRegistry.switchDriver('surrealdb')).ok).toBe(true);
+
+      primaryDown = true;
+      await storageRegistry.active.settings.get('degrade');
+      primaryDown = false;
+      await storageRegistry.active.settings.get('recover');
+
+      await vi.waitFor(() => expect(clearSpy).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(bulkAddSpy).not.toHaveBeenCalled();
+      expect(await db.questionResults.count()).toBe(0);
+    } finally {
+      clearSpy.mockRestore();
+      bulkAddSpy.mockRestore();
+      await db.questionResults.clear();
+      if (previousSurreal) storageRegistry.drivers['surrealdb'] = previousSurreal;
+      else delete storageRegistry.drivers['surrealdb'];
+    }
   });
 
   it('commit refuses (stays in dual-write) when primary and shadow diverge', async () => {

@@ -299,5 +299,5 @@ def test_optout_offline_generate_routes_to_cloud(monkeypatch):
 
 # --- config version pin ------------------------------------------------------
 def test_app_version_is_canonical():
-    """config.APP_VERSION is pinned to the canonical 0.9.0 (matches package.json)."""
-    assert config.APP_VERSION == "0.9.0"
+    """config.APP_VERSION is pinned to the canonical 1.0.0 (matches package.json)."""
+    assert config.APP_VERSION == "1.0.0"

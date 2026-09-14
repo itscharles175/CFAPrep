@@ -8,10 +8,12 @@ import {
   lsatAppRoutes,
   lsatSearchRoutes,
   routeByPath,
+  routeForLocation,
   routeLabel,
   routeTree,
   screenshotRoutes,
   smokeRoutes,
+  workspaceForLocation,
 } from './routeManifest';
 
 const appSource = readFileSync(path.join(process.cwd(), 'src/App.jsx'), 'utf8');
@@ -31,6 +33,7 @@ describe('route visual metadata', () => {
       expect(route.iconKey, route.id).toBeTruthy();
       expect(route.accentRole, route.id).toBeTruthy();
       expect(route.preferredLayout, route.id).toBeTruthy();
+      expect(route.workspace, route.id).toBeTruthy();
       expect(route.navOrder, route.id).toBeGreaterThan(0);
       expect(route.navLabel, route.id).toBeTruthy();
       expect(route.searchGroup, route.id).toBeTruthy();
@@ -72,13 +75,28 @@ describe('route visual metadata', () => {
     expect(appRoutes.find((route) => route.id === 'system')?.routeActions.map((action) => action.id)).toContain('encrypted-backup');
   });
 
-  it('exposes /today as a routable focus-mode landing', () => {
+  it('makes Today canonical at / and preserves /today as an alias', () => {
     const today = appRoutes.find((route) => route.id === 'today');
+    const alias = appRoutes.find((route) => route.id === 'today-alias');
     expect(today).toBeDefined();
-    expect(today?.path).toBe('/today');
+    expect(today?.path).toBe('/');
     expect(today?.navGroup).toBe('home');
     expect(today?.preferredLayout).toBe('dashboard');
     expect(today?.iconKey).toBe('sun');
+    expect(alias?.path).toBe('/today');
+    expect(alias?.canonicalPath).toBe('/');
+    expect(canonicalRoutePath('/today')).toBe('/');
+    expect(appRoutes.find((route) => route.id === 'dashboard')?.path).toBe('/progress/overview');
+  });
+
+  it('maps every host route to the six workspaces or utilities', () => {
+    expect(workspaceForLocation('/')).toBe('today');
+    expect(workspaceForLocation('/cfa/level2/equity')).toBe('learn');
+    expect(workspaceForLocation('/cfa/level3/performance/constructed-response')).toBe('practice');
+    expect(workspaceForLocation('/review')).toBe('review');
+    expect(workspaceForLocation('/progress/overview')).toBe('progress');
+    expect(workspaceForLocation('/library/tutor')).toBe('library');
+    expect(routeForLocation('/cfa/level2/equity')?.id).toBe('cfa-module');
   });
 
   it('keeps host rendered routes aligned with the typed route manifest', () => {

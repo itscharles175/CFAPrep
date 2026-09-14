@@ -21,6 +21,19 @@
  * decides arbitration). */
 export type StudyProfileWriter = 'lsat' | 'host' | 'merge';
 
+export type StudyDomain = 'cfa' | 'lsat' | 'quant' | 'excel';
+
+/** A domain-specific outcome. Optional fields keep older profile payloads valid. */
+export interface StudyDomainGoal {
+  enabled: boolean;
+  goal: string | null;
+  targetDate: string | null;
+}
+
+export type StudyDomainGoals = Partial<Record<StudyDomain, StudyDomainGoal>>;
+/** Daily minutes reserved for each enabled domain. */
+export type StudyTimeAllocation = Partial<Record<StudyDomain, number>>;
+
 /**
  * The reconciled shared study profile, mirroring the backend's
  * `SharedStudyProfileOut` (`services/lsat-backend/app/routers/study_routes.py`).
@@ -48,6 +61,10 @@ export interface SharedStudyProfile {
   mockCadenceDays: number | null;
   /** Host-owned per-topic planning weights. */
   topicWeights: Record<string, number>;
+  /** Per-domain outcomes used by the cross-domain daily planner. */
+  domainGoals: StudyDomainGoals;
+  /** Daily minutes reserved for each domain; missing domains receive no reservation. */
+  timeAllocation: StudyTimeAllocation;
   /** Who wrote last (informational). */
   lastWriter: StudyProfileWriter;
   /** ISO 8601 timestamp the arbiter ordered by, or null when no write yet. */
@@ -67,6 +84,8 @@ export interface StudyProfilePatch {
   restDays?: number[];
   mockCadenceDays?: number | null;
   topicWeights?: Record<string, number>;
+  domainGoals?: StudyDomainGoals;
+  timeAllocation?: StudyTimeAllocation;
   lastWriter?: StudyProfileWriter;
 }
 
@@ -81,6 +100,8 @@ export interface RawSharedStudyProfile {
   rest_days?: number[];
   mock_cadence_days?: number | null;
   topic_weights?: Record<string, number>;
+  domain_goals?: Record<string, unknown>;
+  time_allocation?: Record<string, unknown>;
   last_writer?: string;
   updated_at?: string | null;
 }
@@ -96,6 +117,8 @@ export const DEFAULT_SHARED_STUDY_PROFILE: SharedStudyProfile = {
   restDays: [],
   mockCadenceDays: null,
   topicWeights: {},
+  domainGoals: {},
+  timeAllocation: {},
   lastWriter: 'merge',
   updatedAt: null,
 };
@@ -104,6 +127,40 @@ const WRITERS: readonly StudyProfileWriter[] = ['lsat', 'host', 'merge'];
 
 function coerceWriter(value: unknown): StudyProfileWriter {
   return WRITERS.includes(value as StudyProfileWriter) ? (value as StudyProfileWriter) : 'merge';
+}
+
+const DOMAINS: readonly StudyDomain[] = ['cfa', 'lsat', 'quant', 'excel'];
+
+function coerceDomainGoals(value: unknown): StudyDomainGoals {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const goals: StudyDomainGoals = {};
+  for (const domain of DOMAINS) {
+    const raw = source[domain];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const goal = raw as Record<string, unknown>;
+    goals[domain] = {
+      enabled: typeof goal.enabled === 'boolean' ? goal.enabled : true,
+      goal: typeof goal.goal === 'string' ? goal.goal : null,
+      targetDate: typeof goal.targetDate === 'string'
+        ? goal.targetDate
+        : typeof goal.target_date === 'string' ? goal.target_date : null,
+    };
+  }
+  return goals;
+}
+
+function coerceTimeAllocation(value: unknown): StudyTimeAllocation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const allocation: StudyTimeAllocation = {};
+  for (const domain of DOMAINS) {
+    const minutes = source[domain];
+    if (typeof minutes === 'number' && Number.isFinite(minutes) && minutes >= 0) {
+      allocation[domain] = Math.round(minutes);
+    }
+  }
+  return allocation;
 }
 
 /**
@@ -127,6 +184,8 @@ export function studyProfileFromRaw(raw: RawSharedStudyProfile | null | undefine
     mockCadenceDays: typeof r.mock_cadence_days === 'number' ? r.mock_cadence_days : null,
     topicWeights:
       r.topic_weights && typeof r.topic_weights === 'object' ? { ...r.topic_weights } : {},
+    domainGoals: coerceDomainGoals(r.domain_goals),
+    timeAllocation: coerceTimeAllocation(r.time_allocation),
     lastWriter: coerceWriter(r.last_writer),
     updatedAt: typeof r.updated_at === 'string' ? r.updated_at : null,
   };
@@ -144,6 +203,8 @@ export function studyProfilePatchToRaw(patch: StudyProfilePatch): RawSharedStudy
   if (patch.restDays !== undefined) out.rest_days = patch.restDays;
   if (patch.mockCadenceDays !== undefined) out.mock_cadence_days = patch.mockCadenceDays;
   if (patch.topicWeights !== undefined) out.topic_weights = patch.topicWeights;
+  if (patch.domainGoals !== undefined) out.domain_goals = patch.domainGoals;
+  if (patch.timeAllocation !== undefined) out.time_allocation = patch.timeAllocation;
   if (patch.lastWriter !== undefined) out.last_writer = patch.lastWriter;
   return out;
 }

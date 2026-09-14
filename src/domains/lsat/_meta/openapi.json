@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "LSAT Lab Backend",
-    "version": "0.9.0"
+    "version": "1.0.0"
   },
   "paths": {
     "/api/health": {
@@ -28451,6 +28451,21 @@
             "type": "object",
             "title": "Topic Weights"
           },
+          "domain_goals": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Domain Goals"
+          },
+          "time_allocation": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Time Allocation"
+          },
           "last_writer": {
             "type": "string",
             "title": "Last Writer",
@@ -30166,6 +30181,35 @@
               }
             ],
             "title": "Topic Weights"
+          },
+          "domain_goals": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain Goals"
+          },
+          "time_allocation": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Allocation"
           },
           "last_writer": {
             "anyOf": [

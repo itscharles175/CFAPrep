@@ -28,8 +28,8 @@ describe('NavigationBreadcrumb (UX-4)', () => {
     expect(nav).toBeInTheDocument();
     const current = screen.getByText('Analytics');
     expect(current).toHaveAttribute('aria-current', 'page');
-    // The Dashboard root is a link, not the current page.
-    expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument();
+    // The Today root is a link, not the current page.
+    expect(screen.getByRole('link', { name: 'Today' })).toBeInTheDocument();
   });
 
   it('renders nothing at the host root (single crumb)', () => {
@@ -54,18 +54,18 @@ describe('DomainIndicator (UX-4)', () => {
 
 describe('NavBackButton (UX-4)', () => {
   it('is disabled at the root of the trail with a generic Back label', () => {
-    pushHistory({ path: '/', label: 'Dashboard' });
+    pushHistory({ path: '/', label: 'Today' });
     renderAt(<NavBackButton />, '/');
     const btn = screen.getByRole('button', { name: 'Back' });
     expect(btn).toBeDisabled();
   });
 
   it('names the previous destination in its aria-label and calls the same-domain navigator', async () => {
-    pushHistory({ path: '/', label: 'Dashboard' });
+    pushHistory({ path: '/', label: 'Today' });
     pushHistory({ path: '/analytics', label: 'Analytics' });
     const onBack = vi.fn();
     renderAt(<NavBackButton onSameDomainBack={onBack} />, '/analytics');
-    const btn = screen.getByRole('button', { name: 'Back to Dashboard' });
+    const btn = screen.getByRole('button', { name: 'Back to Today' });
     expect(btn).toBeEnabled();
     await userEvent.click(btn);
     expect(onBack).toHaveBeenCalledTimes(1);

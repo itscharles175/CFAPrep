@@ -97,6 +97,28 @@ export async function clearQueue(): Promise<void> {
   }
 }
 
+/**
+ * Return jobs left in `running` by an app quit or process interruption to a
+ * retryable state. Completed work and explicit failures are left untouched.
+ * Call this once when the local generation worker starts.
+ */
+export async function recoverInterruptedTargetedMaterialJobs(): Promise<TargetedMaterialJob[]> {
+  const jobs = await readQueue();
+  let changed = false;
+  const recovered = jobs.map((job) => {
+    if (job.status !== 'running') return job;
+    changed = true;
+    return {
+      ...job,
+      status: 'pending' as const,
+      completedAt: undefined,
+      error: undefined,
+    };
+  });
+  if (changed) await writeQueue(recovered);
+  return recovered;
+}
+
 // --------------------------------------------------------------------------
 // Pure helpers (exported for unit tests)
 // --------------------------------------------------------------------------
@@ -321,13 +343,22 @@ export async function runTargetedMaterialJob(
       error: undefined,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Job failed.';
-    updated = {
-      ...running,
-      status: 'error',
-      completedAt: new Date().toISOString(),
-      error: message,
-    };
+    if (options.signal?.aborted) {
+      updated = {
+        ...running,
+        status: 'pending',
+        completedAt: undefined,
+        error: undefined,
+      };
+    } else {
+      const message = error instanceof Error ? error.message : 'Job failed.';
+      updated = {
+        ...running,
+        status: 'error',
+        completedAt: new Date().toISOString(),
+        error: message,
+      };
+    }
   }
 
   const persisted = await readQueue();

@@ -79,9 +79,9 @@ function hostCrumbs(fullPath: string): Crumb[] {
   // Find the host manifest route whose (possibly dynamic) path matches.
   const matched = appRoutes.find((route) => matchPath({ path: route.path, end: true }, fullPath));
   if (!matched) {
-    // Unknown host route (for example, a 404) — degrade to a Dashboard root
+    // Unknown host route (for example, a 404) — degrade to the Today root
     // so the chrome still anchors the user.
-    return fullPath === '/' ? [{ label: 'Dashboard' }] : [{ label: 'Dashboard', to: '/' }, { label: 'This page' }];
+    return fullPath === '/' ? [{ label: 'Today' }] : [{ label: 'Today', to: '/' }, { label: 'This page' }];
   }
   // The manifest's breadcrumbs are {label, path}: the last one is the current
   // page (rendered as aria-current, no link).

@@ -3,12 +3,12 @@ import { crumbsForPath, labelForPath } from './navigationCrumbs';
 
 describe('crumbsForPath — host plane', () => {
   it('returns a single (label-only) crumb at the host root', () => {
-    expect(crumbsForPath('/')).toEqual([{ label: 'Dashboard', to: undefined }]);
+    expect(crumbsForPath('/')).toEqual([{ label: 'Today', to: undefined }]);
   });
 
   it('uses the manifest breadcrumbs for a static host route, last crumb un-linked', () => {
     const crumbs = crumbsForPath('/analytics');
-    expect(crumbs[0]).toEqual({ label: 'Dashboard', to: '/' });
+    expect(crumbs[0]).toEqual({ label: 'Today', to: '/' });
     expect(crumbs[crumbs.length - 1].to).toBeUndefined();
     expect(crumbs[crumbs.length - 1].label).toBe('Analytics');
   });
@@ -16,15 +16,15 @@ describe('crumbsForPath — host plane', () => {
   it('matches a DYNAMIC host route (/cfa/:level/:topic) via matchPath', () => {
     const crumbs = crumbsForPath('/cfa/level1/fixed-income');
     const labels = crumbs.map((c) => c.label);
-    // Dashboard > CFA > CFA Module
-    expect(labels[0]).toBe('Dashboard');
+    // Today > CFA > CFA Module
+    expect(labels[0]).toBe('Today');
     expect(labels).toContain('CFA');
     expect(labels[labels.length - 1]).toBe('CFA Module');
   });
 
   it('degrades gracefully for an unknown host route', () => {
     const crumbs = crumbsForPath('/not-in-manifest');
-    expect(crumbs[0]).toEqual({ label: 'Dashboard', to: '/' });
+    expect(crumbs[0]).toEqual({ label: 'Today', to: '/' });
     expect(crumbs[crumbs.length - 1].to).toBeUndefined();
   });
 });

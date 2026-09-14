@@ -58,7 +58,7 @@ describe('RAG-2 — embedder (offline-graceful)', () => {
       fetchImpl,
     });
 
-    expect(fetchImpl.mock.calls[0][0]).toBe('http://localhost:11434/v1/embeddings');
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://localhost:1234/v1/embeddings');
   });
 
   it('empty input is a trivial empty result (no fetch)', async () => {

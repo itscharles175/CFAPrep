@@ -10,20 +10,27 @@ and adaptive drills. All on your machine, no cloud, no account, no API keys.
 
 > New here? Read **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the
 > two-apps-one-window design and **[docs/LSAT-INTEGRATION.md](docs/LSAT-INTEGRATION.md)**
-> for how the LSAT domain is embedded.
+> for how the LSAT domain is embedded. Current implementation and release
+> evidence is tracked in
+> **[docs/STUDYVAULT-1.0-IMPLEMENTATION-LEDGER.md](docs/STUDYVAULT-1.0-IMPLEMENTATION-LEDGER.md)**.
 
 ## Stack
 
-| Layer                                  | What                                                                                                                                                    |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Desktop shell**                      | Electron 43 with a sandboxed renderer, typed preload bridge, secure custom protocol, and main-process sidecar supervisor                                |
-| **Domains**                            | Host (CFA/Quant/Excel) at `/`, LSAT at `/lsat` — one Vite bundle, each with its own router; see [ARCHITECTURE.md](docs/ARCHITECTURE.md)                 |
-| **One local brain** (current → target) | Dexie / IndexedDB → SurrealDB (Wave-1); LSAT uses a FastAPI + SQLite sidecar on :8100                                                                   |
-| **Notebook + RAG**                     | Embedded open-notebook (FastAPI on :5055, worker, transformations)                                                                                      |
-| **Local model**                        | LM Studio or Ollama, OpenAI-compatible chat + embeddings. Standardize on **Gemma 4 E4B** (multimodal, 128K context)                                     |
-| **Frontend**                           | React 19 + Vite 8 + react-router-dom 7 + recharts/@visx + lucide-react + pdfjs-dist; Geist/Newsreader fonts; vite-plugin-pwa for offline service-worker |
+| Layer              | What                                                                                                                                                                  |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Desktop shell**  | Electron 43 with a sandboxed renderer, typed preload bridge, secure custom protocol, and main-process sidecar supervisor                                              |
+| **Domains**        | Host (CFA/Quant/Excel) at `/`, LSAT at `/lsat` — one Vite bundle and one top-level router; see [ARCHITECTURE.md](docs/ARCHITECTURE.md)                                |
+| **Local storage**  | Dexie / IndexedDB for host study data, SQLite for LSAT, and an optional SurrealDB cutover path                                                                        |
+| **Notebook + RAG** | Embedded open-notebook (FastAPI on :5055, worker, transformations)                                                                                                    |
+| **Local model**    | LM Studio first, with Ollama compatibility; both use local OpenAI-compatible chat and embedding endpoints. No specific model is required or downloaded automatically. |
+| **Frontend**       | React 19 + Vite 8 + react-router-dom 7 + recharts/@visx + lucide-react + pdfjs-dist; Geist/Newsreader fonts; vite-plugin-pwa for offline service-worker               |
 
-## What works today
+## Implemented surfaces
+
+The following surfaces are present in the source tree. This is an implementation
+inventory, not a claim that the StudyVault 1.0 acceptance matrix is green; use
+the [implementation ledger](docs/STUDYVAULT-1.0-IMPLEMENTATION-LEDGER.md) for
+verified, current, pending, and blocked status.
 
 **Source ingestion** — three paths into the same `db.sourceDocuments` /
 `db.sourceChunks` Dexie tables, all dedupe by SHA-256:
@@ -57,10 +64,9 @@ forecast. Surfaced as a panel on the CFA dashboard _and_ as the dedicated
 `/today` focus-mode landing (hero card for the top action + then-list).
 
 **AI coaching** (Pillar 3) — on every missed quiz question, an "🤖 Explain
-with AI" button calls the local model with the question + options + correct
-
-- picked indices and renders a personalized 3-5 sentence explanation as a
-  callout below the static explanation. Same CORS guidance in the error path.
+with AI" button calls the local model with the question, options, correct and
+picked indices, then renders a personalized 3-5 sentence explanation below the
+static explanation. The error path includes the same CORS guidance.
 
 **Vault management** (Pillar 1/5) — System Health surfaces the embedded
 backend's notebooks (list/delete) and the local source vault
@@ -79,16 +85,17 @@ offline use; the empty-vault Dashboard banner links straight to ingestion.
 ## Verify everything
 
 ```bash
-npm run lint        # eslint . — must be clean
-npx tsc --noEmit    # zero errors
-npm test            # vitest run — 160+ tests
-npm run build       # vite + tsc + PWA bundle
-
-# Electron desktop:
-npx vitest run --project host electron
-npm run electron:build:dir    # unpacked app
-npm run electron:build        # platform installers
+npm run verify              # host lint/tests + Electron tests + production build
+npm run verify:all          # adds LSAT typecheck and frontend tests
+npm run check:docs          # architecture/documentation drift
+npm run electron:build:dir  # unpacked Electron app
+npm run electron:build      # platform installers
 ```
+
+The Electron tests use Node's test runner through `npm run test:electron`; they
+are intentionally excluded from the host Vitest project. Backend, content,
+contract, restore, accessibility, visual, packaging, and mutation acceptance
+remain separate gates in the implementation ledger.
 
 ## Run dev
 
@@ -111,19 +118,21 @@ conflict. See `docs/SPIKE-FINDINGS.md`.
 
 ## Local model setup
 
-- **LM Studio** (recommended): serve `gemma-4-e4b-it` on
-  `http://localhost:1234/v1`. Load at `-c 32768` (the 4096 default truncates
-  RAG context). Enable CORS in Developer/Server panel — required for
-  browser fetches in web dev. Electron uses the explicit `app://studyvault`
-  origin and the same backend CORS policy.
-- **Ollama**: `ollama pull gemma4:e4b`; start with `OLLAMA_ORIGINS=*` for
-  browser dev.
+- **LM Studio** (recommended): serve a compatible local model on
+  `http://localhost:1234/v1`. Choose a context window appropriate for the model
+  and study task. Enable CORS in Developer/Server panel for browser-based
+  development. Electron uses the explicit `app://studyvault` origin and the
+  same backend CORS policy.
+- **Ollama**: expose its OpenAI-compatible endpoint on
+  `http://localhost:11434/v1`; for browser development, allow the local Vite
+  origin in Ollama's origin configuration.
 
 Configure both URLs in System Health → Local AI / Embedded Notebook.
 
 ## Docs
 
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — full multi-wave roadmap.
+- [`docs/STUDYVAULT-1.0-IMPLEMENTATION-LEDGER.md`](docs/STUDYVAULT-1.0-IMPLEMENTATION-LEDGER.md) — current implementation and acceptance evidence.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — current finish-line sequence and release gates.
 - [`docs/SPIKE-FINDINGS.md`](docs/SPIKE-FINDINGS.md) — sidecar repro + the
   known gotchas (SurrealDB v2 not v3; PYTHONUTF8=1; LM Studio context).
 

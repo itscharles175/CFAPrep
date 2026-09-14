@@ -32,6 +32,10 @@ import { runHostStartupOnce } from '../lib/hostStartup';
 import ErrorBoundary from './ErrorBoundary';
 import { DOMAIN_NAV_EVENT } from '../lib/domainNav';
 import { fetchDataSchemaAlignment } from '../lib/dataDictionary';
+import {
+  reconcileStoredRemediationAttempts,
+  recoverRemediationWork,
+} from '../lib/remediationQueue';
 // AUDIT-1 — activate the cross-domain feed. These two host→backend sync hooks
 // (DATA-4a read-only progress feed + DATA-4b FSRS write-back) were fully built +
 // backend-tested but never mounted, so the LSAT sidecar's HostProgressSnapshot
@@ -47,6 +51,7 @@ import { useSyncFsrsWriteBack } from '../hooks/useSyncFsrsWriteBack';
 import '../index.css';
 import '../styles/tokens.css';
 import '../styles/unified-palette.css';
+import '../styles/studyvault-editorial.css';
 import 'katex/dist/katex.min.css';
 
 const HostShell = lazy(() => import('../App'));
@@ -120,6 +125,9 @@ function PlaneBoundary({ name, children }: { name: string; children: ReactNode }
 export default function UnifiedRoot() {
   useEffect(() => {
     runHostStartupOnce();
+    void reconcileStoredRemediationAttempts()
+      .then(() => recoverRemediationWork())
+      .catch(() => undefined);
   }, []);
 
   // Cross-domain sync feed (AUDIT-1). Mounted once at the root so the host plane's

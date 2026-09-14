@@ -5,11 +5,15 @@ import { MemoryRouter } from 'react-router-dom';
 import { OnboardingWizard } from './OnboardingWizard';
 
 vi.mock('../../lib/localLlm', () => ({
+  checkLlmConnection: vi.fn().mockResolvedValue({
+    ok: true,
+    recommendedModel: 'discovered-chat-model',
+  }),
   saveLlmSettings: vi.fn().mockResolvedValue({}),
 }));
 
 // Import the mock AFTER vi.mock so we get the mocked version
-import { saveLlmSettings } from '../../lib/localLlm';
+import { checkLlmConnection, saveLlmSettings } from '../../lib/localLlm';
 
 function renderWizard(props = {}) {
   const onClose = props.onClose ?? vi.fn();
@@ -29,9 +33,9 @@ describe('OnboardingWizard', () => {
 
   it('renders step 1 with Welcome copy when open=true', () => {
     renderWizard({ open: true });
-    expect(screen.getByText('Welcome')).toBeInTheDocument();
     expect(screen.getByText(/local-first/i)).toBeInTheDocument();
-    expect(screen.getByText('1 / 3')).toBeInTheDocument();
+    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Onboarding step 1 of 3' })).toHaveValue(1);
   });
 
   it('does not render anything when open=false', () => {
@@ -44,10 +48,10 @@ describe('OnboardingWizard', () => {
     renderWizard();
     await user.click(screen.getByRole('button', { name: /continue/i }));
     expect(screen.getByText(/local model/i)).toBeInTheDocument();
-    expect(screen.getByText('2 / 3')).toBeInTheDocument();
+    expect(screen.getByText('Step 2 of 3')).toBeInTheDocument();
   });
 
-  it('clicking LM Studio calls saveLlmSettings with exact shape and advances to step 3', async () => {
+  it('clicking LM Studio discovers a loaded model, saves it, and advances to step 3', async () => {
     const user = userEvent.setup();
     renderWizard();
 
@@ -62,13 +66,29 @@ describe('OnboardingWizard', () => {
       expect(saveLlmSettings).toHaveBeenCalledWith({
         enabled: true,
         baseUrl: 'http://localhost:1234/v1',
-        model: 'gemma-4-e4b-it',
+        model: 'discovered-chat-model',
       });
     });
+    expect(checkLlmConnection).toHaveBeenCalledWith(
+      { baseUrl: 'http://localhost:1234/v1' },
+      { retries: 0 },
+    );
 
     // Should now be on step 3
-    expect(screen.getByText('3 / 3')).toBeInTheDocument();
-    expect(screen.getByText(/ingest sources/i)).toBeInTheDocument();
+    expect(screen.getByText('Step 3 of 3')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /bring in your curriculum/i })).toBeInTheDocument();
+  });
+
+  it('keeps onboarding on the provider step when no chat model is loaded', async () => {
+    checkLlmConnection.mockResolvedValueOnce({ ok: true, recommendedModel: null });
+    const user = userEvent.setup();
+    renderWizard();
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+    await user.click(screen.getByRole('button', { name: /lm studio/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/no loaded chat model/i);
+    expect(saveLlmSettings).not.toHaveBeenCalled();
+    expect(screen.getByText('Step 2 of 3')).toBeInTheDocument();
   });
 
   it('step 3 shows three ingest paths and a Done button', async () => {

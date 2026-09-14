@@ -229,9 +229,9 @@ function vignetteQuestion(
   const row = localDataset.rows[index % localDataset.rows.length] || {};
   const decision = pick(spec.decisions, index);
   const trap = pick(spec.traps, index);
-  const correct = `Use ${objective.title.toLowerCase()} because ${rowCue(row, index)} directly supports ${decision.toLowerCase()}.`;
-  const distractorOne = `Follow ${trap.toLowerCase()}, even though that point does not control the portfolio decision.`;
-  const distractorTwo = `Delay the answer until another policy fact is gathered, despite the case giving enough support.`;
+  const correct = `The response should rely on ${objective.title.toLowerCase()} because ${rowCue(row, index)} directly supports ${decision.toLowerCase()}.`;
+  const distractorOne = `The response should rely on ${trap.toLowerCase()}, even though that point does not control the portfolio decision.`;
+  const distractorTwo = `The response should rely on another policy fact and delay the answer, despite the case giving enough support.`;
   const rotated = rotateOptions(correct, distractorOne, distractorTwo, index);
 
   return {

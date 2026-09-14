@@ -508,6 +508,13 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.optional-dependencies]
+dev = [
+    { name = "hypothesis" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "hypothesis" },
@@ -521,14 +528,18 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.136.1" },
     { name = "fsrs", specifier = ">=6.3.1" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.152.9" },
     { name = "mcp", specifier = ">=1.27.1" },
     { name = "pymupdf", specifier = ">=1.27.2.3" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.1.0" },
     { name = "python-multipart", specifier = ">=0.0.29" },
     { name = "sqlite-vec", specifier = ">=0.1.9" },
     { name = "sqlmodel", specifier = ">=0.0.38" },
     { name = "textstat", specifier = ">=0.7.4" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.47.0" },
 ]
+provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [

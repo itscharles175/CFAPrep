@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Activity, CalendarClock, Gauge, ListChecks, Wrench } from 'lucide-react';
-import { EmptyPanel, MetricCard, PageHeader, ReviewItemCard, SegmentedControl, StatusBadge, Surface } from '../components/ui/Primitives';
+import { PageHeader, ReviewItemCard, StatusBadge, Surface } from '../components/ui/Primitives';
 import { SkeletonList } from '../components/feedback';
 import {
   forecastReviewLoad,
   getReadinessByTopic,
   getReviewInbox,
   getStudyPlan,
-  repairVaultData,
   saveStudyPlanSettings,
 } from '../lib/learning';
 import { getTutorProvider, isTutorEnabledFromEnv } from '../lib/aiTutorContracts';
@@ -23,6 +21,7 @@ import { recordStudyContext, getResumeTarget, clearResumeHandle } from '../lib/s
 // PSY-13 — read the Wave-5 ability snapshots to ability-weight the rank (read-only;
 // degrades to overdue-only when no snapshot is available).
 import { readLatestAbilitySnapshot } from '../lib/psychometrics/abilitySnapshots';
+import { useStudyContext, workspaceHref } from '../lib/studyContext';
 
 const filters = [
   { value: 'all', label: 'All' },
@@ -43,6 +42,7 @@ const VALID_FILTERS = new Set(filters.map((f) => f.value));
 
 export default function ReviewInbox() {
   const [activePathway] = useLevel3Pathway();
+  const [studyContext] = useStudyContext();
   // UX-5 — deep-link support, mirroring the LSAT Review page's `tab` param.
   // `?filter=` opens a specific inbox slice; `?item=` scrolls to + highlights a
   // specific queue item once the list resolves. The filter lives in the URL so
@@ -240,12 +240,6 @@ export default function ReviewInbox() {
     deepLinkHandled.current = false;
   }, [filterParam, deepLinkItemId]);
 
-  async function handleRepair() {
-    const preview = await repairVaultData();
-    setMessage(`Vault repair complete. ${Object.values(preview.counts).reduce((sum, count) => sum + count, 0)} rows checked.`);
-    refresh();
-  }
-
   async function handleSavePlan(event) {
     event.preventDefault();
     await saveStudyPlanSettings({
@@ -285,6 +279,8 @@ export default function ReviewInbox() {
   // is offline / unreachable, so the count gracefully reflects host-only).
   const lsatDueCount = lsatDue?.ok ? lsatDue.dueCount : 0;
   const combinedQueueCount = items.length + lsatDueCount;
+  const forecastHasWork = forecast.some((day) => day.count > 0);
+  const practicePath = workspaceHref('practice', studyContext);
 
   // PSY-13 — ONE global ranking over BOTH planes. Replaces the host-first
   // concatenation (host items, then LSAT appended) with a single pure ranker by
@@ -312,9 +308,8 @@ export default function ReviewInbox() {
     <div className="page-container">
       <PageHeader
         badge="REVIEW INBOX"
-        title="Review Inbox"
-        subtitle="Due reviews, weak objectives, missed questions, bookmarks, stale topics, and unfinished lessons in one queue."
-        actions={<button className="btn btn-secondary" onClick={handleRepair}><Wrench size={16} /> Repair Vault</button>}
+        title="Review"
+        subtitle="Clear the work that will improve retention next."
       />
 
       {/* NAV-1 — cross-restart "resume where you left off". Surfaces the most
@@ -341,12 +336,62 @@ export default function ReviewInbox() {
         </Surface>
       )}
 
-      <div className="grid-4 page-metrics">
-        <MetricCard label="Due Today" value={studyPlan?.dueToday ?? 0} detail="Scheduled review items" icon={CalendarClock} />
-        <MetricCard label="Forecast" value={studyPlan?.forecastReviewCount ?? 0} detail="Next 14 days" icon={Activity} tone="warning" />
-        <MetricCard label="Weakest Topic" value={weakest ? `${weakest.readinessScore}%` : '-'} detail={weakest?.topic || 'No attempts yet'} icon={Gauge} tone="success" />
-        <MetricCard label="Queue" value={combinedQueueCount} detail={lsatDueCount > 0 ? `${items.length} local + ${lsatDueCount} LSAT` : 'Total actionable items'} icon={ListChecks} tone="accent" />
+      <div className="review-status-strip" aria-label="Review status">
+        {combinedQueueCount === 0 && !weakest && (studyPlan?.forecastReviewCount ?? 0) === 0 ? (
+          <span><strong>All caught up</strong> · no review work is waiting.</span>
+        ) : (
+          <>
+            <span><strong>{combinedQueueCount}</strong> in queue</span>
+            <span><strong>{studyPlan?.dueToday ?? 0}</strong> due today</span>
+            {weakest && <span><strong>{weakest.readinessScore}%</strong> · {weakest.topic}</span>}
+            {(studyPlan?.forecastReviewCount ?? 0) > 0 && (
+              <span><strong>{studyPlan.forecastReviewCount}</strong> coming in 14 days</span>
+            )}
+          </>
+        )}
       </div>
+
+      <section className="review-primary" aria-labelledby="review-queue-title">
+        <div className="review-primary-head">
+          <div>
+            <StatusBadge tone="vault">Next up</StatusBadge>
+            <h2 id="review-queue-title">Your review queue</h2>
+            <p>Ordered work from due reviews, mistakes, weak objectives, and unfinished study.</p>
+          </div>
+          {combinedQueueCount > 0 && <span className="review-queue-count">{combinedQueueCount} items</span>}
+        </div>
+
+        <div className="review-filter-row">
+          <label htmlFor="review-filter">Show</label>
+          <select id="review-filter" value={filter} onChange={(event) => changeFilter(event.target.value)}>
+            {filters.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </div>
+        {message && <p className="muted-copy" role="status">{message}</p>}
+
+        <div className="review-list" style={{ minHeight: '12rem' }}>
+          {studyPlan == null ? (
+            <SkeletonList rows={4} />
+          ) : visibleItems.length ? (
+            visibleItems.map((item) =>
+              item.id === deepLinkItemId ? (
+                <div key={item.id} ref={deepLinkRef} className="review-item-deeplink-target">
+                  <ReviewItemCard item={item} />
+                </div>
+              ) : (
+                <ReviewItemCard key={item.id} item={item} />
+              ),
+            )
+          ) : (
+            <div className="review-empty-state">
+              <StatusBadge tone="success">Nothing due</StatusBadge>
+              <h2>{filter === 'all' ? 'Your queue is clear' : 'Nothing in this view'}</h2>
+              <p>{filter === 'all' ? 'Build momentum with a short practice set.' : 'Try another filter or start practice to create fresh review evidence.'}</p>
+              <Link className="btn btn-primary" to={practicePath}>Start practice</Link>
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* PSY-13 — ONE global cross-domain due queue: a single ranked list over
           host + LSAT due cards (by overdue + ability-weighted utility), replacing
@@ -355,93 +400,48 @@ export default function ReviewInbox() {
           cards merged in); otherwise the existing per-plane sections below carry
           the single-plane case unchanged. */}
       {unifiedRanked.length > 0 && lsatDue?.ok && lsatDue.items.length > 0 && (
-        <Surface tone="analytics" style={{ marginBottom: 'var(--space-6)' }}>
-          <StatusBadge tone="accent">Up next — all domains</StatusBadge>
-          <h3 className="qv-mt-3">Ranked across every domain</h3>
+        <details className="review-disclosure">
+          <summary>Cross-domain priority order <span>{unifiedRanked.length} ranked</span></summary>
           <p className="qv-text-secondary qv-fs-sm">
-            One queue ranked by how overdue each card is{abilityByPlane && Object.keys(abilityByPlane).length > 0 ? ', weighted by your ability frontier' : ''}.
+            Ranked by how overdue each card is{abilityByPlane && Object.keys(abilityByPlane).length > 0 ? ', weighted by your ability frontier' : ''}.
           </p>
-          <ul className="qv-text-secondary qv-fs-sm" style={{ margin: 0, paddingLeft: 0, listStyle: 'none' }}>
+          <ul className="review-ranked-list">
             {unifiedRanked.map((card) => {
-              const overdueLabel =
-                card.overdueDays >= 1 ? `${Math.round(card.overdueDays)}d overdue` : 'due now';
+              const overdueLabel = card.overdueDays >= 1 ? `${Math.round(card.overdueDays)}d overdue` : 'due now';
               const body = (
                 <span className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'baseline' }}>
-                  <span>
-                    <StatusBadge tone={card.plane === 'lsat' ? 'study' : 'vault'}>
-                      {card.plane.toUpperCase()}
-                    </StatusBadge>{' '}
-                    {card.title}
-                    {card.leech ? <span className="qv-text-muted"> · leech</span> : null}
-                  </span>
+                  <span><StatusBadge tone={card.plane === 'lsat' ? 'study' : 'vault'}>{card.plane.toUpperCase()}</StatusBadge>{' '}{card.title}</span>
                   <small className="qv-text-muted">{overdueLabel}</small>
                 </span>
               );
-              return (
-                <li key={card.id} style={{ padding: 'var(--space-2) 0' }}>
-                  {card.path ? (
-                    card.plane === 'lsat' ? (
-                      <a href={card.path} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
-                        {body}
-                      </a>
-                    ) : (
-                      <Link to={card.path} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
-                        {body}
-                      </Link>
-                    )
-                  ) : (
-                    body
-                  )}
-                </li>
-              );
+              return <li key={card.id}>{card.path ? (card.plane === 'lsat' ? <a href={card.path}>{body}</a> : <Link to={card.path}>{body}</Link>) : body}</li>;
             })}
           </ul>
-        </Surface>
+        </details>
       )}
 
       {/* Phase 4.1 — cross-domain: LSAT reviews from the sidecar, merged in.
           Rendered only when the LSAT backend is reachable; the actual review
           happens in the LSAT app (hard nav to /lsat/srs). */}
       {lsatDue?.ok && (
-        <Surface tone="study" status="study" style={{ marginBottom: 'var(--space-6)' }}>
-          <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
-            <div>
-              <StatusBadge tone="study">LSAT</StatusBadge>
-              <h3 className="qv-mt-3 qv-mb-2">
-                LSAT reviews{lsatDue.dueCount > 0 ? ` — ${lsatDue.dueCount} due` : ' — all caught up'}
-              </h3>
-              {lsatDue.items.length > 0 ? (
-                <ul className="qv-text-secondary qv-fs-sm" style={{ margin: 0, paddingLeft: '1.1rem' }}>
-                  {lsatDue.items.map((it) => (
-                    <li key={it.id}>
-                      {it.title}
-                      {it.qType ? <span className="qv-text-muted"> · {it.qType}</span> : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="qv-text-secondary qv-m-0 qv-fs-sm">No LSAT cards are due right now.</p>
-              )}
-            </div>
-            {/* Hard nav — the LSAT SRS flow lives in the LSAT sub-app. */}
+        <div className="review-lsat-row">
+          <span><StatusBadge tone="study">LSAT</StatusBadge> {lsatDue.dueCount > 0 ? `${lsatDue.dueCount} due` : 'caught up'}</span>
+          {lsatDue.dueCount > 0 && (
             <a className="btn btn-primary btn-sm" href={LSAT_REVIEW_PATH}>
-              Review in LSAT Lab
+              Open LSAT review
             </a>
-          </div>
-        </Surface>
+          )}
+        </div>
       )}
 
-      {studyPlan?.nextActions?.length > 0 && (
-        <Surface tone="vault" status="vault" style={{ marginBottom: 'var(--space-6)' }}>
-          <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'flex-start' }}>
-            <div>
-              <StatusBadge tone="vault">Adaptive task board</StatusBadge>
-              <h3 className="qv-mt-3">What To Do Next</h3>
-              <p className="qv-text-secondary qv-fs-sm">
-                {studyPlan.daysToExam === null ? 'No exam date set.' : `${studyPlan.daysToExam} days to exam.`} Daily target: {studyPlan.dailyTargetMinutes} minutes.
-              </p>
-            </div>
-            <form onSubmit={handleSavePlan} className="planner-form">
+      {combinedQueueCount > 0 && studyPlan?.nextActions?.length > 0 && (
+        <details className="review-disclosure">
+          <summary>Plan and follow-up <span>{studyPlan.nextActions.length} suggestions</span></summary>
+          <div className="review-plan-copy">
+            <p>{studyPlan.daysToExam === null ? 'No exam date set.' : `${studyPlan.daysToExam} days to exam.`} Daily target: {studyPlan.dailyTargetMinutes} minutes.</p>
+            <details className="review-settings-disclosure">
+              <summary>Plan settings</summary>
+              <form onSubmit={handleSavePlan} className="planner-form">
               <label>
                 <span>Target level</span>
                 <select value={targetLevel} onChange={(event) => setTargetLevel(event.target.value)}>
@@ -463,9 +463,10 @@ export default function ReviewInbox() {
                 <input type="number" min="3" max="60" value={mockCadence} onChange={(event) => setMockCadence(event.target.value)} />
               </label>
               <button className="btn btn-primary" type="submit">Save Plan</button>
-            </form>
+              </form>
+            </details>
           </div>
-          <div className="cockpit-grid cockpit-grid-2" style={{ marginTop: 'var(--space-5)' }}>
+          <div className="review-action-list">
             {studyPlan.nextActions.map((action) => (
               <Link key={`${action.label}:${action.path}`} to={action.path} className="objective-row" style={{ textDecoration: 'none', color: 'inherit' }}>
                 <StatusBadge tone="accent">{action.label}</StatusBadge>
@@ -477,38 +478,40 @@ export default function ReviewInbox() {
               </Link>
             ))}
           </div>
-        </Surface>
+        </details>
       )}
 
-      {tutorResponse && !tutorResponse.blockedReason && (
-        <Surface tone="study" status="exam" style={{ marginBottom: 'var(--space-6)' }}>
-          <StatusBadge tone="accent">Local Tutor</StatusBadge>
-          <h3>Weak Topic Summary</h3>
-          <p className="qv-text-secondary">{tutorResponse.text}</p>
-          <small>Sources: {tutorResponse.sourceIds.join(', ')}</small>
-        </Surface>
-      )}
+      {(tutorResponse && !tutorResponse.blockedReason) || weakest ? (
+        <details className="review-disclosure">
+          <summary>Why this work is here</summary>
+          {tutorResponse && !tutorResponse.blockedReason && (
+            <div className="review-tutor-note">
+              <StatusBadge tone="accent">Local Tutor</StatusBadge>
+              <h3>Weak topic summary</h3>
+              <p>{tutorResponse.text}</p>
+              <small>Sources: {tutorResponse.sourceIds.join(', ')}</small>
+            </div>
+          )}
+          {weakest && (
+            <SourceRail
+              compact
+              title="Weak Topic Source Context"
+              subtitle="Official-first snippets mapped to your current review signal."
+              target={{
+                kind: 'review-item', domain: weakest.domain, level: studyPlan?.targetLevel || 'level1',
+                topicId: weakest.topic?.split(':').at(-1) || weakest.topic,
+                pathway: weakest.topic?.startsWith('level3:') ? activePathway : undefined,
+                title: weakest.title || weakest.topic,
+                objectiveIds: [weakest.learningObjective].filter(Boolean),
+                keywords: [weakest.reason, weakest.topic, weakest.title].filter(Boolean), route: weakest.path || '/review',
+              }}
+            />
+          )}
+        </details>
+      ) : null}
 
-      {weakest && (
-        <SourceRail
-          compact
-          title="Weak Topic Source Context"
-          subtitle="Official-first snippets mapped to your current review signal."
-          target={{
-            kind: 'review-item',
-            domain: weakest.domain,
-            level: studyPlan?.targetLevel || 'level1',
-            topicId: weakest.topic?.split(':').at(-1) || weakest.topic,
-            pathway: weakest.topic?.startsWith('level3:') ? activePathway : undefined,
-            title: weakest.title || weakest.topic,
-            objectiveIds: [weakest.learningObjective].filter(Boolean),
-            keywords: [weakest.reason, weakest.topic, weakest.title].filter(Boolean),
-            route: weakest.path || '/review',
-          }}
-        />
-      )}
-
-      <Surface tone="analytics" style={{ marginBottom: 'var(--space-6)' }}>
+      {forecastHasWork && <details className="review-disclosure">
+        <summary>Review forecast</summary>
         <h3 style={{ marginTop: 0 }}>Review Forecast</h3>
         <div className="forecast-strip">
           {forecast.map((day) => (
@@ -518,39 +521,7 @@ export default function ReviewInbox() {
             </div>
           ))}
         </div>
-      </Surface>
-
-      {/* UX-5: filter changes route through `changeFilter`, which mirrors the
-          slice into the `?filter=` deep-link param. */}
-      <SegmentedControl label="Review inbox filter" options={filters} value={filter} onChange={changeFilter} />
-      {message && <p className="muted-copy">{message}</p>}
-
-      {/* UX-1: reserve a deterministic min-height for the queue so the
-          loading → empty/populated transitions don't shift the page (no CLS),
-          and show the shared SkeletonList while the first load resolves. The
-          studyPlan gate doubles as the "primary data loaded" signal. */}
-      <div className="review-list" style={{ minHeight: '12rem' }}>
-        {studyPlan == null ? (
-          <SkeletonList rows={4} />
-        ) : visibleItems.length ? (
-          visibleItems.map((item) =>
-            // UX-5: wrap only the deep-linked item in a marker div so we have a
-            // scroll/highlight target (`deepLinkRef`). The card itself is
-            // unchanged — its Link click still navigates as before. The wrapper
-            // is a normal grid item carrying the highlight ring; the contained
-            // card keeps its own layout.
-            item.id === deepLinkItemId ? (
-              <div key={item.id} ref={deepLinkRef} className="review-item-deeplink-target">
-                <ReviewItemCard item={item} />
-              </div>
-            ) : (
-              <ReviewItemCard key={item.id} item={item} />
-            ),
-          )
-        ) : (
-          <EmptyPanel title="No items in this slice yet" description="Complete a lesson or quiz to populate the queue." tone="vault" />
-        )}
-      </div>
+      </details>}
     </div>
   );
 }

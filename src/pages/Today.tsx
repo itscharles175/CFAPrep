@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { BookOpen, ChevronRight, Clock, Inbox, NotebookPen, RefreshCw, Sparkles, Target, TrendingUp } from 'lucide-react';
+import { ChevronRight, Clock, Inbox, NotebookPen, RefreshCw, Sparkles, Target, TrendingUp } from 'lucide-react';
 import { PageHeader, StatusBadge, Surface } from '../components/ui/Primitives';
 import { Skeleton } from '../components/feedback';
-import { OnboardingResume, StudySessionCard } from '../components/session';
-import type { StudySessionPanel } from '../components/session';
+import { OnboardingResume, useStudySession } from '../components/session';
 import UnifiedPlanSection from '../components/today/UnifiedPlanSection';
 import { useNextQuestions } from '../hooks/useNextQuestions';
 import { AdaptiveRecommendationCard } from '../components/drills/AdaptiveRecommendationCard';
@@ -13,7 +12,6 @@ import { buildStudyPlan } from '../lib/studyDirector';
 import type { StudyAction, StudyPlan } from '../lib/studyDirector';
 import { generateQuestionsFromCurriculum, getLlmSettings, narrateStudyPlan } from '../lib/localLlm';
 import { getCfaSourceReadingForTopic } from '../lib/cfaSourceVault';
-import { db } from '../lib/progressStore';
 import { getStorage } from '../lib/storage';
 import { useScrollRestoration } from '../lib/scrollRestore';
 
@@ -123,11 +121,6 @@ interface JournalState {
   dirty: boolean;
 }
 
-type TimerState =
-  | { state: 'idle'; startedAt: null; accumulatedMs: number }
-  | { state: 'running'; startedAt: number; accumulatedMs: number }
-  | { state: 'paused'; startedAt: null; accumulatedMs: number };
-
 interface JournalRowValue {
   text?: string;
   savedAt?: string | null;
@@ -135,6 +128,7 @@ interface JournalRowValue {
 
 export default function Today() {
   const navigate = useNavigate();
+  const focusSession = useStudySession();
   const [activePathway] = useLevel3Pathway() as [string, (next: string) => void];
   const [plan, setPlan] = useState<StudyPlan | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -182,61 +176,6 @@ export default function Today() {
     await getStorage().settings.put({ key: journalKey, value: { text, savedAt: stamp }, updatedAt: stamp });
     setJournal({ text, savedAt: stamp, dirty: false });
   }
-  // Pomodoro-style study session timer.
-  const [timer, setTimer] = useState<TimerState>({ state: 'idle', startedAt: null, accumulatedMs: 0 });
-  const [displaySeconds, setDisplaySeconds] = useState(0);
-
-  useEffect(() => {
-    function update() {
-      const nowMs = Date.now();
-      const segment = timer.state === 'running' && timer.startedAt ? nowMs - timer.startedAt : 0;
-      setDisplaySeconds(Math.floor((timer.accumulatedMs + segment) / 1000));
-    }
-    update();
-    if (timer.state !== 'running') return undefined;
-    const id = setInterval(update, 1000);
-    return () => clearInterval(id);
-  }, [timer.state, timer.startedAt, timer.accumulatedMs]);
-
-  function startTimer() {
-    setTimer((prev) => ({ state: 'running', startedAt: Date.now(), accumulatedMs: prev.accumulatedMs }));
-  }
-  function pauseTimer() {
-    setTimer((prev) => {
-      if (prev.state !== 'running' || !prev.startedAt) return prev;
-      const segment = Date.now() - prev.startedAt;
-      return { state: 'paused', startedAt: null, accumulatedMs: prev.accumulatedMs + segment };
-    });
-  }
-  async function stopTimer() {
-    const snapshot = timer;
-    const totalMs = snapshot.state === 'running' && snapshot.startedAt
-      ? snapshot.accumulatedMs + (Date.now() - snapshot.startedAt)
-      : snapshot.accumulatedMs;
-    const elapsedSeconds = Math.floor(totalMs / 1000);
-    if (elapsedSeconds > 5) {
-      const now = new Date();
-      const started = new Date(now.getTime() - totalMs);
-      try {
-        await db.studySessions.add({
-          domain: 'cfa',
-          topic: weakAction ? `cfa:${weakTopic?.topic || 'today'}` : 'cfa:today',
-          mode: 'focus-timer',
-          startedAt: started.toISOString(),
-          endedAt: now.toISOString(),
-          elapsedSeconds,
-          questionsAnswered: drill.questions.length,
-          score: drill.questions.length
-            ? drill.questions.filter((q) => drillAnswers[q.id] === q.correct).length
-            : 0,
-        });
-      } catch {
-        // best-effort persistence; not blocking
-      }
-    }
-    setTimer({ state: 'idle', startedAt: null, accumulatedMs: 0 });
-  }
-
   function formatTimer(seconds: number): string {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -328,6 +267,20 @@ export default function Today() {
   const weakAction = plan?.actions?.find((a) => a.kind === 'weak-topic');
   const weakTopic = weakAction ? parseTopicPath(weakAction.path) : null;
 
+  const answeredQuestionCount = Object.keys(drillAnswers).length;
+  const correctAnswerCount = drill.questions.filter((question) => drillAnswers[question.id] === question.correct).length;
+  useEffect(() => {
+    // An existing provider session can outlive this routed page. Do not replace
+    // its persisted totals with Today's freshly-mounted empty drill state.
+    if (drill.state !== 'done') return;
+    focusSession.updateActivity({
+      domain: 'cfa',
+      topic: weakAction ? `cfa:${weakTopic?.topic || 'today'}` : 'cfa:today',
+      questionsAnswered: answeredQuestionCount,
+      score: correctAnswerCount,
+    });
+  }, [answeredQuestionCount, correctAnswerCount, drill.state, weakAction, weakTopic?.topic, focusSession.updateActivity]);
+
   async function generateDrill() {
     if (!weakTopic || !weakAction) return;
     setDrill({ state: 'loading', questions: [], error: '' });
@@ -367,8 +320,6 @@ export default function Today() {
   const top = plan?.actions?.[0];
   const rest = (plan?.actions || []).slice(1, 5);
 
-  // UB7 — the three study-session affordances, consolidated behind the sticky
-  // tabbed card below. All logic stays here; the card is a presentational shell.
   const timerPanel = (
     <div className="qv-stack-3">
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
@@ -383,29 +334,59 @@ export default function Today() {
             letterSpacing: '0.02em',
           }}
         >
-          {formatTimer(displaySeconds)}
+          {formatTimer(focusSession.elapsedSeconds)}
         </span>
-        <StatusBadge tone={timer.state === 'running' ? 'success' : timer.state === 'paused' ? 'warning' : 'accent'}>
-          {timer.state === 'running' ? 'Focusing' : timer.state === 'paused' ? 'Paused' : 'Ready'}
+        <StatusBadge tone={focusSession.session?.status === 'running' ? 'success' : focusSession.session?.status === 'save-error' ? 'danger' : focusSession.session ? 'warning' : 'accent'}>
+          {focusSession.session?.status === 'running'
+            ? 'Focusing'
+            : focusSession.session?.status === 'saving'
+              ? 'Saving'
+              : focusSession.session?.status === 'save-error'
+                ? 'Save failed'
+                : focusSession.session
+                  ? 'Paused'
+                  : 'Ready'}
         </StatusBadge>
       </div>
       <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-        {timer.state === 'idle' && (
-          <button className="btn btn-primary btn-sm" onClick={startTimer}>Start focus</button>
+        {!focusSession.session && (
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => focusSession.start({
+              domain: 'cfa',
+              topic: weakAction ? `cfa:${weakTopic?.topic || 'today'}` : 'cfa:today',
+              questionsAnswered: answeredQuestionCount,
+              score: correctAnswerCount,
+            })}
+          >
+            Start focus
+          </button>
         )}
-        {timer.state === 'running' && (
+        {focusSession.session?.status === 'running' && (
           <>
-            <button className="btn btn-secondary btn-sm" onClick={pauseTimer}>Pause</button>
-            <button className="btn btn-secondary btn-sm" onClick={stopTimer}>Stop &amp; log</button>
+            <button className="btn btn-secondary btn-sm" onClick={focusSession.pause}>Pause</button>
+            <button className="btn btn-secondary btn-sm" onClick={focusSession.stopAndSave}>Stop &amp; log</button>
           </>
         )}
-        {timer.state === 'paused' && (
+        {focusSession.session?.status === 'paused' && (
           <>
-            <button className="btn btn-primary btn-sm" onClick={startTimer}>Resume</button>
-            <button className="btn btn-secondary btn-sm" onClick={stopTimer}>Stop &amp; log</button>
+            <button className="btn btn-primary btn-sm" onClick={() => focusSession.start()}>Resume</button>
+            <button className="btn btn-secondary btn-sm" onClick={focusSession.stopAndSave}>Stop &amp; log</button>
+          </>
+        )}
+        {focusSession.session?.status === 'save-error' && (
+          <>
+            <button className="btn btn-primary btn-sm" onClick={focusSession.retrySave}>Retry log</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => focusSession.start()}>Keep studying</button>
+            <button className="btn btn-secondary btn-sm" onClick={focusSession.discard}>Discard</button>
           </>
         )}
       </div>
+      {focusSession.session?.status === 'save-error' && (
+        <p role="alert" className="qv-text-danger qv-fs-sm qv-m-0">
+          Your session is still saved as a local checkpoint. {focusSession.session.saveError || 'Retry when the vault is available.'}
+        </p>
+      )}
       <p className="muted-copy qv-fs-sm qv-m-0">
         Counts elapsed focus time and saves a study session to your local vault when you stop.
       </p>
@@ -465,53 +446,17 @@ export default function Today() {
     </div>
   );
 
-  const sessionPanels: StudySessionPanel[] = [
-    {
-      id: 'timer',
-      label: 'Timer',
-      icon: <Clock size={16} aria-hidden="true" />,
-      trailing:
-        timer.state !== 'idle' ? (
-          <span
-            className="qv-fs-xs"
-            style={{ fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-muted)' }}
-          >
-            {formatTimer(displaySeconds)}
-          </span>
-        ) : undefined,
-      content: timerPanel,
-    },
-    {
-      id: 'plan',
-      label: 'Plan',
-      icon: <BookOpen size={16} aria-hidden="true" />,
-      content: planPanel,
-    },
-    {
-      id: 'journal',
-      label: 'Journal',
-      icon: <NotebookPen size={16} aria-hidden="true" />,
-      trailing: journal.dirty ? (
-        <span className="qv-fs-xs" style={{ color: 'var(--warning)' }} aria-hidden="true">
-          •
-        </span>
-      ) : undefined,
-      content: journalPanel,
-    },
-  ];
-
   return (
-    <div className="page-container">
+    <div className="page-container today-page">
       <PageHeader
         tone="study"
-        badge="TODAY"
-        title="What to study right now"
-        subtitle="One screen, one decision. Prioritized from your local FSRS queue, topic readiness, and upcoming review load."
+        title="Today"
+        subtitle="Your highest-value next step, based on due work and current readiness."
         meta={
           plan ? (
             <>
-              <StatusBadge tone="warning">{plan.dueCount} review{plan.dueCount === 1 ? '' : 's'} due</StatusBadge>
-              <StatusBadge tone="danger">{plan.weakCount} weak topic{plan.weakCount === 1 ? '' : 's'}</StatusBadge>
+              {plan.dueCount > 0 && <StatusBadge tone="warning">{plan.dueCount} review{plan.dueCount === 1 ? '' : 's'} due</StatusBadge>}
+              {plan.weakCount > 0 && <StatusBadge tone="danger">{plan.weakCount} weak topic{plan.weakCount === 1 ? '' : 's'}</StatusBadge>}
               {plan.peakReviewDay && <StatusBadge tone="exam">Peak {plan.peakReviewDay.date} · {plan.peakReviewDay.count}</StatusBadge>}
               {examCountdown && (
                 <StatusBadge tone={examCountdown.days < 14 ? 'danger' : examCountdown.days < 60 ? 'warning' : 'exam'}>
@@ -523,11 +468,6 @@ export default function Today() {
             </>
           ) : null
         }
-        actions={
-          <button className="btn btn-secondary" onClick={refresh} disabled={refreshing}>
-            <RefreshCw size={16} /> {refreshing ? 'Refreshing…' : 'Refresh plan'}
-          </button>
-        }
       />
 
       {!plan ? (
@@ -538,91 +478,119 @@ export default function Today() {
         // shipped `.skeleton*` classes; no new tokens.
         <div role="status" aria-busy="true" aria-label="Loading your plan">
           <span className="sr-only">Loading your plan…</span>
-          {/* Study-session card */}
-          <Surface tone="study" style={{ marginBottom: 'var(--space-6)' }}>
-            <Skeleton variant="text-medium" />
-            <Skeleton height="6rem" style={{ marginTop: 'var(--space-3)' }} />
-          </Surface>
           {/* Hero "do this next" action */}
-          <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
+          <Surface tone="study" status="accent" className="today-primary-action" style={{ marginBottom: 'var(--space-4)' }}>
             <Skeleton height="6rem" />
           </Surface>
-          {/* "Then" stack of follow-up actions */}
-          <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-6)' }}>
+          {/* Collapsed supporting tools */}
+          <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-4)' }}>
             <Skeleton variant="text-short" />
-            <div className="qv-stack-2 qv-mt-3">
-              <Skeleton height="3.5rem" />
-              <Skeleton height="3.5rem" />
-              <Skeleton height="3.5rem" />
-            </div>
           </Surface>
         </div>
       ) : (
         <>
+          {top && (
+            <Surface tone="study" status="accent" className="today-primary-action">
+              <div className="today-primary-action__content">
+                <span className="today-primary-action__icon">
+                  <ActionIconRender kind={top.kind} size={40} />
+                </span>
+                <div className="today-primary-action__copy">
+                  <span className="today-eyebrow">Recommended now</span>
+                  <h2>{top.title}</h2>
+                  <p className="muted-copy qv-m-0">{top.reason}</p>
+                  {top.estimatedMinutes && <small className="today-primary-action__duration">About {top.estimatedMinutes} min</small>}
+                </div>
+                <div className="today-primary-action__actions">
+                  <Link
+                    to={top.path}
+                    className="btn btn-primary"
+                    onClick={() => {
+                      if (!focusSession.session) {
+                        focusSession.start({
+                          domain: 'cfa',
+                          topic: top.objective || weakTopic?.topic || 'today',
+                          questionsAnswered: answeredQuestionCount,
+                          score: correctAnswerCount,
+                        });
+                      } else if (focusSession.session.status === 'paused') {
+                        focusSession.start();
+                      }
+                    }}
+                  >
+                    {focusSession.session?.status === 'paused'
+                      ? 'Resume activity'
+                      : focusSession.session?.status === 'running'
+                        ? 'Continue activity'
+                        : focusSession.session?.status === 'save-error'
+                          ? 'Open activity'
+                          : 'Start activity'}
+                    <ChevronRight size={17} aria-hidden="true" />
+                  </Link>
+                </div>
+              </div>
+            </Surface>
+          )}
+
           <OnboardingResume
             onResume={() => navigate('/')}
             onResumeSession={(path) => navigate(path)}
           />
 
-          <StudySessionCard panels={sessionPanels} />
-
-          {top && (
-            <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)' }}>
-              <Link
-                to={top.path}
-                className="qv-card-lg"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-4)',
-                  background: 'var(--surface-2, rgba(120, 180, 255, 0.06))',
-                  textDecoration: 'none',
-                  color: 'inherit',
-                }}
-              >
-                <span style={{ flexShrink: 0, opacity: 0.85, display: 'inline-flex' }}>
-                  <ActionIconRender kind={top.kind} size={40} />
+          <div className="today-disclosures">
+            <details className="today-disclosure">
+              <summary>
+                <span>Session tools</span>
+                <span className="today-disclosure__meta">
+                  {focusSession.session ? formatTimer(focusSession.elapsedSeconds) : 'Timer and journal'}
                 </span>
-                <div style={{ flex: 1 }}>
-                  <StatusBadge tone={toneForKind(top.kind)}>{top.kind.replace('-', ' ')}</StatusBadge>
-                  <h2 style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>{top.title}</h2>
-                  <p className="muted-copy qv-m-0">{top.reason}</p>
-                </div>
-                <ChevronRight size={28} style={{ flexShrink: 0 }} />
-              </Link>
-            </Surface>
-          )}
+              </summary>
+              <div className="today-disclosure__body today-session-tools">
+                <section aria-labelledby="today-timer-title">
+                  <h3 id="today-timer-title"><Clock size={17} aria-hidden="true" /> Focus timer</h3>
+                  {timerPanel}
+                </section>
+                <section aria-labelledby="today-journal-title">
+                  <h3 id="today-journal-title"><NotebookPen size={17} aria-hidden="true" /> Journal</h3>
+                  {journalPanel}
+                </section>
+              </div>
+            </details>
 
-          {rest.length > 0 && (
-            <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-6)' }}>
-              <StatusBadge tone="accent">Then</StatusBadge>
-              <ul className="qv-stack-2 qv-mt-3" style={{ listStyle: 'none', padding: 0, marginBottom: 0 }}>
-                {rest.map((action, index) => (
-                  <li key={`${action.kind}-${index}`}>
-                    <Link
-                      to={action.path}
-                      className="flex-between qv-card"
-                      style={{
-                        gap: 'var(--space-3)',
-                        alignItems: 'center',
-                        textDecoration: 'none',
-                        color: 'inherit',
-                      }}
-                    >
-                      <span className="qv-row-3">
-                        <ActionIconRender kind={action.kind} size={18} />
-                        <span>
-                          <strong style={{ display: 'block' }}>{action.title}</strong>
-                          <small className="muted-copy">{action.reason}</small>
-                        </span>
-                      </span>
-                      <StatusBadge tone={toneForKind(action.kind)}>{action.kind.replace('-', ' ')}</StatusBadge>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </Surface>
-          )}
+            <details className="today-disclosure">
+              <summary>
+                <span>Full plan</span>
+                <span className="today-disclosure__meta">
+                  {plan.scheduledMinutes != null ? `${plan.scheduledMinutes} min scheduled` : `${plan.actions.length} activities`}
+                </span>
+              </summary>
+              <div className="today-disclosure__body qv-stack-4">
+                <div className="today-plan-controls">
+                  <div>{planPanel}</div>
+                  <button className="btn btn-secondary btn-sm" onClick={refresh} disabled={refreshing}>
+                    <RefreshCw size={15} aria-hidden="true" /> {refreshing ? 'Regenerating…' : 'Regenerate plan'}
+                  </button>
+                </div>
+
+                {rest.length > 0 && (
+                  <section aria-labelledby="today-up-next-title">
+                    <h3 id="today-up-next-title">Up next</h3>
+                    <ul className="today-plan-list">
+                      {rest.map((action, index) => (
+                        <li key={`${action.kind}-${index}`}>
+                          <Link to={action.path}>
+                            <ActionIconRender kind={action.kind} size={17} />
+                            <span>
+                              <strong>{action.title}</strong>
+                              <small>{action.reason}</small>
+                            </span>
+                            <ChevronRight size={17} aria-hidden="true" />
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
 
           {/* LEARN-3 — the merged cross-domain plan from the LSAT sidecar (LSAT +
               host CFA/Quant/Excel, reranked by one utility). Self-fetching and
@@ -647,7 +615,7 @@ export default function Today() {
           </div>
 
           {weakAction && (
-            <Surface tone="study" status="warning" style={{ marginBottom: 'var(--space-6)' }}>
+            <Surface tone="study" status="warning">
               <div className="flex-between qv-row-3-start">
                 <div>
                   <StatusBadge tone="warning"><Sparkles size={14} /> Drill your weakest topic</StatusBadge>
@@ -763,6 +731,10 @@ export default function Today() {
               })()}
             </Surface>
           )}
+
+              </div>
+            </details>
+          </div>
 
         </>
       )}

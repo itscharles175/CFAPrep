@@ -6,6 +6,8 @@
  *           `rankStudyActions`.
  */
 
+import type { StudyDomain, StudyTimeAllocation } from './types/StudyProfile';
+
 // ---------------------------------------------------------------------------
 // Types (exported so the UI panel can consume them)
 // ---------------------------------------------------------------------------
@@ -16,12 +18,23 @@ export interface StudyAction {
   path: string;
   reason: string;
   priority: number;
+  domain: StudyDomain;
+  objective: string;
+  estimatedMinutes: number;
+  availability: 'ready' | 'deferred' | 'unavailable';
+  /** Structured alias for `reason`, retained for existing consumers. */
+  rationale: string;
 }
 
 export interface StudyPlan {
   generatedAt: string;
   headline: string;
   actions: StudyAction[];
+  /** Ranked work that did not fit today's time budget. */
+  backlogActions: StudyAction[];
+  totalActionCount: number;
+  totalEstimatedMinutes: number;
+  scheduledMinutes: number;
   dueCount: number;
   weakCount: number;
   peakReviewDay?: { date: string; count: number } | null;
@@ -56,11 +69,32 @@ export interface InterleavingResult {
 // ---------------------------------------------------------------------------
 
 export interface RankStudyActionsInputs {
-  dueReviews: Array<{ title: string; path: string; retrievability?: number }>;
-  readiness: Array<{ title: string; path: string; score: number }>;
+  dueReviews: Array<{ title: string; path: string; retrievability?: number; domain?: StudyDomain; objective?: string; estimatedMinutes?: number; available?: boolean }>;
+  readiness: Array<{ title: string; path: string; score: number; domain?: StudyDomain; objective?: string; estimatedMinutes?: number; available?: boolean }>;
   forecast: Array<{ date: string; count: number }>;
   continuePath?: string | null;
+  availableMinutes?: number;
+  timeAllocation?: StudyTimeAllocation;
   now?: Date;
+}
+
+function domainFromPath(path: string): StudyDomain {
+  const segment = path.split('/').filter(Boolean)[0];
+  return segment === 'lsat' || segment === 'quant' || segment === 'excel' ? segment : 'cfa';
+}
+
+function actionMetadata(
+  item: { title: string; path: string; domain?: StudyDomain; objective?: string; estimatedMinutes?: number; available?: boolean },
+  defaultMinutes: number,
+  rationale: string,
+) {
+  return {
+    domain: item.domain ?? domainFromPath(item.path),
+    objective: item.objective ?? item.title,
+    estimatedMinutes: Math.max(5, Math.round(item.estimatedMinutes ?? defaultMinutes)),
+    availability: item.available === false ? 'unavailable' as const : 'ready' as const,
+    rationale,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -87,12 +121,14 @@ export function rankStudyActions(inputs: RankStudyActionsInputs): StudyPlan {
       item.retrievability != null
         ? `${Math.round(item.retrievability * 100)}% retention remaining`
         : 'due for review';
+    const reason = `Spaced-repetition review is due — ${retPct}.`;
     actions.push({
       kind: 'review',
       title: item.title,
       path: item.path,
-      reason: `Spaced-repetition review is due — ${retPct}.`,
+      reason,
       priority: reviewPriority,
+      ...actionMetadata(item, 15, reason),
     });
     // Give successive review actions slightly lower priority so ordering is stable
     reviewPriority -= 1;
@@ -105,12 +141,14 @@ export function rankStudyActions(inputs: RankStudyActionsInputs): StudyPlan {
     .slice(0, 3);
   let weakPriority = 70;
   for (const item of weakTopics) {
+    const reason = `Topic readiness is only ${item.score}% — needs reinforcement.`;
     actions.push({
       kind: 'weak-topic',
       title: item.title,
       path: item.path,
-      reason: `Topic readiness is only ${item.score}% — needs reinforcement.`,
+      reason,
       priority: weakPriority,
+      ...actionMetadata(item, 30, reason),
     });
     weakPriority -= 1;
   }
@@ -126,27 +164,31 @@ export function rankStudyActions(inputs: RankStudyActionsInputs): StudyPlan {
     );
     if (spike) {
       peakReviewDay = { date: spike.date, count: spike.count };
+      const reason = `${spike.count} items due on ${spike.date} — review ahead to reduce load.`;
       actions.push({
         kind: 'forecast-spike',
         title: 'Upcoming review spike',
         path: '/cfa',
-        reason: `${spike.count} items due on ${spike.date} — review ahead to reduce load.`,
+        reason,
         priority: 55,
+        ...actionMetadata({ title: 'Upcoming review spike', path: '/cfa' }, 20, reason),
       });
     }
   }
 
   // 4. Fallback 'continue' when the list would otherwise be short/empty.
   if (actions.length < 2) {
+    const reason = actions.length === 0
+      ? 'No urgent reviews or weak areas — keep building momentum.'
+      : 'Few action items today — keep progressing through the curriculum.';
+    const path = continuePath || '/cfa';
     actions.push({
       kind: 'continue',
       title: 'Continue studying',
-      path: continuePath || '/cfa',
-      reason:
-        actions.length === 0
-          ? 'No urgent reviews or weak areas — keep building momentum.'
-          : 'Few action items today — keep progressing through the curriculum.',
+      path,
+      reason,
       priority: 30,
+      ...actionMetadata({ title: 'Continue studying', path }, 30, reason),
     });
   }
 
@@ -164,14 +206,81 @@ export function rankStudyActions(inputs: RankStudyActionsInputs): StudyPlan {
     headline = 'No urgent items — great progress!';
   }
 
+  const totalEstimatedMinutes = actions.reduce((sum, action) => sum + action.estimatedMinutes, 0);
+  const availableMinutes = Number.isFinite(inputs.availableMinutes)
+    ? Math.max(0, Math.round(inputs.availableMinutes ?? 0))
+    : Number.POSITIVE_INFINITY;
+  const remainingByDomain = new Map<StudyDomain, number>();
+  for (const [domain, minutes] of Object.entries(inputs.timeAllocation ?? {})) {
+    if (typeof minutes === 'number' && Number.isFinite(minutes) && minutes >= 0) {
+      remainingByDomain.set(domain as StudyDomain, Math.round(minutes));
+    }
+  }
+  let remaining = availableMinutes;
+  const scheduled: StudyAction[] = [];
+  const backlogActions: StudyAction[] = [];
+  for (const action of actions) {
+    const domainRemaining = remainingByDomain.get(action.domain);
+    const fitsDomain = domainRemaining === undefined || action.estimatedMinutes <= domainRemaining;
+    const fitsTotal = action.estimatedMinutes <= remaining;
+    if (action.availability === 'ready' && fitsDomain && fitsTotal) {
+      scheduled.push(action);
+      remaining -= action.estimatedMinutes;
+      if (domainRemaining !== undefined) {
+        remainingByDomain.set(action.domain, domainRemaining - action.estimatedMinutes);
+      }
+    } else {
+      backlogActions.push({
+        ...action,
+        availability: action.availability === 'unavailable' ? 'unavailable' : 'deferred',
+      });
+    }
+  }
+
   return {
     generatedAt,
     headline,
-    actions,
+    actions: scheduled,
+    backlogActions,
+    totalActionCount: actions.length,
+    totalEstimatedMinutes,
+    scheduledMinutes: scheduled.reduce((sum, action) => sum + action.estimatedMinutes, 0),
     dueCount,
     weakCount,
     peakReviewDay,
   };
+}
+
+/** Move an action within today's shortlist while keeping descending priorities. */
+export function reprioritizeStudyPlan(plan: StudyPlan, fromIndex: number, toIndex: number): StudyPlan {
+  if (fromIndex < 0 || fromIndex >= plan.actions.length) return plan;
+  const target = Math.max(0, Math.min(plan.actions.length - 1, toIndex));
+  const actions = [...plan.actions];
+  const [moved] = actions.splice(fromIndex, 1);
+  actions.splice(target, 0, moved);
+  const topPriority = Math.max(...actions.map((action) => action.priority), 0);
+  return { ...plan, actions: actions.map((action, index) => ({ ...action, priority: topPriority - index })) };
+}
+
+/** Defer one scheduled action without discarding it from the day's workload. */
+export function postponeStudyAction(plan: StudyPlan, actionIndex: number): StudyPlan {
+  if (actionIndex < 0 || actionIndex >= plan.actions.length) return plan;
+  const actions = [...plan.actions];
+  const [postponed] = actions.splice(actionIndex, 1);
+  return {
+    ...plan,
+    actions,
+    backlogActions: [...plan.backlogActions, { ...postponed, availability: 'deferred' }],
+    scheduledMinutes: actions.reduce((sum, action) => sum + action.estimatedMinutes, 0),
+  };
+}
+
+/** Rebuild the remaining plan with a new total or per-domain time budget. */
+export function regenerateStudyPlan(
+  inputs: RankStudyActionsInputs,
+  budget: { availableMinutes?: number; timeAllocation?: StudyTimeAllocation },
+): StudyPlan {
+  return rankStudyActions({ ...inputs, ...budget });
 }
 
 // ---------------------------------------------------------------------------
@@ -333,22 +442,25 @@ async function fetchData(pathway?: string) {
     { getDueReviews, getReadinessByTopic, forecastReviewLoad, getMasterySummary },
     { currentRetrievability },
     { db },
+    { fetchStudyProfile },
   ] = await Promise.all([
     import('./progressStore'),
     import('./scheduler'),
     import('./progressStore'),
+    import('./studyProfileBridge'),
   ]);
 
   const options = pathway ? { level3Pathway: pathway } : {};
 
   // Fetch in parallel; each call is graceful about empty data.
-  const [dueItems, readinessByTopic, forecast, mastery, lessonProgress] =
+  const [dueItems, readinessByTopic, forecast, mastery, lessonProgress, profileResult] =
     await Promise.all([
       getDueReviews(new Date(), options).catch(() => [] as Awaited<ReturnType<typeof getDueReviews>>),
       getReadinessByTopic(options).catch(() => [] as Awaited<ReturnType<typeof getReadinessByTopic>>),
       forecastReviewLoad(14, new Date(), options).catch(() => [] as Awaited<ReturnType<typeof forecastReviewLoad>>),
       getMasterySummary(options).catch(() => ({ snapshots: [], weakObjectives: [], averageScore: null })),
       db.lessonProgress.orderBy('lastVisitedAt').reverse().first().catch(() => undefined),
+      fetchStudyProfile({ timeoutMs: 500 }).catch(() => null),
     ]);
 
   // Map due reviews — attach current retrievability from FSRS scheduler.
@@ -409,11 +521,19 @@ async function fetchData(pathway?: string) {
     continuePath,
     weakForInterleave,
     recentHistory,
+    profile: profileResult?.profile ?? DEFAULT_PROFILE_BUDGET,
   };
 }
 
+const DEFAULT_PROFILE_BUDGET = { dailyMinutes: 60, timeAllocation: {} as StudyTimeAllocation };
+
 export async function buildStudyPlan(
-  options: { pathway?: string; interleavingOptions?: InterleavingOptions } = {},
+  options: {
+    pathway?: string;
+    interleavingOptions?: InterleavingOptions;
+    availableMinutes?: number;
+    timeAllocation?: StudyTimeAllocation;
+  } = {},
 ): Promise<StudyPlan> {
   try {
     const {
@@ -423,6 +543,7 @@ export async function buildStudyPlan(
       continuePath,
       weakForInterleave,
       recentHistory,
+      profile,
     } = await fetchData(options.pathway);
 
     const plan = rankStudyActions({
@@ -430,6 +551,8 @@ export async function buildStudyPlan(
       readiness: mappedReadiness,
       forecast: mappedForecast,
       continuePath,
+      availableMinutes: options.availableMinutes ?? profile.dailyMinutes,
+      timeAllocation: options.timeAllocation ?? profile.timeAllocation,
     });
 
     // Layer plan with interleaving + rationale (only when there's at least one

@@ -441,6 +441,10 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
         <Menu size={18} />
       </button>
 
+      <span className="mobile-topbar-context" aria-label={`Current page: ${labelForPath(location.pathname)}`}>
+        {activeDomain === 'general' ? 'StudyVault' : domainBadgeLabel[activeDomain]} · {labelForPath(location.pathname)}
+      </span>
+
       {/* UX-4 — shared shell chrome: history-aware Back + unified breadcrumb +
           domain badge. Back delegates same-domain hops to the host router; the
           breadcrumb/badge are derived purely from the URL. */}
@@ -471,7 +475,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
 
       <div
         ref={searchRef}
-        className="topbar-search"
+        className={`topbar-search ${searchOpen ? 'mobile-open' : ''}`}
       >
         <Search />
         <input
@@ -532,6 +536,18 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
           </div>
         )}
       </div>
+      <button
+        type="button"
+        className="btn-icon btn-ghost mobile-command-button"
+        aria-label="Open search and more commands"
+        title="Search and more"
+        onClick={() => {
+          setSearchOpen(true);
+          requestAnimationFrame(() => inputRef.current?.focus());
+        }}
+      >
+        <Search size={18} />
+      </button>
       <div className="topbar-actions">
         {offline && (
           <span className="badge badge-amber" title="Offline mode">

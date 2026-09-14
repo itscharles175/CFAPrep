@@ -262,15 +262,24 @@ function questionFor(
   const scenario = pick(config.scenarios, index);
   const decision = pick(config.decisions, index);
   const trap = pick(config.traps, index);
-  const correct = `Use ${objective.title.toLowerCase()} because the stated ${rowValue(row, index)} changes ${decision.toLowerCase()}.`;
-  const distractorOne = `Rely on ${trap.toLowerCase()}, which is related to the topic but not supported by the stem.`;
-  const distractorTwo = `Postpone the decision because an irrelevant fact is incomplete, even though the required input is available.`;
+  const responsePrompt = pick(
+    [
+      `Which response best supports ${decision.toLowerCase()}?`,
+      `Which conclusion most directly follows when assessing ${decision.toLowerCase()}?`,
+      `Given the stated constraint, which action is most consistent with ${decision.toLowerCase()}?`,
+      `Which interpretation best uses the evidence to address ${decision.toLowerCase()}?`,
+    ],
+    Math.floor(index / 4),
+  );
+  const correct = `The response should rely on ${objective.title.toLowerCase()} because the stated ${rowValue(row, index)} changes ${decision.toLowerCase()}.`;
+  const distractorOne = `The response should rely on ${trap.toLowerCase()}, which is related to the topic but not supported by the stem.`;
+  const distractorTwo = `The response should rely on an unrelated missing fact and postpone the decision, even though the required input is available.`;
   const rotated = rotateOptions(correct, distractorOne, distractorTwo, index);
 
   return {
     ...base,
     itemType,
-    question: `${pack.title} ${itemType === 'single' ? 'standalone' : 'mini-vignette'} item ${index + 1}: ${vignetteTitle ? `${vignetteTitle}. ` : ''}${scenario} provides ${rowValue(row, index + 1)}. Which response best supports ${decision.toLowerCase()}?`,
+    question: `${pack.title} ${itemType === 'single' ? 'standalone' : 'mini-vignette'} item ${index + 1}: ${vignetteTitle ? `${vignetteTitle}. ` : ''}${scenario} provides ${rowValue(row, index + 1)}. ${responsePrompt}`,
     options: rotated.options,
     correct: rotated.correct,
     explanation: `The correct response follows the stated facts into ${objective.title.toLowerCase()} and then translates the result into the requested decision. The rejected choices either lean on ${trap.toLowerCase()} or avoid a decision that the stem already supports.`,

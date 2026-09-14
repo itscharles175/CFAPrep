@@ -32,6 +32,8 @@ def test_get_profile_returns_reconciled_shape(client):
         "rest_days",
         "mock_cadence_days",
         "topic_weights",
+        "domain_goals",
+        "time_allocation",
         "last_writer",
         "updated_at",
     ):
@@ -61,6 +63,10 @@ def test_put_profile_round_trips_and_updates_studyplan(client):
             "rest_days": [0, 6],
             "mock_cadence_days": 10,
             "topic_weights": {"LR": 0.6, "RC": 0.4},
+            "domain_goals": {
+                "cfa": {"enabled": True, "goal": "Pass Level II", "target_date": exam}
+            },
+            "time_allocation": {"cfa": 45, "lsat": 30},
             "last_writer": "host",
         },
     )
@@ -74,6 +80,8 @@ def test_put_profile_round_trips_and_updates_studyplan(client):
     assert body["rest_days"] == [0, 6]
     assert body["mock_cadence_days"] == 10
     assert body["topic_weights"] == {"LR": 0.6, "RC": 0.4}
+    assert body["domain_goals"]["cfa"]["goal"] == "Pass Level II"
+    assert body["time_allocation"] == {"cfa": 45, "lsat": 30}
     assert body["last_writer"] == "host"
     assert body["updated_at"] is not None
 
@@ -83,6 +91,8 @@ def test_put_profile_round_trips_and_updates_studyplan(client):
     assert got["target_level"] == "level2"
     assert got["rest_days"] == [0, 6]
     assert got["topic_weights"] == {"LR": 0.6, "RC": 0.4}
+    assert got["domain_goals"] == body["domain_goals"]
+    assert got["time_allocation"] == body["time_allocation"]
 
     # The active LSAT StudyPlan row carries the reconciled scalars (the PUT
     # writes through study_plan.upsert_plan, not just the profile mirror).
@@ -133,6 +143,24 @@ def test_put_profile_clamps_out_of_range_scalars(client):
     assert body["rest_days"] == [2]
 
 
+def test_put_profile_sanitizes_domain_allocations_and_keeps_partial_values(client):
+    first = client.put(
+        "/api/study/profile",
+        json={
+            "domain_goals": {"quant": {"enabled": True, "goal": "Build fluency"}},
+            "time_allocation": {"quant": 999, "unknown": 30},
+        },
+    ).json()
+    assert first["domain_goals"] == {
+        "quant": {"enabled": True, "goal": "Build fluency"}
+    }
+    assert first["time_allocation"] == {"quant": 600}
+
+    second = client.put("/api/study/profile", json={"daily_minutes": 80}).json()
+    assert second["domain_goals"] == first["domain_goals"]
+    assert second["time_allocation"] == first["time_allocation"]
+
+
 # --- migration 24 -----------------------------------------------------------
 def test_migration_24_pragma_user_version(client):
     from app.db import engine
@@ -166,6 +194,24 @@ def test_migration_24_registered_in_ledger(client):
 
     versions = {m[0]: m[1] for m in migrations.MIGRATIONS}
     assert versions.get(24) == "shared_study_profile"
+
+
+def test_migration_30_adds_adaptive_profile_fields(client):
+    from app import migrations
+    from app.db import engine
+
+    versions = {m[0]: m[1] for m in migrations.MIGRATIONS}
+    assert versions.get(30) == "adaptive_study_profile"
+    with engine.begin() as conn:
+        cols = {
+            str(r[1])
+            for r in conn.exec_driver_sql(
+                "PRAGMA table_info(sharedstudyprofile)"
+            ).fetchall()
+        }
+        uv = conn.exec_driver_sql("PRAGMA user_version").fetchone()[0]
+    assert {"domain_goals", "time_allocation"}.issubset(cols)
+    assert int(uv) >= 30
 
 
 def test_profile_single_row_invariant(client, db_session):

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
 import { createRequire } from 'node:module';
-import { lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -367,7 +367,10 @@ test('app protocol resolution cannot escape dist and falls back for routes', asy
   await writeFile(path.join(root, 'assets', 'app.js'), 'ok');
   const asset = appAssetCandidate(root, 'app://studyvault/assets/app.js');
   assert.equal(isPathWithin(root, asset), true);
-  assert.equal(await resolveAppAssetPath(root, 'app://studyvault/route/inside'), path.join(root, 'index.html'));
+  assert.equal(
+    await resolveAppAssetPath(root, 'app://studyvault/route/inside'),
+    path.join(await realpath(root), 'index.html'),
+  );
   assert.throws(() => appAssetCandidate(root, 'app://other/assets/app.js'), /Invalid StudyVault/);
   assert.throws(() => appAssetCandidate(root, 'app://studyvault/%5c..%5csecret'), /Invalid app path/);
 });

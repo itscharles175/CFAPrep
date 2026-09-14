@@ -47,6 +47,7 @@ const SETTINGS_KEY = 'local-llm';
 // (questions / flashcards) is allowed to run longer.
 export const LLM_TIMEOUT_CHAT_MS = 150000;
 export const LLM_TIMEOUT_GENERATION_MS = 300000;
+export const LLM_CONNECTION_TIMEOUT_MS = 5000;
 
 // signature -> Promise. Entry lives only for the duration of an in-flight call.
 const inFlightRequests = new Map();
@@ -171,8 +172,10 @@ async function fetchWithTimeout(url, init, { timeoutMs, callerSignal } = {}) {
 
 export const DEFAULT_LLM_SETTINGS = {
   enabled: false,
-  baseUrl: 'http://localhost:11434/v1',
-  model: 'llama3.1',
+  // LM Studio is the first-run provider. Existing saved Ollama settings still
+  // merge over these defaults unchanged.
+  baseUrl: 'http://localhost:1234/v1',
+  model: '',
   /**
    * Optional explicit override for the model's context window.  When unset,
    * the budget is inferred from the model name (e.g. `-cw32768`,
@@ -213,8 +216,8 @@ export function packCurriculumChunks(settings, chunks, opts = {}) {
 }
 
 export const LLM_PRESETS = [
-  { label: 'Ollama', baseUrl: 'http://localhost:11434/v1' },
-  { label: 'LM Studio', baseUrl: 'http://localhost:1234/v1' },
+  { label: 'LM Studio', provider: 'lmstudio', baseUrl: 'http://localhost:1234/v1' },
+  { label: 'Ollama', provider: 'ollama', baseUrl: 'http://localhost:11434/v1' },
 ];
 
 export async function getLlmSettings() {
@@ -242,17 +245,186 @@ function normalizeBaseUrl(baseUrl) {
   return normalizeLoopbackHttpBaseUrl(baseUrl || DEFAULT_LLM_SETTINGS.baseUrl, 'Local model base URL');
 }
 
-export async function checkLlmConnection(settings) {
-  try {
-    const base = normalizeBaseUrl(settings?.baseUrl);
-    const response = await fetch(`${base}/models`, { method: 'GET' });
-    if (!response.ok) return { ok: false, error: `Server responded ${response.status}` };
-    const data = await response.json();
-    const models = Array.isArray(data?.data) ? data.data.map((model) => model.id).filter(Boolean) : [];
-    return { ok: true, models };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Could not reach the local model server.' };
+export function inferLocalLlmProvider(baseUrl) {
+  const value = String(baseUrl || '').toLowerCase();
+  if (value.includes('1234') || value.includes('lmstudio')) return 'lmstudio';
+  if (value.includes('11434') || value.includes('ollama')) return 'ollama';
+  return 'openai-compatible';
+}
+
+function modelCapabilityList(model) {
+  const declared = [
+    ...(Array.isArray(model?.capabilities) ? model.capabilities : []),
+    ...(Array.isArray(model?.metadata?.capabilities) ? model.metadata.capabilities : []),
+  ].map((value) => String(value).toLowerCase());
+  const descriptor = [
+    model?.id,
+    model?.type,
+    model?.architecture,
+    model?.metadata?.type,
+    model?.metadata?.architecture,
+    ...declared,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  const embeddings = /(^|[\s/_-])(embed|embedding|nomic|bge|e5|gte)([\s/_-]|$)/.test(descriptor);
+  const vision = /(^|[\s/_-])(vision|vlm|llava|moondream|pixtral)([\s/_-]|$)|qwen[^\s]*vl|gemma[-_ ]?[34]/.test(
+    descriptor,
+  );
+  const tools = declared.some((value) => /tool|function/.test(value));
+  return { chat: !embeddings, embeddings, vision: !embeddings && vision, tools: !embeddings && tools };
+}
+
+function normalizeDiscoveredModel(model) {
+  const id = typeof model === 'string' ? model : model?.id;
+  if (!id) return null;
+  const contextWindow = Number(
+    model?.max_context_length ?? model?.context_length ?? model?.metadata?.max_context_length,
+  );
+  return {
+    id: String(id),
+    ownedBy: model?.owned_by || model?.publisher || model?.metadata?.publisher || null,
+    capabilities: modelCapabilityList(typeof model === 'string' ? { id: model } : model),
+    contextWindow: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null,
+  };
+}
+
+function connectionRecovery(provider, code, status) {
+  if (code === 'cancelled') return 'Connection test cancelled. You can retry when ready.';
+  if (code === 'timeout') return 'The local server did not answer in time. Check that it is running, then retry.';
+  if (status === 404) return 'Use the OpenAI-compatible server URL ending in /v1, then retry.';
+  if (provider === 'lmstudio') {
+    return 'Start the LM Studio local server, load a model, and allow the StudyVault origin in CORS settings.';
   }
+  if (provider === 'ollama') {
+    return 'Start Ollama and include the StudyVault origin in OLLAMA_ORIGINS, then retry.';
+  }
+  return 'Start the configured OpenAI-compatible local server and verify its /models endpoint.';
+}
+
+function waitForRetry(delayMs, signal) {
+  if (!(delayMs > 0)) return Promise.resolve();
+  if (signal?.aborted) {
+    const error = new Error('The connection test was cancelled.');
+    error.name = 'AbortError';
+    return Promise.reject(error);
+  }
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener('abort', cancel);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+    const cancel = () => {
+      clearTimeout(timer);
+      const error = new Error('The connection test was cancelled.');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    signal?.addEventListener('abort', cancel, { once: true });
+  });
+}
+
+/**
+ * Probe an OpenAI-compatible local server and report enough detail for model
+ * routing without downloading or loading anything. Transient connection and
+ * 5xx failures get one bounded retry by default; callers may cancel the probe.
+ */
+export async function checkLlmConnection(settings, options = {}) {
+  const startedAt = Date.now();
+  let base;
+  try {
+    base = normalizeBaseUrl(settings?.baseUrl);
+  } catch (error) {
+    return {
+      ok: false,
+      provider: inferLocalLlmProvider(settings?.baseUrl),
+      errorCode: 'invalid-url',
+      error: error instanceof Error ? error.message : 'Invalid local model server URL.',
+      recovery: 'Use a loopback HTTP URL such as http://localhost:1234/v1.',
+      attempts: 0,
+      latencyMs: Date.now() - startedAt,
+    };
+  }
+
+  const provider = inferLocalLlmProvider(base);
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : LLM_CONNECTION_TIMEOUT_MS;
+  const retries = Number.isInteger(options.retries) ? Math.max(0, options.retries) : 1;
+  const retryDelayMs = Number.isFinite(options.retryDelayMs) ? Math.max(0, options.retryDelayMs) : 200;
+  let lastError;
+  let lastStatus;
+  let attempts = 0;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    attempts = attempt + 1;
+    try {
+      const response = await fetchWithTimeout(
+        `${base}/models`,
+        { method: 'GET', headers: { Accept: 'application/json' } },
+        { timeoutMs, callerSignal: options.signal },
+      );
+      lastStatus = response.status;
+      if (!response.ok) {
+        lastError = new Error(`Server responded ${response.status}`);
+        if (response.status < 500 || attempt === retries) break;
+      } else {
+        const data = await response.json();
+        const modelDetails = (Array.isArray(data?.data) ? data.data : [])
+          .map(normalizeDiscoveredModel)
+          .filter(Boolean);
+        const models = modelDetails.map((model) => model.id);
+        const selectedModel = String(settings?.model || '').trim();
+        const recommendedModel = modelDetails.find((model) => model.capabilities.chat)?.id || null;
+        return {
+          ok: true,
+          provider,
+          models,
+          modelDetails,
+          selectedModel: selectedModel || null,
+          selectedModelAvailable: selectedModel ? models.includes(selectedModel) : null,
+          recommendedModel,
+          capabilities: {
+            chat: modelDetails.some((model) => model.capabilities.chat),
+            embeddings: modelDetails.some((model) => model.capabilities.embeddings),
+            vision: modelDetails.some((model) => model.capabilities.vision),
+            tools: modelDetails.some((model) => model.capabilities.tools),
+          },
+          attempts: attempt + 1,
+          latencyMs: Date.now() - startedAt,
+        };
+      }
+    } catch (error) {
+      lastError = error;
+      if (error?.name === 'AbortError' && !error?.isLlmTimeout) break;
+      if (attempt === retries) break;
+    }
+    try {
+      await waitForRetry(retryDelayMs * (attempt + 1), options.signal);
+    } catch (error) {
+      lastError = error;
+      break;
+    }
+  }
+
+  const cancelled = lastError?.name === 'AbortError' && !lastError?.isLlmTimeout;
+  const timedOut = Boolean(lastError?.isLlmTimeout);
+  const errorCode = cancelled ? 'cancelled' : timedOut ? 'timeout' : lastStatus ? 'http' : 'connection';
+  const error = cancelled
+    ? 'Connection test cancelled.'
+    : lastError instanceof Error
+      ? lastError.message
+      : 'Could not reach the local model server.';
+  return {
+    ok: false,
+    provider,
+    errorCode,
+    error,
+    status: lastStatus,
+    recovery: connectionRecovery(provider, errorCode, lastStatus),
+    attempts,
+    latencyMs: Date.now() - startedAt,
+  };
 }
 
 // (The former `extractJsonArray` JSON-array scraper was superseded by the

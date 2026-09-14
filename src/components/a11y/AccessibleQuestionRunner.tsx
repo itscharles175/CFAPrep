@@ -143,7 +143,7 @@ export const AccessibleQuestionRunner = forwardRef<
 
   return (
     <div className={className}>
-      <p id={stemId} className={hideStem ? 'sr-only' : 'aqr-stem'}>
+      <p id={stemId} className={hideStem ? 'sr-only' : 'aqr-stem'} style={hideStem ? { display: 'none' } : undefined}>
         {question}
       </p>
 

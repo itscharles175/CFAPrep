@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { applyInterleavingRules, computeSpacingScore, rankStudyActions } from './studyDirector';
+import {
+  applyInterleavingRules,
+  computeSpacingScore,
+  postponeStudyAction,
+  rankStudyActions,
+  regenerateStudyPlan,
+  reprioritizeStudyPlan,
+} from './studyDirector';
 import type { StudyAction } from './studyDirector';
 
 // ---------------------------------------------------------------------------
@@ -44,6 +51,61 @@ describe('rankStudyActions — pure function', () => {
     expect(reviewAction).toBeDefined();
     expect(weakTopicAction).toBeDefined();
     expect(reviewAction!.priority).toBeGreaterThan(weakTopicAction!.priority);
+  });
+
+  it('adds cross-domain planner metadata and packs actions to the time budget', () => {
+    const plan = rankStudyActions({
+      dueReviews: [
+        { ...DUE_LOW_RETENTION, domain: 'cfa', objective: 'Duration', estimatedMinutes: 15 },
+      ],
+      readiness: [
+        { title: 'Logical reasoning', path: '/lsat/drill', score: 45, domain: 'lsat', estimatedMinutes: 30 },
+      ],
+      forecast: [],
+      availableMinutes: 30,
+      timeAllocation: { cfa: 20, lsat: 10 },
+      now: NOW,
+    });
+
+    expect(plan.actions).toHaveLength(1);
+    expect(plan.actions[0]).toMatchObject({
+      domain: 'cfa',
+      objective: 'Duration',
+      estimatedMinutes: 15,
+      availability: 'ready',
+    });
+    expect(plan.actions[0].rationale).toBe(plan.actions[0].reason);
+    expect(plan.backlogActions).toHaveLength(1);
+    expect(plan.backlogActions[0]).toMatchObject({ domain: 'lsat', availability: 'deferred' });
+    expect(plan.totalActionCount).toBe(2);
+    expect(plan.totalEstimatedMinutes).toBe(45);
+    expect(plan.scheduledMinutes).toBe(15);
+  });
+
+  it('reprioritizes, postpones, and deterministically regenerates remaining work', () => {
+    const inputs = {
+      dueReviews: [DUE_LOW_RETENTION, DUE_MID_RETENTION],
+      readiness: [WEAK_SCORE_40],
+      forecast: [],
+      availableMinutes: 60,
+      now: NOW,
+    };
+    const first = rankStudyActions(inputs);
+    const moved = reprioritizeStudyPlan(first, 1, 0);
+    expect(moved.actions[0].title).toBe('Economics');
+    expect(moved.actions[0].priority).toBeGreaterThan(moved.actions[1].priority);
+
+    const postponed = postponeStudyAction(moved, 0);
+    expect(postponed.actions.some((action) => action.title === 'Economics')).toBe(false);
+    expect(postponed.backlogActions.at(-1)).toMatchObject({
+      title: 'Economics',
+      availability: 'deferred',
+    });
+
+    const regenerated = regenerateStudyPlan(inputs, { availableMinutes: 15 });
+    expect(regenerated.generatedAt).toBe(first.generatedAt);
+    expect(regenerated.scheduledMinutes).toBe(15);
+    expect(regenerated.totalActionCount).toBe(first.totalActionCount);
   });
 
   it('due reviews are ordered by ascending retrievability (most-forgotten first)', () => {
@@ -221,6 +283,14 @@ vi.mock('./progressStore', async () => {
 
 vi.mock('./scheduler', () => ({
   currentRetrievability: vi.fn().mockReturnValue(0.42),
+}));
+
+vi.mock('./studyProfileBridge', () => ({
+  fetchStudyProfile: vi.fn().mockResolvedValue({
+    ok: true,
+    fromBackend: true,
+    profile: { dailyMinutes: 120, timeAllocation: {} },
+  }),
 }));
 
 import { buildStudyPlan } from './studyDirector';

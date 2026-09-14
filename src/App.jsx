@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import Sidebar from './components/Layout/Sidebar';
+import MobileWorkspaceNav from './components/Layout/MobileWorkspaceNav';
 import TopBar from './components/Layout/TopBar';
 import ErrorBoundary, { DomainErrorBoundary } from './components/ErrorBoundary';
 import EmptyState from './components/EmptyState';
@@ -18,6 +19,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
 import { OfflineProvider } from './context/OfflineContext';
 import OfflineBanner from './components/OfflineBanner';
+import { StudySessionProvider } from './components/session';
 import { appRoutes } from './routes/routeManifest';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -44,6 +46,7 @@ const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'));
 const StyleGallery = lazy(() => import('./pages/StyleGallery'));
 const LeechesAndGaps = lazy(() => import('./pages/LeechesAndGaps'));
 const Settings = lazy(() => import('./pages/Settings'));
+const TutorWorkspace = lazy(() => import('./pages/TutorWorkspace'));
 const PwaInstallPrompt = lazy(() => import('./components/PwaInstallPrompt'));
 
 export const hostRouteElements = {
@@ -68,7 +71,9 @@ export const hostRouteElements = {
   'content-ops': <ContentOps />,
   system: <SystemHealth />,
   today: <Today />,
+  'today-alias': <Today />,
   'knowledge-graph': <KnowledgeGraph />,
+  'tutor-workspace': <TutorWorkspace />,
   style: <StyleGallery />,
   leeches: <LeechesAndGaps />,
   preferences: <Settings />,
@@ -310,6 +315,7 @@ export default function App() {
     <ThemeProvider>
       <ToastProvider>
         <OfflineProvider>
+        <StudySessionProvider>
         <div className="app-layout">
           {/* BA3: RAG/sidecar-aware offline banner — visible only when degraded,
               sits above the shell so the user knows AI/search is unavailable
@@ -375,6 +381,7 @@ export default function App() {
             </ErrorBoundary>
             </RouteProgressBar>
           </main>
+          <MobileWorkspaceNav />
           {/* UB6: shared "?" keyboard-help overlay — owns its own open state
               (the `?` key and the TopBar help button both reach it). */}
           <KeyboardHelp />
@@ -389,6 +396,7 @@ export default function App() {
             </Suspense>
           </ErrorBoundary>
         </div>
+        </StudySessionProvider>
         </OfflineProvider>
       </ToastProvider>
     </ThemeProvider>

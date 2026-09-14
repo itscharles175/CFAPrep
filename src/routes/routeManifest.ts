@@ -39,6 +39,7 @@ export type RouteBoundary = 'page' | 'domain';
 export type RouteDomain = 'home' | 'cfa' | 'quant' | 'excel' | 'vault' | 'analytics' | 'ops' | 'tool' | 'lsat';
 export type RouteAccentRole = 'study' | 'exam' | 'quant' | 'excel' | 'vault' | 'analytics' | 'ops' | 'danger';
 export type PreferredLayout = 'dashboard' | 'learning' | 'assessment' | 'tool' | 'ops';
+export type StudyWorkspace = 'today' | 'learn' | 'practice' | 'review' | 'progress' | 'library' | 'utility';
 export type RouteActionKind = 'navigate' | 'backup' | 'repair' | 'cache' | 'start-assessment' | 'open-drawer' | 'export';
 export type PreloadStrategy = 'eager' | 'idle' | 'interaction' | 'manual';
 export type QaViewport = 320 | 375 | 414 | 768 | 1024 | 1440;
@@ -73,9 +74,11 @@ export type HostRouteId =
   | 'content-ops'
   | 'system'
   | 'today'
+  | 'today-alias'
   | 'knowledge-graph'
   | 'style'
   | 'leeches'
+  | 'tutor-workspace'
   | 'preferences';
 
 /**
@@ -126,6 +129,8 @@ export interface AppRoute {
   iconKey: string;
   accentRole: RouteAccentRole;
   preferredLayout: PreferredLayout;
+  /** Primary StudyVault workspace that owns this route in navigation and search. */
+  workspace: StudyWorkspace;
   navOrder: number;
   navLabel: string;
   searchGroup: string;
@@ -192,35 +197,37 @@ type BaseAppRoute = Omit<
 >;
 
 const baseAppRoutes: BaseAppRoute[] = [
-  { id: 'dashboard', path: '/', expectedText: 'StudyVault', domain: 'home', navGroup: 'home', iconKey: 'home', accentRole: 'study', preferredLayout: 'dashboard', smokeRoute: '/', screenshotRoute: '/' },
-  { id: 'cfa-dashboard', path: '/cfa', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa', domain: 'cfa', navGroup: 'domains', iconKey: 'graduation-cap', accentRole: 'exam', preferredLayout: 'dashboard', smokeRoute: '/cfa', screenshotRoute: '/cfa' },
-  { id: 'cfa-module', path: '/cfa/:level/:topic', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa-module', domain: 'cfa', navGroup: 'domains', iconKey: 'book-open', accentRole: 'exam', preferredLayout: 'learning', smokeRoute: '/cfa/level1/fixed-income', screenshotRoute: '/cfa/level1/fixed-income' },
-  { id: 'cfa-quiz', path: '/cfa/:level/:topic/quiz', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa-quiz', domain: 'cfa', navGroup: 'practice', iconKey: 'target', accentRole: 'exam', preferredLayout: 'assessment', smokeRoute: '/cfa/level1/fixed-income/quiz', screenshotRoute: '/cfa/level1/fixed-income/quiz' },
-  { id: 'cfa-vignette', path: '/cfa/:level/:topic/vignette', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa-vignette', domain: 'cfa', navGroup: 'practice', iconKey: 'layers', accentRole: 'exam', preferredLayout: 'assessment', smokeRoute: '/cfa/level1/fixed-income/vignette', screenshotRoute: '/cfa/level2/equity/vignette' },
-  { id: 'cfa-constructed-response', path: '/cfa/:level/:topic/constructed-response', expectedText: 'LEVEL III RESPONSE', boundary: 'domain', boundaryName: 'cfa-cr', domain: 'cfa', navGroup: 'practice', iconKey: 'pen-line', accentRole: 'exam', preferredLayout: 'assessment', screenshotRoute: '/cfa/level3/performance/constructed-response' },
-  { id: 'quant-dashboard', path: '/quant', expectedText: 'Quant', boundary: 'domain', boundaryName: 'quant', domain: 'quant', navGroup: 'domains', iconKey: 'brain-circuit', accentRole: 'quant', preferredLayout: 'dashboard', smokeRoute: '/quant', screenshotRoute: '/quant' },
-  { id: 'quant-module', path: '/quant/:module', expectedText: 'Quant', boundary: 'domain', boundaryName: 'quant-module', domain: 'quant', navGroup: 'domains', iconKey: 'cpu', accentRole: 'quant', preferredLayout: 'tool', smokeRoute: '/quant/risk-management', screenshotRoute: '/quant/risk-management' },
-  { id: 'excel-dashboard', path: '/excel', expectedText: 'Excel', boundary: 'domain', boundaryName: 'excel', domain: 'excel', navGroup: 'domains', iconKey: 'table-2', accentRole: 'excel', preferredLayout: 'dashboard', smokeRoute: '/excel', screenshotRoute: '/excel' },
-  { id: 'excel-module', path: '/excel/:module', expectedText: 'Excel', boundary: 'domain', boundaryName: 'excel-module', domain: 'excel', navGroup: 'domains', iconKey: 'file-spreadsheet', accentRole: 'excel', preferredLayout: 'tool', smokeRoute: '/excel/fundamentals', screenshotRoute: '/excel/dcf-modeling' },
-  { id: 'calculators', path: '/calculators', expectedText: 'Calculators', domain: 'tool', navGroup: 'tools', iconKey: 'calculator', accentRole: 'study', preferredLayout: 'tool', smokeRoute: '/calculators', screenshotRoute: '/calculators' },
-  { id: 'formulas', path: '/formulas', expectedText: 'Formula', domain: 'tool', navGroup: 'tools', iconKey: 'library', accentRole: 'study', preferredLayout: 'tool', screenshotRoute: '/formulas' },
-  { id: 'review', path: '/review', expectedText: 'Review', domain: 'vault', navGroup: 'tools', iconKey: 'inbox', accentRole: 'vault', preferredLayout: 'dashboard', smokeRoute: '/review', screenshotRoute: '/review' },
-  { id: 'vault', path: '/vault', expectedText: 'Vault', domain: 'vault', navGroup: 'tools', iconKey: 'notebook-tabs', accentRole: 'vault', preferredLayout: 'tool', smokeRoute: '/vault', screenshotRoute: '/vault' },
-  { id: 'flashcards', path: '/flashcards', expectedText: 'Flashcards', domain: 'tool', navGroup: 'practice', iconKey: 'badge-check', accentRole: 'study', preferredLayout: 'assessment', smokeRoute: '/flashcards', screenshotRoute: '/flashcards' },
-  { id: 'mock', path: '/cfa/mock', expectedText: 'Mock', domain: 'cfa', navGroup: 'practice', iconKey: 'clipboard-list', accentRole: 'exam', preferredLayout: 'assessment', smokeRoute: '/cfa/mock' },
-  { id: 'level-mock', path: '/cfa/:level/mock', expectedText: 'Mock', domain: 'cfa', navGroup: 'practice', iconKey: 'clipboard-list', accentRole: 'exam', preferredLayout: 'assessment', screenshotRoute: '/cfa/level3/mock' },
-  { id: 'analytics', path: '/analytics', expectedText: 'Analytics', domain: 'analytics', navGroup: 'tools', iconKey: 'bar-chart-3', accentRole: 'analytics', preferredLayout: 'dashboard', smokeRoute: '/analytics', screenshotRoute: '/analytics' },
-  { id: 'content-ops', path: '/content-ops', expectedText: 'Content Operations', domain: 'ops', navGroup: 'ops', iconKey: 'file-search', accentRole: 'ops', preferredLayout: 'ops', smokeRoute: '/content-ops', screenshotRoute: '/content-ops' },
-  { id: 'system', path: '/system', expectedText: 'System', domain: 'ops', navGroup: 'ops', iconKey: 'hard-drive', accentRole: 'ops', preferredLayout: 'ops', smokeRoute: '/system', screenshotRoute: '/system' },
-  { id: 'today', path: '/today', expectedText: 'Today', domain: 'home', navGroup: 'home', iconKey: 'sun', accentRole: 'study', preferredLayout: 'dashboard', smokeRoute: '/today', screenshotRoute: '/today' },
-  { id: 'knowledge-graph', path: '/knowledge-graph', expectedText: 'Knowledge Graph', domain: 'analytics', navGroup: 'tools', iconKey: 'network', accentRole: 'analytics', preferredLayout: 'dashboard', smokeRoute: '/knowledge-graph', screenshotRoute: '/knowledge-graph' },
-  { id: 'style', path: '/style', expectedText: 'Style', domain: 'tool', navGroup: 'tools', iconKey: 'palette', accentRole: 'study', preferredLayout: 'tool', smokeRoute: '/style', screenshotRoute: '/style' },
-  { id: 'leeches', path: '/leeches', expectedText: 'Leeches & Gaps', domain: 'vault', navGroup: 'practice', iconKey: 'flag', accentRole: 'vault', preferredLayout: 'dashboard' },
-  { id: 'preferences', path: '/preferences', expectedText: 'Preferences', domain: 'tool', navGroup: 'tools', iconKey: 'settings', accentRole: 'study', preferredLayout: 'tool' },
+  { id: 'dashboard', path: '/progress/overview', expectedText: 'Progress', domain: 'analytics', navGroup: 'tools', iconKey: 'home', accentRole: 'analytics', preferredLayout: 'dashboard', workspace: 'progress', smokeRoute: '/progress/overview', screenshotRoute: '/progress/overview' },
+  { id: 'cfa-dashboard', path: '/cfa', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa', domain: 'cfa', navGroup: 'domains', iconKey: 'graduation-cap', accentRole: 'exam', preferredLayout: 'dashboard', workspace: 'learn', smokeRoute: '/cfa', screenshotRoute: '/cfa' },
+  { id: 'cfa-module', path: '/cfa/:level/:topic', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa-module', domain: 'cfa', navGroup: 'domains', iconKey: 'book-open', accentRole: 'exam', preferredLayout: 'learning', workspace: 'learn', smokeRoute: '/cfa/level1/fixed-income', screenshotRoute: '/cfa/level1/fixed-income' },
+  { id: 'cfa-quiz', path: '/cfa/:level/:topic/quiz', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa-quiz', domain: 'cfa', navGroup: 'practice', iconKey: 'target', accentRole: 'exam', preferredLayout: 'assessment', workspace: 'practice', smokeRoute: '/cfa/level1/fixed-income/quiz', screenshotRoute: '/cfa/level1/fixed-income/quiz' },
+  { id: 'cfa-vignette', path: '/cfa/:level/:topic/vignette', expectedText: 'CFA', boundary: 'domain', boundaryName: 'cfa-vignette', domain: 'cfa', navGroup: 'practice', iconKey: 'layers', accentRole: 'exam', preferredLayout: 'assessment', workspace: 'practice', smokeRoute: '/cfa/level1/fixed-income/vignette', screenshotRoute: '/cfa/level2/equity/vignette' },
+  { id: 'cfa-constructed-response', path: '/cfa/:level/:topic/constructed-response', expectedText: 'LEVEL III RESPONSE', boundary: 'domain', boundaryName: 'cfa-cr', domain: 'cfa', navGroup: 'practice', iconKey: 'pen-line', accentRole: 'exam', preferredLayout: 'assessment', workspace: 'practice', screenshotRoute: '/cfa/level3/performance/constructed-response' },
+  { id: 'quant-dashboard', path: '/quant', expectedText: 'Quant', boundary: 'domain', boundaryName: 'quant', domain: 'quant', navGroup: 'domains', iconKey: 'brain-circuit', accentRole: 'quant', preferredLayout: 'dashboard', workspace: 'learn', smokeRoute: '/quant', screenshotRoute: '/quant' },
+  { id: 'quant-module', path: '/quant/:module', expectedText: 'Quant', boundary: 'domain', boundaryName: 'quant-module', domain: 'quant', navGroup: 'domains', iconKey: 'cpu', accentRole: 'quant', preferredLayout: 'tool', workspace: 'learn', smokeRoute: '/quant/risk-management', screenshotRoute: '/quant/risk-management' },
+  { id: 'excel-dashboard', path: '/excel', expectedText: 'Excel', boundary: 'domain', boundaryName: 'excel', domain: 'excel', navGroup: 'domains', iconKey: 'table-2', accentRole: 'excel', preferredLayout: 'dashboard', workspace: 'learn', smokeRoute: '/excel', screenshotRoute: '/excel' },
+  { id: 'excel-module', path: '/excel/:module', expectedText: 'Excel', boundary: 'domain', boundaryName: 'excel-module', domain: 'excel', navGroup: 'domains', iconKey: 'file-spreadsheet', accentRole: 'excel', preferredLayout: 'tool', workspace: 'learn', smokeRoute: '/excel/fundamentals', screenshotRoute: '/excel/dcf-modeling' },
+  { id: 'calculators', path: '/calculators', expectedText: 'Calculators', domain: 'tool', navGroup: 'tools', iconKey: 'calculator', accentRole: 'study', preferredLayout: 'tool', workspace: 'library', smokeRoute: '/calculators', screenshotRoute: '/calculators' },
+  { id: 'formulas', path: '/formulas', expectedText: 'Formula', domain: 'tool', navGroup: 'tools', iconKey: 'library', accentRole: 'study', preferredLayout: 'tool', workspace: 'library', screenshotRoute: '/formulas' },
+  { id: 'review', path: '/review', expectedText: 'Review', domain: 'vault', navGroup: 'tools', iconKey: 'inbox', accentRole: 'vault', preferredLayout: 'dashboard', workspace: 'review', smokeRoute: '/review', screenshotRoute: '/review' },
+  { id: 'vault', path: '/vault', expectedText: 'Vault', domain: 'vault', navGroup: 'tools', iconKey: 'notebook-tabs', accentRole: 'vault', preferredLayout: 'tool', workspace: 'library', smokeRoute: '/vault', screenshotRoute: '/vault' },
+  { id: 'flashcards', path: '/flashcards', expectedText: 'Flashcards', domain: 'tool', navGroup: 'practice', iconKey: 'badge-check', accentRole: 'study', preferredLayout: 'assessment', workspace: 'practice', smokeRoute: '/flashcards', screenshotRoute: '/flashcards' },
+  { id: 'mock', path: '/cfa/mock', expectedText: 'Mock', domain: 'cfa', navGroup: 'practice', iconKey: 'clipboard-list', accentRole: 'exam', preferredLayout: 'assessment', workspace: 'practice', smokeRoute: '/cfa/mock' },
+  { id: 'level-mock', path: '/cfa/:level/mock', expectedText: 'Mock', domain: 'cfa', navGroup: 'practice', iconKey: 'clipboard-list', accentRole: 'exam', preferredLayout: 'assessment', workspace: 'practice', screenshotRoute: '/cfa/level3/mock' },
+  { id: 'analytics', path: '/analytics', expectedText: 'Analytics', domain: 'analytics', navGroup: 'tools', iconKey: 'bar-chart-3', accentRole: 'analytics', preferredLayout: 'dashboard', workspace: 'progress', smokeRoute: '/analytics', screenshotRoute: '/analytics' },
+  { id: 'content-ops', path: '/content-ops', expectedText: 'Content Operations', domain: 'ops', navGroup: 'ops', iconKey: 'file-search', accentRole: 'ops', preferredLayout: 'ops', workspace: 'utility', smokeRoute: '/content-ops', screenshotRoute: '/content-ops' },
+  { id: 'system', path: '/system', expectedText: 'System', domain: 'ops', navGroup: 'ops', iconKey: 'hard-drive', accentRole: 'ops', preferredLayout: 'ops', workspace: 'utility', smokeRoute: '/system', screenshotRoute: '/system' },
+  { id: 'today', path: '/', expectedText: 'Today', domain: 'home', navGroup: 'home', iconKey: 'sun', accentRole: 'study', preferredLayout: 'dashboard', workspace: 'today', smokeRoute: '/', screenshotRoute: '/' },
+  { id: 'today-alias', path: '/today', expectedText: 'Today', domain: 'home', navGroup: 'home', iconKey: 'sun', accentRole: 'study', preferredLayout: 'dashboard', workspace: 'today', canonicalPath: '/' },
+  { id: 'knowledge-graph', path: '/knowledge-graph', expectedText: 'Knowledge Graph', domain: 'analytics', navGroup: 'tools', iconKey: 'network', accentRole: 'analytics', preferredLayout: 'dashboard', workspace: 'progress', smokeRoute: '/knowledge-graph', screenshotRoute: '/knowledge-graph' },
+  { id: 'style', path: '/style', expectedText: 'Style', domain: 'tool', navGroup: 'tools', iconKey: 'palette', accentRole: 'study', preferredLayout: 'tool', workspace: 'utility', smokeRoute: '/style', screenshotRoute: '/style' },
+  { id: 'leeches', path: '/leeches', expectedText: 'Leeches & Gaps', domain: 'vault', navGroup: 'practice', iconKey: 'flag', accentRole: 'vault', preferredLayout: 'dashboard', workspace: 'review' },
+  { id: 'tutor-workspace', path: '/library/tutor', expectedText: 'Tutor Workspace', domain: 'vault', navGroup: 'tools', iconKey: 'brain-circuit', accentRole: 'vault', preferredLayout: 'learning', workspace: 'library' },
+  { id: 'preferences', path: '/preferences', expectedText: 'Preferences', domain: 'tool', navGroup: 'tools', iconKey: 'settings', accentRole: 'study', preferredLayout: 'tool', workspace: 'utility' },
 ];
 
 const routeLabels: Partial<Record<AppRouteId, string>> = {
-  dashboard: 'Dashboard',
+  dashboard: 'Progress',
   'cfa-dashboard': 'CFA Program',
   'cfa-module': 'CFA Module',
   'cfa-quiz': 'CFA Quiz',
@@ -241,9 +248,11 @@ const routeLabels: Partial<Record<AppRouteId, string>> = {
   'content-ops': 'Content QA',
   system: 'System Health',
   today: 'Today',
+  'today-alias': 'Today',
   'knowledge-graph': 'Knowledge Graph',
   style: 'Style Gallery',
   leeches: 'Leeches & Gaps',
+  'tutor-workspace': 'Tutor Workspace',
   preferences: 'Preferences',
 };
 
@@ -261,6 +270,7 @@ const offlineCriticalRouteIds = new Set<AppRouteId>([
   'flashcards',
   'system',
   'today',
+  'today-alias',
 ]);
 
 const keyboardScopesByRoute: Partial<Record<AppRouteId, string[]>> = {
@@ -300,8 +310,8 @@ const routeActionsByRoute: Partial<Record<AppRouteId, AppRoute['routeActions']>>
 };
 
 function breadcrumbsFor(route: BaseAppRoute) {
-  const root = [{ label: 'Dashboard', path: '/' }];
-  if (route.id === 'dashboard') return root;
+  const root = [{ label: 'Today', path: '/' }];
+  if (route.id === 'today' || route.id === 'today-alias') return root;
   const domainCrumb =
     route.domain === 'cfa'
       ? { label: 'CFA', path: '/cfa' }
@@ -380,6 +390,14 @@ export const searchToolRoutes: SearchRoute[] = [
     type: 'Tool',
     path: '/vault',
     keywords: ['notes bookmarks local vault saved source qvsource cfa documents private search'],
+  },
+  {
+    id: 'tool:tutor-workspace',
+    title: 'Tutor Workspace',
+    subtitle: 'Read sources, ask cited questions, annotate, and generate practice',
+    type: 'Workspace',
+    path: '/library/tutor',
+    keywords: ['tutor sources citations notes annotations practice generation lm studio'],
   },
   {
     id: 'tool:mock',
@@ -462,6 +480,7 @@ export const commandRoutes: CommandRoute[] = [
   { id: 'command:mock-level3', title: 'Start Level III Mock', subtitle: 'Constructed response and item-set section', path: '/cfa/level3/mock', keywords: ['start level iii mock constructed response essay'] },
   { id: 'command:system', title: 'Open System Health', subtitle: 'Offline cache, storage, and backup status', path: '/system', keywords: ['system health pwa offline storage backup'] },
   { id: 'command:today', title: 'Today — Focused Plan', subtitle: 'One-screen "what to do next" driven by the Study Director', path: '/today', keywords: ['today focused next action study director plan'] },
+  { id: 'command:tutor-workspace', title: 'Open Tutor Workspace', subtitle: 'Source-linked reading, notes, tutoring, and practice generation', path: '/library/tutor', keywords: ['library tutor sources citations notes practice generate'] },
   { id: 'command:knowledge-graph', title: 'Open Knowledge Graph', subtitle: 'Interactive map of CFA topics across Levels I → III', path: '/knowledge-graph', keywords: ['knowledge graph topics map levels canvas'] },
   { id: 'action:backup', title: 'Open Encrypted Backup', subtitle: 'Create a passphrase-protected local vault export', path: '/system', keywords: ['export backup vault encrypted passphrase local data'], action: 'backup' },
   { id: 'action:repair', title: 'Repair Local Vault', subtitle: 'Rebuild indexes and clean corrupted rows', path: '/review', keywords: ['repair vault rebuild indexes corrupted rows'], action: 'repair' },
@@ -678,6 +697,15 @@ function lsatExpectedTextFor(manifestPath: string): string {
   return lsatRouteExpectedText[manifestPath] ?? lsatDynamicExpectedText[manifestPath] ?? 'LSAT';
 }
 
+function lsatWorkspaceFor(id: LsatRouteId, navGroup: string): StudyWorkspace {
+  if (id === 'lsat-review' || id === 'lsat-review-history' || id === 'lsat-srs' || id === 'lsat-blind-review') return 'review';
+  if (id === 'lsat-analytics' || id === 'lsat-analytics-type' || id === 'lsat-analytics-pt') return 'progress';
+  if (id === 'lsat-tutor' || id === 'lsat-notebook' || id === 'lsat-bank' || id === 'lsat-playlists' || id === 'lsat-explanation') return 'library';
+  if (navGroup === 'practice') return 'practice';
+  if (navGroup === 'ops') return 'utility';
+  return 'learn';
+}
+
 // Breadcrumb trail for an LSAT entry: always rooted at the LSAT plane home
 // (`/lsat` -> "LSAT Lab"), then the entry itself. Aliases and the home route
 // collapse to a single crumb.
@@ -706,6 +734,7 @@ function lsatStaticAppRoute(entry: LsatRouteManifestEntry, navOrder: number): Ap
     iconKey: lsatIconKeys.get(entry.icon) ?? 'book-open',
     accentRole: lsatGroupToAccentRole[entry.group],
     preferredLayout: lsatGroupToLayout[entry.group],
+    workspace: lsatWorkspaceFor(id, navGroup),
     navOrder,
     navLabel: entry.label,
     searchGroup: navGroup,
@@ -765,6 +794,7 @@ function lsatDynamicAppRoute(spec: LsatDynamicSpec, navOrder: number): AppRoute 
     iconKey: 'book-open',
     accentRole: spec.accentRole,
     preferredLayout: spec.preferredLayout,
+    workspace: lsatWorkspaceFor(spec.id, spec.navGroup),
     navOrder,
     navLabel: spec.navLabel,
     searchGroup: spec.navGroup,
@@ -822,6 +852,24 @@ export function canonicalRoutePath(path: string): string {
 /** Friendly nav label for a merged-tree path (canonical-aware). */
 export function routeLabel(path: string): string | undefined {
   return routeTreeByPath.get(canonicalRoutePath(path))?.navLabel;
+}
+
+/** Resolve a concrete URL to its owning route, including dynamic route patterns. */
+export function routeForLocation(pathname: string): AppRoute | undefined {
+  const cleanPath = pathname.split(/[?#]/, 1)[0].replace(/\/$/, '') || '/';
+  const exact = routeTreeByPath.get(cleanPath);
+  if (exact) return exact;
+  const inputSegments = cleanPath.split('/').filter(Boolean);
+  return routeTree.find((route) => {
+    const patternSegments = route.path.split('/').filter(Boolean);
+    if (patternSegments.length !== inputSegments.length) return false;
+    return patternSegments.every((segment, index) => segment.startsWith(':') || segment === inputSegments[index]);
+  });
+}
+
+/** Resolve the primary workspace highlighted by a concrete URL. */
+export function workspaceForLocation(pathname: string): StudyWorkspace {
+  return routeForLocation(pathname)?.workspace ?? 'learn';
 }
 
 /**

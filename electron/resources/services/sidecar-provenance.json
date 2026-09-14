@@ -1,16 +1,16 @@
 {
   "schema": "studyvault.sidecar-provenance.v1",
-  "generatedAt": "2026-07-05T20:39:59.962Z",
+  "generatedAt": "2026-09-14T02:49:40.925Z",
   "servicesRoot": "electron/resources/services",
   "entries": [
     {
       "service": "LSAT backend",
-      "path": "lsat-backend/lsatlab-backend.exe",
-      "sha256": "adadb1cdb0e070b9bc089e481e2956bb9f549b893e4cc83740220aed40eaf638",
-      "size": 55494956,
+      "path": "lsat-backend/lsatlab-backend",
+      "sha256": "83104b3293dc4c99c0b2f001b80f4ac27b81293ff7f35835e3f608fbde8c86f7",
+      "size": 62699856,
       "optional": false,
       "source": "scripts/build-lsat-binary.mjs",
-      "recordedAt": "2026-07-05T20:39:59.961Z"
+      "recordedAt": "2026-09-14T02:49:40.924Z"
     }
   ]
 }

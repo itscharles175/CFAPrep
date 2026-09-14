@@ -6,9 +6,9 @@ apps into one desktop window (Electron) and one web bundle (Vite):
 - the **host** — CFA / Quant / Excel prep (the original QuantVault), and
 - the **LSAT domain** — Law School Admission Test prep (vendored from LSAT Lab).
 
-They share one window, one bundle, and one theme, but each keeps its own router,
-design system, and data layer. Everything runs on the user's machine — no cloud,
-no account, no API keys.
+They share one window, one bundle, one top-level router, and one theme. Each
+domain retains its own feature modules and data layer. Everything runs on the
+user's machine — no cloud, no account, no API keys.
 
 > This is the umbrella overview. For how the LSAT app is embedded, see
 > [LSAT-INTEGRATION.md](LSAT-INTEGRATION.md). For packaging the desktop app and
@@ -18,7 +18,9 @@ no account, no API keys.
 > [STUDYVAULT-POLISH-PLAN.md](STUDYVAULT-POLISH-PLAN.md). The desktop shell was
 > Tauri 2 until 2026-07-16 — see
 > [decisions/2026-07-23-electron-desktop-runtime.md](decisions/2026-07-23-electron-desktop-runtime.md)
-> for what that migration gained, lost, and still owes.
+> for what that migration gained and lost. Its verification-debt section is a
+> historical snapshot; current evidence lives in
+> [STUDYVAULT-1.0-IMPLEMENTATION-LEDGER.md](STUDYVAULT-1.0-IMPLEMENTATION-LEDGER.md).
 
 ---
 
@@ -31,7 +33,7 @@ no account, no API keys.
 | Styling   | CSS `@layer tokens` + `.qv-*` utilities, raw hex palette (`src/index.css`, `src/styles/tokens.css`) | Tailwind 3 + Radix + HSL CSS-var tokens (`src/domains/lsat/index.css`) |
 | Data      | Dexie / IndexedDB (SurrealDB cutover available)                                                     | FastAPI + SQLite backend **sidecar** on `127.0.0.1:8100`               |
 | Charts    | recharts                                                                                            | @visx                                                                  |
-| Router    | `react-router` (`BrowserRouter`)                                                                    | own `BrowserRouter basename="/lsat"`                                   |
+| Router    | Owns the single top-level `BrowserRouter`                                                           | routes are re-based beneath `/lsat` inside the host router             |
 
 There is **one Vite build**. The LSAT subtree is aliased (`@lsat/*` →
 `/src/domains/lsat`) and bundled into its own lazy chunks, so a host-only user
@@ -113,10 +115,15 @@ process — which is why an unhealthy watchdog degrades the boot (banner +
 clears owned ports before the first launch and `electron/relocation.js` guards
 app-data relocation, both ported from the retired Rust supervisor.
 
-The Tauri shell enforced crash cleanup in the kernel (an explicit Job Object plus
-`PR_SET_PDEATHSIG` on Linux). Neither exists now, and no test covers the crash
-path — the migration's outstanding debt. See the
-[Electron runtime decision record](decisions/2026-07-23-electron-desktop-runtime.md).
+The retired Tauri shell used an explicit Windows Job Object plus
+`PR_SET_PDEATHSIG` on Linux. Electron now combines its detached watchdog with
+the non-detached Windows spawn policy. `electron/tests/crash-recovery.test.mjs`
+covers abrupt parent death, watchdog liveness-poll reaping, ownership rejection,
+and the end-to-end orphan guard; the runtime suite also pins relocation behavior
+across Windows, macOS, and Linux. These tests restore coverage of the migration
+gaps, but code and test presence alone do not establish packaged release
+acceptance. See the [implementation ledger](STUDYVAULT-1.0-IMPLEMENTATION-LEDGER.md)
+for the current evidence boundary.
 
 ## 5. Quality gates (CI)
 
@@ -130,10 +137,9 @@ path — the migration's outstanding debt. See the
     shell. It runs `npm run test:electron`, builds the LSAT sidecar, verifies
     its provenance, smoke-tests it, then packages an unpacked app with
     `electron-builder --dir` and asserts the executable and staged sidecar
-    exist. This job replaced the deleted `tauri-rust` Rust gate. Coverage of the
-    relocation guard, port sweep, and watchdog degradation has been rebuilt on
-    the Electron side; **crash-path sidecar reaping has not** — see the
-    decision record.
+    exist. This job replaced the deleted `tauri-rust` Rust gate. The Electron
+    suite covers the relocation guard, port sweep, watchdog degradation, abrupt
+    crash-path reaping, and the Windows non-detached spawn guarantee.
   - `a11y`, `visual`, `perf`, `lsat-qa-gates`, `lsat-sidecar-smoke` — the
     Playwright/contract lanes.
 - **`.github/workflows/release.yml`** (on `v*` tags) — `verify` runs host and
@@ -153,9 +159,9 @@ Local: `npm run verify` (host lint + test + **Electron runtime tests** + build) 
 `npm run test:all` (both vitest projects) · `npm run typecheck:lsat` ·
 `npm run test:electron`.
 
-> The Electron tests are **not** vitest. `vite.config.js` excludes `electron/**`
-> from the `host` project, so they run under `node --test` against
-> `electron/tests/runtime.test.mjs`.
+> The Electron tests are **not** Vitest. `vite.config.js` excludes `electron/**`
+> from the `host` project, so `npm run test:electron` runs every
+> `electron/tests/**/*.test.mjs` file under `node --test`.
 
 ## 6. Source map
 
@@ -174,7 +180,7 @@ electron/                   Electron main/preload, IPC policy, supervisor, asset
   sidecar-manager.js        sidecar launch/health/provenance/backoff supervisor
   watchdog.js, child-watchdog.cjs  owned-child crash reaping
   port-sweep.js, relocation.js     owned-port sweep, app-data relocation guard
-  tests/runtime.test.mjs    the desktop shell gate (node --test)
+  tests/*.test.mjs          desktop runtime, security, and crash-recovery gates (node --test)
 electron-builder.yml        installers, resources, signing/notarization config
 services/lsat-backend/      LSAT FastAPI + SQLite backend (committed source)
 scripts/                    build-*-binary.mjs, smoke-sidecar.mjs, …

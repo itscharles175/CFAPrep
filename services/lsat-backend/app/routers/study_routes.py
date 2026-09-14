@@ -160,6 +160,8 @@ class StudyProfileBody(BaseModel):
     rest_days: Optional[list[int]] = None
     mock_cadence_days: Optional[int] = None
     topic_weights: Optional[dict[str, float]] = None
+    domain_goals: Optional[dict[str, dict[str, Any]]] = None
+    time_allocation: Optional[dict[str, int]] = None
     # Provenance hint for last-write-wins arbitration ("lsat" | "host" | "merge").
     # Informational only — the timestamp decides; defaults to "host" because the
     # bridge is the primary PUT caller.
@@ -182,6 +184,8 @@ class SharedStudyProfileOut(BaseModel):
     rest_days: list[int] = Field(default_factory=list)
     mock_cadence_days: Optional[int] = None
     topic_weights: dict[str, float] = Field(default_factory=dict)
+    domain_goals: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    time_allocation: dict[str, int] = Field(default_factory=dict)
     last_writer: str = "merge"
     updated_at: Optional[str] = None
 
@@ -249,6 +253,12 @@ def _reconcile_profile(
         mock_cadence_days=row.mock_cadence_days if row else None,
         topic_weights=(
             dict(row.topic_weights) if row and isinstance(row.topic_weights, dict) else {}
+        ),
+        domain_goals=(
+            dict(row.domain_goals) if row and isinstance(row.domain_goals, dict) else {}
+        ),
+        time_allocation=(
+            dict(row.time_allocation) if row and isinstance(row.time_allocation, dict) else {}
         ),
         last_writer=last_writer,
         updated_at=latest.isoformat() if latest is not None else None,
@@ -323,6 +333,25 @@ def put_profile(
         if body.topic_weights is not None
         else current.topic_weights
     )
+    allowed_domains = {"cfa", "lsat", "quant", "excel"}
+    domain_goals = (
+        {
+            str(domain): dict(goal)
+            for domain, goal in body.domain_goals.items()
+            if str(domain) in allowed_domains and isinstance(goal, dict)
+        }
+        if body.domain_goals is not None
+        else current.domain_goals
+    )
+    time_allocation = (
+        {
+            str(domain): _clamp(int(minutes), 0, _DAILY_MIN_MAX)
+            for domain, minutes in body.time_allocation.items()
+            if str(domain) in allowed_domains
+        }
+        if body.time_allocation is not None
+        else current.time_allocation
+    )
     last_writer = (body.last_writer or "host").strip().lower()
     if last_writer not in {"lsat", "host", "merge"}:
         last_writer = "host"
@@ -349,6 +378,8 @@ def put_profile(
     row.rest_days = rest_days
     row.mock_cadence_days = mock_cadence_days
     row.topic_weights = topic_weights
+    row.domain_goals = domain_goals
+    row.time_allocation = time_allocation
     row.last_writer = last_writer
     row.updated_at = now
     session.add(row)

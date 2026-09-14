@@ -223,9 +223,18 @@ function vignetteQuestion(
   const row = localDataset.rows[index % localDataset.rows.length] || {};
   const decision = pick(spec.decisions, index);
   const trap = pick(spec.traps, index);
-  const correct = `Use ${objective.title.toLowerCase()} because ${rowCue(row, index)} supports ${decision.toLowerCase()}.`;
-  const distractorOne = `Choose the answer suggested by ${trap.toLowerCase()}, even though that fact is not controlling.`;
-  const distractorTwo = `Avoid the conclusion because another exhibit value is incomplete, despite the case giving enough evidence.`;
+  const responsePrompt = pick(
+    [
+      `Which response best supports ${decision.toLowerCase()}?`,
+      `Which conclusion most directly follows when assessing ${decision.toLowerCase()}?`,
+      `Given the stated constraint, which action is most consistent with ${decision.toLowerCase()}?`,
+      `Which interpretation best uses the evidence to address ${decision.toLowerCase()}?`,
+    ],
+    Math.floor(index / 4),
+  );
+  const correct = `The response should rely on ${objective.title.toLowerCase()} because ${rowCue(row, index)} supports ${decision.toLowerCase()}.`;
+  const distractorOne = `The response should rely on ${trap.toLowerCase()}, even though that fact is not controlling.`;
+  const distractorTwo = `The response should rely on an incomplete exhibit value and avoid the conclusion, despite the case giving enough evidence.`;
   const rotated = rotateOptions(correct, distractorOne, distractorTwo, index);
 
   return {
@@ -234,7 +243,7 @@ function vignetteQuestion(
     topic: topicKey(spec.id),
     learningObjective: objective.id,
     itemType: 'vignette',
-    question: `${spec.title} item-set question ${index + 1}: ${pick(spec.caseFrames, index)} includes ${rowCue(row, index + 1)}. Which response best supports ${decision.toLowerCase()}?`,
+    question: `${spec.title} item-set question ${index + 1}: ${pick(spec.caseFrames, index)} includes ${rowCue(row, index + 1)}. ${responsePrompt}`,
     options: rotated.options,
     correct: rotated.correct,
     explanation: `The correct response uses the case exhibit to apply ${objective.title.toLowerCase()} and then states the valuation or analytical implication. The other choices either rely on ${trap.toLowerCase()} or avoid a conclusion that the case facts support.`,

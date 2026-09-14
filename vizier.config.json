@@ -1,0 +1,125 @@
+{
+  "$schema": "https://unpkg.com/@stag175/vizier@0.3.0/dist/vizier.config.schema.json",
+  "configVersion": 1,
+  "app": {
+    "mode": "managed",
+    "startCommand": "VITE_LSAT_API_BASE=http://127.0.0.1:5198/lsat-api npm run build && npm run preview -- --host 127.0.0.1 --port 5198 --strictPort",
+    "baseUrl": "http://127.0.0.1:5198",
+    "readyPath": "/",
+    "expectTitle": "StudyVault",
+    "startupTimeoutMs": 120000,
+    "shutdownTimeoutMs": 15000
+  },
+  "browser": {
+    "headless": true,
+    "browserName": "chromium",
+    "defaultTimeoutMs": 30000,
+    "settleMs": 500,
+    "fullPage": false
+  },
+  "routes": [
+    "/",
+    "/cfa",
+    "/cfa/level1/fixed-income/quiz",
+    "/review",
+    "/progress/overview",
+    "/library/tutor",
+    "/vault"
+  ],
+  "viewports": [
+    {
+      "name": "desktop",
+      "coverage": "required",
+      "width": 1440,
+      "height": 1000,
+      "deviceScaleFactor": 1,
+      "isMobile": false,
+      "hasTouch": false,
+      "reducedMotion": "no-preference"
+    },
+    {
+      "name": "tablet",
+      "coverage": "required",
+      "width": 768,
+      "height": 1024,
+      "deviceScaleFactor": 1,
+      "isMobile": true,
+      "hasTouch": true,
+      "reducedMotion": "reduce"
+    },
+    {
+      "name": "mobile",
+      "coverage": "required",
+      "width": 390,
+      "height": 844,
+      "deviceScaleFactor": 1,
+      "isMobile": true,
+      "hasTouch": true,
+      "reducedMotion": "reduce"
+    }
+  ],
+  "matrix": {
+    "engines": [{ "name": "chromium", "coverage": "required" }],
+    "maxSurfaces": 30
+  },
+  "vision": { "provider": "none" },
+  "security": {
+    "visionEgress": {
+      "mode": "local-only",
+      "allowedHosts": [],
+      "allowSensitiveData": false
+    }
+  },
+  "analysis": {
+    "includeVision": false,
+    "includeA11y": true,
+    "includeConsole": true,
+    "includeNetwork": true,
+    "includeVisualDiff": false,
+    "includeDesign": true,
+    "includeDesignIntentVision": false,
+    "includeWebVitals": false,
+    "minTouchTarget": 40
+  },
+  "gate": {
+    "mode": "absolute",
+    "visionAuthority": "corroborated",
+    "advisoryChecks": ["cross-viewport-disappearance", "color-scheme-contrast", "reflow"],
+    "waivers": [],
+    "flakeThreshold": 0,
+    "minScore": 85,
+    "failOnConsoleErrors": true,
+    "failOnNetworkErrors": false,
+    "maxCriticalIssues": 0,
+    "maxHighSeverityIssues": 0,
+    "maxMediumSeverityIssues": 0,
+    "requireDesktopPass": true,
+    "requireTabletPass": true,
+    "requireMobilePass": true,
+    "requireAllConfiguredSurfaces": true,
+    "requireSpecPass": false,
+    "minIntentScore": 0,
+    "webVitals": { "enforceCls": false, "clsBudget": 0.1 }
+  },
+  "capture": {
+    "randomSeed": 1,
+    "dismiss": ["[aria-label='Skip onboarding']"],
+    "stabilization": {
+      "fontsTimeoutMs": 5000,
+      "freezeAnimations": true,
+      "hideCaret": true
+    },
+    "autoScroll": {
+      "stepPx": 700,
+      "delayMs": 50,
+      "maxSteps": 50,
+      "maxDurationMs": 6000,
+      "maxHeightPx": 50000,
+      "maxGrowthRounds": 4
+    }
+  },
+  "performance": {
+    "captureConcurrency": 1,
+    "pipelineConsumers": 1
+  }
+}

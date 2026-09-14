@@ -31,6 +31,7 @@ export default [
       // config during the merge port, not the host's strict flat config.
       'src/domains/lsat',
       '.venv-lsat',
+      'services/lsat-backend/.venv',
     ],
   },
   js.configs.recommended,

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_LLM_SETTINGS,
   LLM_PRESETS,
+  LLM_CONNECTION_TIMEOUT_MS,
   LLM_TIMEOUT_CHAT_MS,
   LLM_TIMEOUT_GENERATION_MS,
   checkLlmConnection,
@@ -11,6 +12,7 @@ import {
   generateQuestionsFromCurriculum,
   generateText,
   getLlmSettings,
+  inferLocalLlmProvider,
   narrateStudyPlan,
   saveLlmSettings,
   streamText,
@@ -50,15 +52,17 @@ describe('Local LLM settings + connection', () => {
     expect(byLabel.Ollama).toBe('http://localhost:11434/v1');
   });
 
-  it('defaults to disabled with the Ollama URL', async () => {
+  it('defaults to disabled with the LM Studio URL and no prescribed model', async () => {
     expect(DEFAULT_LLM_SETTINGS.enabled).toBe(false);
-    expect((await getLlmSettings()).baseUrl).toBe('http://localhost:11434/v1');
+    expect(DEFAULT_LLM_SETTINGS.model).toBe('');
+    expect((await getLlmSettings()).baseUrl).toBe('http://localhost:1234/v1');
+    expect(LLM_CONNECTION_TIMEOUT_MS).toBe(5000);
   });
 
   it('persists settings and merges over the defaults', async () => {
     const saved = await saveLlmSettings({ enabled: true, baseUrl: 'http://localhost:1234/v1' });
     expect(saved.enabled).toBe(true);
-    expect(saved.model).toBe('llama3.1'); // default kept
+    expect(saved.model).toBe(''); // first run discovers rather than prescribes a model
     const loaded = await getLlmSettings();
     expect(loaded.baseUrl).toBe('http://localhost:1234/v1');
   });
@@ -73,16 +77,25 @@ describe('Local LLM settings + connection', () => {
         }),
       ),
     );
-    const result = await checkLlmConnection({ baseUrl: 'http://localhost:1234/v1/' });
+    const result = await checkLlmConnection(
+      { baseUrl: 'http://localhost:1234/v1/', model: 'gemma-4-e4b-it' },
+      { retries: 0 },
+    );
     expect(result.ok).toBe(true);
+    expect(result.provider).toBe('lmstudio');
     expect(result.models).toEqual(['gemma-4-e4b-it', 'nomic-embed']);
+    expect(result.selectedModelAvailable).toBe(true);
+    expect(result.recommendedModel).toBe('gemma-4-e4b-it');
+    expect(result.capabilities).toEqual({ chat: true, embeddings: true, vision: true, tools: false });
+    expect(result.modelDetails[1].capabilities).toMatchObject({ chat: false, embeddings: true });
   });
 
   it('checkLlmConnection surfaces a non-200 status', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 503 })));
-    const result = await checkLlmConnection({ baseUrl: 'http://localhost:1234/v1' });
+    const result = await checkLlmConnection({ baseUrl: 'http://localhost:1234/v1' }, { retries: 0 });
     expect(result.ok).toBe(false);
     expect(result.error).toContain('503');
+    expect(result.recovery).toMatch(/LM Studio local server/i);
   });
 
   it('checkLlmConnection rejects remote model bases before fetch', async () => {
@@ -94,6 +107,75 @@ describe('Local LLM settings + connection', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/loopback/i);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('infers the active provider without removing generic OpenAI-compatible support', () => {
+    expect(inferLocalLlmProvider('http://localhost:1234/v1')).toBe('lmstudio');
+    expect(inferLocalLlmProvider('http://localhost:11434/v1')).toBe('ollama');
+    expect(inferLocalLlmProvider('http://127.0.0.1:9000/v1')).toBe('openai-compatible');
+  });
+
+  it('retries a transient provider failure and reports the successful attempt count', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('busy', { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'local-chat' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await checkLlmConnection(
+      { baseUrl: 'http://localhost:1234/v1' },
+      { retries: 1, retryDelayMs: 0 },
+    );
+
+    expect(result).toMatchObject({ ok: true, attempts: 2, recommendedModel: 'local-chat' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('supports cancellation without retrying or turning it into a CORS error', async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        }),
+      ),
+    );
+
+    const pending = checkLlmConnection(
+      { baseUrl: 'http://localhost:1234/v1' },
+      { signal: controller.signal, retries: 2 },
+    );
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({ ok: false, errorCode: 'cancelled', attempts: 1 });
+  });
+
+  it('reports a bounded connection timeout separately from cancellation', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        }),
+      ),
+    );
+
+    const result = await checkLlmConnection(
+      { baseUrl: 'http://localhost:1234/v1' },
+      { timeoutMs: 5, retries: 0 },
+    );
+
+    expect(result).toMatchObject({ ok: false, errorCode: 'timeout', attempts: 1 });
+    expect(result.error).toMatch(/timed out/i);
   });
 });
 

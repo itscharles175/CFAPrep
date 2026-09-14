@@ -22,8 +22,8 @@ def _truthy(value: str | None) -> bool:
 
 
 # Single source of truth for the backend version; kept in sync with the frontend
-# package.json (0.9.0). FastAPI's version is read from here.
-APP_VERSION = _env("LSATLAB_APP_VERSION", "0.9.0")
+# package.json (1.0.0). FastAPI's version is read from here.
+APP_VERSION = _env("LSATLAB_APP_VERSION", "1.0.0")
 
 
 # --- App data directory (S2) ------------------------------------------------

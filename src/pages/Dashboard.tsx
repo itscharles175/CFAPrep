@@ -1,13 +1,8 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  GraduationCap, BrainCircuit, Table2, Calculator,
-  Target, BookOpen, ChevronRight,
-  Upload, Trash2, CalendarClock,
-  Bookmark, StickyNote, ShieldAlert, Inbox, BadgeCheck, ClipboardList, BarChart3, Lock,
+  Upload, Trash2, Bookmark, StickyNote, ShieldAlert, BarChart3, Lock,
 } from 'lucide-react';
-import { domains } from '../data/catalog';
-import { navigateDomain } from '../lib/domainNav';
 import { useProgressSummary } from '../hooks/useProgress';
 import { exportVaultData, importVaultData, previewVaultImportPayload, resetVaultData } from '../lib/learning';
 import type { VaultImportPreview } from '../lib/learning';
@@ -16,7 +11,6 @@ import { getCfaSourceDocuments } from '../lib/cfaSourceVault';
 import { getLlmSettings } from '../lib/localLlm';
 import { getStorage } from '../lib/storage';
 import {
-  IconFrame,
   Dialog,
   InlineCluster,
   PageHeader,
@@ -24,114 +18,22 @@ import {
   Panel,
   SegmentedControl,
   StatCell,
-  StatGrid,
   StatusBadge,
   Surface,
 } from '../components/ui/Primitives';
 import { OnboardingWizard } from '../components/Onboarding';
-import { Skeleton } from '../components/feedback';
-import { DashboardKpiBand } from '../components/dashboard/DashboardKpiBand';
-import { DashboardHero } from '../components/dashboard/DashboardHero';
 import { WeaknessIndexCard } from '../components/dashboard/WeaknessIndexCard';
 import { CrossDomainProgressReport } from '../components/dashboard/CrossDomainProgressReport';
 import { DashboardSparklineGrid } from '../components/dashboard/DashboardSparklineGrid';
 import { DashboardReadinessChecklist } from '../components/dashboard/DashboardReadinessChecklist';
 import {
+  aggregateReadiness,
   fetchDashboardMetrics,
   scoreReadiness,
   aggregateBlindReviewOutcomes,
   type DashboardMetrics,
 } from '../lib/dashboardMetrics';
-import UnifiedPlanSection from '../components/today/UnifiedPlanSection';
 import { useScrollRestoration } from '../lib/scrollRestore';
-
-type LucideIcon = ComponentType<{ size?: number; 'aria-hidden'?: boolean }>;
-
-const domainIcons: Record<string, LucideIcon> = {
-  cfa: GraduationCap,
-  quant: BrainCircuit,
-  excel: Table2,
-};
-
-interface QuickTool {
-  title: string;
-  icon: LucideIcon;
-  path: string;
-  desc: string;
-}
-
-const quickTools: QuickTool[] = [
-  { title: 'Today', icon: CalendarClock, path: '/today', desc: 'One screen, one decision — what to study now' },
-  { title: 'Review Inbox', icon: Inbox, path: '/review', desc: 'Due work and weak areas' },
-  { title: 'Analytics', icon: BarChart3, path: '/analytics', desc: 'Readiness and trends' },
-  { title: 'Flashcards', icon: BadgeCheck, path: '/flashcards', desc: 'Formula and objective drills' },
-  { title: 'Mock Exam', icon: ClipboardList, path: '/cfa/mock', desc: 'Mixed CFA section' },
-  { title: 'TVM Calculator', icon: Calculator, path: '/calculators', desc: 'Time Value of Money' },
-  { title: 'Formula Library', icon: BookOpen, path: '/formulas', desc: 'Searchable reference' },
-  { title: 'Quick Quiz', icon: Target, path: '/cfa/level1/ethics/quiz', desc: 'Test your knowledge' },
-];
-
-type DomainEntry = (typeof domains)[number];
-
-interface DomainCardProps {
-  domain: DomainEntry;
-  index: number;
-}
-
-function DomainCard({ domain, index }: DomainCardProps) {
-  const Icon = domainIcons[domain.id] || BookOpen;
-  const tone =
-    domain.id === 'cfa' ? 'exam' : domain.id === 'quant' ? 'quant' : domain.id === 'lsat' ? 'study' : 'excel';
-
-  // `external` domains (the LSAT sub-app) live under their own router, not the
-  // host client router. The anchor keeps a real href (so modifier/middle-click
-  // and a11y work), but a plain left-click soft-swaps domains via the unified
-  // StudyVault root (no full page reload). (Plan S6.)
-  const linkProps = domain.external
-    ? {
-        as: 'a' as const,
-        href: domain.path,
-        onClick: (e: MouseEvent) => {
-          if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
-            return;
-          }
-          e.preventDefault();
-          navigateDomain(domain.path);
-        },
-      }
-    : { as: Link, to: domain.path };
-
-  return (
-    <Panel
-      {...linkProps}
-      tone={domain.id}
-      status={tone}
-      interactive
-      className="domain-cockpit-card animate-fade"
-      style={{ animationDelay: `${index * 80}ms` }}
-      footer={
-        <InlineCluster className={`domain-card-link domain-card-link-${tone}`}>
-          Start Learning <ChevronRight size={16} />
-        </InlineCluster>
-      }
-    >
-      <div className="domain-card-head">
-        <IconFrame icon={Icon} tone={tone} size={24} />
-        <StatusBadge tone={tone}>{domain.badge}</StatusBadge>
-      </div>
-      <div className="domain-card-copy">
-        <h3>{domain.title}</h3>
-        <small>{domain.subtitle}</small>
-        <p>{domain.description}</p>
-      </div>
-      <StatGrid columns={3}>
-        {Object.entries(domain.stats).map(([key, val]) => (
-          <StatCell key={key} tone={tone} label={key} value={val} />
-        ))}
-      </StatGrid>
-    </Panel>
-  );
-}
 
 function formatStudyTime(seconds: number): string {
   if (!seconds) return '0m';
@@ -224,7 +126,6 @@ export default function Dashboard() {
   const [exportPassphraseConfirm, setExportPassphraseConfirm] = useState('');
   const [includeSourceExport, setIncludeSourceExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
-  const [sourceDocCount, setSourceDocCount] = useState<number | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   // ANL-4: shaped learning curves + study profile (per-domain mastery sparklines
   // and the green/amber/red readiness checklist). fetchDashboardMetrics never
@@ -238,18 +139,6 @@ export default function Dashboard() {
   // (the progress summary fills in from a stable empty shape), so restoration
   // is enabled immediately.
   useScrollRestoration('host:/');
-
-  useEffect(() => {
-    let active = true;
-    getCfaSourceDocuments()
-      .then((docs) => {
-        if (active) setSourceDocCount(docs.length);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, []);
 
   // ANL-4: load the shaped curves + study profile once on mount.
   useEffect(() => {
@@ -270,6 +159,19 @@ export default function Dashboard() {
         { blindReview: aggregateBlindReviewOutcomes(metrics.curves) },
       )
     : [];
+  const hasReadinessEvidence = summary.questionsAnswered > 0
+    || metrics?.curves.some((curve) => curve.reachable && curve.evidenceN > 0) === true;
+  const readinessStatus = hasReadinessEvidence ? aggregateReadiness(readinessChecks) : 'unknown';
+  const attentionCount = readinessChecks.filter((check) => check.status === 'red' || check.status === 'amber').length;
+  const readinessNarrative = metrics === null
+    ? 'Building your readiness view from local study evidence.'
+    : readinessStatus === 'green'
+      ? 'Your available evidence is on track. Keep the current pace and use the detailed view to protect weaker areas.'
+      : readinessStatus === 'amber'
+        ? `${attentionCount} readiness signal${attentionCount === 1 ? '' : 's'} need watching. Focus on consistency before adding more volume.`
+        : readinessStatus === 'red'
+          ? `${attentionCount} readiness signal${attentionCount === 1 ? '' : 's'} need attention. Review the weakest areas before the next full assessment.`
+          : 'Complete a few scored study sessions to establish a trustworthy readiness baseline.';
 
   useEffect(() => {
     let active = true;
@@ -422,64 +324,19 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container progress-page">
       <OnboardingWizard open={onboardingOpen} onClose={handleOnboardingClose} />
       <PageHeader
-        tone="study"
-        badge="LOCAL STUDY COMMAND"
-        title="StudyVault"
-        subtitle="CFA, quantitative finance, and Excel practice organized around today’s next action, local vault safety, and exam readiness."
-        meta={
-          <>
-            <StatusBadge tone="exam">Exam cockpit</StatusBadge>
-            <StatusBadge tone="vault">Browser-local</StatusBadge>
-          </>
-        }
+        tone="analytics"
+        badge="PERFORMANCE"
+        title="Progress"
+        subtitle="A focused view of readiness, learning momentum, and what is changing over time."
         actions={
-          <>
-            <button className="btn btn-secondary" onClick={handleExport}><Lock size={16} /> Export</button>
-            <button className="btn btn-primary" onClick={() => importRef.current?.click()}><Upload size={16} /> Import</button>
-            <input ref={importRef} type="file" accept="application/json,.json" onChange={handleImport} style={{ display: 'none' }} />
-          </>
+          <Link to="/analytics" className="btn btn-secondary"><BarChart3 size={16} /> Detailed analytics</Link>
         }
       />
 
-      <DashboardKpiBand
-        streakDays={summary.streakDays}
-        questionsAnswered={summary.questionsAnswered}
-        studyTime={formatStudyTime(summary.studyTimeSeconds)}
-        masteryScore={summary.masteryScore}
-      />
-
-      {/* UX-1: the "Get started" strip is conditional on an async source-doc
-          count. Until that resolves (sourceDocCount === null) reserve its
-          footprint with a fixed min-height skeleton so the strip appearing (or
-          collapsing away) never shifts the domain cards below it (no CLS). */}
-      {sourceDocCount === null ? (
-        <Surface
-          tone="study"
-          status="accent"
-          aria-busy="true"
-          style={{ marginBottom: 'var(--space-6)', minHeight: '7.5rem' }}
-        >
-          <Skeleton variant="text-short" />
-          <Skeleton variant="text-medium" style={{ marginTop: 'var(--space-3)' }} />
-          <Skeleton variant="text" style={{ marginTop: 'var(--space-2)' }} />
-        </Surface>
-      ) : sourceDocCount === 0 ? (
-        <Surface tone="study" status="accent" style={{ marginBottom: 'var(--space-6)', minHeight: '7.5rem' }}>
-          <div className="flex-between qv-row-3">
-            <div>
-              <StatusBadge tone="accent">Get started</StatusBadge>
-              <h3 style={{ margin: 'var(--space-1) 0 0' }}>Bring your own curriculum into the vault</h3>
-              <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
-                StudyVault's grounded answers and curriculum reader light up once you have source documents in the local vault. Import a <code>.qvsource</code> bundle, paste raw text, or — in the desktop shell — pick a folder of CFA PDFs directly.
-              </p>
-            </div>
-            <Link to="/system" className="btn btn-primary">Open System Health</Link>
-          </div>
-        </Surface>
-      ) : null}
+      <input ref={importRef} type="file" accept="application/json,.json" onChange={handleImport} style={{ display: 'none' }} />
 
       {(pendingImport || pendingReset) && (
         <Dialog
@@ -633,119 +490,96 @@ export default function Dashboard() {
         </Dialog>
       )}
 
-      {/* Today — backup actions live in the page hero (PageHeader) only; this
-          section is study recommendations, not vault ops. */}
-      <PageSection
-        title="Today"
-        subtitle="Adaptive local recommendations from your review queue and mastery snapshots"
-      >
-
-        {!summary.indexedDbAvailable && (
-          <Surface status="danger" density="compact">
-            <InlineCluster>
-              <ShieldAlert size={20} color="var(--danger)" aria-hidden="true" />
-              <div>
-                <div className="panel-emphasis">IndexedDB is unavailable</div>
-                <div className="muted-copy">
-                  Local progress cannot be saved until browser storage is enabled.
-                </div>
-              </div>
-            </InlineCluster>
-          </Surface>
-        )}
-
-        <DashboardHero
-          recommendation={summary.todayRecommendation}
-          dueReviews={summary.dueReviews}
-          weakObjectives={summary.weakObjectives}
-        />
-
-        {/* ANL-4 — per-domain learning-curve sparklines + green/amber/red
-            readiness checklist, shaped from the shipped cross-domain ability
-            curves + the DATA-6 study profile. Both return null on empty input,
-            so an offline sidecar simply renders nothing here. ANL-2 — unified
-            weakness index card (top weak areas across LSAT + host), self-wiring
-            and fully degrading. Sits in the analytics/readiness rail alongside
-            DashboardHero. */}
-        <div className="grid-2" style={{ marginTop: 'var(--space-4)', alignItems: 'start' }}>
-          {metrics && <DashboardSparklineGrid curves={metrics.curves} />}
-          {readinessChecks.length > 0 && <DashboardReadinessChecklist checks={readinessChecks} />}
-          <WeaknessIndexCard options={{ domain: 'all', days: 30, limit: 8 }} maxRows={5} />
-          {/* ANL-7 — exportable cross-domain progress report (CSV + print-to-PDF),
-              self-wiring off the same merged weakness index; fully degrading. */}
-          <CrossDomainProgressReport />
-        </div>
-
-        {/* LEARN-3 — a compact subset of the merged cross-domain daily plan
-            (LSAT + host CFA/Quant/Excel) from the LSAT sidecar. Self-fetching and
-            fully degrading: renders nothing when the sidecar is offline or has no
-            host evidence to merge, so the local dashboard is never blocked. */}
-        <UnifiedPlanSection variant="compact" maxTasks={4} />
-
-        <Surface density="compact" className="vault-strip">
+      {!summary.indexedDbAvailable && (
+        <Surface status="danger" density="compact" className="progress-storage-alert">
           <InlineCluster>
-            <InlineCluster>
-              <StickyNote size={16} color="var(--accent)" />
-              <span>{summary.notesCount} notes</span>
-            </InlineCluster>
-            <InlineCluster>
-              <Bookmark size={16} color="var(--accent)" />
-              <span>{summary.bookmarksCount} bookmarks</span>
-            </InlineCluster>
-            {vaultMessage && <span className="muted-copy">{vaultMessage}</span>}
-          </InlineCluster>
-          <InlineCluster>
-            <button className="btn btn-secondary" onClick={() => handleReset('attempts')}><Trash2 size={16} /> Attempts</button>
-            <button className="btn btn-secondary" onClick={() => handleReset('progress')}><Trash2 size={16} /> Progress</button>
-            <button className="btn btn-secondary" onClick={() => handleReset('full')}><Trash2 size={16} /> Full Reset</button>
+            <ShieldAlert size={20} color="var(--danger)" aria-hidden="true" />
+            <div>
+              <div className="panel-emphasis">Progress cannot be saved</div>
+              <div className="muted-copy">Enable browser storage before continuing your study session.</div>
+            </div>
           </InlineCluster>
         </Surface>
-      </PageSection>
+      )}
 
-      {/* Domain Cards */}
-      <PageSection title="Knowledge Domains" subtitle="Choose a domain to begin your study journey">
-        <div className="grid-3">
-          {domains.map((d, i) => <DomainCard key={d.path} domain={d} index={i} />)}
+      <section className={`progress-readiness progress-readiness--${readinessStatus}`} aria-labelledby="progress-readiness-title">
+        <div>
+          <StatusBadge tone={readinessStatus === 'green' ? 'positive' : readinessStatus === 'red' ? 'danger' : 'analytics'}>
+            {readinessStatus === 'unknown' ? 'Baseline pending' : `${readinessStatus} readiness`}
+          </StatusBadge>
+          <h2 id="progress-readiness-title">Your readiness, without the noise.</h2>
+          <p>{readinessNarrative}</p>
         </div>
-      </PageSection>
+        <Link to={hasReadinessEvidence ? '/review' : '/'} className="btn btn-primary">
+          {hasReadinessEvidence ? 'Review weak areas' : 'Start a study session'}
+        </Link>
+      </section>
 
-      {/* Quick Tools */}
-      <PageSection title="Quick Access" subtitle="Jump into tools and practice">
-        <div className="grid-3">
-          {quickTools.map((tool, i) => (
-            <Panel
-              as={Link}
-              key={tool.path}
-              to={tool.path}
-              tone="study"
-              interactive
-              className="quick-tool-card animate-fade"
-              style={{ animationDelay: `${i * 60}ms` }}
-            >
-              <IconFrame icon={tool.icon} />
-              <div>
-                <div className="qv-fw-semibold">{tool.title}</div>
-                <div className="qv-fs-xs qv-text-muted">{tool.desc}</div>
-              </div>
-              <ChevronRight size={16} color="var(--text-muted)" style={{ marginLeft: 'auto' }} />
-            </Panel>
-          ))}
-        </div>
-      </PageSection>
-
-      <PageSection title="Learning Momentum" subtitle="Your local progress is saved on this device">
-        <div className="grid-3">
+      <PageSection title="Core signals" subtitle="The three measures that best summarize current momentum.">
+        <div className="progress-summary-grid">
           <Panel tone="analytics" density="compact">
-            <StatCell label="Modules Completed" value={summary.completedModules} detail={`${summary.visitedModules} visited`} />
+            <StatCell label="Mastery" value={summary.masteryScore === null ? '—' : `${summary.masteryScore}%`} detail="Current readiness snapshot" />
           </Panel>
           <Panel tone="analytics" density="compact">
-            <StatCell label="Recent Activity" value={summary.lastActivity || 'No activity yet'} detail="Open a module or quiz to start the trail" />
+            <StatCell label="Questions answered" value={summary.questionsAnswered.toLocaleString()} detail={`${summary.streakDays} day study streak`} />
           </Panel>
           <Panel tone="analytics" density="compact">
-            <StatCell label="Review Queue" value={summary.upcomingReviews.length} detail="Weak areas from recent quizzes" />
+            <StatCell label="Study time" value={formatStudyTime(summary.studyTimeSeconds)} detail={`${summary.completedModules} modules completed`} />
           </Panel>
         </div>
       </PageSection>
+
+      {metrics && hasReadinessEvidence && metrics.curves.length > 0 && (
+        <PageSection title="Learning curves" subtitle="Direction and pace by domain.">
+          <DashboardSparklineGrid curves={metrics.curves} className="progress-learning-curves" />
+        </PageSection>
+      )}
+
+      <section className="progress-disclosures" aria-label="Progress details">
+        <details>
+          <summary>
+            <span><strong>Readiness details</strong><small>Signals, weak areas, and review priorities</small></span>
+          </summary>
+          <div className="progress-disclosure-body grid-2">
+            {readinessChecks.length > 0 ? (
+              <DashboardReadinessChecklist checks={readinessChecks} />
+            ) : (
+              <Surface density="compact"><p className="muted-copy">No readiness evidence yet.</p></Surface>
+            )}
+            <WeaknessIndexCard options={{ domain: 'all', days: 30, limit: 8 }} maxRows={5} />
+            <div style={{ gridColumn: '1 / -1' }}>
+              <CrossDomainProgressReport />
+            </div>
+          </div>
+        </details>
+
+        <details>
+          <summary>
+            <span><strong>Local data and vault</strong></span>
+          </summary>
+          <div className="progress-disclosure-body">
+            <Surface density="compact" className="vault-strip">
+              <InlineCluster>
+                <InlineCluster><StickyNote size={16} color="var(--accent)" /><span>{summary.notesCount} notes</span></InlineCluster>
+                <InlineCluster><Bookmark size={16} color="var(--accent)" /><span>{summary.bookmarksCount} bookmarks</span></InlineCluster>
+                {vaultMessage && <span className="muted-copy" role="status">{vaultMessage}</span>}
+              </InlineCluster>
+              <InlineCluster>
+                <button className="btn btn-secondary" onClick={handleExport}><Lock size={16} /> Export backup</button>
+                <button className="btn btn-secondary" onClick={() => importRef.current?.click()}><Upload size={16} /> Import</button>
+              </InlineCluster>
+            </Surface>
+            <div className="progress-reset-controls">
+              <span>Reset local data</span>
+              <InlineCluster>
+                <button className="btn btn-ghost" onClick={() => handleReset('attempts')}><Trash2 size={16} /> Attempts</button>
+                <button className="btn btn-ghost" onClick={() => handleReset('progress')}><Trash2 size={16} /> Progress</button>
+                <button className="btn btn-ghost" onClick={() => handleReset('full')}><Trash2 size={16} /> Full reset</button>
+              </InlineCluster>
+            </div>
+          </div>
+        </details>
+      </section>
     </div>
   );
 }

@@ -472,6 +472,8 @@ export default function CfaQuiz() {
         <ArrowLeft size={16} /> Back to {topicData?.title || topic}
       </Link>
 
+      <h1 className="quiz-workspace-title">{topicData?.title || topic} Practice</h1>
+
       <div className="quiz-container">
         <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-5)' }}>
           <SegmentedControl

@@ -422,6 +422,10 @@ class SharedStudyProfile(SQLModel, table=True):
     rest_days: list = Field(default_factory=list, sa_column=Column(JSON))
     mock_cadence_days: Optional[int] = None
     topic_weights: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    # StudyVault 1.0 cross-domain planner inputs. Additive JSON columns keep the
+    # schema flexible and migration-safe for older single-user databases.
+    domain_goals: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    time_allocation: dict = Field(default_factory=dict, sa_column=Column(JSON))
     # Who wrote last ("lsat" | "host" | "merge"): provenance for the
     # last-write-wins arbitration (informational; the timestamp decides).
     last_writer: str = Field(default="merge")

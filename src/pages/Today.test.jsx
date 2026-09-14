@@ -9,11 +9,14 @@ vi.mock('../lib/studyDirector', () => ({
 
 import { buildStudyPlan } from '../lib/studyDirector';
 import Today from './Today';
+import { StudySessionProvider } from '../components/session';
 
 function renderToday() {
   return render(
     <MemoryRouter>
-      <Today />
+      <StudySessionProvider>
+        <Today />
+      </StudySessionProvider>
     </MemoryRouter>,
   );
 }
@@ -43,9 +46,9 @@ describe('Today focus-mode landing', () => {
     // The hero top action renders in the always-visible scrolling content.
     expect(await screen.findByText('Modified duration')).toBeInTheDocument();
 
-    // UB7: the plan headline now lives in the sticky study-session card's "Plan"
-    // tab — activate it before asserting the headline.
-    await userEvent.click(screen.getByRole('tab', { name: /plan/i }));
+    // Supporting rationale and follow-up work stay behind the full-plan
+    // disclosure so the recommended activity owns the initial viewport.
+    await userEvent.click(screen.getByText('Full plan'));
     expect(screen.getByText('2 reviews due, 1 weak topic to shore up')).toBeInTheDocument();
     // "Equity Investments" appears in the actions list AND the targeted-drill
     // header (since it's the first weak-topic action) — assert >= 1.
@@ -72,8 +75,9 @@ describe('Today focus-mode landing', () => {
     renderToday();
     // The hero "continue" action is in the always-visible scrolling content.
     await waitFor(() => expect(screen.getByText('Continue studying')).toBeInTheDocument());
-    // The headline lives in the study-session card's Plan tab.
-    await userEvent.click(screen.getByRole('tab', { name: /plan/i }));
+    expect(screen.queryByText('0 reviews due')).not.toBeInTheDocument();
+    expect(screen.queryByText('0 weak topics')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('Full plan'));
     expect(screen.getByText('No urgent items — great progress!')).toBeInTheDocument();
   });
 });

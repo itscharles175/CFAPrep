@@ -1037,6 +1037,36 @@ def _m029_backend_perf(conn) -> None:
     conn.exec_driver_sql("PRAGMA user_version = 29")
 
 
+def _m030_adaptive_study_profile(conn) -> None:
+    """Add defaulted cross-domain goal and daily allocation JSON fields.
+
+    Existing profiles migrate to empty objects, which is the legacy behavior:
+    the single daily-minutes budget remains authoritative until allocations are
+    explicitly configured.
+    """
+    _add_column_if_missing(
+        conn,
+        "sharedstudyprofile",
+        "domain_goals",
+        "domain_goals JSON DEFAULT '{}'",
+        mig="migration 30",
+    )
+    _add_column_if_missing(
+        conn,
+        "sharedstudyprofile",
+        "time_allocation",
+        "time_allocation JSON DEFAULT '{}'",
+        mig="migration 30",
+    )
+    conn.exec_driver_sql(
+        "UPDATE sharedstudyprofile SET domain_goals = '{}' WHERE domain_goals IS NULL"
+    )
+    conn.exec_driver_sql(
+        "UPDATE sharedstudyprofile SET time_allocation = '{}' WHERE time_allocation IS NULL"
+    )
+    conn.exec_driver_sql("PRAGMA user_version = 30")
+
+
 def _annotation_search_text(data_json, user_explanation) -> str:
     """Flatten an annotation's searchable note text out of its opaque ``data_json``
     plus the user-authored explanation, into one whitespace-joined string for FTS.
@@ -1136,6 +1166,7 @@ MIGRATIONS: list[Migration] = [
     (27, "cross_domain_sync_log", _m027_cross_domain_sync_log),
     (28, "export_history", _m028_export_history),
     (29, "backend_perf", _m029_backend_perf),
+    (30, "adaptive_study_profile", _m030_adaptive_study_profile),
 ]
 
 

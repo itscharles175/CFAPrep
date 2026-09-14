@@ -89,6 +89,7 @@ import {
   generateTargetedMaterialJobs,
   jobIdFor,
   readQueue,
+  recoverInterruptedTargetedMaterialJobs,
   runTargetedMaterialJob,
   type TargetedMaterialJob,
 } from './targetedMaterialQueue';
@@ -288,5 +289,27 @@ describe('runTargetedMaterialJob', () => {
     const after = await readQueue();
     const persisted = after.find((j) => j.id === target.id)!;
     expect(persisted.status).toBe('done');
+  });
+
+  it('returns an aborted job to pending so it can be resumed', async () => {
+    const controller = new AbortController();
+    generateQuestionsFromCurriculum.mockImplementationOnce(async () => {
+      controller.abort();
+      throw new DOMException('Aborted', 'AbortError');
+    });
+    const result = await runTargetedMaterialJob(pendingJob('questions'), { signal: controller.signal });
+    expect(result.status).toBe('pending');
+    expect(result.error).toBeUndefined();
+  });
+
+  it('recovers jobs stranded in running after an app interruption', async () => {
+    const job = { ...pendingJob('questions'), status: 'running' as const };
+    settingsStore.set(TARGETED_QUEUE_KEY, {
+      key: TARGETED_QUEUE_KEY,
+      value: [job],
+      updatedAt: FIXED_NOW.toISOString(),
+    });
+    const recovered = await recoverInterruptedTargetedMaterialJobs();
+    expect(recovered[0].status).toBe('pending');
   });
 });

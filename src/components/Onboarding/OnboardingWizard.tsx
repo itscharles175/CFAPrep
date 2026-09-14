@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { saveLlmSettings } from '../../lib/localLlm';
+import { checkLlmConnection, saveLlmSettings } from '../../lib/localLlm';
 import { markOnboardingComplete, setOnboardingStep } from '../../lib/onboardingProgress';
 import { setUnifiedOnboardingDismissed } from '../../lib/unifiedResume';
-import { Dialog, InlineCluster, StatusBadge, Surface } from '../ui/Primitives';
+import { Dialog, InlineCluster, Surface } from '../ui/Primitives';
 
 const CORS_NOTE_LM_STUDIO =
   'LM Studio: open Developer / Server panel and enable CORS for "*", then restart the server.';
@@ -15,18 +15,10 @@ interface StepperProps {
 
 function Stepper({ step }: StepperProps) {
   return (
-    <InlineCluster className="onboarding-stepper">
-      {[1, 2, 3].map((n) => (
-        <span
-          key={n}
-          className={`onboarding-step-dot${n === step ? ' onboarding-step-dot-active' : ''}`}
-          aria-current={n === step ? 'step' : undefined}
-        >
-          {n}
-        </span>
-      ))}
-      <span className="muted-copy qv-fs-xs">{step} / 3</span>
-    </InlineCluster>
+    <div className="onboarding-progress">
+      <span className="onboarding-progress-label">Step {step} of 3</span>
+      <progress value={step} max={3} aria-label={`Onboarding step ${step} of 3`} />
+    </div>
   );
 }
 
@@ -37,16 +29,15 @@ interface Step1Props {
 function Step1({ onContinue }: Step1Props) {
   return (
     <div className="onboarding-step">
-      <StatusBadge tone="accent">Welcome</StatusBadge>
-      <h3 style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>StudyVault is local-first</h3>
+      <h2 id="onboarding-step-title">StudyVault is local-first</h2>
       <p className="qv-m-0">
-        Everything stays on your machine — no cloud, no account, no tracking. Three quick choices and you are set.
+        Your study data stays on this Mac; these optional choices take less than a minute.
       </p>
-      <Surface tone="study" density="compact" style={{ marginTop: 'var(--space-4)' }}>
-        <ul className="qv-m-0" style={{ paddingLeft: 'var(--space-4)', lineHeight: 1.7 }}>
-          <li>Choose a local model server (optional)</li>
-          <li>Bring in your source documents (optional)</li>
-          <li>Start studying immediately — nothing is required</li>
+      <Surface tone="study" density="compact" className="onboarding-summary">
+        <ul className="qv-m-0">
+          <li>Connect a local model</li>
+          <li>Add source documents</li>
+          <li>Or skip setup and start studying</li>
         </ul>
       </Surface>
       <InlineCluster align="end" style={{ marginTop: 'var(--space-5)' }}>
@@ -65,11 +56,22 @@ interface Step2Props {
 
 function Step2({ onPresetChosen, onSkip }: Step2Props) {
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
-  async function handlePreset(baseUrl: string, model: string) {
+  async function handlePreset(baseUrl: string) {
     setSaving(true);
+    setError('');
     try {
-      await saveLlmSettings({ enabled: true, baseUrl, model });
+      const connection = await checkLlmConnection({ baseUrl }, { retries: 0 });
+      if (!connection.ok) {
+        setError(`${connection.error} ${connection.recovery}`);
+        return;
+      }
+      if (!connection.recommendedModel) {
+        setError('The server is connected, but no loaded chat model was found. Load one and try again.');
+        return;
+      }
+      await saveLlmSettings({ enabled: true, baseUrl, model: connection.recommendedModel });
       onPresetChosen();
     } finally {
       setSaving(false);
@@ -78,48 +80,45 @@ function Step2({ onPresetChosen, onSkip }: Step2Props) {
 
   return (
     <div className="onboarding-step">
-      <StatusBadge tone="accent">Step 2 — Local model</StatusBadge>
-      <h3 style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>Connect a local AI model</h3>
-      <p style={{ margin: '0 0 var(--space-4)' }}>
-        Pick a preset to enable AI-generated questions and explanations grounded in your source documents.
+      <h2 id="onboarding-step-title">Connect a local model</h2>
+      <p className="qv-m-0">
+        Choose the server already running on this Mac; StudyVault will discover its loaded chat model.
       </p>
 
       <InlineCluster style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
         <button
           className="btn btn-primary"
           disabled={saving}
-          onClick={() => handlePreset('http://localhost:1234/v1', 'gemma-4-e4b-it')}
+          onClick={() => handlePreset('http://localhost:1234/v1')}
         >
           LM Studio
           <small className="qv-fs-xs" style={{ display: 'block', fontWeight: 400 }}>
-            localhost:1234 · gemma-4-e4b-it
+            localhost:1234 · discover loaded model
           </small>
         </button>
         <button
           className="btn btn-secondary"
           disabled={saving}
-          onClick={() => handlePreset('http://localhost:11434/v1', 'llama3.1')}
+          onClick={() => handlePreset('http://localhost:11434/v1')}
         >
           Ollama
           <small className="qv-fs-xs" style={{ display: 'block', fontWeight: 400 }}>
-            localhost:11434 · llama3.1
+            localhost:11434 · discover loaded model
           </small>
         </button>
       </InlineCluster>
 
-      <Surface
-        tone="study"
-        density="compact"
-        status="warning"
-        className="qv-fs-xs"
-        style={{ marginTop: 'var(--space-4)' }}
-      >
-        <strong>CORS note:</strong>
-        <br />
-        {CORS_NOTE_LM_STUDIO}
-        <br />
-        {CORS_NOTE_OLLAMA}
-      </Surface>
+      {error && (
+        <p className="qv-text-danger qv-fs-xs qv-mt-3" role="alert">
+          {error}
+        </p>
+      )}
+
+      <details className="onboarding-help">
+        <summary>Connection help</summary>
+        <p>{CORS_NOTE_LM_STUDIO}</p>
+        <p>{CORS_NOTE_OLLAMA}</p>
+      </details>
 
       <InlineCluster align="end" style={{ marginTop: 'var(--space-5)' }}>
         <button className="btn btn-ghost qv-text-muted" onClick={onSkip}>
@@ -144,10 +143,9 @@ function Step3({ onDone }: Step3Props) {
 
   return (
     <div className="onboarding-step">
-      <StatusBadge tone="accent">Step 3 — Ingest sources</StatusBadge>
-      <h3 style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>Bring in your curriculum</h3>
-      <p style={{ margin: '0 0 var(--space-4)' }}>
-        AI features and grounded answers light up once you have source documents in the local vault.
+      <h2 id="onboarding-step-title">Bring in your curriculum</h2>
+      <p className="qv-m-0">
+        Add source material now for cited tutoring and grounded practice, or do it later from Library.
       </p>
 
       <div className="qv-stack-2">
@@ -234,13 +232,14 @@ export function OnboardingWizard({ open, onClose }: OnboardingWizardProps) {
   return (
     <Dialog
       title={null}
+      labelledBy="onboarding-step-title"
       onClose={handleClose}
-      actions={<small className="muted-copy qv-fs-xs">Enter to advance · Esc to dismiss</small>}
+      className="onboarding-dialog"
     >
-      <InlineCluster className="qv-mb-3" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+      <InlineCluster className="onboarding-topline" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <Stepper step={step} />
         <button className="btn btn-ghost qv-fs-xs qv-text-muted" onClick={handleClose} aria-label="Skip onboarding">
-          Skip onboarding ✕
+          Skip onboarding
         </button>
       </InlineCluster>
 

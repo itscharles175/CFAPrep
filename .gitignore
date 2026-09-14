@@ -88,3 +88,7 @@ services/lsat-backend/data/
 # are restored from an approved Linux-generated cache; intentional refreshes must
 # be run with UPDATE_VISUAL_BASELINES=1 after reviewing the generated frames.
 tests/visual-baselines/
+
+# Local Vizier runtime database and leases. The shareable project configuration
+# lives in vizier.config.json at the repository root.
+.vizier/

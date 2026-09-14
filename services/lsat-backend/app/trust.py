@@ -1121,9 +1121,12 @@ def _knowledge_index_check(session: Session, tier: TrustTier) -> dict[str, Any]:
 
 def _sidecar_check(tier: TrustTier) -> dict[str, Any]:
     candidates = _sidecar_binary_candidates()
-    binary_present = any(path.exists() for path in candidates)
     provenance_path = _first_existing(_sidecar_provenance_candidates())
     provenance = _verify_sidecar_provenance(provenance_path)
+    # An explicitly supplied provenance manifest may describe a staged package
+    # outside the repository's default resource roots. Successful verification
+    # already proves that each recorded binary exists and matches its digest.
+    binary_present = any(path.exists() for path in candidates) or bool(provenance["verified"])
     worker = jobs.get_worker()
     thread = worker._thread
     alive = thread is not None and thread.is_alive()

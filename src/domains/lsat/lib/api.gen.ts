@@ -8235,6 +8235,16 @@ export interface components {
             topic_weights?: {
                 [key: string]: number;
             };
+            /** Domain Goals */
+            domain_goals?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            /** Time Allocation */
+            time_allocation?: {
+                [key: string]: number;
+            };
             /**
              * Last Writer
              * @default merge
@@ -8951,6 +8961,16 @@ export interface components {
             mock_cadence_days?: number | null;
             /** Topic Weights */
             topic_weights?: {
+                [key: string]: number;
+            } | null;
+            /** Domain Goals */
+            domain_goals?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            } | null;
+            /** Time Allocation */
+            time_allocation?: {
                 [key: string]: number;
             } | null;
             /** Last Writer */

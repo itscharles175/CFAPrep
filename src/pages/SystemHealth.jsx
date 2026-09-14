@@ -176,6 +176,7 @@ export default function SystemHealth() {
   const [llm, setLlm] = useState(null);
   const [llmStatus, setLlmStatus] = useState(null);
   const [llmTesting, setLlmTesting] = useState(false);
+  const llmTestAbortRef = useRef(null);
   const [onb, setOnb] = useState(null);
   const [onbStatus, setOnbStatus] = useState(null);
   const [onbTesting, setOnbTesting] = useState(false);
@@ -922,14 +923,25 @@ export default function SystemHealth() {
   }
 
   async function handleTestLlm() {
+    const controller = new AbortController();
+    llmTestAbortRef.current = controller;
     setLlmTesting(true);
-    const result = await checkLlmConnection(llm);
-    setLlmStatus(result);
-    setLlmTesting(false);
-    // Also refresh the LSAT backend's own AI/provider health — the LSAT sidecar
-    // talks to the same local model servers, so a host pass with an LSAT
-    // failure (e.g. sidecar down, provider switched) is worth surfacing.
-    checkLsatBackendHealth().then(setLsatHealth);
+    try {
+      const result = await checkLlmConnection(llm, { signal: controller.signal });
+      setLlmStatus(result);
+      // Discovery may reveal that a saved model is missing. Seed the first
+      // available chat model into the form, but leave persistence to Save.
+      if (result.ok && result.recommendedModel && result.selectedModelAvailable !== true) {
+        setLlm((current) => ({ ...current, model: result.recommendedModel }));
+      }
+      // Also refresh the LSAT backend's own AI/provider health — the LSAT sidecar
+      // talks to the same local model servers, so a host pass with an LSAT
+      // failure (e.g. sidecar down, provider switched) is worth surfacing.
+      checkLsatBackendHealth().then(setLsatHealth);
+    } finally {
+      if (llmTestAbortRef.current === controller) llmTestAbortRef.current = null;
+      setLlmTesting(false);
+    }
   }
 
   async function handleIngestFolder() {
@@ -2678,7 +2690,7 @@ export default function SystemHealth() {
                   className="input"
                   value={llm.baseUrl}
                   onChange={(event) => setLlm({ ...llm, baseUrl: event.target.value })}
-                  placeholder="http://localhost:11434/v1"
+                  placeholder="http://localhost:1234/v1"
                   aria-label="Local model base URL"
                 />
               </label>
@@ -2705,7 +2717,7 @@ export default function SystemHealth() {
                     className="input"
                     value={llm.model}
                     onChange={(event) => setLlm({ ...llm, model: event.target.value })}
-                    placeholder="llama3.1"
+                    placeholder="Discover a loaded model"
                     aria-label="Local model name"
                   />
                 )}
@@ -2732,19 +2744,45 @@ export default function SystemHealth() {
               <button className="btn btn-primary" onClick={handleSaveLlm}>
                 Save
               </button>
-              <button className="btn btn-secondary" onClick={handleTestLlm} disabled={llmTesting}>
-                {llmTesting ? 'Testing…' : 'Test Connection'}
+              <button
+                className="btn btn-secondary"
+                onClick={llmTesting ? () => llmTestAbortRef.current?.abort() : handleTestLlm}
+              >
+                {llmTesting ? 'Cancel test' : 'Test connection'}
               </button>
               {llmStatus && (
                 <StatusBadge tone={llmStatus.ok ? 'success' : 'danger'}>
-                  {llmStatus.ok ? `Connected · ${llmStatus.models.length} model(s)` : `Offline · ${llmStatus.error}`}
+                  {llmStatus.ok
+                    ? `${llmStatus.provider === 'lmstudio' ? 'LM Studio' : llmStatus.provider === 'ollama' ? 'Ollama' : 'Local server'} connected · ${llmStatus.models.length} model(s) · ${llmStatus.latencyMs}ms`
+                    : `${llmStatus.errorCode === 'cancelled' ? 'Cancelled' : 'Offline'} · ${llmStatus.error}`}
                 </StatusBadge>
               )}
             </div>
             {llmStatus?.ok && llmStatus.models.length > 0 && (
-              <p className="qv-text-muted qv-fs-xs qv-mt-2">
-                Available models: {llmStatus.models.slice(0, 8).join(', ')}
-              </p>
+              <div className="qv-stack-1 qv-mt-2">
+                <p className="qv-text-muted qv-fs-xs qv-m-0">
+                  Available models: {llmStatus.models.slice(0, 8).join(', ')}
+                </p>
+                <p className="qv-text-muted qv-fs-xs qv-m-0">
+                  Capabilities:{' '}
+                  {[
+                    llmStatus.capabilities.chat && 'chat',
+                    llmStatus.capabilities.embeddings && 'embeddings',
+                    llmStatus.capabilities.vision && 'vision',
+                    llmStatus.capabilities.tools && 'tools',
+                  ]
+                    .filter(Boolean)
+                    .join(', ') || 'none reported'}
+                </p>
+                {llmStatus.selectedModelAvailable === false && (
+                  <p className="qv-text-warning qv-fs-xs qv-m-0" role="status">
+                    The saved model is not loaded. The first available chat model was selected; save to keep it.
+                  </p>
+                )}
+              </div>
+            )}
+            {llmStatus && !llmStatus.ok && llmStatus.recovery && (
+              <p className="qv-text-muted qv-fs-xs qv-mt-2">{llmStatus.recovery}</p>
             )}
           </>
         )}
