@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import {
@@ -33,7 +33,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Icon } from "@lsat/components/ui/icon";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@lsat/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -73,6 +72,30 @@ import type {
 } from "@lsat/lib/types";
 type NotebookExportFormat = NotebookExportBundle["format"];
 type NotebookImportFormat = "auto" | "json" | "markdown" | "html";
+type NotebookAction =
+  | "source"
+  | "bundle"
+  | "note"
+  | "chat"
+  | "tutor"
+  | "transform"
+  | "briefing"
+  | "export"
+  | "inbox"
+  | "tutor-note"
+  | "briefing-note";
+
+type NotebookActionFailure = {
+  action: NotebookAction;
+  label: string;
+  message: string;
+  retry: () => void;
+};
+
+export function notebookActionErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  return "The local study service did not finish this request.";
+}
 
 function humanize(value: string) {
   return value.split("_").join(" ");
@@ -118,6 +141,40 @@ export function sourceScopeActionState(activeCitation: CitationTarget | null) {
   };
 }
 
+function OfficialMaterialSwitch({
+  checked,
+  label,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  label: string;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onCheckedChange(!checked)}
+      className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <span
+        aria-hidden="true"
+        className={`relative block h-6 w-11 rounded-full border-2 border-transparent transition-colors ${
+          checked ? "bg-primary" : "bg-input"
+        }`}
+      >
+        <span
+          className={`absolute top-0 block h-5 w-5 rounded-full bg-background shadow-e1 transition-transform ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
+
 export default function Notebook() {
   const qc = useQueryClient();
   const location = useLocation();
@@ -138,6 +195,7 @@ export default function Notebook() {
   const [contextMode, setContextMode] = useState<ContextMode>("summary");
   const [activeCitation, setActiveCitation] = useState<CitationTarget | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
+  const activeSessionIdRef = useRef<number | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
 
   const [sourceTitle, setSourceTitle] = useState("");
@@ -156,6 +214,9 @@ export default function Notebook() {
   const [chatInput, setChatInput] = useState("");
   const [template, setTemplate] = useState("summarize");
   const [exportFormat, setExportFormat] = useState<NotebookExportFormat>("markdown");
+  const [pendingActions, setPendingActions] = useState<Partial<Record<NotebookAction, true>>>({});
+  const pendingActionRef = useRef(new Set<NotebookAction>());
+  const [actionFailure, setActionFailure] = useState<NotebookActionFailure | null>(null);
   const capabilities =
     capabilitiesQuery.data?.data ?? DEFAULT_NOTEBOOK_CAPABILITIES;
   const sourceTypeOptions = useMemo(
@@ -209,6 +270,10 @@ export default function Notebook() {
   const backlinks = backlinksQuery.data?.data ?? [];
   const versions = versionsQuery.data?.data ?? [];
   const activeArtifact = activeArtifactQuery.data ?? null;
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
   useEffect(() => {
     if (!activeSessionId && sessions.length) {
       setActiveSessionId(sessions[0].id);
@@ -317,6 +382,47 @@ export default function Notebook() {
   );
   const canAddSource = Boolean(sourceTitle.trim() && hasSourcePayload);
 
+  function isActionPending(action: NotebookAction) {
+    return Boolean(pendingActions[action]);
+  }
+
+  async function runNotebookAction(
+    action: NotebookAction,
+    label: string,
+    work: () => Promise<void>,
+  ) {
+    // State alone cannot reject two clicks that arrive before React renders, so
+    // keep a synchronous latch as well as the visible pending state.
+    if (pendingActionRef.current.has(action)) return false;
+    pendingActionRef.current.add(action);
+    setPendingActions((current) => ({ ...current, [action]: true }));
+    setActionFailure(null);
+
+    try {
+      await work();
+      return true;
+    } catch (error) {
+      const message = notebookActionErrorMessage(error);
+      setActionFailure({
+        action,
+        label,
+        message,
+        retry: () => {
+          void runNotebookAction(action, label, work);
+        },
+      });
+      toast.error(`${label} failed. Retry when the local service is available.`);
+      return false;
+    } finally {
+      pendingActionRef.current.delete(action);
+      setPendingActions((current) => {
+        const next = { ...current };
+        delete next[action];
+        return next;
+      });
+    }
+  }
+
   async function refreshWorkbench() {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["notebook-sources"] }),
@@ -345,23 +451,25 @@ export default function Notebook() {
 
   async function addSource() {
     if (!canAddSource) return;
-    await api.importNotebookSource({
-      title: sourceTitle,
-      source_type: sourceType,
-      content: sourceContent,
-      url: sourceUrl,
-      file: sourceFile,
-      provider: "local",
-      refs: activeRefs,
-      official_firewall: sourceOfficialFirewall,
+    await runNotebookAction("source", "Adding source", async () => {
+      await api.importNotebookSource({
+        title: sourceTitle,
+        source_type: sourceType,
+        content: sourceContent,
+        url: sourceUrl,
+        file: sourceFile,
+        provider: "local",
+        refs: activeRefs,
+        official_firewall: sourceOfficialFirewall,
+      });
+      setSourceTitle("");
+      setSourceContent("");
+      setSourceUrl("");
+      setSourceFile(null);
+      setSourceOfficialFirewall(false);
+      await refreshWorkbench();
+      toast.success("Source added");
     });
-    setSourceTitle("");
-    setSourceContent("");
-    setSourceUrl("");
-    setSourceFile(null);
-    setSourceOfficialFirewall(false);
-    await refreshWorkbench();
-    toast.success("Source added");
   }
 
   function editNote(note: NotebookNote) {
@@ -383,100 +491,128 @@ export default function Notebook() {
 
   async function addNote() {
     if (!noteTitle.trim()) return;
-    if (editingNoteId) {
-      await api.updateNotebookNote(editingNoteId, {
-        title: noteTitle,
-        note_type: noteType,
-        content: noteContent,
-        citations: activeRefs,
-      });
-      toast.success("Note updated");
-    } else {
-      await api.createNotebookNote({
-        title: noteTitle,
-        note_type: noteType,
-        content: noteContent,
-        citations: activeRefs,
-      });
-      toast.success("Note saved");
-    }
-    resetNoteEditor();
-    await refreshWorkbench();
+    const editing = Boolean(editingNoteId);
+    await runNotebookAction("note", editing ? "Updating note" : "Saving note", async () => {
+      if (editingNoteId) {
+        await api.updateNotebookNote(editingNoteId, {
+          title: noteTitle,
+          note_type: noteType,
+          content: noteContent,
+          citations: activeRefs,
+        });
+        toast.success("Note updated");
+      } else {
+        await api.createNotebookNote({
+          title: noteTitle,
+          note_type: noteType,
+          content: noteContent,
+          citations: activeRefs,
+        });
+        toast.success("Note saved");
+      }
+      resetNoteEditor();
+      await refreshWorkbench();
+    });
   }
 
   async function ensureChatSession() {
     if (!sourceScope.ready) return null;
-    if (activeSessionId) return activeSessionId;
+    if (activeSessionIdRef.current) return activeSessionIdRef.current;
     const session = await api.createNotebookChatSession({
       title: "Notebook tutor",
       mode: contextMode,
       model: "local",
       context: { refs: activeRefs },
     });
+    activeSessionIdRef.current = session.id;
     setActiveSessionId(session.id);
     await qc.invalidateQueries({ queryKey: ["notebook-chat-sessions"] });
     return session.id;
   }
 
+  async function startNewChat() {
+    if (!sourceScope.ready) return;
+    await runNotebookAction("chat", "Starting tutor chat", async () => {
+      const session = await api.createNotebookChatSession({
+        title: "Notebook tutor",
+        mode: contextMode,
+        model: "local",
+        context: { refs: activeRefs },
+      });
+      activeSessionIdRef.current = session.id;
+      setActiveSessionId(session.id);
+      await refreshWorkbench();
+      toast.success("New cited tutor chat ready");
+    });
+  }
+
   async function sendMessage() {
     if (!chatInput.trim()) return;
-    const sessionId = await ensureChatSession();
-    if (!sessionId) return;
-    await api.sendNotebookChatMessage(sessionId, {
-      content: chatInput,
-      mode: contextMode,
-      refs: activeRefs,
+    await runNotebookAction("tutor", "Sending tutor message", async () => {
+      const sessionId = await ensureChatSession();
+      if (!sessionId) return;
+      await api.sendNotebookChatMessage(sessionId, {
+        content: chatInput,
+        mode: contextMode,
+        refs: activeRefs,
+      });
+      setChatInput("");
+      await refreshWorkbench();
+      await qc.invalidateQueries({ queryKey: ["notebook-chat-messages", sessionId] });
     });
-    setChatInput("");
-    await refreshWorkbench();
-    await qc.invalidateQueries({ queryKey: ["notebook-chat-messages", sessionId] });
   }
 
   async function runTransform() {
     if (!sourceScope.ready) return;
-    const result = await api.runTransformation({
-      template_key: template,
-      provider: "local",
-      model: "local",
-      input_refs: activeRefs,
+    await runNotebookAction("transform", "Transforming source", async () => {
+      const result = await api.runTransformation({
+        template_key: template,
+        provider: "local",
+        model: "local",
+        input_refs: activeRefs,
+      });
+      if (result.output_artifact_id) {
+        selectArtifact(
+          `artifact:${result.output_artifact_id}`,
+          humanize(result.template_key),
+          Boolean(result.firewall_decision?.official_firewall),
+        );
+      }
+      await refreshWorkbench();
+      toast.success(`${humanize(result.template_key)} complete`);
     });
-    if (result.output_artifact_id) {
-      selectArtifact(
-        `artifact:${result.output_artifact_id}`,
-        humanize(result.template_key),
-        Boolean(result.firewall_decision?.official_firewall),
-      );
-    }
-    await refreshWorkbench();
-    toast.success(`${humanize(result.template_key)} complete`);
   }
 
   async function makePodcast() {
     if (!sourceScope.ready) return;
-    const result = await api.createPodcast({
-      title: "Notebook study briefing",
-      episode_type: "weekly_briefing",
-      provider: "local",
-      source_refs: activeRefs,
-      generate_audio: true,
+    await runNotebookAction("briefing", "Creating briefing", async () => {
+      const result = await api.createPodcast({
+        title: "Notebook study briefing",
+        episode_type: "weekly_briefing",
+        provider: "local",
+        source_refs: activeRefs,
+        generate_audio: true,
+      });
+      await refreshWorkbench();
+      toast.success(
+        result.status === "audio_ready"
+          ? `${result.title} audio ready`
+          : `${result.title} transcript ready`,
+      );
     });
-    await refreshWorkbench();
-    toast.success(
-      result.status === "audio_ready"
-        ? `${result.title} audio ready`
-        : `${result.title} transcript ready`,
-    );
   }
 
   async function saveMessageAsNote(message: NotebookChatMessage) {
-    await api.createNotebookNote({
-      title: `Tutor turn ${new Date(message.created_at).toLocaleString()}`,
-      note_type: "captured",
-      content: message.content,
-      citations: message.citations,
+    await runNotebookAction("tutor-note", "Saving tutor turn", async () => {
+      await api.createNotebookNote({
+        title: `Tutor turn ${new Date(message.created_at).toLocaleString()}`,
+        note_type: "captured",
+        content: message.content,
+        citations: message.citations,
+      });
+      await refreshWorkbench();
+      toast.success("Tutor turn saved as a note");
     });
-    await refreshWorkbench();
-    toast.success("Tutor turn saved as a note");
   }
 
   async function savePodcastAsNote(episode: {
@@ -484,79 +620,87 @@ export default function Notebook() {
     transcript: string;
     source_refs: Array<string | Record<string, unknown>>;
   }) {
-    await api.createNotebookNote({
-      title: episode.title,
-      note_type: "transformed",
-      content: episode.transcript,
-      citations: episode.source_refs,
+    await runNotebookAction("briefing-note", "Saving briefing transcript", async () => {
+      await api.createNotebookNote({
+        title: episode.title,
+        note_type: "transformed",
+        content: episode.transcript,
+        citations: episode.source_refs,
+      });
+      await refreshWorkbench();
+      toast.success("Briefing transcript saved as a note");
     });
-    await refreshWorkbench();
-    toast.success("Briefing transcript saved as a note");
   }
 
   async function exportNotebook() {
-    const result = await api.exportNotebook({
-      title: activeCitation ? `${activeCitation.label} export` : "LSATLab Notebook Export",
-      format: exportFormat,
-      refs: activeRefs,
+    await runNotebookAction("export", "Preparing export", async () => {
+      const result = await api.exportNotebook({
+        title: activeCitation ? `${activeCitation.label} export` : "LSAT Library Export",
+        format: exportFormat,
+        refs: activeRefs,
+      });
+      const body =
+        typeof result.body === "string"
+          ? result.body
+          : JSON.stringify(result.body, null, 2);
+      const blob = new Blob([body], { type: result.content_type });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${
+        result.title.replace(/[^\w.-]+/g, "-").toLowerCase() || "notebook-export"
+      }.${extensionForExport(result.format)}`;
+      link.click();
+      URL.revokeObjectURL(url);
+      await refreshWorkbench();
+      toast.success(
+        result.redacted_count
+          ? `Export ready with ${result.redacted_count} redacted item${result.redacted_count === 1 ? "" : "s"}`
+          : "Export ready",
+      );
     });
-    const body =
-      typeof result.body === "string"
-        ? result.body
-        : JSON.stringify(result.body, null, 2);
-    const blob = new Blob([body], { type: result.content_type });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${
-      result.title.replace(/[^\w.-]+/g, "-").toLowerCase() || "notebook-export"
-    }.${extensionForExport(result.format)}`;
-    link.click();
-    URL.revokeObjectURL(url);
-    await refreshWorkbench();
-    toast.success(
-      result.redacted_count
-        ? `Export ready with ${result.redacted_count} redacted item${result.redacted_count === 1 ? "" : "s"}`
-        : "Export ready",
-    );
   }
 
   async function importBundle() {
     if (!bundleFile) return;
-    const content = await bundleFile.text();
-    const result = await api.importNotebookBundle({
-      title: bundleFile.name.replace(/\.[^.]+$/, "") || "Imported notebook bundle",
-      format: bundleFormat,
-      content,
-      provider: "local",
-      official_firewall: bundleOfficialFirewall,
-      tags: ["notebook-import"],
+    await runNotebookAction("bundle", "Importing bundle", async () => {
+      const content = await bundleFile.text();
+      const result = await api.importNotebookBundle({
+        title: bundleFile.name.replace(/\.[^.]+$/, "") || "Imported notebook bundle",
+        format: bundleFormat,
+        content,
+        provider: "local",
+        official_firewall: bundleOfficialFirewall,
+        tags: ["notebook-import"],
+      });
+      setBundleFile(null);
+      setBundleFormat("auto");
+      setBundleOfficialFirewall(false);
+      await refreshWorkbench();
+      toast.success(
+        `Imported ${result.created.sources} source${result.created.sources === 1 ? "" : "s"} and ${result.created.notes} note${result.created.notes === 1 ? "" : "s"}`,
+      );
     });
-    setBundleFile(null);
-    setBundleFormat("auto");
-    setBundleOfficialFirewall(false);
-    await refreshWorkbench();
-    toast.success(
-      `Imported ${result.created.sources} source${result.created.sources === 1 ? "" : "s"} and ${result.created.notes} note${result.created.notes === 1 ? "" : "s"}`,
-    );
   }
 
   async function updateInboxItem(
     id: number,
     patch: { status?: string; priority?: number },
   ) {
-    await api.updateKnowledgeInboxItem(id, patch);
-    await refreshWorkbench();
-    toast.success(patch.status === "resolved" ? "Inbox item resolved" : "Inbox item updated");
+    await runNotebookAction("inbox", "Updating inbox item", async () => {
+      await api.updateKnowledgeInboxItem(id, patch);
+      await refreshWorkbench();
+      toast.success(patch.status === "resolved" ? "Inbox item resolved" : "Inbox item updated");
+    });
   }
 
   return (
     <PageLayout
-      title="Notebook & Curriculum"
-      eyebrow={workspace.data?.data.key ?? "local workspace"}
+      title="LSAT Library"
+      eyebrow={workspace.data?.data.key ?? "specialized workspace"}
       icon={BookOpen}
       width="full"
-      description={workspace.data?.data.description || "Your LSAT source study space for curriculum notes, tutor chat, citations, and local-first transformations."}
+      description={workspace.data?.data.description || "This specialized LSAT workspace keeps your curriculum sources, notes, cited tutor chat, and local-first transformations together."}
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <SourceStatusPill status={workbenchStatus} official={Boolean(activeCitation?.official_firewall)} />
@@ -566,10 +710,11 @@ export default function Notebook() {
             onClick={runTransform}
             aria-label="Transform"
             aria-describedby={!sourceScope.ready ? "notebook-source-scope-help" : undefined}
-            disabled={!sourceScope.ready}
+            disabled={!sourceScope.ready || isActionPending("transform")}
+            loading={isActionPending("transform")}
           >
             <Sparkles className="h-4 w-4" aria-hidden />
-            <span className="hidden sm:inline">Transform</span>
+            <span className="hidden sm:inline">{isActionPending("transform") ? "Transforming…" : "Transform"}</span>
           </Button>
           <Button
             size="sm"
@@ -577,10 +722,11 @@ export default function Notebook() {
             onClick={makePodcast}
             aria-label="Briefing"
             aria-describedby={!sourceScope.ready ? "notebook-source-scope-help" : undefined}
-            disabled={!sourceScope.ready}
+            disabled={!sourceScope.ready || isActionPending("briefing")}
+            loading={isActionPending("briefing")}
           >
             <AudioLines className="h-4 w-4" aria-hidden />
-            <span className="hidden sm:inline">Briefing</span>
+            <span className="hidden sm:inline">{isActionPending("briefing") ? "Creating…" : "Briefing"}</span>
           </Button>
           <Select
             value={exportFormat}
@@ -602,9 +748,11 @@ export default function Notebook() {
             variant="outline"
             onClick={exportNotebook}
             aria-label="Export"
+            disabled={isActionPending("export")}
+            loading={isActionPending("export")}
           >
             <Download className="h-4 w-4" aria-hidden />
-            <span className="hidden sm:inline">Export</span>
+            <span className="hidden sm:inline">{isActionPending("export") ? "Preparing…" : "Export"}</span>
           </Button>
         </div>
       }
@@ -619,8 +767,28 @@ export default function Notebook() {
           }
         >
           {hasQueryError
-            ? "Notebook & Curriculum could not load current backend evidence. Actions may fail until the backend recovers."
-            : "Notebook & Curriculum is showing offline fallback data until the backend responds."}
+            ? "LSAT Library could not load current backend evidence. Actions may fail until the backend recovers."
+            : "LSAT Library is showing offline fallback data until the backend responds."}
+        </div>
+      )}
+      {actionFailure && (
+        <div
+          role="alert"
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/35 bg-destructive/10 p-3 text-sm text-destructive"
+        >
+          <p>
+            <span className="font-medium">{actionFailure.label} failed.</span>{" "}
+            {actionFailure.message}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={actionFailure.retry}
+            disabled={isActionPending(actionFailure.action)}
+            loading={isActionPending(actionFailure.action)}
+          >
+            {isActionPending(actionFailure.action) ? "Retrying…" : "Retry"}
+          </Button>
         </div>
       )}
       {!sourceScope.ready && (
@@ -689,20 +857,25 @@ export default function Notebook() {
                   </p>
                 )}
               </div>
-              <div className="flex items-center justify-between gap-3 rounded-md border bg-surface-1 px-3 py-2">
+              <div className="flex min-h-11 items-center justify-between gap-3 rounded-md border bg-surface-1 px-3 py-2">
                 <span className="flex min-w-0 items-center gap-2 text-sm">
                   <ShieldCheck className="h-4 w-4 shrink-0 text-primary" aria-hidden />
                   <span className="truncate">Official material</span>
                 </span>
-                <Switch
+                <OfficialMaterialSwitch
                   checked={sourceOfficialFirewall}
                   onCheckedChange={setSourceOfficialFirewall}
-                  aria-label="Treat source as official material"
+                  label="Treat source as official material"
                 />
               </div>
-              <Button className="w-full" onClick={addSource} disabled={!canAddSource}>
+              <Button
+                className="w-full"
+                onClick={addSource}
+                disabled={!canAddSource || isActionPending("source")}
+                loading={isActionPending("source")}
+              >
                 <Plus className="h-4 w-4" aria-hidden />
-                Add source
+                {isActionPending("source") ? "Adding source…" : "Add source"}
               </Button>
 
               <div className="space-y-2 rounded-md border bg-surface-1 p-3">
@@ -733,28 +906,34 @@ export default function Notebook() {
                   onChange={(event) => setBundleFile(event.target.files?.[0] ?? null)}
                   aria-label="Import notebook bundle file"
                 />
-                <div className="flex items-center justify-between gap-3">
-                  <span className="min-w-0 truncate text-xs text-muted-foreground">
+                <div className="space-y-2">
+                  <p
+                    className="min-w-0 truncate text-xs text-muted-foreground"
+                    aria-live="polite"
+                  >
                     {bundleFile ? bundleFile.name : "No file selected"}
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-                    <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
-                    Protect as official
-                  </span>
-                  <Switch
-                    checked={bundleOfficialFirewall}
-                    onCheckedChange={setBundleOfficialFirewall}
-                    aria-label="Protect imported bundle as official material"
-                  />
+                  </p>
+                  <div className="flex min-h-11 items-center justify-between gap-2 rounded-md border bg-surface-2 px-2 sm:min-h-0 sm:border-0 sm:bg-transparent sm:px-0">
+                    <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                      <ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      <span className="truncate">Official material</span>
+                    </span>
+                    <OfficialMaterialSwitch
+                      checked={bundleOfficialFirewall}
+                      onCheckedChange={setBundleOfficialFirewall}
+                      label="Treat imported bundle as official material"
+                    />
+                  </div>
                 </div>
                 <Button
                   className="w-full"
                   variant="outline"
                   onClick={importBundle}
-                  disabled={!bundleFile}
+                  disabled={!bundleFile || isActionPending("bundle")}
+                  loading={isActionPending("bundle")}
                 >
                   <UploadCloud className="h-4 w-4" aria-hidden />
-                  Import bundle
+                  {isActionPending("bundle") ? "Importing bundle…" : "Import bundle"}
                 </Button>
               </div>
 
@@ -792,7 +971,7 @@ export default function Notebook() {
           </Card>
         </aside>
 
-        <main className="min-w-0 space-y-4">
+        <section className="min-w-0 space-y-4">
           <Card>
             <CardContent className="space-y-4 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -866,9 +1045,15 @@ export default function Notebook() {
                               New note
                             </Button>
                           )}
-                          <Button onClick={addNote} disabled={!noteTitle.trim()}>
+                          <Button
+                            onClick={addNote}
+                            disabled={!noteTitle.trim() || isActionPending("note")}
+                            loading={isActionPending("note")}
+                          >
                             <FileText className="h-4 w-4" aria-hidden />
-                            {editingNoteId ? "Update note" : "Save note"}
+                            {isActionPending("note")
+                              ? editingNoteId ? "Updating note…" : "Saving note…"
+                              : editingNoteId ? "Update note" : "Save note"}
                           </Button>
                         </div>
                       </div>
@@ -911,21 +1096,13 @@ export default function Notebook() {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={!sourceScope.ready}
+                      disabled={!sourceScope.ready || isActionPending("chat")}
+                      loading={isActionPending("chat")}
                       aria-describedby={!sourceScope.ready ? "notebook-source-scope-help" : undefined}
-                      onClick={async () => {
-                        const session = await api.createNotebookChatSession({
-                          title: "Notebook tutor",
-                          mode: contextMode,
-                          model: "local",
-                          context: { refs: activeRefs },
-                        });
-                        setActiveSessionId(session.id);
-                        await refreshWorkbench();
-                      }}
+                      onClick={startNewChat}
                     >
                       <MessageSquareText className="h-4 w-4" aria-hidden />
-                      New chat
+                      {isActionPending("chat") ? "Starting…" : "New chat"}
                     </Button>
                   </div>
 
@@ -972,9 +1149,11 @@ export default function Notebook() {
                                 size="sm"
                                 variant="outline"
                                 onClick={() => saveMessageAsNote(message)}
+                                disabled={isActionPending("tutor-note")}
+                                loading={isActionPending("tutor-note")}
                               >
                                 <FileText className="h-4 w-4" aria-hidden />
-                                Save as note
+                                {isActionPending("tutor-note") ? "Saving…" : "Save as note"}
                               </Button>
                             </div>
                           )}
@@ -998,8 +1177,13 @@ export default function Notebook() {
                       aria-label="Notebook tutor message"
                       className="min-h-20"
                     />
-                    <Button className="sm:self-end" onClick={sendMessage} disabled={!sourceScope.ready || !chatInput.trim()}>
-                      Send
+                    <Button
+                      className="sm:self-end"
+                      onClick={sendMessage}
+                      disabled={!sourceScope.ready || !chatInput.trim() || isActionPending("tutor")}
+                      loading={isActionPending("tutor")}
+                    >
+                      {isActionPending("tutor") ? "Sending…" : "Send"}
                     </Button>
                   </div>
                 </TabsContent>
@@ -1157,9 +1341,11 @@ export default function Notebook() {
                         size="sm"
                         variant="outline"
                         onClick={() => savePodcastAsNote(episode)}
+                        disabled={isActionPending("briefing-note")}
+                        loading={isActionPending("briefing-note")}
                       >
                         <FileText className="h-4 w-4" aria-hidden />
-                        Save note
+                        {isActionPending("briefing-note") ? "Saving…" : "Save note"}
                       </Button>
                     </div>
                   </div>
@@ -1180,7 +1366,7 @@ export default function Notebook() {
               </div>
             </PageSection>
           </div>
-        </main>
+        </section>
 
         <aside className="space-y-4">
           <EvidencePanel

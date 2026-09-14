@@ -3,6 +3,7 @@ import { AlertTriangle } from "lucide-react";
 import { SystemNotice } from "@lsat/components/system-notice";
 import { unwrap, useErrorLog } from "@lsat/lib/hooks";
 import { detectErrorPatterns } from "@lsat/lib/errorPatterns";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 
 /**
  * R4-A9 — surfaces recurring error-log reasons.
@@ -11,12 +12,23 @@ import { detectErrorPatterns } from "@lsat/lib/errorPatterns";
  * deprecated `bg-warning/10` opacity idiom for the token-driven `warning` tone.
  */
 export function ErrorPatternBanner() {
-  const { data } = unwrap(useErrorLog());
+  const { data, usingSample, refetch } = unwrap(useErrorLog());
   const patterns = useMemo(
-    () => detectErrorPatterns(data ?? []),
-    [data],
+    () => (usingSample ? [] : detectErrorPatterns(data ?? [])),
+    [data, usingSample],
   );
 
+  // Fallback error-log rows are fixtures, not the learner's diagnosis. Keep
+  // them out of pattern detection and make the unavailable source actionable.
+  if (usingSample)
+    return (
+      <SampleDataRecovery
+        compact
+        section="Error patterns"
+        affectedSections={["Recurring misses", "Targeted remediation"]}
+        onRetry={refetch}
+      />
+    );
   if (!patterns.length) return null;
 
   const top = patterns[0];

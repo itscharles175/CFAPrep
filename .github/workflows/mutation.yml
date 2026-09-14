@@ -38,7 +38,7 @@ jobs:
         run: |
           python -m venv .venv-lsat
           .venv-lsat/bin/python -m pip install --upgrade pip wheel
-          .venv-lsat/bin/python -m pip install "services/lsat-backend"
+          .venv-lsat/bin/python -m pip install "services/lsat-backend[dev]"
 
       - name: Host mutation score gate
         run: npm run mutation:host

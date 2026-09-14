@@ -59,7 +59,7 @@ export function ImportJobHistory({
             description={error}
             icon={<AlertCircle className="h-5 w-5" aria-hidden />}
             action={
-              <Button variant="outline" size="sm" onClick={loadJobs}>
+              <Button variant="outline" size="sm" className="min-h-10" onClick={loadJobs}>
                 Retry
               </Button>
             }

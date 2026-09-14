@@ -101,11 +101,22 @@ describe('unifiedResume — per-source candidates', () => {
     expect(c).toMatchObject({
       kind: 'lsat-session',
       domain: 'lsat',
-      path: '/take/73',
+      path: '/lsat/take/73',
       at: '2026-06-15T10:00:00.000Z',
     });
     expect(c?.label).toMatch(/resume lsat section/i);
     expect(c?.detail).toBe('PT 73 · LR Section 1');
+  });
+
+  it('keeps an already app-rooted LSAT resume path stable', () => {
+    setResume({
+      kind: 'section',
+      label: 'PT 73 · LR Section 1',
+      path: '/lsat/take/73',
+      updatedAt: '2026-06-15T10:00:00.000Z',
+    });
+
+    expect(lsatResumeCandidate()?.path).toBe('/lsat/take/73');
   });
 
   it('LSAT candidate is null when there is no resume pointer', () => {
@@ -171,7 +182,7 @@ describe('unifiedResume — recency arbiter', () => {
     const r = await getUnifiedResume();
     expect(r?.domain).toBe('lsat');
     expect(r?.kind).toBe('lsat-session');
-    expect(r?.path).toBe('/exam/80');
+    expect(r?.path).toBe('/lsat/exam/80');
   });
 
   it('prefers any timestamped session over onboarding in the async path', async () => {

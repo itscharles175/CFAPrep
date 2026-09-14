@@ -55,6 +55,10 @@ describe("AppShell chromeless (K4-13)", () => {
     const scrollRegion = screen.getByRole("region", { name: "LSAT content" });
     expect(scrollRegion).toBeInTheDocument();
     expect(scrollRegion).toHaveAttribute("id", "main-content");
+    expect(scrollRegion).toHaveAttribute("tabindex", "0");
+    expect(scrollRegion).toHaveClass("lsat-main-scroll-area");
+    expect(scrollRegion).toHaveClass("min-h-0", "overflow-y-auto");
+    expect(scrollRegion).toHaveClass("focus-visible:ring-2");
 
     // NONE of the LSAT shell's own chrome is rendered — SharedLayout supplies it.
     expect(

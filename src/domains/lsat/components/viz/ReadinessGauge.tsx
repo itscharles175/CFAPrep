@@ -93,7 +93,7 @@ export function ReadinessGauge({
         </g>
       </svg>
       {(centerTop || centerBottom) && (
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center leading-none">
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 whitespace-nowrap text-center leading-none">
           {centerTop}
           {centerBottom}
         </div>

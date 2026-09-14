@@ -125,7 +125,7 @@ export function workspaceHref(workspace: StudyWorkspace, context: StudyContext):
   if (workspace === 'today') return '/';
   if (workspace === 'review') return context.domain === 'lsat' ? '/lsat/review' : '/review';
   if (workspace === 'progress') return context.domain === 'lsat' ? '/lsat/analytics' : '/analytics';
-  if (workspace === 'library') return '/vault';
+  if (workspace === 'library') return context.domain === 'lsat' ? '/lsat' : '/vault';
   if (workspace === 'practice') {
     if (context.domain === 'cfa') return `/cfa/${context.cfaLevel}/mock`;
     if (context.domain === 'lsat') return '/lsat/practice';

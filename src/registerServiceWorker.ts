@@ -1,9 +1,9 @@
 export function registerServiceWorker(): void {
-  // Automated browsers intentionally block service-worker registration. Skip
-  // it there so production QA observes the application console rather than a
-  // Playwright-generated warning; packaged and ordinary browser builds still
-  // register normally.
-  if (!('serviceWorker' in navigator) || !import.meta.env.PROD || navigator.webdriver) return;
+  // Most automated browser checks skip registration to avoid carrying cached
+  // assets between visual routes. The dedicated production PWA regression opts
+  // in explicitly so it exercises this same registration path.
+  const automationOptIn = new URLSearchParams(window.location.search).get('pwa-qa') === '1';
+  if (!('serviceWorker' in navigator) || !import.meta.env.PROD || (navigator.webdriver && !automationOptIn)) return;
 
   const register = () => {
     navigator.serviceWorker

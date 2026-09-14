@@ -683,6 +683,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   flex-basis: calc(100% - var(--sidebar-collapsed));
 }
 
+/* The unified host main owns vertical scrolling. LSAT pages keep their
+   content padding without introducing a second scroll container. */
+.main-content > .lsat-main-scroll-area {
+  min-height: 100%;
+  overflow: visible;
+}
+
 .page-container {
   padding: var(--space-8) var(--space-8) var(--space-12);
   max-width: 1320px;
@@ -3319,6 +3326,19 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   flex-shrink: 1;
 }
 
+/* Keep the current page label and its domain badge as separate visual atoms.
+   The breadcrumb may give up width, but the active-domain cue always keeps a
+   small breathing gap so long LSAT labels never paint into the badge. */
+.topbar-breadcrumb {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.topbar-domain {
+  margin-left: var(--space-1);
+}
+
 .nav-back-button {
   flex-shrink: 0;
 }
@@ -3336,6 +3356,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   padding: 0;
   list-style: none;
   min-width: 0;
+  overflow: hidden;
   font-size: var(--fs-sm);
 }
 
@@ -3386,6 +3407,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.lsat-dashboard-score-card .type-overline {
+  margin-bottom: var(--space-2);
 }
 
 .breadcrumb-separator {
@@ -3574,6 +3599,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   border-top: 1px solid var(--border);
   border-bottom: none;
   margin-top: var(--space-1);
+}
+
+.search-palette-domain-divider {
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+  margin-top: var(--space-1);
+  color: var(--text-muted);
 }
 
 .search-result:hover:not(:disabled),

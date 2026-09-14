@@ -344,7 +344,7 @@ export function ErrorState({
       </div>
       <div className="max-w-md text-sm text-muted-foreground">
         {offline
-          ? "Is the LSAT Lab backend running at the configured address? You can keep building UI; data will appear once it is up."
+          ? "The local LSAT service is unavailable. Your study data is safe; open Diagnostics to check the service and retry."
           : message}
       </div>
       {onRetry && (

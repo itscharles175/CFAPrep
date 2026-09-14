@@ -7,6 +7,25 @@ QA_DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/studyvault-vizier-lsat.XXXXXX")"
 BACKEND_PID=""
 PREVIEW_PID=""
 
+assert_port_free() {
+  local port="$1"
+  if /usr/bin/env python3 - "$port" <<'PY'
+import socket
+import sys
+
+port = int(sys.argv[1])
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+    probe.settimeout(0.2)
+    if probe.connect_ex(("127.0.0.1", port)) == 0:
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+  then
+    echo "StudyVault Vizier refused to reuse occupied port $port; stop the stale QA stack and retry." >&2
+    exit 1
+  fi
+}
+
 cleanup() {
   trap - EXIT INT TERM
   if [[ -n "$PREVIEW_PID" ]]; then
@@ -20,6 +39,12 @@ cleanup() {
   rm -rf "$QA_DATA_DIR"
 }
 trap cleanup EXIT INT TERM
+
+# A stale Vite preview can satisfy Vizier's baseUrl readiness probe even when a
+# new managed launch failed. Refuse that state before starting either child so
+# every capture is tied to the bundle built by the current check.
+assert_port_free 8100
+assert_port_free 5198
 
 (
   cd "$BACKEND"

@@ -60,6 +60,49 @@ describe('unified palette', () => {
     expect(within(listbox).getByText('SRS')).toBeInTheDocument();
   });
 
+  it('uses LSAT vocabulary for search scope and empty results', async () => {
+    renderTopBar();
+    const input = await openPalette();
+
+    expect(input).toHaveAttribute('placeholder', 'Search LSAT questions, passages, sources, and notes…');
+    await userEvent.type(input, 'no-such-lsat-destination');
+
+    const listbox = screen.getByRole('listbox', { name: /command palette results/i });
+    await waitFor(() => expect(within(listbox).getByText('No matching LSAT content or destinations.')).toBeInTheDocument());
+  });
+
+  it('opens the LSAT keyboard help event from the shared toolbar', async () => {
+    const onLsatHelp = vi.fn();
+    const onHostHelp = vi.fn();
+    window.addEventListener('lsatlab:keyboard-help', onLsatHelp);
+    window.addEventListener('quantvault:keyboard-help', onHostHelp);
+
+    renderTopBar('/lsat/practice');
+    await userEvent.click(screen.getByRole('button', { name: 'Open keyboard shortcuts help' }));
+
+    expect(onLsatHelp).toHaveBeenCalledOnce();
+    expect(onHostHelp).not.toHaveBeenCalled();
+    window.removeEventListener('lsatlab:keyboard-help', onLsatHelp);
+    window.removeEventListener('quantvault:keyboard-help', onHostHelp);
+  });
+
+  it('keeps the command list out of the tab order while supporting active-descendant navigation', async () => {
+    renderTopBar('/lsat/practice');
+    await openPalette();
+
+    expect(screen.getByRole('listbox', { name: /command palette results/i })).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('dismisses notifications when focus moves to content outside the popover', async () => {
+    renderTopBar('/lsat/practice');
+    const trigger = screen.getByRole('button', { name: 'Notifications' });
+    await userEvent.click(trigger);
+    expect(screen.getByRole('region', { name: 'Notifications' })).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('region', { name: 'Notifications' })).not.toBeInTheDocument();
+  });
+
   it('names the selected curriculum and scopes the palette copy on a neutral route', () => {
     localStorage.setItem(
       'studyvault:study-context:v1',
@@ -141,6 +184,18 @@ describe('unified palette', () => {
     expect(within(options[0]).getByText('Start Level III Mock')).toBeInTheDocument();
   });
 
+  it('shows the CFA scope when a cross-domain mock match is searched from LSAT', async () => {
+    renderTopBar('/lsat/practice');
+    const input = await openPalette();
+    await userEvent.type(input, 'mock');
+
+    const listbox = screen.getByRole('listbox', { name: /command palette results/i });
+    await waitFor(() => expect(within(listbox).getByText('Start Level I Mock')).toBeInTheDocument());
+    expect(within(listbox).getByText('CFA results')).toBeInTheDocument();
+    const mockOption = within(listbox).getByRole('option', { name: /Start Level I Mock/i });
+    expect(within(mockOption).getByText('CFA')).toBeInTheDocument();
+  });
+
   it('marks the measured 960px desktop range as compact before controls can overlap', () => {
     const originalMatchMedia = window.matchMedia;
     Object.defineProperty(window, 'matchMedia', {
@@ -154,7 +209,7 @@ describe('unified palette', () => {
 
     const { container, unmount } = renderTopBar('/lsat/practice');
     expect(container.querySelector('header.topbar')).toHaveClass('topbar--compact');
-    const input = screen.getByRole('combobox', { name: /search modules, formulas, topics with the command palette/i });
+    const input = screen.getByRole('combobox', { name: /search lsat questions, passages, sources, and notes with the command palette/i });
     expect(input).toHaveAttribute('placeholder', 'Search');
     expect(screen.getByLabelText('Control K')).toBeVisible();
     unmount();

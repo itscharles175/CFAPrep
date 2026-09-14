@@ -27,6 +27,7 @@ import { DiagnosticsPanel } from "@lsat/components/settings/diagnostics-panel";
 import { ModelRoutingCard } from "@lsat/components/settings/model-routing-card";
 import { AppearanceSettings } from "@lsat/components/settings/appearance-settings";
 import { cn } from "@lsat/lib/utils";
+import "./utility-pages.css";
 
 /** The in-page section map — drives both the anchor rail and the section order. */
 const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
@@ -46,25 +47,27 @@ export default function Settings() {
     setExporting(true);
     setExportMsg(null);
     try {
-      // The export endpoint is not in the contract; we approximate by bundling
-      // analytics + error log for a local download.
-      const [dash, errors] = await Promise.all([
-        api.dashboard().catch(() => null),
-        api.errorLog().catch(() => []),
-      ]);
+      // Use the unified, contract-backed export so the artifact carries the
+      // backend's schema/checksum/provenance metadata. This also preserves the
+      // official-content firewall instead of pretending analytics are a backup.
+      const backup = await api.exportBackup({
+        include_history: true,
+        notes: "Created from StudyVault LSAT Settings",
+      });
       const blob = new Blob(
-        [JSON.stringify({ dashboard: dash, error_log: errors }, null, 2)],
+        [JSON.stringify(backup, null, 2)],
         { type: "application/json" },
       );
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "lsatlab-export.json";
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `studyvault-lsat-backup-${date}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      setExportMsg("Exported to lsatlab-export.json");
+      setExportMsg(`Backup created: ${a.download}`);
     } catch {
-      setExportMsg("Export failed (backend offline).");
+      setExportMsg("Backup could not be created. The LSAT service may be offline; your existing data is unchanged. Retry when it is available.");
     } finally {
       setExporting(false);
     }
@@ -77,21 +80,22 @@ export default function Settings() {
     // host `PageHeader` (eyebrow → badge, description → subtitle) inside the host
     // `.page-container`, with the wide two-column settings layout preserved via an
     // inner `mx-auto max-w-6xl` wrapper. The `Sliders` page-icon has no slot on
-    // the host `PageHeader` and is dropped (parity with batch A/B). Every form,
-    // section, anchor rail, and the export handler are unchanged — page-frame skin
-    // only.
-    <div className="page-container">
+    // the host `PageHeader` and is dropped (parity with batch A/B). Forms and
+    // section anchors keep their existing layout while data export uses the
+    // unified contract-backed backup route below.
+    <div className="page-container lsat-utility-page lsat-settings-page">
       <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
         <PageHeader
           badge="Preferences"
           title="Settings"
           subtitle="Goals, appearance, input, AI, and your data — all on this device."
         />
-        <div className="grid gap-8 md:grid-cols-[12rem_minmax(0,1fr)]">
+        <div className="lsat-settings-grid grid gap-8 md:grid-cols-[12rem_minmax(0,1fr)]">
           <AnchorRail />
 
           <div className="min-w-0 space-y-10">
             <PageSection
+              className="lsat-utility-section"
               eyebrow="STUDY"
               title="Goals & timing"
               description="Drive the dashboard countdown, on-track band, and section timers."
@@ -111,6 +115,7 @@ export default function Settings() {
             </PageSection>
 
             <PageSection
+              className="lsat-utility-section"
               eyebrow="APPEARANCE"
               title="Theme & comfort"
               description="Tune how the app looks and how dense the data screens are."
@@ -131,6 +136,7 @@ export default function Settings() {
             </PageSection>
 
             <PageSection
+              className="lsat-utility-section"
               eyebrow="INPUT"
               title="Keyboard"
               description="Customize exam keys and review the global shortcuts."
@@ -141,6 +147,7 @@ export default function Settings() {
             </PageSection>
 
             <PageSection
+              className="lsat-utility-section"
               eyebrow="AI & SYSTEM"
               title="Model routing & diagnostics"
               description="Where realtime and batch AI run, plus local database health."
@@ -152,6 +159,7 @@ export default function Settings() {
             </PageSection>
 
             <PageSection
+              className="lsat-utility-section"
               eyebrow="DATA"
               title="Backup & export"
               description="Everything stays on this machine."
@@ -168,7 +176,7 @@ export default function Settings() {
                       {exporting ? "Exporting…" : "Export / backup data"}
                     </Button>
                     {exportMsg && (
-                      <p className="text-xs text-muted-foreground">{exportMsg}</p>
+                      <p aria-live="polite" className="text-xs text-muted-foreground">{exportMsg}</p>
                     )}
                   </CardContent>
                 </Card>
@@ -186,7 +194,7 @@ function AnchorRail() {
   return (
     <nav
       aria-label="Settings sections"
-      className="hidden md:block"
+      className="lsat-settings-rail hidden md:block"
     >
       <ul className="sticky top-4 space-y-0.5">
         {SECTIONS.map(({ id, label, icon }) => (

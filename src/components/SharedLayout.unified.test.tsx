@@ -15,8 +15,21 @@
  * under test.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+
+const studyContextMocks = vi.hoisted(() => ({
+  context: { domain: 'cfa', cfaLevel: 'level1', goal: 'balanced' },
+  updateStudyContext: vi.fn(),
+}));
+
+vi.mock('../lib/studyContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/studyContext')>();
+  return {
+    ...actual,
+    useStudyContext: () => [studyContextMocks.context, studyContextMocks.updateStudyContext],
+  };
+});
 
 // Stub the heavy data deps the chrome pulls in (kept identical in spirit to the
 // palette test). NOTE: we do NOT mock ThemeContext/ToastContext/OfflineContext —
@@ -43,6 +56,17 @@ afterEach(() => {
 });
 
 describe('SharedLayout (unified LSAT chrome)', () => {
+  it('synchronizes a cold full-bleed LSAT URL into the selected curriculum', async () => {
+    render(
+      <MemoryRouter initialEntries={['/lsat/take/section-1']}>
+        <SharedLayout><div>assessment surface</div></SharedLayout>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('assessment surface');
+    await waitFor(() => expect(studyContextMocks.updateStudyContext).toHaveBeenCalledWith({ domain: 'lsat' }));
+  });
+
   it('mounts the host chrome WITHOUT any ancestor provider (self-provides ThemeProvider et al.)', () => {
     // No <ThemeProvider> wrapper here — if SharedLayout did not self-provide the
     // host contexts, TopBar's useTheme() would throw and this render would fail.
@@ -73,4 +97,22 @@ describe('SharedLayout (unified LSAT chrome)', () => {
     );
     expect(document.body.getAttribute('data-domain')).toBe('lsat');
   });
+
+  it.each(['/lsat/take/section-1', '/lsat/exam/preptest-1', '/lsat/blind-review/session-1', '/lsat/popout/passage'])(
+    'leaves timed and popout routes full bleed without host chrome (%s)',
+    (path) => {
+      render(
+        <MemoryRouter initialEntries={[path]}>
+          <SharedLayout>
+            <div data-testid="full-bleed-content">assessment surface</div>
+          </SharedLayout>
+        </MemoryRouter>,
+      );
+
+      expect(screen.getByTestId('full-bleed-content')).toBeInTheDocument();
+      expect(screen.queryByRole('complementary', { name: /main navigation sidebar/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('navigation', { name: /study workspaces/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('main')).not.toBeInTheDocument();
+    },
+  );
 });

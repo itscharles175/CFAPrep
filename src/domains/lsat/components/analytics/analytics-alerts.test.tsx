@@ -54,4 +54,23 @@ describe("AnalyticsAlerts", () => {
     expect(mocks.warning).not.toHaveBeenCalled();
     expect(mocks.captureGapSnapshot).not.toHaveBeenCalled();
   });
+
+  it("moves compact warning toasts into the top band and gives both controls 40px targets", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    mocks.useBlindReviewGap.mockReturnValue(sampleQuery(false));
+    mocks.useRegressionAlerts.mockReturnValue(sampleQuery(false));
+
+    render(<AnalyticsAlerts />);
+
+    expect(mocks.warning).toHaveBeenCalledWith(
+      "Sample-backed regression",
+      expect.objectContaining({
+        position: "top-center",
+        classNames: expect.objectContaining({
+          closeButton: "min-h-10 min-w-10",
+          actionButton: "min-h-10 px-3",
+        }),
+      }),
+    );
+  });
 });

@@ -7,6 +7,10 @@ export interface VirtualListProps<T> {
   estimateSize: number;
   renderItem: (item: T, index: number) => ReactNode;
   className?: string;
+  /** Accessible name for the scroll region when it is independently scrollable. */
+  "aria-label"?: string;
+  /** Opt-in keyboard access for scroll regions that need arrow/page scrolling. */
+  tabIndex?: number;
   /** Max height of the scroll container (px). Defaults to 70vh. */
   maxHeight?: number | string;
   overscan?: number;
@@ -24,6 +28,8 @@ export function VirtualList<T>({
   estimateSize,
   renderItem,
   className,
+  "aria-label": ariaLabel,
+  tabIndex,
   maxHeight = "70vh",
   overscan = 6,
   getItemKey,
@@ -41,6 +47,8 @@ export function VirtualList<T>({
     <div
       ref={parentRef}
       className={cn("overflow-y-auto", className)}
+      aria-label={ariaLabel}
+      tabIndex={tabIndex}
       style={{ maxHeight }}
     >
       <div

@@ -74,7 +74,7 @@ export function buildWeeklyReportHtml(opts: {
     d.score_delta_30d == null
       ? "n/a"
       : `${d.score_delta_30d >= 0 ? "+" : ""}${d.score_delta_30d}`;
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>LSAT Lab Weekly Summary</title>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>StudyVault LSAT Weekly Summary</title>
 <style>body{font-family:system-ui,sans-serif;max-width:640px;margin:2rem auto;line-height:1.5;color:#111}
 h1{font-size:1.5rem}ul{padding-left:1.25rem}.muted{color:#555;font-size:0.875rem}</style></head><body>
 <h1>Weekly study summary</h1>
@@ -84,7 +84,7 @@ h1{font-size:1.5rem}ul{padding-left:1.25rem}.muted{color:#555;font-size:0.875rem
 ${gapNote}
 <h2>Weakest types</h2><ul>${weak || "<li>No attempts yet</li>"}</ul>
 ${trendTable}
-<p class="muted">LSAT Lab — local report</p></body></html>`;
+<p class="muted">StudyVault · LSAT · local report</p></body></html>`;
 }
 
 export function downloadWeeklyReport(html: string): void {

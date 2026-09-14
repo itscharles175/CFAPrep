@@ -6,10 +6,10 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Badge } from "@lsat/components/ui/badge";
-import { Input } from "@lsat/components/ui/input";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Icon } from "@lsat/components/ui/icon";
 import {
   Select,
@@ -17,7 +17,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@lsat/components/ui/select";
+} from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@lsat/components/ui/toggle-group";
 import { useAiHealth, useObservability, useSettings } from "@lsat/lib/hooks";
 import { usePregenerate, useSaveSettings } from "@lsat/lib/mutations";
@@ -391,12 +391,12 @@ export function ModelRolePicker({
   const useInput = !hasModels || customMode;
 
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="settings-model-role-row flex items-center justify-between gap-3">
       <span className={cn("text-muted-foreground", missing && "text-foreground")}>
         {label}
       </span>
       {useInput ? (
-        <div className="flex items-center gap-1.5">
+        <div className="settings-model-role-actions flex items-center gap-1.5">
           <Input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -427,6 +427,7 @@ export function ModelRolePicker({
           )}
         </div>
       ) : (
+        <div className="settings-model-role-actions">
         <Select
           value={value || undefined}
           disabled={pending}
@@ -452,6 +453,7 @@ export function ModelRolePicker({
             <SelectItem value={CUSTOM}>Type a custom id…</SelectItem>
           </SelectContent>
         </Select>
+        </div>
       )}
     </div>
   );

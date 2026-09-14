@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, HelpCircle, Menu, Monitor, Moon, RefreshCw, Search, Sun, WifiOff, X } from 'lucide-react';
 import { buildSearchItems } from '../../data/catalog';
@@ -160,10 +160,10 @@ function activeDomainForPath(pathname: string): PaletteDomain {
 // so it routes through the same goToResult() path (LSAT carries `external` so it
 // soft-navigates cross-domain via navigateDomain).
 const domainJumps: SearchResultItem[] = [
-  { id: 'jump:cfa', title: 'CFA Program', subtitle: 'Jump to the CFA dashboard', type: 'Jump', path: '/cfa', keywords: ['cfa', 'jump', 'domain'] },
-  { id: 'jump:quant', title: 'Quant Finance', subtitle: 'Jump to the Quant dashboard', type: 'Jump', path: '/quant', keywords: ['quant', 'jump', 'domain'] },
-  { id: 'jump:excel', title: 'Excel Training', subtitle: 'Jump to the Excel dashboard', type: 'Jump', path: '/excel', keywords: ['excel', 'jump', 'domain'] },
-  { id: 'jump:lsat', title: 'LSAT Lab', subtitle: 'Jump to the LSAT domain', type: 'Jump', path: '/lsat', keywords: ['lsat', 'jump', 'domain'], external: true },
+  { id: 'jump:cfa', title: 'CFA Program', subtitle: 'Open the CFA study track', type: 'Jump', path: '/cfa', keywords: ['cfa', 'jump', 'domain'] },
+  { id: 'jump:quant', title: 'Quant Finance', subtitle: 'Open the Quant study track', type: 'Jump', path: '/quant', keywords: ['quant', 'jump', 'domain'] },
+  { id: 'jump:excel', title: 'Excel Training', subtitle: 'Open the Excel study track', type: 'Jump', path: '/excel', keywords: ['excel', 'jump', 'domain'] },
+  { id: 'jump:lsat', title: 'LSAT', subtitle: 'Open the LSAT study track', type: 'Jump', path: '/lsat', keywords: ['lsat', 'jump', 'domain'], external: true },
 ];
 
 function normalizeSearch(value: string): string {
@@ -227,9 +227,14 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   const nativeShortcut = usesCommandKey();
   const selectedContextLabel = contextLabel(studyContext);
   const isNeutralRoute = activeDomain === 'general';
-  const searchPlaceholder = isNeutralRoute
-    ? neutralSearchPlaceholder(studyContext)
-    : 'Search modules, formulas, topics…';
+  const searchPlaceholder = activeDomain === 'lsat'
+    ? 'Search LSAT questions, passages, sources, and notes…'
+    : isNeutralRoute
+      ? neutralSearchPlaceholder(studyContext)
+      : 'Search modules, formulas, topics…';
+  const emptySearchMessage = activeDomain === 'lsat'
+    ? 'No matching LSAT content or destinations.'
+    : 'No matching modules or formulas.';
   // The toolbar has only about 430px after the persistent sidebar at the
   // native 960px minimum. A truncated sentence reads like a rendering fault;
   // use a purposeful compact label while retaining the complete scope for
@@ -260,6 +265,8 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLDivElement | null>(null);
   const paletteReturnFocusRef = useRef<HTMLElement | null>(null);
+  const notificationTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const notificationsRef = useRef<HTMLDivElement | null>(null);
   const searchItems = useMemo(() => buildSearchItems({ level3Pathway: activePathway }), [activePathway]);
   // K4-cmd — fold the LSAT route vocabulary + the LSAT palette's cmdk Recents
   // into the host palette so ONE ⌘K serves both planes. Test Mode (from the
@@ -433,10 +440,17 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
       if (!searchRef.current?.contains(event.target as Node)) setSearchOpen(false);
+      if (
+        notificationsOpen &&
+        !notificationTriggerRef.current?.contains(event.target as Node) &&
+        !notificationsRef.current?.contains(event.target as Node)
+      ) {
+        setNotificationsOpen(false);
+      }
     }
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, []);
+  }, [notificationsOpen]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -446,13 +460,16 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
       }
       if (event.key === 'Escape') {
         if (searchOpen) closePaletteAndRestoreFocus();
-        setNotificationsOpen(false);
+        if (notificationsOpen) {
+          setNotificationsOpen(false);
+          requestAnimationFrame(() => notificationTriggerRef.current?.focus());
+        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [closePaletteAndRestoreFocus, openPaletteFromShortcut, searchOpen]);
+  }, [closePaletteAndRestoreFocus, notificationsOpen, openPaletteFromShortcut, searchOpen]);
 
   useEffect(() => {
     function handleOnline() {
@@ -506,6 +523,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
     }
     setQuery('');
     setSearchOpen(false);
+    requestAnimationFrame(() => document.getElementById('main')?.focus({ preventScroll: true }));
   }
 
   // UB6: one result row, used by both the main result list and the
@@ -632,18 +650,53 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
         )}
 
         {searchOpen && (
-          <div id="command-palette-results" className="search-popover" role="listbox" aria-label="Command palette results">
+          <div
+            id="command-palette-results"
+            className="search-popover"
+            role="listbox"
+            aria-label="Command palette results"
+            tabIndex={-1}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setSelectedIndex((value) => Math.min(navigableResults.length - 1, value + 1));
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setSelectedIndex((value) => Math.max(0, value - 1));
+              }
+              if (event.key === 'Enter' && navigableResults[selectedIndex]) {
+                event.preventDefault();
+                goToResult(navigableResults[selectedIndex]);
+              }
+              if (event.key === 'Escape') closePaletteAndRestoreFocus();
+            }}
+          >
             <div className="search-palette-title">Command Palette</div>
             {results.length ? (
-              results.map((item, index) => renderResultRow(item, index))
+              results.map((item, index) => {
+                const domain = domainForResult(item);
+                const previousDomain = index > 0 ? domainForResult(results[index - 1]) : null;
+                const showDomainDivider = Boolean(normalizeSearch(query)) && (index === 0 || domain !== previousDomain);
+                return (
+                  <Fragment key={item.id}>
+                    {showDomainDivider && (
+                      <div className="search-palette-title search-palette-domain-divider">
+                        {domainBadgeLabel[domain]} results
+                      </div>
+                    )}
+                    {renderResultRow(item, index)}
+                  </Fragment>
+                );
+              })
             ) : (
-              <div className="search-empty">No matching modules or formulas.</div>
+              <div className="search-empty">{emptySearchMessage}</div>
             )}
             {/* UB6: jump-to-domain section — fast cross-domain hops, keyboard
                 cursor continues from the main results into these rows. */}
             {domainJumpRows.length > 0 && (
               <>
-                <div className="search-palette-title search-palette-subtitle">Jump to domain</div>
+                <div className="search-palette-title search-palette-subtitle">Other Study Tracks</div>
                 {domainJumpRows.map((item, index) => renderResultRow(item, results.length + index))}
               </>
             )}
@@ -688,6 +741,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
           </button>
         )}
         <button
+          ref={notificationTriggerRef}
           className="btn-icon btn-ghost"
           title="Notifications"
           aria-label={summary.upcomingReviews.length > 0 ? `Notifications, ${summary.upcomingReviews.length} upcoming reviews` : 'Notifications'}
@@ -701,7 +755,7 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
           className="btn-icon btn-ghost"
           title="Keyboard shortcuts (press ?)"
           aria-label="Open keyboard shortcuts help"
-          onClick={() => window.dispatchEvent(new Event(KEYBOARD_HELP_EVENT))}
+          onClick={() => window.dispatchEvent(new Event(activeDomain === 'lsat' ? 'lsatlab:keyboard-help' : KEYBOARD_HELP_EVENT))}
         >
           <HelpCircle size={18} />
         </button>
@@ -722,7 +776,12 @@ export default function TopBar({ collapsed, navOpen = false, onMenuToggle, lsatM
       </div>
 
       {notificationsOpen && (
-        <div className="notifications-popover">
+        <div
+          ref={notificationsRef}
+          className="notifications-popover"
+          role="region"
+          aria-label="Notifications"
+        >
           {/* UX-6: cross-domain notification surface — folds host due reviews +
               the LSAT sidecar's ability-ranked queue into one nudge. Self-wiring
               and fully degrading (a down sidecar quietly omits LSAT rows). */}

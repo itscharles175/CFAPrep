@@ -68,9 +68,9 @@ function lsatCrumbs(fullPath: string): Crumb[] {
   const appRelative = fullPath === LSAT_PREFIX ? '/' : fullPath.slice(LSAT_PREFIX.length) || '/';
   // Root of the LSAT plane — the shell shows no trail there.
   if (appRelative === '/' || appRelative === '') {
-    return [{ label: 'LSAT Lab' }];
+    return [{ label: 'LSAT', to: LSAT_PREFIX }, { label: 'Library' }];
   }
-  const trail: Crumb[] = [{ label: 'LSAT Lab', to: LSAT_PREFIX }];
+  const trail: Crumb[] = [{ label: 'LSAT', to: LSAT_PREFIX }];
   const parent = LSAT_PARENTS.find((p) => p.match(appRelative));
   if (parent && parent.to !== appRelative) {
     trail.push({ label: parent.label, to: `${LSAT_PREFIX}${parent.to}` });

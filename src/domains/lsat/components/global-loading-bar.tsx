@@ -3,11 +3,12 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { useLocation } from "react-router-dom";
-import { cn } from "@lsat/lib/utils";
+import { useReducedMotion } from "@/lib/reducedMotion";
 
 /**
  * R9 (docs/19 F7) — navigation-driven top progress bar.
@@ -56,6 +57,7 @@ export function SuspenseSignal() {
 
 export function GlobalLoadingBar({ children }: { children?: React.ReactNode }) {
   const { pathname } = useLocation();
+  const reduce = useReducedMotion();
   const [width, setWidth] = useState(0);
   const [visible, setVisible] = useState(false);
 
@@ -76,24 +78,35 @@ export function GlobalLoadingBar({ children }: { children?: React.ReactNode }) {
       window.clearTimeout(hideTimer.current);
       hideTimer.current = null;
     }
+    // The route-shaped skeleton and its polite busy state already communicate
+    // loading. Do not add a moving top-bar acknowledgment for reduced-motion
+    // users, especially during a timed assessment.
+    if (reduce) return;
     setVisible(true);
-    setWidth((w) => (w < 12 ? 12 : w));
+    // A second navigation can arrive while the previous completion is fading.
+    // Restart at an honest in-progress value rather than briefly showing 100%.
+    setWidth((w) => (w === 0 || w >= 100 ? 12 : Math.max(12, w)));
     if (trickle.current == null) {
       // Ease toward 90% on a decaying curve; never claim completion.
       trickle.current = window.setInterval(() => {
         setWidth((w) => (w >= 90 ? w : w + Math.max(0.6, (90 - w) * 0.12)));
       }, 120);
     }
-  }, []);
+  }, [reduce]);
 
   const finish = useCallback(() => {
     clearTrickle();
+    if (reduce) {
+      setVisible(false);
+      setWidth(0);
+      return;
+    }
     setWidth(100);
     hideTimer.current = window.setTimeout(() => {
       setVisible(false);
       setWidth(0);
-    }, 220);
-  }, []);
+    }, 140);
+  }, [reduce]);
 
   const begin = useCallback(() => {
     pending.current += 1;
@@ -111,6 +124,7 @@ export function GlobalLoadingBar({ children }: { children?: React.ReactNode }) {
   // there so `pending` can never get stranded above zero (which would freeze the
   // bar visible). `acked` guards against double-decrementing.
   useEffect(() => {
+    if (reduce) return undefined;
     begin();
     let acked = false;
     const ack = () => {
@@ -118,13 +132,21 @@ export function GlobalLoadingBar({ children }: { children?: React.ReactNode }) {
       acked = true;
       end();
     };
-    const t = window.setTimeout(ack, 160);
+    const t = window.setTimeout(ack, 120);
     return () => {
       window.clearTimeout(t);
       ack();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+  }, [pathname, reduce]);
+
+  useEffect(() => {
+    if (!reduce) return;
+    clearTrickle();
+    if (hideTimer.current != null) window.clearTimeout(hideTimer.current);
+    setVisible(false);
+    setWidth(0);
+  }, [reduce]);
 
   useEffect(
     () => () => {
@@ -134,25 +156,28 @@ export function GlobalLoadingBar({ children }: { children?: React.ReactNode }) {
     [],
   );
 
+  // The Suspense fallback needs a stable context value. Recreating it on each
+  // trickle frame re-runs SuspenseSignal's effect, which can keep a pending
+  // signal alive long after a route has painted.
+  const api = useMemo(() => ({ begin, end }), [begin, end]);
+
   return (
-    <LoadingBarCtx.Provider value={{ begin, end }}>
-      <div
-        role="progressbar"
-        aria-label="Page loading"
-        aria-hidden={!visible}
-        aria-valuenow={Math.round(width)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        className="pointer-events-none fixed left-0 right-0 top-0 z-[100] h-0.5 overflow-hidden"
-      >
+    <LoadingBarCtx.Provider value={api}>
+      {visible && (
         <div
-          className={cn(
-            "h-full bg-primary shadow-[0_0_8px_hsl(var(--primary)/0.6)] transition-[width] duration-200 ease-out",
-            !visible && "opacity-0",
-          )}
-          style={{ width: `${width}%` }}
-        />
-      </div>
+          role="progressbar"
+          aria-label="Page loading"
+          aria-valuenow={Math.round(width)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className="lsat-global-loading-bar pointer-events-none fixed left-0 right-0 top-[var(--topbar-height)] z-[var(--z-overlay)] h-0.5 overflow-hidden"
+        >
+          <div
+            className="h-full bg-primary shadow-[0_0_8px_hsl(var(--primary)/0.6)] transition-[width] duration-200 ease-out"
+            style={{ width: `${width}%` }}
+          />
+        </div>
+      )}
       {children}
     </LoadingBarCtx.Provider>
   );

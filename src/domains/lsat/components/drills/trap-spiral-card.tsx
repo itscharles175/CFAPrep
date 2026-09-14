@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Zap } from "lucide-react";
+import { RefreshCw, Zap } from "lucide-react";
 import { Button } from "@lsat/components/ui/button";
 import { Icon } from "@lsat/components/ui/icon";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@lsat/components/ui/card";
 import { Badge } from "@lsat/components/ui/badge";
 import { useByType, useTraps } from "@lsat/lib/hooks";
+import { SystemNotice } from "@lsat/components/system-notice";
 import { useCreateDrill } from "@lsat/lib/mutations";
 import { trapLabel } from "@lsat/lib/labels";
 import { pct } from "@lsat/lib/utils";
@@ -22,6 +23,30 @@ export function TrapSpiralCard() {
   const traps = useTraps(30);
   const byType = useByType("official", 30);
   const createDrill = useCreateDrill();
+
+  // Trap and weakness metrics are learner evidence. When either source is
+  // offline, keep the recommendation unavailable rather than displaying the
+  // local sample metrics as if they belonged to this learner.
+  if (traps.data?.usingSample || byType.data?.usingSample) {
+    return (
+      <SystemNotice
+        tone="warning"
+        icon={Zap}
+        title="Trap spiral is unavailable offline"
+        action={
+          <Button
+            variant="outline"
+            onClick={() => void Promise.all([traps.refetch(), byType.refetch()])}
+          >
+            <RefreshCw className="h-4 w-4" aria-hidden />
+            Retry
+          </Button>
+        }
+      >
+        StudyVault excludes sample data here. Weak-type recommendations and trap evidence will return when the LSAT backend is back.
+      </SystemNotice>
+    );
+  }
 
   const topTrap = traps.data?.data?.[0];
   const weak =

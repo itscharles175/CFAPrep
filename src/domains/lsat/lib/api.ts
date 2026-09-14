@@ -1284,7 +1284,7 @@ export const api = {
       '/api/generation/passages',
       { method: 'POST', json: { q_type: qType, count } },
     ),
-  passageJobProgress: (jobId: number) =>
+  passageJobProgress: (jobId: number, signal?: AbortSignal) =>
     request<{
       id?: number;
       status: string;
@@ -1292,7 +1292,17 @@ export const api = {
       accepted?: number;
       quarantined?: number;
       passage_first?: boolean;
-    }>(`/api/generation/passages/${jobId}/progress`),
+    }>(`/api/generation/passages/${jobId}/progress`, { signal }),
+  /** Cancel a passage-first job through the shared durable generation queue. */
+  cancelPassageJob: (jobId: number) =>
+    request<{ ok: boolean; status?: string; reason?: string }>(`/api/gen/jobs/${jobId}/cancel`, {
+      method: 'PATCH',
+    }),
+  /** Retry a failed passage-first job without creating a duplicate passage. */
+  retryPassageJob: (jobId: number) =>
+    request<{ ok: boolean; job_id?: number; status?: string; reason?: string }>(`/api/gen/jobs/${jobId}/retry`, {
+      method: 'PATCH',
+    }),
   passageQuestions: (passageId: number) =>
     request<{ passage_id: number; passage: string; topic: string; type: string; questions: unknown[]; count: number }>(
       `/api/generation/passages/${passageId}/questions`,

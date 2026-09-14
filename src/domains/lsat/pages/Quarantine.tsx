@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Icon } from "@lsat/components/ui/icon";
 import { EmptyState, ErrorState, SkeletonListPage } from "@lsat/components/states";
 import { IllustrationSrsCaughtUp } from "@lsat/components/illustrations";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 import { ShortcutBar } from "@lsat/components/bank/shortcut-bar";
 import { ProvenanceBadge } from "@lsat/components/bank/provenance-badge";
 import { ChoiceList } from "@lsat/components/question/choice-list";
@@ -19,6 +20,7 @@ import { qTypeLabel } from "@lsat/lib/labels";
 import { countLabel, pluralize } from "@lsat/lib/utils";
 import { STORAGE_KEYS, getJSON, setJSON } from "@lsat/lib/storage";
 import type { Question } from "@lsat/lib/types";
+import "./utility-pages.css";
 
 const K_DISMISSED = STORAGE_KEYS.quarantineDismissed;
 
@@ -120,7 +122,7 @@ export default function Quarantine() {
   }
   if (isError) {
     return (
-      <div className="page-container">
+      <div className="page-container lsat-utility-page lsat-quarantine-page">
         <PageHeader title="Generation quarantine" />
         <ErrorState error={error} onRetry={refetch} />
       </div>
@@ -128,7 +130,7 @@ export default function Quarantine() {
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container lsat-utility-page lsat-quarantine-page">
       <PageHeader
         title="Generation quarantine"
         subtitle="AI-generated questions pending review — batch approve or dismiss."
@@ -140,15 +142,21 @@ export default function Quarantine() {
           ) : undefined
         }
       />
-      {items.length === 0 ? (
+      {usingSample ? (
+        <SampleDataRecovery
+          section="Generation quarantine"
+          affectedSections={["Pending generated questions", "Approve and dismiss actions"]}
+          onRetry={refetch}
+        />
+      ) : items.length === 0 ? (
         <EmptyState
           illustration={<IllustrationSrsCaughtUp />}
           title="Quarantine empty"
-          description="No pending generated questions, or the backend is offline."
+          description="No generated questions are waiting for review."
         />
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border bg-surface-1 px-4 py-3">
+          <div className="quarantine-summary flex flex-wrap items-center justify-between gap-3 rounded-card border px-4 py-3">
             <div className="flex items-baseline gap-2">
               <span className="type-numeric text-2xl font-semibold text-foreground">
                 {items.length}
@@ -171,6 +179,9 @@ export default function Quarantine() {
           {/* 7.6 — virtualize: the pending-review queue can grow large after a
               big generation batch. */}
           <VirtualList
+            className="quarantine-list"
+            aria-label="Pending generated questions"
+            tabIndex={0}
             items={items}
             estimateSize={320}
             getItemKey={(q) => q.id}
@@ -220,7 +231,7 @@ function QuarantineCard({
   return (
     <Card
       interactive
-      className={selected ? "mb-4 ring-2 ring-primary" : "mb-4"}
+      className={`quarantine-card mb-4 ${selected ? "ring-2 ring-primary" : ""}`}
       onClick={onToggleSelect}
     >
       <CardHeader className="flex-row items-center justify-between space-y-0">
@@ -228,7 +239,7 @@ function QuarantineCard({
           {qTypeLabel(q.q_type)}
           <ProvenanceBadge source="ai_generated" />
         </CardTitle>
-        <div className="flex gap-2">
+        <div className="quarantine-card-actions flex flex-wrap gap-2">
           <Button
             size="sm"
             variant="outline"
@@ -268,7 +279,7 @@ function QuarantineCard({
                 size="xs"
               />
               <span className="type-overline">
-                Suggested: {t.suggested_verdict}
+                Suggested: {formatStatus(t.suggested_verdict)}
               </span>
               {t.reason ? (
                 <span className="font-normal opacity-90">· {t.reason}</span>
@@ -279,7 +290,7 @@ function QuarantineCard({
                 key={k}
                 className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-1 px-2 py-0.5 text-muted-foreground"
               >
-                <span>{k.replace(/_/g, " ")}</span>
+                <span>{formatStatus(k)}</span>
                 <span className="font-mono tabular-nums text-foreground">
                   {String(v)}
                 </span>
@@ -306,4 +317,10 @@ function QuarantineCard({
       </CardContent>
     </Card>
   );
+}
+
+function formatStatus(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

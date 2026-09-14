@@ -7,16 +7,36 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Input } from "@lsat/components/ui/input";
-import { Label } from "@lsat/components/ui/label";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { getGoal, getPlanBudgetMin, setGoal as persistGoal } from "@lsat/lib/prefs";
 import { useSaveStudyPlan } from "@lsat/lib/mutations";
 
+const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+function isCalendarDate(value: string): boolean {
+  if (!datePattern.test(value)) return false;
+
+  const [year, month, day] = value.split("-").map(Number);
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  return (
+    candidate.getUTCFullYear() === year &&
+    candidate.getUTCMonth() === month - 1 &&
+    candidate.getUTCDate() === day
+  );
+}
+
 const schema = z.object({
   targetScore: z.number().min(120).max(180),
-  examDate: z.string().optional(),
+  examDate: z
+    .string()
+    .trim()
+    .refine(
+      (value) => value === "" || isCalendarDate(value),
+      "Enter the exam date as YYYY-MM-DD.",
+    ),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -87,7 +107,26 @@ export function GoalSettingsForm() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="exam-date">Exam date</Label>
-              <Input id="exam-date" type="date" {...register("examDate")} />
+              <Input
+                id="exam-date"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="YYYY-MM-DD"
+                maxLength={10}
+                spellCheck={false}
+                aria-describedby={errors.examDate ? "exam-date-hint exam-date-error" : "exam-date-hint"}
+                aria-invalid={errors.examDate ? "true" : undefined}
+                {...register("examDate")}
+              />
+              <p id="exam-date-hint" className="text-xs text-muted-foreground">
+                Enter the date as YYYY-MM-DD, or leave it blank to hide the countdown.
+              </p>
+              {errors.examDate && (
+                <p id="exam-date-error" className="text-xs text-destructive" role="alert">
+                  {errors.examDate.message}
+                </p>
+              )}
             </div>
           </div>
           <Button type="submit" size="sm">

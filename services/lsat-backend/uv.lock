@@ -529,7 +529,7 @@ requires-dist = [
     { name = "fsrs", specifier = ">=6.3.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.152.9" },
-    { name = "mcp", specifier = ">=1.27.1" },
+    { name = "mcp", specifier = ">=1.27.1,<2" },
     { name = "pymupdf", specifier = ">=1.27.2.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.1.0" },

@@ -19,9 +19,25 @@
   },
   "routes": [
     "/",
+    "/lsat",
+    "/lsat/dashboard",
+    "/lsat/practice",
+    "/lsat/drills",
+    "/lsat/playlists",
+    "/lsat/preptests",
+    "/lsat/analytics",
+    "/lsat/tutor",
+    "/lsat/rc-lab",
+    "/lsat/bank",
+    "/lsat/import",
+    "/lsat/settings",
+    "/lsat/content-ops",
+    "/lsat/quarantine",
     "/cfa",
     "/cfa/level1/fixed-income/quiz",
     "/review",
+    "/lsat/review",
+    "/lsat/srs",
     "/progress/overview",
     "/library/tutor",
     "/vault"
@@ -60,7 +76,7 @@
   ],
   "matrix": {
     "engines": [{ "name": "chromium", "coverage": "required" }],
-    "maxSurfaces": 30
+    "maxSurfaces": 80
   },
   "vision": { "provider": "none" },
   "security": {

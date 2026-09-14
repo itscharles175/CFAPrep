@@ -1,6 +1,6 @@
 {
   "schemaVersion": "studyvault.bundle-baseline.v1",
-  "generatedAt": "2026-09-14T17:33:59.989Z",
+  "generatedAt": "2026-09-14T20:45:17.126Z",
   "growthPolicy": {
     "maxGzipGrowthRatio": 0.05,
     "maxGzipGrowthBytes": 10240
@@ -16,23 +16,30 @@
     "Analytics-[hash].js#1": {
       "assetKey": "Analytics-[hash].js#1",
       "stableAssetKey": "Analytics-[hash].js",
-      "assetName": "Analytics-BR_xDxn6.js",
-      "bytes": 63962,
-      "gzipBytes": 18163
+      "assetName": "Analytics-DqxvkSSL.js",
+      "bytes": 68524,
+      "gzipBytes": 19094
     },
     "Analytics-[hash].js#2": {
       "assetKey": "Analytics-[hash].js#2",
       "stableAssetKey": "Analytics-[hash].js",
-      "assetName": "Analytics-DAoJlNUv.js",
-      "bytes": 36305,
-      "gzipBytes": 10805
+      "assetName": "Analytics-3Ffqa7Xx.js",
+      "bytes": 36310,
+      "gzipBytes": 10810
     },
     "attemptIds-[hash].js": {
       "assetKey": "attemptIds-[hash].js",
       "stableAssetKey": "attemptIds-[hash].js",
-      "assetName": "attemptIds-_crLurSj.js",
-      "bytes": 44247,
-      "gzipBytes": 13178
+      "assetName": "attemptIds-CogtINH4.js",
+      "bytes": 47081,
+      "gzipBytes": 13835
+    },
+    "Bank-[hash].js": {
+      "assetKey": "Bank-[hash].js",
+      "stableAssetKey": "Bank-[hash].js",
+      "assetName": "Bank-CsRWsDxJ.js",
+      "bytes": 36709,
+      "gzipBytes": 10360
     },
     "cfa-level1-content-[hash].js": {
       "assetKey": "cfa-level1-content-[hash].js",
@@ -58,9 +65,9 @@
     "cfaLevel1Runtime-[hash].js": {
       "assetKey": "cfaLevel1Runtime-[hash].js",
       "stableAssetKey": "cfaLevel1Runtime-[hash].js",
-      "assetName": "cfaLevel1Runtime-DAZJumK1.js",
+      "assetName": "cfaLevel1Runtime-C28wnxkq.js",
       "bytes": 437,
-      "gzipBytes": 281
+      "gzipBytes": 280
     },
     "cfaLevel2Runtime-[hash].js": {
       "assetKey": "cfaLevel2Runtime-[hash].js",
@@ -72,14 +79,14 @@
     "CfaModule-[hash].js": {
       "assetKey": "CfaModule-[hash].js",
       "stableAssetKey": "CfaModule-[hash].js",
-      "assetName": "CfaModule-DVU2DQeO.js",
-      "bytes": 38189,
-      "gzipBytes": 11121
+      "assetName": "CfaModule-2SWaM0uu.js",
+      "bytes": 38205,
+      "gzipBytes": 11134
     },
     "cfaSummary-[hash].js": {
       "assetKey": "cfaSummary-[hash].js",
       "stableAssetKey": "cfaSummary-[hash].js",
-      "assetName": "cfaSummary-B6uflLYR.js",
+      "assetName": "cfaSummary-X0_eVvog.js",
       "bytes": 979,
       "gzipBytes": 471
     },
@@ -93,9 +100,9 @@
     "ContentOps-[hash].js": {
       "assetKey": "ContentOps-[hash].js",
       "stableAssetKey": "ContentOps-[hash].js",
-      "assetName": "ContentOps-DXPZN4kS.js",
-      "bytes": 74810,
-      "gzipBytes": 18227
+      "assetName": "ContentOps-0MhFRzBW.js",
+      "bytes": 74815,
+      "gzipBytes": 18228
     },
     "d3-core-vendor-[hash].js": {
       "assetKey": "d3-core-vendor-[hash].js",
@@ -107,9 +114,9 @@
     "Dashboard-[hash].js": {
       "assetKey": "Dashboard-[hash].js",
       "stableAssetKey": "Dashboard-[hash].js",
-      "assetName": "Dashboard-voNyh0oU.js",
+      "assetName": "Dashboard-r1lvfLWi.js",
       "bytes": 44374,
-      "gzipBytes": 13847
+      "gzipBytes": 13848
     },
     "geist-cyrillic-wght-normal-[hash].woff2": {
       "assetKey": "geist-cyrillic-wght-normal-[hash].woff2",
@@ -156,9 +163,9 @@
     "index-[hash].js": {
       "assetKey": "index-[hash].js",
       "stableAssetKey": "index-[hash].js",
-      "assetName": "index-qKVg5Qxq.js",
+      "assetName": "index-D4Yr4kdQ.js",
       "bytes": 23351,
-      "gzipBytes": 8256
+      "gzipBytes": 8259
     },
     "KaTeX_AMS-Regular-[hash].ttf": {
       "assetKey": "KaTeX_AMS-Regular-[hash].ttf",
@@ -471,16 +478,16 @@
     "LsatUnifiedMount-[hash].css": {
       "assetKey": "LsatUnifiedMount-[hash].css",
       "stableAssetKey": "LsatUnifiedMount-[hash].css",
-      "assetName": "LsatUnifiedMount-CUlDtLtN.css",
-      "bytes": 78789,
-      "gzipBytes": 15447
+      "assetName": "LsatUnifiedMount-CFDaTncL.css",
+      "bytes": 89238,
+      "gzipBytes": 17545
     },
     "LsatUnifiedMount-[hash].js": {
       "assetKey": "LsatUnifiedMount-[hash].js",
       "stableAssetKey": "LsatUnifiedMount-[hash].js",
-      "assetName": "LsatUnifiedMount-tUtdV_mz.js",
-      "bytes": 140302,
-      "gzipBytes": 43478
+      "assetName": "LsatUnifiedMount-D60nsO6c.js",
+      "bytes": 143337,
+      "gzipBytes": 44470
     },
     "lucide-vendor-[hash].js": {
       "assetKey": "lucide-vendor-[hash].js",
@@ -492,9 +499,9 @@
     "motivation-[hash].js": {
       "assetKey": "motivation-[hash].js",
       "stableAssetKey": "motivation-[hash].js",
-      "assetName": "motivation-ChWCZA9_.js",
-      "bytes": 41157,
-      "gzipBytes": 12099
+      "assetName": "motivation-lPc4FzTX.js",
+      "bytes": 41522,
+      "gzipBytes": 12163
     },
     "newsreader-latin-ext-wght-normal-C-3rgBeH.woff2": {
       "assetKey": "newsreader-latin-ext-wght-normal-C-3rgBeH.woff2",
@@ -520,9 +527,9 @@
     "OfflineContext-[hash].js": {
       "assetKey": "OfflineContext-[hash].js",
       "stableAssetKey": "OfflineContext-[hash].js",
-      "assetName": "OfflineContext-WjFYkgpp.js",
-      "bytes": 106033,
-      "gzipBytes": 33822
+      "assetName": "OfflineContext-CM71ltLx.js",
+      "bytes": 110197,
+      "gzipBytes": 34922
     },
     "ort-wasm-simd-threaded.jsep-[hash].wasm": {
       "assetKey": "ort-wasm-simd-threaded.jsep-[hash].wasm",
@@ -548,16 +555,16 @@
     "progressStore-[hash].js": {
       "assetKey": "progressStore-[hash].js",
       "stableAssetKey": "progressStore-[hash].js",
-      "assetName": "progressStore-CRvh1qOT.js",
+      "assetName": "progressStore-j1i04Tnb.js",
       "bytes": 78880,
-      "gzipBytes": 22505
+      "gzipBytes": 22504
     },
     "QuantModule-[hash].js": {
       "assetKey": "QuantModule-[hash].js",
       "stableAssetKey": "QuantModule-[hash].js",
-      "assetName": "QuantModule-BYsY6NTH.js",
-      "bytes": 16805,
-      "gzipBytes": 4595
+      "assetName": "QuantModule-iJpJRx_V.js",
+      "bytes": 16877,
+      "gzipBytes": 4634
     },
     "react-query-vendor-[hash].js": {
       "assetKey": "react-query-vendor-[hash].js",
@@ -583,16 +590,16 @@
     "Settings-[hash].js": {
       "assetKey": "Settings-[hash].js",
       "stableAssetKey": "Settings-[hash].js",
-      "assetName": "Settings-C4T9pnvc.js",
-      "bytes": 45238,
-      "gzipBytes": 11997
+      "assetName": "Settings-CmWe5ExV.js",
+      "bytes": 45709,
+      "gzipBytes": 12094
     },
     "storage-[hash].js": {
       "assetKey": "storage-[hash].js",
       "stableAssetKey": "storage-[hash].js",
-      "assetName": "storage-DvmufKDW.js",
+      "assetName": "storage-BLRP4IcY.js",
       "bytes": 125717,
-      "gzipBytes": 39801
+      "gzipBytes": 39802
     },
     "surrealDriver-[hash].js": {
       "assetKey": "surrealDriver-[hash].js",
@@ -604,9 +611,9 @@
     "SystemHealth-[hash].js": {
       "assetKey": "SystemHealth-[hash].js",
       "stableAssetKey": "SystemHealth-[hash].js",
-      "assetName": "SystemHealth-b1Oq1-ZZ.js",
-      "bytes": 157950,
-      "gzipBytes": 43752
+      "assetName": "SystemHealth-neApMGgK.js",
+      "bytes": 157987,
+      "gzipBytes": 43766
     },
     "transformers.web-[hash].js": {
       "assetKey": "transformers.web-[hash].js",
@@ -618,16 +625,16 @@
     "UnifiedRoot-[hash].css": {
       "assetKey": "UnifiedRoot-[hash].css",
       "stableAssetKey": "UnifiedRoot-[hash].css",
-      "assetName": "UnifiedRoot-BBr_oUVK.css",
-      "bytes": 132500,
-      "gzipBytes": 25330
+      "assetName": "UnifiedRoot-BtOwiKFG.css",
+      "bytes": 133441,
+      "gzipBytes": 25552
     },
     "UnifiedRoot-[hash].js": {
       "assetKey": "UnifiedRoot-[hash].js",
       "stableAssetKey": "UnifiedRoot-[hash].js",
-      "assetName": "UnifiedRoot-BHhN3aQE.js",
-      "bytes": 37680,
-      "gzipBytes": 12498
+      "assetName": "UnifiedRoot-CTbV9Xdv.js",
+      "bytes": 38540,
+      "gzipBytes": 12727
     },
     "visx-vendor-[hash].js": {
       "assetKey": "visx-vendor-[hash].js",

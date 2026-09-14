@@ -105,6 +105,35 @@ function windowsProcessSnapshot() {
   }
 }
 
+// Tracking needs one process identity, not a machine-wide CIM inventory. The
+// targeted query is substantially cheaper and lets the watchdog become ready
+// even when a loaded CI host cannot complete the full descendant snapshot.
+// Parentage and creation time are still captured before a PID is accepted.
+function windowsProcessIdentity(pid) {
+  if (process.platform !== 'win32' || !isAllowedPid(pid)) return null;
+  const command =
+    `$p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -OperationTimeoutSec 5; ` +
+    "if ($null -ne $p) { $p | Select-Object ProcessId,ParentProcessId,CreationDate | ConvertTo-Json -Compress }";
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
+    windowsHide: true,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 8000,
+    maxBuffer: 64 * 1024,
+  });
+  if (result.status !== 0 || !result.stdout.trim()) return null;
+  try {
+    const row = JSON.parse(result.stdout);
+    const identity = {
+      parentPid: Number(row.ParentProcessId),
+      creationDate: String(row.CreationDate ?? ''),
+    };
+    return Number.isSafeInteger(identity.parentPid) && identity.creationDate ? identity : null;
+  } catch {
+    return null;
+  }
+}
+
 // Deliberately called ONCE, from the reap: the CIM query was measured at
 // 3.8-7.5s, so running it on the 1500ms parent probe meant back-to-back queries
 // burning CPU for the life of the app. Descendants are only needed at reap time.
@@ -210,11 +239,12 @@ function respond(id, ok, callback) {
 function handleMessage(message) {
   if (message?.op === 'track' && isAllowedPid(message.pid)) {
     if (process.platform === 'win32') {
-      if (!isProcessAlive(message.pid)) {
+      const identity = windowsProcessIdentity(message.pid);
+      if (!identity || identity.parentPid !== parentPid || !isProcessAlive(message.pid)) {
         respond(message.id, false);
         return;
       }
-      ownedProcesses.set(message.pid, { startFingerprint: null, rootPid: message.pid });
+      ownedProcesses.set(message.pid, { startFingerprint: identity.creationDate, rootPid: message.pid });
     } else {
       const identity = posixProcessIdentity(message.pid);
       if (!identity || identity.parentPid !== parentPid || identity.startFingerprint === null) {
@@ -254,8 +284,6 @@ if (utilityParentPort) {
   process.stdin.on('end', reapAndExit);
   process.stdin.on('error', reapAndExit);
 }
-
-if (process.platform === 'win32' && windowsProcessSnapshot() === null) process.exit(3);
 
 // Parent death is already detected within ~100ms by the stdin 'close' above;
 // this poll is only the backstop for a parent that dies without the pipe

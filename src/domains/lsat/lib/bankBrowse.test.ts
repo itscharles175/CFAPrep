@@ -49,9 +49,10 @@ describe("loadBankQuestions", () => {
         items: [row(3)],
       });
 
-    const rows = await loadBankQuestions(true);
+    const result = await loadBankQuestions(true);
 
-    expect(rows.map((item) => item.id)).toEqual([1, 2, 3]);
+    expect(result).toMatchObject({ usingSample: false });
+    expect(result.items.map((item) => item.id)).toEqual([1, 2, 3]);
     expect(bankQuestionsMock).toHaveBeenNthCalledWith(1, {
       cursor: undefined,
       limit: 200,
@@ -60,5 +61,31 @@ describe("loadBankQuestions", () => {
       cursor: 2,
       limit: 200,
     });
+  });
+
+  it("keeps an available empty bank empty instead of substituting fixtures", async () => {
+    bankQuestionsMock.mockResolvedValueOnce({
+      total: 0,
+      offset: 0,
+      limit: 200,
+      cursor: null,
+      next_cursor: null,
+      has_more: false,
+      items: [],
+    });
+
+    await expect(loadBankQuestions(true)).resolves.toEqual({
+      items: [],
+      usingSample: false,
+    });
+  });
+
+  it("marks fixture rows as sample data when the backend is unreachable", async () => {
+    bankQuestionsMock.mockRejectedValueOnce(new TypeError("Network unavailable"));
+
+    const result = await loadBankQuestions(true);
+
+    expect(result.usingSample).toBe(true);
+    expect(result.items.length).toBeGreaterThan(0);
   });
 });

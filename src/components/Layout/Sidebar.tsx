@@ -26,6 +26,7 @@ import {
   stageStudyContextHandoff,
   stageStudyContextOrigin,
   type StudyDomain,
+  type StudyContext,
   useStudyContext,
   workspaceHref,
 } from '../../lib/studyContext';
@@ -96,6 +97,19 @@ const sidebarToolRouteIds = ['flashcards', 'mock', 'leeches', 'vault', 'tutor-wo
 const sidebarToolRoutes: AppRoute[] = appRoutes
   .filter((route) => sidebarToolRouteIds.includes(route.id))
   .sort((a, b) => sidebarToolRouteIds.indexOf(a.id) - sidebarToolRouteIds.indexOf(b.id));
+
+function mockRouteForContext(context: StudyContext): string {
+  if (context.domain === 'cfa') return `/cfa/${context.cfaLevel}/mock`;
+  return workspaceHref('practice', context);
+}
+
+function mockLabelForContext(context: StudyContext): string {
+  if (context.domain === 'cfa') {
+    const level = context.cfaLevel === 'level1' ? 'Level I' : context.cfaLevel === 'level2' ? 'Level II' : 'Level III';
+    return `CFA ${level} Mock Exam`;
+  }
+  return context.domain === 'lsat' ? 'LSAT Practice' : context.domain === 'quant' ? 'Quant Practice' : 'Excel Practice';
+}
 
 const primaryWorkspaces: Array<{ id: Exclude<StudyWorkspace, 'utility'>; label: string; icon: LucideIcon }> = [
   { id: 'today', label: 'Today', icon: Sun },
@@ -197,32 +211,23 @@ function LsatSidebarSection({
   onNavigate?: () => void;
 }) {
   const location = useLocation();
-  const isActive = location.pathname === '/lsat' || location.pathname.startsWith('/lsat/');
-  const [expanded, setExpanded] = useState(isActive);
+  const isLsatContext = location.pathname === '/lsat' || location.pathname.startsWith('/lsat/');
+  const [expanded, setExpanded] = useState(isLsatContext);
   const groups = buildLsatNavGroups(mode);
 
   return (
     <div className="sidebar-section">
-      <NavLink
-        to="/lsat"
-        className={`sidebar-link ${isActive ? 'active' : ''}`}
-        onClick={(e) => {
-          if (!collapsed) {
-            e.preventDefault();
-            setExpanded(!expanded);
-          } else {
-            onNavigate?.();
-          }
-        }}
+      <button
+        type="button"
+        className="sidebar-link sidebar-context-link"
+        aria-label={expanded ? 'Collapse specialized LSAT tools' : 'Expand specialized LSAT tools'}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
       >
-        <Scale />
-        {!collapsed && (
-          <>
-            <span style={{ flex: 1 }}>LSAT</span>
-            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </>
-        )}
-      </NavLink>
+          <Scale />
+          {!collapsed && <span style={{ flex: 1, textAlign: 'left' }}>Specialized tools</span>}
+          {!collapsed && (expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
+      </button>
 
       {!collapsed && expanded && (
         <div className="sidebar-sub-links">
@@ -235,6 +240,7 @@ function LsatSidebarSection({
                   <NavLink
                     key={item.id}
                     to={item.path}
+                    end={item.path === '/lsat'}
                     onClick={onNavigate}
                     className={({ isActive: active }) => `sidebar-link ${active ? 'active' : ''}`}
                   >
@@ -317,7 +323,11 @@ export default function Sidebar({
   const [studyContext, updateStudyContext] = useStudyContext();
   const [activePathway, setActivePathway] = useLevel3Pathway();
   const activeWorkspace = workspaceForLocation(location.pathname);
-  const pendingRouteSync = useRef<{ domain: StudyDomain; level?: typeof studyContext.cfaLevel } | null>(null);
+  const pendingRouteSync = useRef<{
+    domain: StudyDomain;
+    level?: typeof studyContext.cfaLevel;
+    sourcePathname: string;
+  } | null>(null);
   const [navigationAnnouncement, setNavigationAnnouncement] = useState(readContextNavigationAnnouncement);
 
   useEffect(() => {
@@ -327,7 +337,11 @@ export default function Sidebar({
     if (pending) {
       const pendingDomainReached = routeDomain === pending.domain;
       const pendingLevelReached = !pending.level || levelMatch === pending.level;
-      if (!pendingDomainReached || !pendingLevelReached) return;
+      // A context switch first updates local state, then navigates. Suppress
+      // only that one render of its original source route. Any other explicit
+      // domain route is history navigation and must immediately own the context.
+      const stillAtOriginalSource = location.pathname === pending.sourcePathname;
+      if (stillAtOriginalSource && (!pendingDomainReached || !pendingLevelReached)) return;
       pendingRouteSync.current = null;
     }
     const patch = {
@@ -346,13 +360,21 @@ export default function Sidebar({
   const selectedCfaTopics = selectedCfaLevel.topics.filter(
     (topic) => studyContext.cfaLevel !== 'level3' || level3TopicBelongsToPathway(topic.id, activePathway),
   );
+  const visibleSidebarToolRoutes = studyContext.domain === 'lsat'
+    ? sidebarToolRoutes.filter((route) => route.id === 'system' || route.id === 'preferences')
+    : sidebarToolRoutes;
 
   function focusMainAfterNavigation() {
     window.requestAnimationFrame(() => document.getElementById('main')?.focus({ preventScroll: true }));
   }
 
+  function handleRouteNavigation() {
+    onNavigate?.();
+    focusMainAfterNavigation();
+  }
+
   function announceAndNavigate(destination: string, message: string, pending: { domain: StudyDomain; level?: typeof studyContext.cfaLevel } | null) {
-    pendingRouteSync.current = pending;
+    pendingRouteSync.current = pending ? { ...pending, sourcePathname: location.pathname } : null;
     const sourceIsLsat = domainForLocation(location.pathname) === 'lsat';
     const destinationIsLsat = domainForLocation(destination) === 'lsat';
     if (sourceIsLsat !== destinationIsLsat) persistContextNavigationAnnouncement(message);
@@ -480,7 +502,7 @@ export default function Sidebar({
                 key={workspace.id}
                 to={workspaceHref(workspace.id, studyContext)}
                 end
-                onClick={onNavigate}
+                onClick={handleRouteNavigation}
                 aria-current={active ? 'page' : undefined}
                 className={`sidebar-link ${active ? 'active' : ''}`}
               >
@@ -490,6 +512,12 @@ export default function Sidebar({
             );
           })}
         </div>
+
+        {!collapsed && studyContext.domain === 'lsat' && (
+          <div className="sidebar-current-track">
+            <LsatSidebarSection mode={lsatMode} onNavigate={handleRouteNavigation} />
+          </div>
+        )}
 
         {!collapsed && (
           <details className="sidebar-more">
@@ -506,26 +534,26 @@ export default function Sidebar({
                   icon={GraduationCap}
                   basePath="/cfa"
                   items={selectedCfaTopics.map((topic) => ({ id: `${studyContext.cfaLevel}/${topic.id}`, label: topic.label, icon: cfaIconMap[topic.id] || BookOpen }))}
-                  onNavigate={onNavigate}
+                  onNavigate={handleRouteNavigation}
                 />
               )}
               {studyContext.domain === 'quant' && (
-                <SidebarSection label="Quant Finance" icon={BrainCircuit} basePath="/quant" items={quantModules.map((module) => ({ id: module.id, label: module.label, icon: quantIconMap[module.id] || Cpu }))} onNavigate={onNavigate} />
+                <SidebarSection label="Quant Finance" icon={BrainCircuit} basePath="/quant" items={quantModules.map((module) => ({ id: module.id, label: module.label, icon: quantIconMap[module.id] || Cpu }))} onNavigate={handleRouteNavigation} />
               )}
               {studyContext.domain === 'excel' && (
-                <SidebarSection label="Excel Training" icon={Table2} basePath="/excel" items={excelModules.map((module) => ({ id: module.id, label: module.label, icon: excelIconMap[module.id] || GitBranch }))} onNavigate={onNavigate} />
+                <SidebarSection label="Excel Training" icon={Table2} basePath="/excel" items={excelModules.map((module) => ({ id: module.id, label: module.label, icon: excelIconMap[module.id] || GitBranch }))} onNavigate={handleRouteNavigation} />
               )}
-              {studyContext.domain === 'lsat' && <LsatSidebarSection mode={lsatMode} onNavigate={onNavigate} />}
-
               <div className="sidebar-section-label">Specialized</div>
               <div className="sidebar-section sidebar-utility-links">
-                {sidebarToolRoutes.map((route) => {
+                {visibleSidebarToolRoutes.map((route) => {
                   const Icon = routeIconMap[route.iconKey] || Gauge;
-                  const path = route.id === 'mock' ? `/cfa/${studyContext.cfaLevel}/mock` : route.path;
+                  const isMock = route.id === 'mock';
+                  const path = isMock ? mockRouteForContext(studyContext) : route.path;
+                  const label = isMock ? mockLabelForContext(studyContext) : route.navLabel;
                   return (
-                    <NavLink key={route.id} to={path} onClick={onNavigate} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+                    <NavLink key={route.id} to={path} onClick={handleRouteNavigation} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
                       <Icon />
-                      <span>{route.navLabel}</span>
+                      <span>{label}</span>
                     </NavLink>
                   );
                 })}

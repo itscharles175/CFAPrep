@@ -81,7 +81,7 @@ export function SystemNotice({
           type="button"
           aria-label="Dismiss"
           onClick={onDismiss}
-          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="-my-2 -mr-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <X className="h-4 w-4" />
         </button>

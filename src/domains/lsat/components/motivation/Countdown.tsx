@@ -94,7 +94,7 @@ export function Countdown({
             Set a target score and test date — the most charged number in your
             prep — and the countdown lights up here.
           </p>
-          <Button size="sm" onClick={() => navigate("/settings")}>
+          <Button size="sm" className="min-h-10" onClick={() => navigate("/settings")}>
             Set a date
           </Button>
         </CardContent>

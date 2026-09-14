@@ -135,7 +135,7 @@ export function DockedCoach({ scope = "global" }: { scope?: string }) {
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="h-7 w-7"
+                    className="h-10 w-10"
                     disabled={refresh.isPending}
                     onClick={() => refresh.mutate()}
                     aria-label="Re-diagnose"
@@ -147,7 +147,7 @@ export function DockedCoach({ scope = "global" }: { scope?: string }) {
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-7 w-7"
+                  className="h-10 w-10"
                   onClick={() => setOpen(false)}
                   aria-label="Close coach"
                 >

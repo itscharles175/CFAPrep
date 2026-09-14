@@ -37,7 +37,7 @@ const Progress = React.forwardRef<
           className={cn(
             // R11 5.1 — one progress-fill tempo (was the un-tokened `transition-all`
             // default ~150ms); animate only the transform (compositor-only).
-            "h-full w-full flex-1 bg-primary transition-transform duration-500 ease-out",
+            "h-full w-full flex-1 bg-primary transition-transform duration-500 ease-out motion-reduce:transition-none",
             indicatorClassName,
           )}
           style={{ transform: `translateX(-${100 - numericValue}%)` }}

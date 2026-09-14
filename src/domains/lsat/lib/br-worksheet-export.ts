@@ -50,7 +50,7 @@ h2 { font-size: 12pt; margin-top: 1.5rem; border-bottom: 1px solid #ccc; padding
 <h1>Blind review worksheet</h1>
 <p class="muted">${escapeHtml(sessionLabel)} · ${items.length} questions · no answers</p>
 ${blocks}
-<p class="muted">LSAT Lab — print and work offline, then enter answers in the app.</p>
+<p class="muted">StudyVault · LSAT · print and work offline, then enter answers in the app.</p>
 </body></html>`;
 }
 

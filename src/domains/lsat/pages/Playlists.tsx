@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/Primitives";
 import { EmptyState, ErrorState, LoadingState } from "@lsat/components/states";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 import { IllustrationPlaylists } from "@lsat/components/illustrations";
 import { SmartSetBuilder } from "@lsat/components/playlists/smart-set-builder";
 import { PlaylistCard } from "@lsat/components/playlists/playlist-card";
@@ -28,6 +29,7 @@ import {
 } from "@lsat/lib/mutations";
 import { type WireCriteria } from "@lsat/lib/playlistCriteria";
 import type { PlaylistSummary } from "@lsat/lib/types";
+import "./selection-pages.css";
 
 /**
  * R7 6.1 — custom problem sets ("Smart sets"). Lists saved playlists with their
@@ -54,6 +56,7 @@ export default function Playlists() {
   const [playingId, setPlayingId] = useState<number | null>(null);
 
   const playlists = data?.data ?? [];
+  const playlistsAreSample = data?.usingSample ?? false;
 
   function play(p: PlaylistSummary) {
     setPlayingId(p.id);
@@ -109,7 +112,7 @@ export default function Playlists() {
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container lsat-selection-page lsat-playlists-page">
       <PageHeader
         badge="COLLECTIONS"
         title="Smart sets"
@@ -119,6 +122,7 @@ export default function Playlists() {
             <Button
               variant="outline"
               size="sm"
+              disabled={playlistsAreSample}
               onClick={() => {
                 setManualName("");
                 setManualOpen(true);
@@ -129,6 +133,7 @@ export default function Playlists() {
             </Button>
             <Button
               size="sm"
+              disabled={playlistsAreSample}
               onClick={() => {
                 setEditing(null);
                 setBuilderOpen(true);
@@ -140,7 +145,7 @@ export default function Playlists() {
           </div>
         }
       />
-      <div className="space-y-[calc(var(--space-unit)*4)]">
+      <div className="lsat-collections-stack">
       {(pacing.data?.data.budgets.length ?? 0) > 0 && (
         <PacingBudgetCard
           title="Per-type pacing budgets"
@@ -153,9 +158,17 @@ export default function Playlists() {
         <LoadingState label="Loading smart sets…" />
       ) : isError ? (
         <ErrorState error={error} onRetry={refetch} />
+      ) : playlistsAreSample ? (
+        <SampleDataRecovery
+          section="Smart sets"
+          compact
+          affectedSections={["Saved smart sets", "Playlist question counts"]}
+          onRetry={() => refetch().then(() => undefined)}
+        />
       ) : playlists.length === 0 ? (
         <EmptyState
           illustration={<IllustrationPlaylists />}
+          className="lsat-empty-state"
           title="No smart sets yet"
           description="Create a smart set from criteria (type, difficulty, outcome, flagged…) or a manual set, then play it like a drill."
           action={
@@ -171,7 +184,7 @@ export default function Playlists() {
           }
         />
       ) : (
-        <div className="space-y-3">
+        <div className="lsat-collections-list">
           {playlists.map((p) => (
             <PlaylistCard
               key={p.id}

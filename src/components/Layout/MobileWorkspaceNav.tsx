@@ -15,7 +15,7 @@ const workspaces: Array<{
   { id: 'review', label: 'Review', icon: RefreshCw },
 ];
 
-const moreItems = [
+const hostMoreItems = [
   { id: 'progress', label: 'Progress', icon: BarChart3 },
   { id: 'library', label: 'Library', icon: Library },
   { id: 'tutor', label: 'Tutor', icon: BookOpen, path: '/library/tutor' },
@@ -24,10 +24,19 @@ const moreItems = [
   { id: 'diagnostics', label: 'Diagnostics', icon: Activity, path: '/system' },
 ];
 
+const lsatMoreItems = [
+  { id: 'progress', label: 'Progress', icon: BarChart3, path: '/lsat/analytics' },
+  { id: 'library', label: 'Library', icon: Library, path: '/lsat' },
+  { id: 'tutor', label: 'Tutor', icon: BookOpen, path: '/lsat/tutor' },
+  { id: 'rc-lab', label: 'RC Lab', icon: BookOpen, path: '/lsat/rc-lab' },
+  { id: 'settings', label: 'Settings', icon: Settings, path: '/lsat/settings' },
+];
+
 export default function MobileWorkspaceNav() {
   const location = useLocation();
   const [studyContext] = useStudyContext();
   const activeWorkspace = workspaceForLocation(location.pathname);
+  const moreItems = studyContext.domain === 'lsat' ? lsatMoreItems : hostMoreItems;
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDetailsElement | null>(null);
   const summaryRef = useRef<HTMLElement | null>(null);

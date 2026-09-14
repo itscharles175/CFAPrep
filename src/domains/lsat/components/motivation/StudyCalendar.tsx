@@ -61,17 +61,18 @@ export function StudyCalendar({ activity }: StudyCalendarProps) {
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
+      <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0">
         <CardTitle>Study calendar</CardTitle>
-        <div className="flex rounded-md border p-0.5 text-xs">
+        <div className="flex shrink-0 rounded-md border p-0.5 text-xs" role="group" aria-label="Calendar metric">
           {(["questions", "minutes"] as Metric[]).map((m) => (
             <button
               key={m}
+              type="button"
               onClick={() => setMetric(m)}
               className={
                 metric === m
-                  ? "rounded-[4px] bg-primary px-2 py-1 font-medium capitalize text-primary-foreground"
-                  : "rounded-[4px] px-2 py-1 capitalize text-muted-foreground hover:text-foreground"
+                  ? "min-h-10 min-w-[4.5rem] rounded-[4px] bg-primary px-3 py-2 font-medium capitalize text-primary-foreground"
+                  : "min-h-10 min-w-[4.5rem] rounded-[4px] px-3 py-2 capitalize text-muted-foreground hover:text-foreground"
               }
             >
               {m}
@@ -80,7 +81,12 @@ export function StudyCalendar({ activity }: StudyCalendarProps) {
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-6 lg:flex-row lg:items-center">
-        <div className="min-w-0 flex-1 overflow-x-auto">
+        <div
+          className="min-w-0 flex-1 overflow-x-auto rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          tabIndex={0}
+          role="region"
+          aria-label="Study activity calendar. Scroll horizontally to review the last 26 weeks."
+        >
           <ContributionHeatmap data={heatmap} weeks={26} />
         </div>
 

@@ -1,20 +1,8 @@
 import { lazy, Suspense, useMemo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { m, useReducedMotion } from "motion/react";
-import {
-  ArrowDownRight,
-  ArrowRight,
-  ArrowUpRight,
-  BrainCircuit,
-  ShieldCheck,
-  Target,
-} from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, BrainCircuit, ShieldCheck, Target } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/Primitives";
@@ -22,7 +10,7 @@ import { Icon } from "@lsat/components/ui/icon";
 import { MotionCard } from "@lsat/components/ui/motion-card";
 import { ErrorState, Skeleton } from "@lsat/components/states";
 import { DashboardSkeleton } from "@lsat/components/dashboard/dashboard-skeleton";
-import { FirstLightConsole } from "@lsat/components/dashboard/first-light-console";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 // R10 A1.1 — StatNumber/TypeBadge come from their DIRECT paths, not the
 // `@/components/viz` barrel: the barrel co-exports the visx-heavy TrendChart,
 // so a barrel import would drag that chart vendor back onto first paint even
@@ -30,26 +18,15 @@ import { FirstLightConsole } from "@lsat/components/dashboard/first-light-consol
 import { StatNumber } from "@lsat/components/viz/StatNumber";
 import { TypeBadge } from "@lsat/components/viz/TypeBadge";
 import type { TrendDatum } from "@lsat/components/viz/TrendChart";
-import {
-  Countdown,
-  ReadinessCard,
-  RecommendationInbox,
-  SessionRecap,
-  StudyNudge,
-  TodayPlan,
-} from "@lsat/components/motivation";
+import { Countdown, ReadinessCard, RecommendationInbox, SessionRecap, StudyNudge, TodayPlan } from "@lsat/components/motivation";
 import { UtilityTradeoffChips } from "@lsat/components/motivation/utility-tradeoff-chips";
 
-const DashboardBelowFold = lazy(
-  () => import("@lsat/components/motivation/dashboard-below-fold"),
-);
+const DashboardBelowFold = lazy(() => import("@lsat/components/motivation/dashboard-below-fold"));
 
 // R10 A1.1 — the ~37KB visx chart vendor is split off the Dashboard's
 // first-paint critical path. The chart sits below the instrument cluster, so it
 // streams in behind a reserved-height fallback after the focal cards render.
-const TrendChart = lazy(() =>
-  import("@lsat/components/viz/TrendChart").then((m) => ({ default: m.TrendChart })),
-);
+const TrendChart = lazy(() => import("@lsat/components/viz/TrendChart").then((m) => ({ default: m.TrendChart })));
 import { NarrativeCards } from "@lsat/components/analytics/NarrativeCards";
 import { ResumeHero } from "@lsat/components/practice/resume-hero";
 import { AnalyticsAlerts } from "@lsat/components/analytics/analytics-alerts";
@@ -70,13 +47,7 @@ import {
   useSrsDue,
 } from "@lsat/lib/hooks";
 import { forecastConeBands } from "@lsat/lib/forecast";
-import type {
-  AdaptivityPlan,
-  ByTypeRow,
-  ReadinessStatus,
-  ReleaseTrustManifest,
-  SessionSummary,
-} from "@lsat/lib/types";
+import type { AdaptivityPlan, ByTypeRow, ReadinessStatus, ReleaseTrustManifest, SessionSummary } from "@lsat/lib/types";
 import { getGoal } from "@lsat/lib/prefs";
 import { liveReadinessStatus, readinessFromStatus } from "@lsat/lib/readiness";
 import { computeMilestoneUnlocks } from "@lsat/lib/milestones";
@@ -86,10 +57,8 @@ import { formatUtilityPriority, utilityTradeoffs } from "@lsat/lib/utilityTradeo
 import type { Trend } from "@lsat/lib/types";
 
 function TrendIcon({ trend }: { trend: Trend }) {
-  if (trend === "up")
-    return <Icon as={ArrowUpRight} size="sm" className="text-success" />;
-  if (trend === "down")
-    return <Icon as={ArrowDownRight} size="sm" className="text-destructive" />;
+  if (trend === "up") return <Icon as={ArrowUpRight} size="sm" className="text-success" />;
+  if (trend === "down") return <Icon as={ArrowDownRight} size="sm" className="text-destructive" />;
   return <Icon as={ArrowRight} size="sm" className="text-muted-foreground" />;
 }
 
@@ -104,15 +73,7 @@ function TrendIcon({ trend }: { trend: Trend }) {
  * intentional skin delta. Behaviour is unchanged; this is the page-frame skin
  * only.
  */
-function DashboardShell({
-  title,
-  actions,
-  children,
-}: {
-  title: string;
-  actions?: ReactNode;
-  children: ReactNode;
-}) {
+function DashboardShell({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
   return (
     <div className="page-container">
       <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
@@ -148,7 +109,7 @@ export default function Dashboard() {
 
   if (isLoading) {
     return (
-      <DashboardShell title="Welcome back">
+      <DashboardShell title="LSAT Curriculum">
         <div role="status" aria-busy="true" aria-label="Loading your dashboard">
           <DashboardSkeleton />
         </div>
@@ -168,20 +129,32 @@ export default function Dashboard() {
   const predictedScore = d.predicted_score;
   const safeDelta = delta ?? 0;
 
-  // R9 F3.2 — honest first-run predicate. The fabrication problem only exists
-  // when the screen is on SAMPLE data (the `usingSample` envelope): the offline
-  // fallback also serves sample *sessions*, so a raw session COUNT is sample
-  // noise, not a real signal. So "genuinely new" = the dashboard AND the
-  // sessions query are both on sample data AND no real goal was ever set. When
-  // a real backend is reachable, its (possibly empty) numbers are honest and we
-  // show the normal Console. No backend — derived purely from existing flags.
-  const sessionsAreSample = sessions.data?.usingSample ?? false;
-  const isBrandNew = data.usingSample && sessionsAreSample && goal == null;
-
-  if (isBrandNew) {
+  // The fallback dashboard is a fixture, never study evidence. Keep the saved
+  // local goal visible because it is real user data, but withhold every score,
+  // review, recommendation, and mutation until the backend reconnects.
+  if (data.usingSample) {
     return (
-      <DashboardShell title="First light">
-        <FirstLightConsole />
+      <DashboardShell title="LSAT Curriculum">
+        <div className="space-y-4">
+          <SampleDataRecovery
+            section="LSAT dashboard"
+            affectedSections={["Scores", "Review load", "Recommendations", "Study history"]}
+            onRetry={async () => {
+              await refetch();
+            }}
+          />
+          {goal && (
+            <Card>
+              <CardContent className="space-y-1 p-[var(--card-pad)]">
+                <p className="text-sm font-medium">Saved LSAT target</p>
+                <p className="text-sm text-muted-foreground">
+                  {goal.targetScore}
+                  {goal.examDate ? ` · ${goal.examDate}` : ""}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       </DashboardShell>
     );
   }
@@ -219,22 +192,17 @@ export default function Dashboard() {
     date: p.date,
     score: p.score,
   }));
-  const fallbackProjectionScore =
-    predictedScore != null
-      ? predictedScore + Math.max(0, safeDelta)
-      : trendSeries.at(-1)?.score;
+  const fallbackProjectionScore = predictedScore != null ? predictedScore + Math.max(0, safeDelta) : trendSeries.at(-1)?.score;
   // R9 — earliest practice date (first trend point) feeds Countdown's
   // prep-window elapsed arc. Real data already on the dashboard; no new query.
   const prepStartDate = d.trend[0]?.date;
 
   // Most-recent finished section for the recap.
-  const recentSession = (sessions.data?.data ?? []).find(
-    (s) => s.scaled_score != null,
-  );
+  const recentSession = (sessions.data?.data ?? []).find((s) => s.scaled_score != null);
 
   return (
     <DashboardShell
-      title="Welcome back"
+      title="LSAT Curriculum"
       actions={
         data.usingSample ? (
           <Badge variant="outline" className="text-muted-foreground">
@@ -244,263 +212,185 @@ export default function Dashboard() {
       }
     >
       <AnalyticsAlerts />
-    <m.div
-      variants={reduce ? undefined : stagger}
-      initial={reduce ? false : "hidden"}
-      animate="show"
-      className="space-y-6 pb-12"
-    >
-      {/* R7 6.4 — resume-first hero: lead with action at the very top. */}
-      <m.div variants={reduce ? undefined : fadeUp}>
-        <ResumeHero />
-      </m.div>
+      <m.div variants={reduce ? undefined : stagger} initial={reduce ? false : "hidden"} animate="show" className="space-y-6 pb-12">
+        {/* R7 6.4 — resume-first hero: lead with action at the very top. */}
+        <m.div variants={reduce ? undefined : fadeUp}>
+          <ResumeHero />
+        </m.div>
 
-      {/* R9 — the focal instrument cluster: predicted score + countdown +
+        {/* R9 — the focal instrument cluster: predicted score + countdown +
           readiness, promoted above the fold and read as one wall. The trend +
           the rest of the periphery follow below. */}
-      <m.div
-        variants={reduce ? undefined : fadeUp}
-        className="grid gap-6 lg:grid-cols-3"
-      >
-        {/* Predicted score — the primary engraved figure. */}
-        <Card className="flex flex-col justify-center lg:col-span-1">
-          <CardContent className="p-[var(--card-pad)]">
-            <StatNumber
-              label="Predicted score"
-              value={predictedScore}
-              delta={delta}
-              deltaSuffix=" (30d)"
-              size="stat-xl"
-              voice="numeric"
-              aurora
-              subline={heroCounsel}
+        <m.div variants={reduce ? undefined : fadeUp} className="grid gap-6 lg:grid-cols-3">
+          {/* Predicted score — the primary engraved figure. */}
+          <Card className="lsat-dashboard-score-card flex flex-col justify-center lg:col-span-1">
+            <CardContent className="p-[var(--card-pad)]">
+              <StatNumber label="Predicted score" value={predictedScore} delta={delta} deltaSuffix=" (30d)" size="stat-xl" voice="numeric" aurora subline={heroCounsel} />
+            </CardContent>
+          </Card>
+
+          {/* Countdown — co-equal emotional focal instrument. */}
+          <div className="lg:col-span-1">
+            <Countdown goal={goal} predictedScore={predictedScore} delta30d={delta} prepStartDate={prepStartDate} />
+          </div>
+
+          {/* Readiness — the third instrument in the cluster. */}
+          <div className="lg:col-span-1">
+            <ReadinessCard
+              streakDays={d.streak_days}
+              srsDue={srsDue}
+              timedAccuracy={timedAccuracy}
+              brGap={brGap}
+              sessionsLast7d={sessions7d}
+              predictedScore={predictedScore ?? undefined}
+              readiness={backendReadiness}
             />
-          </CardContent>
-        </Card>
+          </div>
+        </m.div>
 
-        {/* Countdown — co-equal emotional focal instrument. */}
-        <div className="lg:col-span-1">
-          <Countdown
-            goal={goal}
-            predictedScore={predictedScore}
-            delta30d={delta}
-            prepStartDate={prepStartDate}
-          />
-        </div>
-
-        {/* Readiness — the third instrument in the cluster. */}
-        <div className="lg:col-span-1">
-          <ReadinessCard
-            streakDays={d.streak_days}
-            srsDue={srsDue}
-            timedAccuracy={timedAccuracy}
-            brGap={brGap}
-            sessionsLast7d={sessions7d}
-            predictedScore={predictedScore ?? undefined}
-            readiness={backendReadiness}
-          />
-        </div>
-      </m.div>
-
-      {/* Score trend — the wide chart sits just under the instrument cluster. */}
-      <m.div variants={reduce ? undefined : fadeUp}>
-        <Card>
-          <CardHeader>
-            <CardTitle voice="display">Score trend</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {/* R10 A1.1 — Suspense boundary for the lazy()'d chart vendor. The
+        {/* Score trend — the wide chart sits just under the instrument cluster. */}
+        <m.div variants={reduce ? undefined : fadeUp}>
+          <Card>
+            <CardHeader>
+              <CardTitle voice="display">Score trend</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* R10 A1.1 — Suspense boundary for the lazy()'d chart vendor. The
                 fallback reserves the chart's height so deferring it costs no
                 layout shift when it streams in. */}
-            <Suspense
-              fallback={<div className="h-[240px]" aria-hidden />}
-            >
-              <TrendChart
-                series={trendSeries}
-                goal={
-                  goal?.bandLow != null && goal?.bandHigh != null
-                    ? [goal.bandLow, goal.bandHigh]
-                    : goal
-                      ? [goal.targetScore - 2, goal.targetScore + 2]
+              <Suspense fallback={<div className="h-[240px]" aria-hidden />}>
+                <TrendChart
+                  series={trendSeries}
+                  goal={goal?.bandLow != null && goal?.bandHigh != null ? [goal.bandLow, goal.bandHigh] : goal ? [goal.targetScore - 2, goal.targetScore + 2] : undefined}
+                  examDate={goal?.examDate || undefined}
+                  projection={
+                    goal?.examDate && fallbackProjectionScore != null
+                      ? {
+                          // B1/B2 — server forecast with nested variance cones;
+                          // predicted_score + recent delta is the offline fallback.
+                          score: fc?.projected_score ?? fallbackProjectionScore,
+                          bands: forecastConeBands(fc),
+                        }
                       : undefined
-                }
-                examDate={goal?.examDate || undefined}
-                projection={
-                  goal?.examDate && fallbackProjectionScore != null
-                    ? {
-                        // B1/B2 — server forecast with nested variance cones;
-                        // predicted_score + recent delta is the offline fallback.
-                        score: fc?.projected_score ?? fallbackProjectionScore,
-                        bands: forecastConeBands(fc),
-                      }
-                    : undefined
-                }
-                height={240}
-              />
-            </Suspense>
-          </CardContent>
-        </Card>
-      </m.div>
+                  }
+                  height={240}
+                />
+              </Suspense>
+            </CardContent>
+          </Card>
+        </m.div>
 
-      <m.div variants={reduce ? undefined : fadeUp}>
-        <StudyNudge sessions={sessions.data?.data ?? []} />
-      </m.div>
-
-      <m.div variants={reduce ? undefined : fadeUp}>
-        <VNextCockpit
-          plan={vnextPlan.data?.data}
-          readiness={backendReadiness ?? undefined}
-          contentScore={contentHealth.data?.data.score}
-          contentWarnings={contentHealth.data?.data.warnings ?? []}
-          trust={releaseTrust.data?.data}
-          onStart={() => navigate("/drills")}
-        />
-      </m.div>
-
-      <m.div variants={reduce ? undefined : fadeUp}>
-        <NarrativeCards
-          fallback={{ text: coachText, recommendation: coachRec }}
-          trend={trendSeries.map((p) => p.score)}
-        />
-      </m.div>
-
-      <m.div variants={reduce ? undefined : fadeUp}>
-        <RecommendationInbox />
-      </m.div>
-
-      {/* Session recap (most recent finished section) */}
-      {recentSession && (
         <m.div variants={reduce ? undefined : fadeUp}>
-          <RecentRecap
-            sessionId={recentSession.id}
-            summaryScore={recentSession.scaled_score}
-            streakDays={d.streak_days}
+          <StudyNudge sessions={sessions.data?.data ?? []} />
+        </m.div>
+
+        <m.div variants={reduce ? undefined : fadeUp}>
+          <VNextCockpit
+            plan={vnextPlan.data?.data}
+            readiness={backendReadiness ?? undefined}
+            contentScore={contentHealth.data?.data.score}
+            contentWarnings={contentHealth.data?.data.warnings ?? []}
+            trust={releaseTrust.data?.data}
+            onStart={() => navigate("/drills")}
           />
         </m.div>
-      )}
 
-      <Suspense fallback={<Skeleton className="h-64 w-full" />}>
-        <DashboardBelowFold
-          activity={activity.data?.data ?? []}
-          byType={byType.data?.data ?? []}
-          sessions={sessions.data?.data ?? []}
-          predictedScore={predictedScore}
-          milestoneUnlocks={computeMilestoneUnlocks({
-            sessions: sessions.data?.data ?? [],
-            byType: byType.data?.data ?? [],
-            predictedScore,
-            streakDays: d.streak_days,
-          })}
-          reduceMotion={!!reduce}
-        />
-      </Suspense>
+        <m.div variants={reduce ? undefined : fadeUp}>
+          <NarrativeCards fallback={{ text: coachText, recommendation: coachRec }} trend={trendSeries.map((p) => p.score)} />
+        </m.div>
 
-      <m.div variants={reduce ? undefined : fadeUp} className="flex justify-end">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            const html = buildWeeklyReportHtml({
-              generatedAt: new Date().toLocaleString(),
-              dashboard: d,
-              weakTypes: d.weakest_types,
-              gap: gap.data?.data ?? null,
+        <m.div variants={reduce ? undefined : fadeUp}>
+          <RecommendationInbox />
+        </m.div>
+
+        {/* Session recap (most recent finished section) */}
+        {recentSession && (
+          <m.div variants={reduce ? undefined : fadeUp}>
+            <RecentRecap sessionId={recentSession.id} summaryScore={recentSession.scaled_score} streakDays={d.streak_days} />
+          </m.div>
+        )}
+
+        <Suspense fallback={<Skeleton className="h-64 w-full" />}>
+          <DashboardBelowFold
+            activity={activity.data?.data ?? []}
+            byType={byType.data?.data ?? []}
+            sessions={sessions.data?.data ?? []}
+            predictedScore={predictedScore}
+            milestoneUnlocks={computeMilestoneUnlocks({
+              sessions: sessions.data?.data ?? [],
+              byType: byType.data?.data ?? [],
+              predictedScore,
               streakDays: d.streak_days,
-              trend: d.trend?.map((p) => ({
-                date: p.date,
-                score: p.score,
-              })),
-            });
-            downloadWeeklyReport(html);
-          }}
-        >
-          Download weekly report
-        </Button>
-      </m.div>
+            })}
+            reduceMotion={!!reduce}
+          />
+        </Suspense>
 
-      <m.div
-        variants={reduce ? undefined : fadeUp}
-        className="grid gap-6 md:grid-cols-2"
-      >
-        {/* Weakest types → drills. The card itself isn't a click target; each
+        <m.div variants={reduce ? undefined : fadeUp} className="flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const html = buildWeeklyReportHtml({
+                generatedAt: new Date().toLocaleString(),
+                dashboard: d,
+                weakTypes: d.weakest_types,
+                gap: gap.data?.data ?? null,
+                streakDays: d.streak_days,
+                trend: d.trend?.map((p) => ({
+                  date: p.date,
+                  score: p.score,
+                })),
+              });
+              downloadWeeklyReport(html);
+            }}
+          >
+            Download weekly report
+          </Button>
+        </m.div>
+
+        <m.div variants={reduce ? undefined : fadeUp} className="grid gap-6 md:grid-cols-2">
+          {/* Weakest types → drills. The card itself isn't a click target; each
             row is (B1.5 — no false `interactive` affordance on the card). */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Weakest types</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {d.weakest_types.map((w) => (
-              // R10 B2.1 — each weakest-type row is a real navigation target, so
-              // it gets the tactile spring hover-lift/press (reduced-motion-gated
-              // inside MotionCard).
-              <MotionCard
-                key={String(w.q_type)}
-                className="group flex w-full items-center gap-3 rounded-md p-2 transition-colors hover:bg-accent"
-              >
-                <button
-                  type="button"
-                  onClick={() =>
-                    navigate(
-                      `/analytics/type/${encodeURIComponent(String(w.q_type))}`,
-                    )
-                  }
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                >
-                  <span className="w-40 shrink-0">
-                    <TypeBadge qType={w.q_type} />
-                  </span>
-                  <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-secondary">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: pct(w.accuracy) }}
-                    />
+          <Card>
+            <CardHeader>
+              <CardTitle>Weakest types</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {d.weakest_types.map((w) => (
+                // R10 B2.1 — each weakest-type row is a real navigation target, so
+                // it gets the tactile spring hover-lift/press (reduced-motion-gated
+                // inside MotionCard).
+                <MotionCard key={String(w.q_type)} className="group flex w-full items-center gap-3 rounded-md p-2 transition-colors hover:bg-accent">
+                  <button type="button" onClick={() => navigate(`/analytics/type/${encodeURIComponent(String(w.q_type))}`)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                    <span className="w-40 shrink-0">
+                      <TypeBadge qType={w.q_type} />
+                    </span>
+                    <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-secondary">
+                      <div className="h-full rounded-full bg-primary" style={{ width: pct(w.accuracy) }} />
+                    </div>
+                    <span className="w-10 text-right text-sm tabular-nums">{pct(w.accuracy)}</span>
+                    <span className="hidden w-16 text-right text-sm tabular-nums text-muted-foreground sm:inline">{formatMs(w.avg_time_ms)}</span>
+                    <TrendIcon trend={w.trend} />
+                  </button>
+                  <div className="flex shrink-0 gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate(`/drills?q_type=${encodeURIComponent(String(w.q_type))}`)}>
+                      Drill
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => navigate(`/analytics/type/${encodeURIComponent(String(w.q_type))}`)}>
+                      Analytics
+                    </Button>
                   </div>
-                  <span className="w-10 text-right text-sm tabular-nums">
-                    {pct(w.accuracy)}
-                  </span>
-                  <span className="hidden w-16 text-right text-sm tabular-nums text-muted-foreground sm:inline">
-                    {formatMs(w.avg_time_ms)}
-                  </span>
-                  <TrendIcon trend={w.trend} />
-                </button>
-                <div className="flex shrink-0 gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs"
-                    onClick={() =>
-                      navigate(
-                        `/drills?q_type=${encodeURIComponent(String(w.q_type))}`,
-                      )
-                    }
-                  >
-                    Drill
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-xs"
-                    onClick={() =>
-                      navigate(
-                        `/analytics/type/${encodeURIComponent(String(w.q_type))}`,
-                      )
-                    }
-                  >
-                    Analytics
-                  </Button>
-                </div>
-              </MotionCard>
-            ))}
-            <p className="pt-1 text-xs text-muted-foreground">
-              Hover a row for quick drill or analytics.
-            </p>
-          </CardContent>
-        </Card>
+                </MotionCard>
+              ))}
+              <p className="pt-1 text-xs text-muted-foreground">Hover a row for quick drill or analytics.</p>
+            </CardContent>
+          </Card>
 
-        {/* Adaptive today's plan */}
-        <TodayPlan />
+          {/* Adaptive today's plan */}
+          <TodayPlan />
+        </m.div>
       </m.div>
-    </m.div>
     </DashboardShell>
   );
 }
@@ -524,20 +414,11 @@ function VNextCockpit({
   const weak = plan?.weakest[0];
   const primaryPriority = formatUtilityPriority(primaryTask);
   const primaryTradeoffs = utilityTradeoffs(primaryTask, plan?.utility);
-  const readinessLabel = readiness
-    ? `${Math.round(readiness.readiness_score)} readiness`
-    : "warming up";
+  const readinessLabel = readiness ? `${Math.round(readiness.readiness_score)} readiness` : "warming up";
   const releaseContract = dashboardReleaseContract(trust);
   const releaseReasons = releaseContract?.reasons ?? [];
-  const trustNeedsEvidence = Boolean(
-    trust && (trust.status !== "ok" || (releaseContract && !releaseContract.ready)),
-  );
-  const trustVariant =
-    trust?.status === "blocked"
-      ? "destructive"
-      : trust?.status === "ok"
-        ? "success"
-        : "warning";
+  const trustNeedsEvidence = Boolean(trust && (trust.status !== "ok" || (releaseContract && !releaseContract.ready)));
+  const trustVariant = trust?.status === "blocked" ? "destructive" : trust?.status === "ok" ? "success" : "warning";
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
@@ -545,36 +426,23 @@ function VNextCockpit({
           <BrainCircuit className="h-4 w-4 text-primary" aria-hidden />
           Adaptive cockpit
         </CardTitle>
-        <Badge variant={readiness?.status === "ready" ? "success" : "outline"}>
-          {readinessLabel}
-        </Badge>
+        <Badge variant={readiness?.status === "ready" ? "success" : "outline"}>{readinessLabel}</Badge>
       </CardHeader>
       <CardContent className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-3">
           <div>
-            <p className="text-sm font-medium">
-              {primaryTask?.label ?? "Build an adaptive plan"}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {primaryTask?.why ??
-                "The local ability model needs a few more attempts before it can rank the next best work."}
-            </p>
+            <p className="text-sm font-medium">{primaryTask?.label ?? "Build an adaptive plan"}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{primaryTask?.why ?? "The local ability model needs a few more attempts before it can rank the next best work."}</p>
             {(primaryPriority || primaryTradeoffs.length > 0) && (
               <div className="mt-2 flex flex-wrap gap-1">
-                <UtilityTradeoffChips
-                  priority={primaryPriority}
-                  tradeoffs={primaryTradeoffs}
-                  title={plan?.utility?.model}
-                />
+                <UtilityTradeoffChips priority={primaryPriority} tradeoffs={primaryTradeoffs} title={plan?.utility?.model} />
               </div>
             )}
           </div>
           <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <Target className="h-3.5 w-3.5" aria-hidden />
-              {weak?.q_type
-                ? `${weak.q_type} · ${Math.round(weak.mastery * 100)}% mastery`
-                : "No weak type yet"}
+              {weak?.q_type ? `${weak.q_type} · ${Math.round(weak.mastery * 100)}% mastery` : "No weak type yet"}
             </span>
             <span className="inline-flex items-center gap-1">
               <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
@@ -594,19 +462,16 @@ function VNextCockpit({
                   ? `${trust.blockers.length} trust blocker${trust.blockers.length === 1 ? "" : "s"}`
                   : releaseContract && !releaseContract.ready
                     ? "Release gate needs evidence"
-                  : trustNeedsEvidence
-                    ? "Trust gate needs evidence"
-                  : contentWarnings.length
-                    ? `${contentWarnings.length} content warning${contentWarnings.length === 1 ? "" : "s"}`
-                    : "Trust gate clear"}
+                    : trustNeedsEvidence
+                      ? "Trust gate needs evidence"
+                      : contentWarnings.length
+                        ? `${contentWarnings.length} content warning${contentWarnings.length === 1 ? "" : "s"}`
+                        : "Trust gate clear"}
               </p>
               {trust ? <Badge variant={trustVariant}>{trust.status}</Badge> : null}
             </div>
             <p className="truncate text-muted-foreground">
-              {trust?.next_actions[0] ??
-                releaseReasons[0]?.replace(/_/g, " ") ??
-                contentWarnings[0]?.replace(/_/g, " ") ??
-                "Official content remains local-only."}
+              {trust?.next_actions[0] ?? releaseReasons[0]?.replace(/_/g, " ") ?? contentWarnings[0]?.replace(/_/g, " ") ?? "Official content remains local-only."}
             </p>
           </div>
           <Button size="sm" onClick={onStart}>
@@ -619,17 +484,13 @@ function VNextCockpit({
   );
 }
 
-function dashboardReleaseContract(
-  trust: ReleaseTrustManifest | undefined,
-): { ready: boolean; reasons: string[] } | null {
+function dashboardReleaseContract(trust: ReleaseTrustManifest | undefined): { ready: boolean; reasons: string[] } | null {
   const raw = trust?.checks.release_local?.detail?.freshness_contract;
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
   return {
     ready: record.ready === true,
-    reasons: Array.isArray(record.reasons)
-      ? record.reasons.filter((item): item is string => typeof item === "string")
-      : [],
+    reasons: Array.isArray(record.reasons) ? record.reasons.filter((item): item is string => typeof item === "string") : [],
   };
 }
 
@@ -651,10 +512,7 @@ function sessionsLast7(sessions: SessionSummary[]): number {
  * Speaks from the existing readiness verdict + 30-day trajectory — no new
  * data, no API. Keeps the observatory's calm, second-person counsel voice.
  */
-function readinessCounsel(
-  label: "On track" | "Building" | "Needs focus",
-  delta30d: number | null | undefined,
-): string {
+function readinessCounsel(label: "On track" | "Building" | "Needs focus", delta30d: number | null | undefined): string {
   if (delta30d == null) {
     if (label === "On track") return "Set one more timed baseline to keep this signal honest.";
     if (label === "Building") return "You're building a base — the next timed section will sharpen the trend.";
@@ -662,30 +520,16 @@ function readinessCounsel(
   }
   const climbing = delta30d > 0;
   if (label === "On track") {
-    return climbing
-      ? "You're on track and still climbing — hold this pace and stress-test under time."
-      : "You're on track — protect the routine and keep the signal steady.";
+    return climbing ? "You're on track and still climbing — hold this pace and stress-test under time." : "You're on track — protect the routine and keep the signal steady.";
   }
   if (label === "Building") {
-    return climbing
-      ? "Momentum is building — keep showing up and the trend will follow."
-      : "You're building a base — a little more timed volume turns it into a trend.";
+    return climbing ? "Momentum is building — keep showing up and the trend will follow." : "You're building a base — a little more timed volume turns it into a trend.";
   }
-  return climbing
-    ? "Early signs are turning your way — channel the next sessions into your weakest types."
-    : "This needs focus — start with one weak type and clear your review backlog.";
+  return climbing ? "Early signs are turning your way — channel the next sessions into your weakest types." : "This needs focus — start with one weak type and clear your review backlog.";
 }
 
 // Loads results for a specific session and renders the recap.
-function RecentRecap({
-  sessionId,
-  summaryScore,
-  streakDays,
-}: {
-  sessionId: number;
-  summaryScore: number | null;
-  streakDays: number;
-}) {
+function RecentRecap({ sessionId, summaryScore, streakDays }: { sessionId: number; summaryScore: number | null; streakDays: number }) {
   const { data } = useSessionResults(sessionId);
   if (!data) return null;
   return (

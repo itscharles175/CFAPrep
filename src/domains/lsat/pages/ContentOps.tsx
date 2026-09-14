@@ -55,6 +55,7 @@ import { NearDuplicatePanel } from "@lsat/components/content-ops/near-duplicate-
 import { LexicalLeakHeatmap } from "@lsat/components/content-ops/lexical-leak-heatmap";
 import { CoverageMatrix } from "@lsat/components/content-ops/coverage-matrix";
 import { AuditLogViewer } from "@lsat/components/content-ops/audit-log-viewer";
+import "./utility-pages.css";
 
 type ContentSourceRow = Pick<
   ContentSourceRegistry,
@@ -486,7 +487,7 @@ export default function ContentOps() {
     // inside the host `.page-container`, with the wide reading column preserved
     // via an inner `mx-auto max-w-6xl` wrapper so every section keeps its width.
     // Behaviour is unchanged — this is the page-frame skin only.
-    <div className="page-container">
+    <div className="page-container lsat-utility-page lsat-content-ops-page">
       <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
         <PageHeader
           badge="Trust OS"
@@ -517,14 +518,15 @@ export default function ContentOps() {
           }
         />
       )}
-      <div className="grid gap-4 md:grid-cols-4">
-        <Metric label="Content health" value={`${h?.score ?? 0}/100`} status={h?.status ?? "pending"} />
-        <Metric label="Sources" value={sourceRows.length} status="registry" />
-        <Metric label="Validators" value={validatorRows.length} status="runs" />
+      <div className="utility-metric-grid grid gap-4 md:grid-cols-4">
+        <Metric label="Content health" value={`${h?.score ?? 0}/100`} status={formatStatus(h?.status ?? "pending")} />
+        <Metric label="Sources" value={sourceRows.length} status="Registry rows" />
+        <Metric label="Validators" value={validatorRows.length} status="Recent runs" />
         <Metric label="Migrations" value={`v${migrations.data?.data.pragma_user_version ?? 0}`} status={`${migrations.data?.data.pending_count ?? 0} pending`} />
       </div>
 
-      <PageSection title="Trust cockpit" eyebrow="Evidence">
+      <div className="lsat-utility-flow">
+      <PageSection className="lsat-utility-section" title="Trust cockpit" eyebrow="Evidence">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {trustSignals.map((signal) => (
             <SignalCard key={signal.label} {...signal} />
@@ -532,7 +534,7 @@ export default function ContentOps() {
         </div>
       </PageSection>
 
-      <PageSection title="Approved AI revalidation" eyebrow="Validator queue">
+      <PageSection className="lsat-utility-section" title="Approved AI revalidation" eyebrow="Validator queue">
         <div className="grid gap-3 md:grid-cols-4">
           <Metric
             label="Approved AI"
@@ -580,7 +582,7 @@ export default function ContentOps() {
                     </p>
                   </div>
                   <Badge variant={row.latest_status === "failed" ? "destructive" : "warning"}>
-                    {row.latest_status ?? "unvalidated"}
+                    {formatStatus(row.latest_status ?? "unvalidated")}
                   </Badge>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -639,7 +641,7 @@ export default function ContentOps() {
         )}
       </PageSection>
 
-      <PageSection title="Provenance scoring" eyebrow="Source risk">
+      <PageSection className="lsat-utility-section" title="Provenance scoring" eyebrow="Source risk">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {visibleProvenanceRows.map((source) => (
             <Card key={source.key}>
@@ -669,7 +671,7 @@ export default function ContentOps() {
         </div>
       </PageSection>
 
-      <PageSection title="Source trust summary" eyebrow="Provenance">
+      <PageSection className="lsat-utility-section" title="Source trust summary" eyebrow="Provenance">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {sourceCounts.map(([sourceKey, count]) => {
             const registry = sourceRegistryByKey.get(sourceKey);
@@ -699,7 +701,7 @@ export default function ContentOps() {
         </div>
       </PageSection>
 
-      <PageSection title="Scheduled maintenance" eyebrow="Scheduler">
+      <PageSection className="lsat-utility-section" title="Scheduled maintenance" eyebrow="Scheduler">
         <div className="grid gap-3 md:grid-cols-2">
           {(schedule.data?.data.tasks ?? []).map((task) => (
             <Card key={task.key}>
@@ -721,7 +723,7 @@ export default function ContentOps() {
         </div>
       </PageSection>
 
-      <PageSection title="Content trust findings" eyebrow="Audit">
+      <PageSection className="lsat-utility-section" title="Content trust findings" eyebrow="Audit">
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
@@ -810,7 +812,7 @@ export default function ContentOps() {
         </div>
       </PageSection>
 
-      <PageSection title="Content integrity matrix" eyebrow="Trust signals">
+      <PageSection className="lsat-utility-section" title="Content integrity matrix" eyebrow="Trust signals">
         <div className="grid gap-6 lg:grid-cols-2">
           <NearDuplicatePanel
             clusters={duplicateClusters}
@@ -1006,7 +1008,7 @@ export default function ContentOps() {
                         {run.section_type ?? "unknown section"} · {validatorScore(run.score)}
                       </p>
                     </div>
-                    <Badge variant={run.status === "failed" ? "destructive" : "outline"}>{run.status}</Badge>
+                    <Badge variant={run.status === "failed" ? "destructive" : "outline"}>{formatStatus(run.status)}</Badge>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {(run.failure_reasons.length ? run.failure_reasons.join(", ") : "No rejection reasons recorded")}
@@ -1040,7 +1042,7 @@ export default function ContentOps() {
             <CardTitle className="text-base">Version history</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="space-y-2 rounded-md border bg-surface-2 p-3">
+            <div className="content-ops-filter-panel space-y-2 rounded-md border bg-surface-2 p-3">
               <div className="flex flex-wrap gap-2" role="group" aria-label="Version entity filters">
                 <VersionFilterButton
                   active={versionEntityFilter === "all"}
@@ -1154,7 +1156,7 @@ export default function ContentOps() {
               <div key={run.id} className="rounded-md border p-3 text-sm">
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-medium">{run.kind}</p>
-                  <Badge variant="outline">{run.status}</Badge>
+                  <Badge variant="outline">{formatStatus(run.status)}</Badge>
                 </div>
                 <p className="mt-1 text-muted-foreground">
                   {Object.entries(run.metrics).slice(0, 3).map(([k, v]) => `${k}: ${String(v)}`).join(" · ") || "No metrics"}
@@ -1164,6 +1166,7 @@ export default function ContentOps() {
             {!benchmarkRows.length && <Empty text="No benchmark runs recorded yet." />}
           </CardContent>
         </Card>
+      </div>
       </div>
       </div>
     </div>
@@ -1535,6 +1538,12 @@ function policyText(value: unknown): string {
   if (value === false) return "blocked";
   if (typeof value === "string" && value.trim()) return value;
   return "unknown";
+}
+
+function formatStatus(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function versionBreakdown(byEntity: Record<string, number>): string {

@@ -1,25 +1,20 @@
-import { useId } from "react";
-import { Filter } from "lucide-react";
-import { Button } from "@lsat/components/ui/button";
-import { Label } from "@lsat/components/ui/label";
-import { Switch } from "@lsat/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@lsat/components/ui/select";
-import { Sheet, SheetContent, SheetTrigger } from "@lsat/components/ui/sheet";
-import type { AnalyticsRange, Source } from "./types";
+import { useId } from 'react';
+import { Filter } from 'lucide-react';
+import { Button } from '@lsat/components/ui/button';
+import { Label } from '@lsat/components/ui/label';
+import { Switch } from '@lsat/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@lsat/components/ui/select';
+import { Sheet, SheetContent, SheetTrigger } from '@lsat/components/ui/sheet';
+import type { AnalyticsRange, Source } from './types';
 
-export type { AnalyticsRange, Source } from "./types";
+export type { AnalyticsRange, Source } from './types';
 
 export function AnalyticsFilters({
   source,
   range,
   comparePrior,
   usingSample,
+  compact = false,
   onSourceChange,
   onRangeChange,
   onCompareChange,
@@ -29,6 +24,8 @@ export function AnalyticsFilters({
   range: AnalyticsRange;
   comparePrior: boolean;
   usingSample?: boolean;
+  /** Render the controls inline for the Progress command bar. */
+  compact?: boolean;
   onSourceChange: (s: Source) => void;
   onRangeChange: (r: AnalyticsRange) => void;
   onCompareChange: (v: boolean) => void;
@@ -36,6 +33,98 @@ export function AnalyticsFilters({
 }) {
   const sourceId = useId();
   const rangeId = useId();
+  const controls = (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor={sourceId}>Question source</Label>
+        <Select value={source} onValueChange={(v) => onSourceChange(v as Source)}>
+          <SelectTrigger id={sourceId}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="official">Real questions only</SelectItem>
+            <SelectItem value="all">Include AI drills</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor={rangeId}>Time range</Label>
+        <Select value={range} onValueChange={(v) => onRangeChange(v as AnalyticsRange)}>
+          <SelectTrigger id={rangeId}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="7">Last 7 days</SelectItem>
+            <SelectItem value="30">Last 30 days</SelectItem>
+            <SelectItem value="all">All time</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Trend uses this window. Type stats use full history until the API supports a range.
+        </p>
+      </div>
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-0.5">
+          <Label htmlFor="compare-prior-sheet">Compare to prior period</Label>
+          <p className="text-xs text-muted-foreground">Overlay earlier scores on the trend.</p>
+        </div>
+        <Switch
+          id="compare-prior-sheet"
+          className="analytics-filter-switch"
+          checked={comparePrior}
+          onCheckedChange={onCompareChange}
+        />
+      </div>
+    </>
+  );
+
+  if (compact) {
+    return (
+      <div className="analytics-filter-inline" role="group" aria-label="Analytics filters">
+        <div className="analytics-filter-field">
+          <Label htmlFor={sourceId}>Source</Label>
+          <Select value={source} onValueChange={(v) => onSourceChange(v as Source)}>
+            <SelectTrigger id={sourceId} aria-label="Question source">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="official">Real questions only</SelectItem>
+              <SelectItem value="all">Include AI drills</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="analytics-filter-field">
+          <Label htmlFor={rangeId}>Window</Label>
+          <Select value={range} onValueChange={(v) => onRangeChange(v as AnalyticsRange)}>
+            <SelectTrigger id={rangeId} aria-label="Time range">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7">Last 7 days</SelectItem>
+              <SelectItem value="30">Last 30 days</SelectItem>
+              <SelectItem value="all">All time</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="analytics-filter-compare">
+          <Label htmlFor="compare-prior-inline">Compare</Label>
+          <Switch
+            id="compare-prior-inline"
+            className="analytics-filter-switch"
+            checked={comparePrior}
+            onCheckedChange={onCompareChange}
+          />
+        </div>
+        {footer && (
+          <details className="analytics-filter-saved">
+            <summary>Saved views</summary>
+            {footer}
+          </details>
+        )}
+      </div>
+    );
+  }
+
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -47,48 +136,8 @@ export function AnalyticsFilters({
       <SheetContent side="right" className="w-full sm:max-w-sm">
         <h2 className="text-lg font-semibold">Analytics filters</h2>
         <div className="mt-6 space-y-6">
-          {usingSample && (
-            <p className="text-sm text-warning">Showing sample data (backend offline).</p>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor={sourceId}>Question source</Label>
-            <Select value={source} onValueChange={(v) => onSourceChange(v as Source)}>
-              <SelectTrigger id={sourceId}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="official">Real questions only</SelectItem>
-                <SelectItem value="all">Include AI drills</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={rangeId}>Time range</Label>
-            <Select value={range} onValueChange={(v) => onRangeChange(v as AnalyticsRange)}>
-              <SelectTrigger id={rangeId}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">Last 7 days</SelectItem>
-                <SelectItem value="30">Last 30 days</SelectItem>
-                <SelectItem value="all">All time</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Filters trend chart client-side; type stats use full history until API adds range.
-            </p>
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor="compare-prior-sheet">Compare to prior period</Label>
-              <p className="text-xs text-muted-foreground">Overlay earlier scores on the trend.</p>
-            </div>
-            <Switch
-              id="compare-prior-sheet"
-              checked={comparePrior}
-              onCheckedChange={onCompareChange}
-            />
-          </div>
+          {usingSample && <p className="text-sm text-warning">Showing sample data (backend offline).</p>}
+          {controls}
           {footer}
         </div>
       </SheetContent>

@@ -1,0 +1,5 @@
+/* The shared ErrorState is used across LSAT routes. Keep its recovery action
+   reliably touch-sized without changing the global Button primitive. */
+body[data-domain='lsat'] [data-app-root] div[role='alert'].bg-destructive-subtle > button.inline-flex.items-center {
+  min-height: 2.5rem;
+}

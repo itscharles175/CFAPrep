@@ -1,26 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { m, useReducedMotion } from "motion/react";
-import { BarChart3, Download, Printer } from "lucide-react";
-import { PageLayout } from "@lsat/components/page-layout";
-import { AnalyticsFilters, type AnalyticsRange } from "@lsat/components/analytics/AnalyticsFilters";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TrendChart } from "@lsat/components/viz";
-import { avg, inRange, splitTrendPeriods } from "@lsat/lib/dateRange";
-import {
-  EmptyState,
-  ErrorState,
-  SkeletonCard,
-  SkeletonChart,
-} from "@lsat/components/states";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { m, useReducedMotion } from 'motion/react';
+import { BarChart3, Download, Printer } from 'lucide-react';
+import { PageLayout } from '@lsat/components/page-layout';
+import { AnalyticsFilters, type AnalyticsRange } from '@lsat/components/analytics/AnalyticsFilters';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TrendChart } from '@lsat/components/viz';
+import { avg, inRange, splitTrendPeriods } from '@lsat/lib/dateRange';
+import { EmptyState, ErrorState, SkeletonCard, SkeletonChart } from '@lsat/components/states';
 import {
   KpiRow,
   NarrativeCards,
@@ -30,16 +19,9 @@ import {
   PrintReport,
   downloadReport,
   printReport,
-} from "@lsat/components/analytics";
-import { AnalyticsProvider } from "@lsat/components/analytics/analytics-context";
-import {
-  ByTypeTab,
-  DifficultyTab,
-  GapTab,
-  TimingTab,
-  TrapsTab,
-  type Source,
-} from "@lsat/components/analytics/tabs";
+} from '@lsat/components/analytics';
+import { AnalyticsProvider } from '@lsat/components/analytics/analytics-context';
+import { ByTypeTab, DifficultyTab, GapTab, TimingTab, TrapsTab, type Source } from '@lsat/components/analytics/tabs';
 import {
   useBlindReviewGap,
   useByDifficulty,
@@ -52,20 +34,21 @@ import {
   useSessions,
   useSrsDue,
   useTraps,
-} from "@lsat/lib/hooks";
-import { forecastConeBands } from "@lsat/lib/forecast";
-import { liveReadinessStatus } from "@lsat/lib/readiness";
-import { daysFromRange } from "@lsat/lib/analyticsParams";
-import { inBrushRange } from "@lsat/lib/brushFilter";
-import { fadeUp, stagger } from "@lsat/lib/motion";
-import { SavedAnalyticsViews } from "@lsat/components/analytics/saved-views";
-import { AnalyticsAlerts } from "@lsat/components/analytics/analytics-alerts";
-import { WidgetBoundary } from "@lsat/components/error-boundary";
-import { toast } from "@lsat/lib/toast";
-import { getGoal, type SavedAnalyticsView } from "@lsat/lib/prefs";
-import type { QType } from "@lsat/lib/types";
-import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
-
+} from '@lsat/lib/hooks';
+import { forecastConeBands } from '@lsat/lib/forecast';
+import { liveReadinessStatus } from '@lsat/lib/readiness';
+import { daysFromRange } from '@lsat/lib/analyticsParams';
+import { inBrushRange } from '@lsat/lib/brushFilter';
+import { fadeUp, stagger } from '@lsat/lib/motion';
+import { SavedAnalyticsViews } from '@lsat/components/analytics/saved-views';
+import { AnalyticsAlerts } from '@lsat/components/analytics/analytics-alerts';
+import { WidgetBoundary } from '@lsat/components/error-boundary';
+import { toast } from '@lsat/lib/toast';
+import { getGoal, type SavedAnalyticsView } from '@lsat/lib/prefs';
+import type { QType } from '@lsat/lib/types';
+import { SampleDataRecovery } from '@lsat/components/sample-data-recovery';
+import { IllustrationAwaitingData } from '@lsat/components/illustrations';
+import './Analytics.progress.css';
 
 /**
  * A3.7 — a Radix <TabsContent> that keeps its subtree mounted (and CSS-hidden)
@@ -85,11 +68,7 @@ function KeepAliveTabContent({
   children: React.ReactNode;
 }) {
   return (
-    <TabsContent
-      value={value}
-      forceMount={visited ? true : undefined}
-      className="data-[state=inactive]:hidden"
-    >
+    <TabsContent value={value} forceMount={visited ? true : undefined} className="data-[state=inactive]:hidden">
       {children}
     </TabsContent>
   );
@@ -97,32 +76,24 @@ function KeepAliveTabContent({
 
 export default function Analytics() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabParam = searchParams.get("tab") ?? "type";
+  const tabParam = searchParams.get('tab') ?? 'type';
   // B12 — a view is fully encoded in the URL (?tab&source&range&compare&brush)
   // so a saved view can be shared as a deep link (local-first, no accounts).
-  const [source, setSource] = useState<Source>(
-    searchParams.get("source") === "official" ? "official" : "all",
-  );
+  const [source, setSource] = useState<Source>(searchParams.get('source') === 'official' ? 'official' : 'all');
   // B11 — brush selection persists in the URL (?brush=START..END) so it
   // survives tab changes and reloads.
-  const brushParam = searchParams.get("brush");
+  const brushParam = searchParams.get('brush');
   const [pInitStart, pInitEnd] =
-    brushParam && brushParam.includes("..")
-      ? brushParam.split("..")
-      : [undefined, undefined];
-  const rangeParam = searchParams.get("range") as AnalyticsRange | null;
-  const [range, setRange] = useState<AnalyticsRange>(
-    brushParam ? "all" : (rangeParam ?? "all"),
-  );
-  const [comparePrior, setComparePrior] = useState(
-    searchParams.get("compare") === "1",
-  );
+    brushParam && brushParam.includes('..') ? brushParam.split('..') : [undefined, undefined];
+  const rangeParam = searchParams.get('range') as AnalyticsRange | null;
+  const [range, setRange] = useState<AnalyticsRange>(brushParam ? 'all' : (rangeParam ?? 'all'));
+  const [comparePrior, setComparePrior] = useState(searchParams.get('compare') === '1');
   const [brushStart, setBrushStart] = useState<string | undefined>(pInitStart);
   const [brushEnd, setBrushEnd] = useState<string | undefined>(pInitEnd);
   // B11/R9 §5 — the cross-filter type focus also lives in the URL (?type=) so a
   // focused analytics view is a shareable deep link, just like the brush.
   const [typeFocus, setTypeFocusState] = useState<QType | undefined>(
-    (searchParams.get("type") as QType | null) ?? undefined,
+    (searchParams.get('type') as QType | null) ?? undefined,
   );
   const reduce = useReducedMotion();
   const days = daysFromRange(range);
@@ -133,15 +104,11 @@ export default function Analytics() {
   // been visited and CSS-hide it when inactive, so re-selecting it is instant
   // (charts persist) — while still NOT mounting tabs the user never opens, to
   // bound DOM/work. `draw-on` therefore plays only on a tab's first reveal.
-  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(
-    () => new Set([tabParam]),
-  );
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => new Set([tabParam]));
   // Track tab changes that arrive via the URL (saved views, narrative-card
   // deep links) as well as direct trigger clicks.
   useEffect(() => {
-    setVisitedTabs((prev) =>
-      prev.has(tabParam) ? prev : new Set(prev).add(tabParam),
-    );
+    setVisitedTabs((prev) => (prev.has(tabParam) ? prev : new Set(prev).add(tabParam)));
   }, [tabParam]);
 
   // Persist the brush range to the URL alongside in-component state.
@@ -153,8 +120,41 @@ export default function Analytics() {
       setBrushStart(start);
       setBrushEnd(end);
       const next = new URLSearchParams(searchParams);
-      if (start && end) next.set("brush", `${start}..${end}`);
-      else next.delete("brush");
+      if (start && end) next.set('brush', `${start}..${end}`);
+      else next.delete('brush');
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const applySource = useCallback(
+    (nextSource: Source) => {
+      setSource(nextSource);
+      const next = new URLSearchParams(searchParams);
+      if (nextSource === 'official') next.set('source', nextSource);
+      else next.delete('source');
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const applyRange = useCallback(
+    (nextRange: AnalyticsRange) => {
+      setRange(nextRange);
+      const next = new URLSearchParams(searchParams);
+      if (nextRange === 'all') next.delete('range');
+      else next.set('range', nextRange);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const applyCompare = useCallback(
+    (enabled: boolean) => {
+      setComparePrior(enabled);
+      const next = new URLSearchParams(searchParams);
+      if (enabled) next.set('compare', '1');
+      else next.delete('compare');
       setSearchParams(next, { replace: true });
     },
     [searchParams, setSearchParams],
@@ -165,8 +165,8 @@ export default function Analytics() {
     (q: QType | null) => {
       setTypeFocusState(q ?? undefined);
       const next = new URLSearchParams(searchParams);
-      if (q) next.set("type", String(q));
-      else next.delete("type");
+      if (q) next.set('type', String(q));
+      else next.delete('type');
       setSearchParams(next, { replace: true });
     },
     [searchParams, setSearchParams],
@@ -211,9 +211,7 @@ export default function Analytics() {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 7);
     const iso = cutoff.toISOString().slice(0, 10);
-    return (sessions.data?.data ?? []).filter(
-      (s) => s.started.slice(0, 10) >= iso,
-    ).length;
+    return (sessions.data?.data ?? []).filter((s) => s.started.slice(0, 10) >= iso).length;
   }, [sessions.data]);
   const readinessInput = useMemo(
     () => ({
@@ -230,8 +228,7 @@ export default function Analytics() {
 
   const filteredTrend = useMemo(() => {
     const raw = d?.trend ?? [];
-    const ranged =
-      range === "all" ? raw : raw.filter((p) => inRange(p.date, range));
+    const ranged = range === 'all' ? raw : raw.filter((p) => inRange(p.date, range));
     if (!brushStart && !brushEnd) return ranged;
     return ranged.filter((p) => inBrushRange(p.date, brushStart, brushEnd));
   }, [d, range, brushStart, brushEnd]);
@@ -241,10 +238,14 @@ export default function Analytics() {
     [filteredTrend, range],
   );
 
-  const trendScores = useMemo(
-    () => trendCurrent.map((p) => p.score),
-    [trendCurrent],
+  const hasAttempts = useMemo(() => (byType.data?.data ?? []).some((row) => row.attempts > 0), [byType.data]);
+  const hasBlindReview = useMemo(
+    () => (gap.data?.data.by_type ?? []).some((row) => row.timed_accuracy != null || row.br_accuracy != null),
+    [gap.data],
   );
+  const hasProgressEvidence = hasAttempts || trendCurrent.length > 0 || (sessions.data?.data.length ?? 0) > 0;
+
+  const trendScores = useMemo(() => trendCurrent.map((p) => p.score), [trendCurrent]);
 
   const priorOverlay = useMemo(
     () => (comparePrior && trendPrior.length ? trendPrior : undefined),
@@ -263,35 +264,27 @@ export default function Analytics() {
   );
 
   const compareDeltas = useMemo(() => {
-    if (!comparePrior || trendCurrent.length < 1 || trendPrior.length < 1)
-      return undefined;
+    if (!comparePrior || trendCurrent.length < 1 || trendPrior.length < 1) return undefined;
     const accRows = byType.data?.data ?? [];
     const vol = accRows.reduce((s, r) => s + r.attempts, 0);
-    const acc = vol
-      ? accRows.reduce((s, r) => s + r.accuracy * r.attempts, 0) / vol
-      : 0;
+    const acc = vol ? accRows.reduce((s, r) => s + r.accuracy * r.attempts, 0) / vol : 0;
     return {
-      scoreDelta: Math.round(
-        avg(trendCurrent.map((p) => p.score)) - avg(trendPrior.map((p) => p.score)),
-      ),
+      scoreDelta: Math.round(avg(trendCurrent.map((p) => p.score)) - avg(trendPrior.map((p) => p.score))),
       accuracyDelta: comparePrior ? Math.round(acc * 100) : undefined,
     };
   }, [comparePrior, trendCurrent, trendPrior, byType.data]);
 
-  const pageError =
-    dashboard.isError && byType.isError
-      ? dashboard.error ?? byType.error
-      : null;
+  const pageError = dashboard.isError && byType.isError ? (dashboard.error ?? byType.error) : null;
 
   function handleExport() {
     if (!byType.data || !gap.data || !difficulty.data || !traps.data || !d) {
-      toast.error("Analytics still loading — try again in a moment.");
+      toast.error('Analytics still loading — try again in a moment.');
       return;
     }
     downloadReport({
       generatedAt: new Date().toISOString(),
       source,
-      range: range === "all" ? "all-time" : `last-${range}-days`,
+      range: range === 'all' ? 'all-time' : `last-${range}-days`,
       kpis: {
         predictedScore: d.predicted_score,
         scoreDelta30d: d.score_delta_30d,
@@ -304,7 +297,7 @@ export default function Analytics() {
       difficulty: difficulty.data.data,
       traps: traps.data.data,
     });
-    toast.success("Report downloaded");
+    toast.success('Report downloaded');
   }
 
   // Analytics used to mix local fallback rows into KPI, forecast, and readiness
@@ -312,15 +305,17 @@ export default function Analytics() {
   // this learner, so this page stays in an explicit recovery state until every
   // progress-bearing source is live again.
   const sampleSections = [
-    ["Score history", dashboard.data?.usingSample],
-    ["Question accuracy", byType.data?.usingSample],
-    ["Blind-review gap", gap.data?.usingSample],
-    ["Difficulty and trap analysis", difficulty.data?.usingSample || traps.data?.usingSample],
-    ["Session consistency", sessions.data?.usingSample],
-    ["SRS and readiness", srs.data?.usingSample || readinessStatus.data?.usingSample],
-    ["Forecast", forecast.data?.usingSample],
-    ["Plan feedback", feedbackCohorts.data?.usingSample || feedbackOutcomes.data?.usingSample],
-  ].filter(([, usingSample]) => usingSample).map(([section]) => section as string);
+    ['Score history', dashboard.data?.usingSample],
+    ['Question accuracy', byType.data?.usingSample],
+    ['Blind-review gap', gap.data?.usingSample],
+    ['Difficulty and trap analysis', difficulty.data?.usingSample || traps.data?.usingSample],
+    ['Session consistency', sessions.data?.usingSample],
+    ['SRS and readiness', srs.data?.usingSample || readinessStatus.data?.usingSample],
+    ['Forecast', forecast.data?.usingSample],
+    ['Plan feedback', feedbackCohorts.data?.usingSample || feedbackOutcomes.data?.usingSample],
+  ]
+    .filter(([, usingSample]) => usingSample)
+    .map(([section]) => section as string);
   const hasSampleAnalytics = sampleSections.length > 0;
 
   function retryAnalytics() {
@@ -354,16 +349,7 @@ export default function Analytics() {
       typeFocus,
       setTypeFocus,
     }),
-    [
-      source,
-      range,
-      comparePrior,
-      days,
-      brushStart,
-      brushEnd,
-      typeFocus,
-      setTypeFocus,
-    ],
+    [source, range, comparePrior, days, brushStart, brushEnd, typeFocus, setTypeFocus],
   );
 
   // 7.6 — when the range/source switches, `keepPreviousData` keeps the prior
@@ -400,11 +386,7 @@ export default function Analytics() {
         description="Your diagnostic picture — where the clock dies and where understanding holds."
         width="2xl"
       >
-        <SampleDataRecovery
-          section="Analytics"
-          affectedSections={sampleSections}
-          onRetry={retryAnalytics}
-        />
+        <SampleDataRecovery section="Analytics" affectedSections={sampleSections} onRetry={retryAnalytics} />
       </PageLayout>
     );
   }
@@ -416,13 +398,13 @@ export default function Analytics() {
       icon={BarChart3}
       description="Your diagnostic picture — where the clock dies and where understanding holds."
       width="2xl"
-      className="print:max-w-none"
+      className="analytics-progress-page print:max-w-none"
     >
       {/* R9 §7 — composed print-only report; the live page is hidden on print. */}
       <PrintReport
         generatedAt={new Date().toISOString()}
-        rangeLabel={range === "all" ? "All time" : `Last ${range} days`}
-        sourceLabel={source === "official" ? "Official only" : "All content"}
+        rangeLabel={range === 'all' ? 'All time' : `Last ${range} days`}
+        sourceLabel={source === 'official' ? 'Official only' : 'All content'}
         goalBand={goal?.band}
         examDate={goal?.examDate}
         kpis={{
@@ -436,10 +418,7 @@ export default function Analytics() {
         projection={
           goal?.examDate && trendScores.length
             ? {
-                score:
-                  fc?.projected_score ??
-                  goal.targetScore ??
-                  trendScores[trendScores.length - 1] + 3,
+                score: fc?.projected_score ?? goal.targetScore ?? trendScores[trendScores.length - 1] + 3,
                 lowSpread: 3,
                 highSpread: 3,
                 bands: forecastConeBands(fc),
@@ -450,244 +429,266 @@ export default function Analytics() {
         difficulty={difficulty.data?.data ?? []}
       />
       <AnalyticsAlerts />
-    <m.div
-      variants={stagger}
-      initial={reduce ? false : "hidden"}
-      animate="show"
-      // R9 §7 — the live, interactive page is suppressed on print; the composed
-      // <PrintReport> above owns the printed page instead.
-      className="space-y-6 pb-12 print:hidden"
-      aria-busy={isStale}
-    >
       <m.div
-        variants={fadeUp}
-        className="flex flex-wrap items-center justify-end gap-2 print:hidden"
+        variants={stagger}
+        initial={reduce ? false : 'hidden'}
+        animate="show"
+        // R9 §7 — the live, interactive page is suppressed on print; the composed
+        // <PrintReport> above owns the printed page instead.
+        className="space-y-6 pb-12 print:hidden"
+        aria-busy={isStale}
       >
-          <AnalyticsFilters
-            source={source}
-            range={range}
-            comparePrior={comparePrior}
-            onSourceChange={setSource}
-            onRangeChange={setRange}
-            onCompareChange={setComparePrior}
-            footer={
-              <SavedAnalyticsViews
-                tab={tabParam}
-                range={range}
-                source={source}
-                comparePrior={comparePrior}
-                onApply={(v: SavedAnalyticsView) => {
-                  setSource(v.source as Source);
-                  setRange(v.range as AnalyticsRange);
-                  setComparePrior(v.comparePrior);
-                  setSearchParams({ tab: v.tab });
-                }}
-              />
-            }
-          />
-          <Button variant="outline" size="sm" onClick={handleExport}>
-            <Download className="h-4 w-4" /> Export
-          </Button>
-          <Button variant="outline" size="sm" onClick={printReport}>
-            <Printer className="h-4 w-4" /> Print
-          </Button>
-      </m.div>
-
-      {/* 7.6 — dim (but keep visible) the prior window's data while a range/
-          source switch resolves. The filter toolbar above stays interactive. */}
-      <div
-        className={
-          "space-y-6 transition-opacity duration-200" +
-          (isStale ? " opacity-60" : "")
-        }
-      >
-      {/* §3.9 KPI row */}
-      <m.div variants={fadeUp}>
-        {dashboard.isLoading || byType.isLoading || gap.isLoading ? (
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <SkeletonCard key={i} />
-            ))}
+        <m.div variants={fadeUp} className="analytics-command-bar print:hidden">
+          <div className="analytics-command-copy">
+            <p className="type-overline text-muted-foreground">Progress / analytics</p>
+            <p className="text-sm text-muted-foreground">
+              Start with the score trend, then open a breakdown when a signal needs attention.
+            </p>
           </div>
-        ) : (
-          <KpiRow
-            predictedScore={d?.predicted_score ?? null}
-            scoreDelta30d={d?.score_delta_30d ?? null}
-            accuracy={accuracy}
-            avgTimeMsPerQ={avgTimeMsPerQ}
-            brGap={gap.data?.data.gap ?? 0}
-            trend={trendScores}
-            compare={compareDeltas}
-          />
-        )}
-      </m.div>
+          <div className="analytics-command-actions">
+            <AnalyticsFilters
+              source={source}
+              range={range}
+              comparePrior={comparePrior}
+              compact
+              onSourceChange={applySource}
+              onRangeChange={applyRange}
+              onCompareChange={applyCompare}
+              footer={
+                <SavedAnalyticsViews
+                  tab={tabParam}
+                  range={range}
+                  source={source}
+                  comparePrior={comparePrior}
+                  onApply={(v: SavedAnalyticsView) => {
+                    setSource(v.source as Source);
+                    setRange(v.range as AnalyticsRange);
+                    setComparePrior(v.comparePrior);
+                    setSearchParams({ tab: v.tab });
+                  }}
+                />
+              }
+            />
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="h-4 w-4" /> Export
+            </Button>
+            <Button variant="outline" size="sm" onClick={printReport}>
+              <Printer className="h-4 w-4" /> Print
+            </Button>
+          </div>
+        </m.div>
 
-      {/* R9 §4 — Forecast hero: "Are you on track?". The glide-path projection
-          lives here now (gauge + projection numbers) instead of being crammed
-          into the trend chart's right edge. */}
-      <m.div variants={fadeUp}>
-        <WidgetBoundary label="Forecast panel">
-          <ForecastPanel
-            forecast={fc}
-            goalBand={goal?.band}
-            examDate={goal?.examDate}
-            targetScore={goal?.targetScore}
-            predictedScore={d?.predicted_score ?? null}
-            readiness={readinessInput}
-            backendReadiness={backendReadiness}
-            onSetGoal={() => navigate("/settings")}
-          />
-        </WidgetBoundary>
-      </m.div>
+        <div className="analytics-truth-strip" role="status" aria-live="polite">
+          <span>{source === 'official' ? 'Official questions' : 'All question sources'}</span>
+          <span>{range === 'all' ? 'All-time trend' : `Last ${range} days`}</span>
+          <span>Type stats: full history</span>
+          {comparePrior && <span>Prior period shown</span>}
+        </div>
 
-      {/* §3.1 Score trend — the page hero. Elevated + verdict-edged so the
-          glide-path forecast reads as the headline, with the tabbed deep-dives
-          demoted beneath it. */}
-      <m.div variants={fadeUp}>
-        <Card className="border-primary/15 bg-surface-1 shadow-e2">
-          <CardHeader>
-            <CardTitle className="text-lg">Score trend</CardTitle>
-            <CardDescription>
-              {goal?.band
-                ? "Your goal band and exam date are overlaid; milestone pins mark your best, biggest jump, and where momentum began. Drag to brush a window."
-                : "Milestone pins mark your best and biggest jump. Set a goal in Settings to overlay your target band. Drag to brush a window."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {dashboard.isLoading ? (
-              <SkeletonChart className="border-0 p-0 shadow-none" />
-            ) : trendScores.length > 1 ? (
-              <WidgetBoundary label="Score trend chart">
-              {/* R9 §4 — the projection cone now lives in the ForecastPanel
-                  above; the trend stays focused on history + milestone pins. */}
-              <TrendChart
-                series={trendCurrent}
-                priorSeries={priorOverlay}
-                goal={goal?.band}
-                examDate={goal?.examDate}
-                annotate
-                onBrushRange={(r) => {
-                  if (r) {
-                    applyBrush(r.start.slice(0, 10), r.end.slice(0, 10));
-                    setRange("all");
-                    toast.info(`Filtered trend: ${r.start.slice(0, 10)} → ${r.end.slice(0, 10)}`);
-                  } else {
-                    applyBrush(undefined, undefined);
-                  }
-                }}
-              />
-              {brushStart && brushEnd && (
-                <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>
-                    Brush selection: {brushStart} → {brushEnd} (filters session-based tabs)
-                  </span>
-                  <button
-                    type="button"
-                    className="underline underline-offset-2 hover:text-foreground"
-                    onClick={() => applyBrush(undefined, undefined)}
-                  >
-                    Clear
-                  </button>
-                </p>
-              )}
-              </WidgetBoundary>
+        {/* 7.6 — dim (but keep visible) the prior window's data while a range/
+          source switch resolves. The filter toolbar above stays interactive. */}
+        <div className={'space-y-6 transition-opacity duration-200' + (isStale ? ' opacity-60' : '')}>
+          {/* §3.9 KPI row */}
+          <m.div variants={fadeUp}>
+            {dashboard.isLoading || byType.isLoading || gap.isLoading ? (
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <SkeletonCard key={i} />
+                ))}
+              </div>
             ) : (
-              <EmptyState
-                title="Not enough score history"
-                description="Finish a few timed sections to see your trend take shape."
+              <KpiRow
+                predictedScore={d?.predicted_score ?? null}
+                scoreDelta30d={d?.score_delta_30d ?? null}
+                accuracy={accuracy}
+                avgTimeMsPerQ={avgTimeMsPerQ}
+                brGap={gap.data?.data.gap ?? 0}
+                trend={trendScores}
+                compare={compareDeltas}
+                hasAttempts={hasAttempts}
+                hasScoreHistory={trendCurrent.length > 0}
+                hasBlindReview={hasBlindReview}
               />
             )}
-          </CardContent>
-        </Card>
-      </m.div>
+          </m.div>
 
-      {/* §3.7 Diagnostic narrative cards */}
-      <m.div variants={fadeUp}>
-        <NarrativeCards
-          fallback={d?.coach}
-          trend={trendScores}
-          onOpenAnalyticsTab={(tab, qType) => {
-            const next = new URLSearchParams(searchParams);
-            next.set("tab", tab);
-            if (qType) next.set("q_type", qType);
-            setSearchParams(next);
-          }}
-        />
-      </m.div>
+          {/* R9 §4 — Forecast hero: "Are you on track?". The glide-path projection
+          lives here now (gauge + projection numbers) instead of being crammed
+          into the trend chart's right edge. */}
+          <m.div variants={fadeUp}>
+            <WidgetBoundary label="Forecast panel">
+              <ForecastPanel
+                forecast={fc}
+                goalBand={goal?.band}
+                examDate={goal?.examDate}
+                targetScore={goal?.targetScore}
+                predictedScore={d?.predicted_score ?? null}
+                readiness={readinessInput}
+                backendReadiness={backendReadiness}
+                onSetGoal={() => navigate('/settings')}
+                hasEvidence={hasProgressEvidence}
+              />
+            </WidgetBoundary>
+          </m.div>
 
-      <m.div variants={fadeUp}>
-        <WidgetBoundary label="Plan feedback cohorts">
-          <FeedbackCohortSummaryCard
-            summary={feedbackCohorts.data?.data}
-            outcomeSummary={feedbackOutcomes.data?.data}
-            isLoading={feedbackCohorts.isLoading}
-          />
-        </WidgetBoundary>
-      </m.div>
+          {/* §3.1 Score trend — the page hero. Elevated + verdict-edged so the
+          glide-path forecast reads as the headline, with the tabbed deep-dives
+          demoted beneath it. */}
+          <m.div variants={fadeUp}>
+            <Card className="border-primary/15 bg-surface-1 shadow-e2">
+              <CardHeader>
+                <CardTitle className="text-lg">Score trend</CardTitle>
+                <CardDescription>
+                  {goal?.band
+                    ? 'Your goal band and exam date are overlaid; milestone pins mark your best, biggest jump, and where momentum began. Drag to brush a window.'
+                    : 'Milestone pins mark your best and biggest jump. Set a goal in Settings to overlay your target band. Drag to brush a window.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {dashboard.isLoading ? (
+                  <SkeletonChart className="border-0 p-0 shadow-none" />
+                ) : trendScores.length > 1 ? (
+                  <WidgetBoundary label="Score trend chart">
+                    {/* R9 §4 — the projection cone now lives in the ForecastPanel
+                  above; the trend stays focused on history + milestone pins. */}
+                    <TrendChart
+                      series={trendCurrent}
+                      priorSeries={priorOverlay}
+                      goal={goal?.band}
+                      examDate={goal?.examDate}
+                      annotate
+                      onBrushRange={(r) => {
+                        if (r) {
+                          applyBrush(r.start.slice(0, 10), r.end.slice(0, 10));
+                          setRange('all');
+                          toast.info(`Filtered trend: ${r.start.slice(0, 10)} → ${r.end.slice(0, 10)}`);
+                        } else {
+                          applyBrush(undefined, undefined);
+                        }
+                      }}
+                    />
+                    {brushStart && brushEnd && (
+                      <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>
+                          Brush selection: {brushStart} → {brushEnd} (filters session-based tabs)
+                        </span>
+                        <button
+                          type="button"
+                          className="underline underline-offset-2 hover:text-foreground"
+                          onClick={() => applyBrush(undefined, undefined)}
+                        >
+                          Clear
+                        </button>
+                      </p>
+                    )}
+                  </WidgetBoundary>
+                ) : (
+                  <EmptyState
+                    illustration={<IllustrationAwaitingData />}
+                    title="Not enough score history"
+                    description="Finish a few timed sections to see your trend take shape."
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </m.div>
 
-      {/* §3.9b — study-consistency heatmap (cadence is the strongest growth
-          predictor). Reuses the GitHub-style ContributionHeatmap. */}
-      <m.div variants={fadeUp}>
-        <WidgetBoundary label="Study consistency">
-          <StudyConsistency sessions={sessions.data?.data ?? []} />
-        </WidgetBoundary>
-      </m.div>
+          <details className="analytics-more-signals">
+            <summary>
+              <span>More signals</span>
+              <span className="analytics-summary-hint">Insights, plan feedback, and study cadence</span>
+            </summary>
+            <div className="analytics-more-signals-body">
+              {/* §3.7 Diagnostic narrative cards */}
+              <m.div variants={fadeUp}>
+                <NarrativeCards
+                  fallback={d?.coach}
+                  trend={trendScores}
+                  onOpenAnalyticsTab={(tab, qType) => {
+                    const next = new URLSearchParams(searchParams);
+                    next.set('tab', tab);
+                    if (qType) next.set('q_type', qType);
+                    setSearchParams(next);
+                  }}
+                />
+              </m.div>
 
-      {/* Tabbed deep-dives */}
-      <m.div variants={fadeUp}>
-        <AnalyticsProvider value={analyticsCtx}>
-        <Tabs
-          value={tabParam}
-          onValueChange={(v) => {
-            const next = new URLSearchParams(searchParams);
-            next.set("tab", v);
-            setSearchParams(next);
-          }}
-        >
-          <TabsList className="flex-wrap">
-            <TabsTrigger value="type">By Type</TabsTrigger>
-            <TabsTrigger value="timing">Timing</TabsTrigger>
-            <TabsTrigger value="gap">Timed vs BR</TabsTrigger>
-            <TabsTrigger value="difficulty">Difficulty</TabsTrigger>
-            <TabsTrigger value="traps">Traps</TabsTrigger>
-          </TabsList>
+              <m.div variants={fadeUp}>
+                <WidgetBoundary label="Plan feedback cohorts">
+                  <FeedbackCohortSummaryCard
+                    summary={feedbackCohorts.data?.data}
+                    outcomeSummary={feedbackOutcomes.data?.data}
+                    isLoading={feedbackCohorts.isLoading}
+                  />
+                </WidgetBoundary>
+              </m.div>
 
-          <KeepAliveTabContent value="type" visited={visitedTabs.has("type")}>
-            <WidgetBoundary label="By-type analytics">
-              <ByTypeTab source={source} />
-            </WidgetBoundary>
-          </KeepAliveTabContent>
-          <KeepAliveTabContent
-            value="timing"
-            visited={visitedTabs.has("timing")}
-          >
-            <WidgetBoundary label="Timing analytics">
-              <TimingTab />
-            </WidgetBoundary>
-          </KeepAliveTabContent>
-          <KeepAliveTabContent value="gap" visited={visitedTabs.has("gap")}>
-            <WidgetBoundary label="Timed vs blind-review analytics">
-              <GapTab comparePrior={comparePrior} />
-            </WidgetBoundary>
-          </KeepAliveTabContent>
-          <KeepAliveTabContent
-            value="difficulty"
-            visited={visitedTabs.has("difficulty")}
-          >
-            <WidgetBoundary label="Difficulty analytics">
-              <DifficultyTab source={source} />
-            </WidgetBoundary>
-          </KeepAliveTabContent>
-          <KeepAliveTabContent value="traps" visited={visitedTabs.has("traps")}>
-            <WidgetBoundary label="Traps analytics">
-              <TrapsTab />
-            </WidgetBoundary>
-          </KeepAliveTabContent>
-        </Tabs>
-        </AnalyticsProvider>
+              {/* §3.9b — study-consistency heatmap (cadence is the strongest growth
+              predictor). Reuses the GitHub-style ContributionHeatmap. */}
+              <m.div variants={fadeUp}>
+                <WidgetBoundary label="Study consistency">
+                  <StudyConsistency sessions={sessions.data?.data ?? []} />
+                </WidgetBoundary>
+              </m.div>
+            </div>
+          </details>
+
+          {/* Tabbed deep-dives */}
+          <m.div variants={fadeUp} className="analytics-deep-dive">
+            <div className="analytics-deep-dive-heading">
+              <div>
+                <p className="type-overline text-muted-foreground">Explore</p>
+                <h2 className="type-display text-xl">Breakdowns</h2>
+              </div>
+              <p className="text-sm text-muted-foreground">Choose one lens to inspect the pattern behind your score.</p>
+            </div>
+            <AnalyticsProvider value={analyticsCtx}>
+              <Tabs
+                value={tabParam}
+                onValueChange={(v) => {
+                  const next = new URLSearchParams(searchParams);
+                  next.set('tab', v);
+                  setSearchParams(next);
+                }}
+              >
+                <TabsList className="flex-wrap">
+                  <TabsTrigger value="type">By Type</TabsTrigger>
+                  <TabsTrigger value="timing">Timing</TabsTrigger>
+                  <TabsTrigger value="gap">Timed vs BR</TabsTrigger>
+                  <TabsTrigger value="difficulty">Difficulty</TabsTrigger>
+                  <TabsTrigger value="traps">Traps</TabsTrigger>
+                </TabsList>
+
+                <KeepAliveTabContent value="type" visited={visitedTabs.has('type')}>
+                  <WidgetBoundary label="By-type analytics">
+                    <ByTypeTab source={source} />
+                  </WidgetBoundary>
+                </KeepAliveTabContent>
+                <KeepAliveTabContent value="timing" visited={visitedTabs.has('timing')}>
+                  <WidgetBoundary label="Timing analytics">
+                    <TimingTab />
+                  </WidgetBoundary>
+                </KeepAliveTabContent>
+                <KeepAliveTabContent value="gap" visited={visitedTabs.has('gap')}>
+                  <WidgetBoundary label="Timed vs blind-review analytics">
+                    <GapTab comparePrior={comparePrior} />
+                  </WidgetBoundary>
+                </KeepAliveTabContent>
+                <KeepAliveTabContent value="difficulty" visited={visitedTabs.has('difficulty')}>
+                  <WidgetBoundary label="Difficulty analytics">
+                    <DifficultyTab source={source} />
+                  </WidgetBoundary>
+                </KeepAliveTabContent>
+                <KeepAliveTabContent value="traps" visited={visitedTabs.has('traps')}>
+                  <WidgetBoundary label="Traps analytics">
+                    <TrapsTab />
+                  </WidgetBoundary>
+                </KeepAliveTabContent>
+              </Tabs>
+            </AnalyticsProvider>
+          </m.div>
+        </div>
       </m.div>
-      </div>
-    </m.div>
     </PageLayout>
   );
 }

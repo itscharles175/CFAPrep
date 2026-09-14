@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { SOURCE_SCOPE_GUIDANCE, sourceScopeActionState } from "./Notebook";
+import {
+  SOURCE_SCOPE_GUIDANCE,
+  notebookActionErrorMessage,
+  sourceScopeActionState,
+} from "./Notebook";
 
 describe("Notebook source scope actions", () => {
   it("keeps transformations and cited chats blocked until a source is selected", () => {
@@ -18,5 +22,14 @@ describe("Notebook source scope actions", () => {
         official_firewall: false,
       }),
     ).toEqual({ ready: true, guidance: null });
+  });
+
+  it("keeps async failure guidance actionable without exposing an empty error", () => {
+    expect(notebookActionErrorMessage(new Error("Local service unavailable"))).toBe(
+      "Local service unavailable",
+    );
+    expect(notebookActionErrorMessage(null)).toBe(
+      "The local study service did not finish this request.",
+    );
   });
 });

@@ -64,7 +64,7 @@ export function NarrativeCards({ fallback, trend, onOpenAnalyticsTab }: Narrativ
         <CardTitle className="flex items-center gap-2 text-base">
           <Sparkles className="h-5 w-5 text-primary" /> Diagnostic insights
         </CardTitle>
-        <Button size="sm" variant="outline" onClick={run} disabled={loading}>
+        <Button size="sm" variant="outline" className="min-h-10" onClick={run} disabled={loading}>
           <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
           {loading ? "Diagnosing…" : "Re-diagnose"}
         </Button>
@@ -100,7 +100,7 @@ export function NarrativeCards({ fallback, trend, onOpenAnalyticsTab }: Narrativ
                   {diag.recommendation.label}
                 </div>
               </div>
-              <Button size="sm" className="mt-3 self-start" onClick={act}>
+              <Button size="sm" className="mt-3 min-h-10 self-start" onClick={act}>
                 {diag.recommendation.label}
               </Button>
             </m.div>

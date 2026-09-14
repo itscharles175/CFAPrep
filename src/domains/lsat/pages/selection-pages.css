@@ -1,0 +1,312 @@
+/* Selection pages share the host's quiet, information-first surface while
+   keeping their layout contract local to the LSAT landing and setup routes. */
+
+.lsat-selection-page {
+  width: min(100%, 1160px);
+  margin-inline: auto;
+  padding: clamp(1.5rem, 3vw, 2.75rem) clamp(1rem, 3vw, 2.5rem) 5rem;
+}
+
+.lsat-selection-page > .page-header {
+  margin-bottom: clamp(1.5rem, 3vw, 2.25rem);
+}
+
+.lsat-selection-page .page-header h1 {
+  max-width: none;
+  text-wrap: balance;
+}
+
+.lsat-selection-page .page-header p {
+  max-width: 68ch;
+}
+
+.lsat-selection-card {
+  border-color: color-mix(in srgb, var(--border) 82%, var(--accent) 18%);
+  background: color-mix(in srgb, var(--surface-raised) 94%, var(--accent) 6%);
+}
+
+.lsat-selection-card .qv-card-header {
+  padding-bottom: var(--space-4);
+}
+
+.lsat-selection-card .qv-card-content {
+  padding-top: 0;
+}
+
+.lsat-practice-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.lsat-action-card {
+  min-height: 11.25rem;
+}
+
+.lsat-action-card .qv-card-header {
+  padding-bottom: var(--space-3);
+}
+
+.lsat-action-card .qv-card-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.lsat-action-card .qv-card-content > p {
+  flex: 1;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+
+.lsat-practice-sections {
+  overflow: hidden;
+}
+
+.lsat-section-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.lsat-section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-data);
+}
+
+.lsat-inline-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.lsat-drill-layout {
+  width: min(100%, 920px);
+  margin-inline: auto;
+  display: grid;
+  gap: var(--space-5);
+}
+
+.lsat-drill-card .qv-card-content {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.lsat-drill-intent {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.lsat-drill-intent input {
+  min-width: 0;
+  flex: 1;
+}
+
+/* The host input is intentionally 40px, but the LSAT Tailwind reset loads
+   after the host facade and can collapse a native form control to its 34px
+   intrinsic height on touch Chromium. Keep the intent field in the same
+   interaction rhythm as the selects and buttons. */
+.lsat-drills-page .lsat-drill-intent .qv-input {
+  min-height: 40px;
+}
+
+.lsat-drill-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.lsat-drill-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-data);
+}
+
+.lsat-drill-mode-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.lsat-drill-mode-copy p {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+.lsat-drill-time-cap {
+  width: min(100%, 15rem);
+}
+
+/* A switch's visual track is deliberately compact; its button still needs a
+   full touch target. Paint the 24px track in a 40px hit area so mobile QA can
+   reach it without making the control look oversized. */
+.lsat-drill-switch {
+  position: relative;
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+}
+
+.lsat-drill-switch::before {
+  position: absolute;
+  inset: 8px 0;
+  border-radius: 999px;
+  background: hsl(var(--input));
+  content: "";
+}
+
+.lsat-drill-switch[aria-checked="true"]::before {
+  background: hsl(var(--primary));
+}
+
+.lsat-drill-switch > span {
+  position: relative;
+  z-index: 1;
+}
+
+/* Radix places the tall time-cap menu above its trigger when the trigger is
+   near the viewport edge. Give it enough separation to clear its own field
+   label instead of painting the final option over that label. */
+.lsat-drill-time-cap-menu[data-side="top"] {
+  transform: translateY(-28px);
+}
+
+.lsat-drill-support {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.lsat-drill-support > h2 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.02em;
+}
+
+.lsat-drill-support-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.lsat-collections-stack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.lsat-collections-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.lsat-empty-state {
+  min-height: 14rem;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--border) 76%, var(--accent) 24%);
+  background: color-mix(in srgb, var(--surface-raised) 94%, var(--accent) 6%);
+}
+
+.lsat-preptests-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.lsat-preptest-card {
+  min-width: 0;
+}
+
+.lsat-preptest-card .qv-card-header {
+  min-height: 7rem;
+}
+
+.lsat-preptest-card .qv-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+@media (max-width: 760px) {
+  .lsat-practice-actions,
+  .lsat-preptests-grid,
+  .lsat-drill-support-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lsat-drill-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .lsat-section-row,
+  .lsat-inline-empty,
+  .lsat-drill-mode {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .lsat-section-row > .btn,
+  .lsat-inline-empty > .btn,
+  .lsat-drill-mode > .lsat-drill-time-cap {
+    width: 100%;
+  }
+}
+
+/* Keep the tablet first viewport clear of the five-item workspace dock. The
+   drill builder is intentionally dense, but its mode explanation and time-cap
+   control still need to finish inside the content viewport before the dock
+   begins. This preserves the generous desktop rhythm while avoiding painted
+   text underneath the mobile navigation at 768px. */
+@media (min-width: 761px) and (max-width: 900px) {
+  .lsat-drills-page > .page-header {
+    margin-bottom: var(--space-5);
+  }
+
+  .lsat-drills-page .lsat-drill-card .qv-card-content {
+    gap: var(--space-3);
+  }
+
+  .lsat-drills-page .lsat-drill-fields {
+    gap: var(--space-3);
+  }
+
+  .lsat-drills-page .lsat-drill-mode {
+    padding-block: var(--space-2);
+  }
+}
+
+@media (max-width: 480px) {
+  .lsat-selection-page {
+    padding-inline: 1rem;
+  }
+
+  .lsat-drill-intent {
+    flex-direction: column;
+  }
+
+  .lsat-drill-intent .btn {
+    width: 100%;
+  }
+}

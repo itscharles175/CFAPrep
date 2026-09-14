@@ -363,7 +363,7 @@ function ShelledRoutes() {
   );
 }
 
-function GlobalChrome({ children }: { children: React.ReactNode }) {
+function GlobalChrome({ children, fullBleed }: { children: React.ReactNode; fullBleed: boolean }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { resolved, setTheme } = useTheme();
@@ -456,43 +456,43 @@ function GlobalChrome({ children }: { children: React.ReactNode }) {
     const hostActions: CommandAction[] = [
       {
         id: 'host-home',
-        group: 'StudyVault',
+        group: 'Other Study Tracks',
         label: 'StudyVault Home',
         keywords: ['host', 'dashboard', 'home'],
         perform: () => navigateDomain('/'),
       },
       {
         id: 'host-cfa',
-        group: 'StudyVault',
+        group: 'Other Study Tracks',
         label: 'CFA Program',
         keywords: ['host', 'cfa', 'finance'],
         perform: () => navigateDomain('/cfa'),
       },
       {
         id: 'host-quant',
-        group: 'StudyVault',
+        group: 'Other Study Tracks',
         label: 'Quant Finance',
         keywords: ['host', 'quant'],
         perform: () => navigateDomain('/quant'),
       },
       {
         id: 'host-excel',
-        group: 'StudyVault',
+        group: 'Other Study Tracks',
         label: 'Excel Training',
         keywords: ['host', 'excel'],
         perform: () => navigateDomain('/excel'),
       },
       {
         id: 'host-today',
-        group: 'StudyVault',
-        label: 'Today (host)',
+        group: 'Other Study Tracks',
+        label: 'StudyVault Today',
         keywords: ['host', 'today', 'plan'],
         perform: () => navigateDomain('/today'),
       },
       {
         id: 'host-review',
-        group: 'StudyVault',
-        label: 'Review Inbox (host)',
+        group: 'Other Study Tracks',
+        label: 'StudyVault Review Inbox',
         keywords: ['host', 'review', 'due'],
         perform: () => navigateDomain('/review'),
       },
@@ -553,24 +553,28 @@ function GlobalChrome({ children }: { children: React.ReactNode }) {
     ];
   }, [location.pathname, navigate, resolved, setTheme, mode, setMode]);
 
+  const frame = (
+    <div
+      data-app-root
+      className={`flex w-full flex-col overflow-hidden bg-background ${fullBleed ? 'h-screen' : 'h-full min-h-0'}`}
+    >
+      {/* K4-13: the LSAT App is always mounted inside the host <SharedLayout>,
+          whose TopBar is the single window chrome — so this app no longer
+          renders its own <Titlebar/> (it was removed in the final cutover). */}
+      <OfflineBanner />
+      <AiPrereqBanner />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ErrorBoundary key={location.pathname}>{children}</ErrorBoundary>
+      </div>
+    </div>
+  );
+
   return (
     <CommandPaletteProvider initialActions={actions}>
-      {/* R9 (docs/19 F1.1): `data-app-root` lets the root go transparent under
-          native Mica (`html.mica` rules in index.css); opaque `bg-background`
-          everywhere else. R9 F7: the loading bar is now a provider wrapping the
-          frame so `<SuspenseSignal/>` inside route boundaries can drive it. */}
-      <GlobalLoadingBar>
-        <div data-app-root className="flex h-screen w-full flex-col overflow-hidden bg-background">
-          {/* K4-13: the LSAT App is always mounted inside the host <SharedLayout>,
-              whose TopBar is the single window chrome — so this app no longer
-              renders its own <Titlebar/> (it was removed in the final cutover). */}
-          <OfflineBanner />
-          <AiPrereqBanner />
-          <div className="min-h-0 flex-1">
-            <ErrorBoundary key={location.pathname}>{children}</ErrorBoundary>
-          </div>
-        </div>
-      </GlobalLoadingBar>
+      {/* A full-bleed assessment intentionally has no host toolbar. Its loading
+          skeleton is sufficient feedback, and omitting this fixed bar prevents
+          it from entering the native traffic-light clearance. */}
+      {fullBleed ? frame : <GlobalLoadingBar>{frame}</GlobalLoadingBar>}
       <KeyboardHelp />
       <OnboardingWizard />
       {/* R10 C2 — toasts speak the design-system token language (was sonner's
@@ -610,7 +614,7 @@ export default function App() {
     location.pathname.startsWith('/popout/');
 
   return (
-    <GlobalChrome>
+    <GlobalChrome fullBleed={fullBleed}>
       {fullBleed ? (
         // C6 — animate entry/exit on full-bleed exam screens (motion-safe via
         // MotionProvider) so starting/finishing a section isn't a hard cut.

@@ -46,13 +46,24 @@ export interface LsatNavGroup {
 // Host navGroup slug -> heading shown in the LSAT section. Mirrors the LSAT
 // shell's own group names mapped onto the host nav taxonomy (see K4-5).
 const GROUP_LABELS: Record<string, string> = {
-  practice: 'Practice',
-  tools: 'Insight',
-  ops: 'Setup',
+  practice: 'Exercises',
+  tools: 'Study tools',
+  ops: 'Maintenance',
 };
 
 // Stable display order for the groups (matches the LSAT rail: Practice first).
 const GROUP_ORDER = ['practice', 'tools', 'ops'];
+
+// The shared workspace rail already provides these domain-aware destinations.
+// Keeping them out of the LSAT track section prevents two rows from taking a
+// learner to the same surface while preserving every LSAT deep link.
+const SHARED_WORKSPACE_ROUTE_IDS = new Set([
+  'lsat-home',
+  'lsat-dashboard',
+  'lsat-practice',
+  'lsat-review',
+  'lsat-analytics',
+]);
 
 /** True when a route is a real, navigable LSAT nav row (not an alias/dynamic). */
 function isNavRow(route: AppRoute): boolean {
@@ -72,7 +83,9 @@ function visibleInMode(route: AppRoute, mode: LsatNavMode): boolean {
  * returned in a stable order (Practice → Insight → Setup).
  */
 export function buildLsatNavGroups(mode: LsatNavMode): LsatNavGroup[] {
-  const rows = lsatAppRoutes.filter((route) => isNavRow(route) && visibleInMode(route, mode));
+  const rows = lsatAppRoutes.filter(
+    (route) => isNavRow(route) && visibleInMode(route, mode) && !SHARED_WORKSPACE_ROUTE_IDS.has(route.id),
+  );
   const byGroup = new Map<string, LsatNavItem[]>();
   for (const route of rows) {
     const list = byGroup.get(route.navGroup) ?? [];

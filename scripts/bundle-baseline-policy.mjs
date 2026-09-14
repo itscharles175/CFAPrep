@@ -31,14 +31,9 @@ export function stableAssetKey(name) {
   const previousHyphen = prefix.lastIndexOf('-');
   if (previousHyphen < 0) return input;
   const candidate = body.slice(previousHyphen + 1);
-  const hasDigitOrUnderscore = /[0-9_]/.test(candidate);
-  const hasInteriorHyphen = /^[A-Za-z0-9_]+-[A-Za-z0-9_]+$/.test(candidate);
-  if (
-    candidate.length >= 8 &&
-    candidate.length <= 12 &&
-    /^[A-Za-z0-9_-]+$/.test(candidate) &&
-    (hasDigitOrUnderscore || hasInteriorHyphen)
-  ) {
+  // Vite/Rolldown emits eight-character URL-safe hashes. A trailing "-" is
+  // part of that alphabet, not another filename separator.
+  if (candidate.length === 8 && /^[A-Za-z0-9_-]+$/.test(candidate)) {
     return `${body.slice(0, previousHyphen)}-[hash]${ext}`;
   }
   return input;

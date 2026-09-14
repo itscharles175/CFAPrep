@@ -16,9 +16,9 @@ import {
   TriangleAlert,
   Wrench,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@lsat/components/ui/card';
-import { Button } from '@lsat/components/ui/button';
-import { Badge } from '@lsat/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -26,8 +26,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@lsat/components/ui/dialog';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@lsat/components/ui/table';
+} from '@/components/ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@lsat/components/states';
 import {
   useBackupIntegrity,
@@ -797,6 +797,12 @@ export function DiagnosticsPanel() {
               icon={<DatabaseBackup className="h-6 w-6" />}
             />
           ) : (
+            <div
+              className="settings-table-scroll"
+              role="region"
+              aria-label="Local backup snapshots"
+              tabIndex={0}
+            >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -831,6 +837,7 @@ export function DiagnosticsPanel() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
           <p className="text-xs text-muted-foreground">
             Restoring replaces your current database with the selected snapshot.

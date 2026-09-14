@@ -56,6 +56,8 @@ describe('learning catalog integrity', () => {
     expect(ids.size).toBe(items.length);
     expect(items.length).toBeGreaterThan(30);
     expect(items.some((item) => item.path === '/calculators')).toBe(true);
+    expect(items.filter((item) => item.path === '/lsat')).toHaveLength(1);
+    expect(items.some((item) => item.id === 'lsat:practice')).toBe(false);
   });
 
   it('projects command palette Level III topics through the selected pathway', () => {

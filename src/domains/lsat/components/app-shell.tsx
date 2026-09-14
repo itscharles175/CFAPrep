@@ -57,10 +57,10 @@ function MainScrollArea({
     <div
       ref={ref}
       id="main-content"
-      className="scroll-thin flex-1 overflow-y-auto p-3 sm:p-6"
+      className="lsat-main-scroll-area scroll-thin min-h-0 flex-1 overflow-y-auto p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:p-6"
       role="region"
       aria-label="LSAT content"
-      tabIndex={-1}
+      tabIndex={0}
     >
       {children}
     </div>

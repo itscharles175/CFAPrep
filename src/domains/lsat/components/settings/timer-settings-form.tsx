@@ -2,9 +2,9 @@ import { useId } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Button } from "@lsat/components/ui/button";
-import { Input } from "@lsat/components/ui/input";
-import { Label } from "@lsat/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   getTimerDefaults,
   setTimerDefaults,

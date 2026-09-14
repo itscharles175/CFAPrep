@@ -96,7 +96,10 @@ export function ContributionHeatmap({
     "repeating-linear-gradient(45deg, rgba(0,0,0,0.4) 0 1px, transparent 1px 3px)";
 
   return (
-    <div className={cn("inline-flex flex-col gap-2", className)}>
+    <div
+      className={cn("inline-flex flex-col gap-2", className)}
+      aria-label={`Activity heatmap. Maximum ${maxV} per day; ${step} pixel grid step.`}
+    >
       <div ref={containerRef} data-heatmap-root className="relative inline-flex gap-1">
         {/* day-of-week labels */}
         <div className="flex flex-col" style={{ gap, paddingTop: 0 }}>
@@ -150,8 +153,6 @@ export function ContributionHeatmap({
             <div className="text-muted-foreground">{tooltipData.key}</div>
           </TooltipInPortal>
         )}
-        {/* keep maxV referenced for legend-less builds */}
-        <span className="sr-only">max {maxV} per day, {step}px step</span>
       </div>
       {showScaleKey && (
         <ColorScaleKey

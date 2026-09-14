@@ -25,7 +25,7 @@ export const MilestoneShareCard = forwardRef<HTMLDivElement, MilestoneShareCardP
         <h2 className="mt-3 text-2xl font-bold">{label}</h2>
         <p className="mt-2 text-sm text-white/70">
           {progressPct >= 100
-            ? "Unlocked in LSAT Lab"
+            ? "Unlocked in StudyVault · LSAT"
             : `${Math.round(progressPct)}% progress`}
         </p>
         {predictedScore != null && (
@@ -34,7 +34,7 @@ export const MilestoneShareCard = forwardRef<HTMLDivElement, MilestoneShareCardP
           </p>
         )}
         <p className="mt-8 text-[10px] text-white/70">
-          {new Date().toLocaleDateString()} · lsatlab.app
+          {new Date().toLocaleDateString()} · StudyVault · LSAT
         </p>
       </div>
     );

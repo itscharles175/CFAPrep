@@ -8,7 +8,7 @@ import {
 import { setJSON, STORAGE_KEYS } from "./storage";
 
 describe("commandRecents", () => {
-  it("canonicalizes the /notebook alias to home so recents do not duplicate Notebook & Curriculum", () => {
+  it("canonicalizes the /notebook alias to home so recents do not duplicate LSAT Library", () => {
     setJSON(STORAGE_KEYS.commandRecents, ["/notebook", "/dashboard", "/"]);
 
     expect(getCommandRecents()).toEqual(["/", "/dashboard"]);
@@ -16,6 +16,6 @@ describe("commandRecents", () => {
     pushCommandRecent("/notebook");
 
     expect(getCommandRecents()).toEqual(["/", "/dashboard"]);
-    expect(routeCommandLabel("/notebook")).toBe("Notebook & Curriculum");
+    expect(routeCommandLabel("/notebook")).toBe("LSAT Library");
   });
 });

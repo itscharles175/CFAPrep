@@ -1,6 +1,7 @@
 """MCP tools (C6), tag-review queue (B6), dataset schema validation (D5)."""
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -28,6 +29,14 @@ def test_mcp_tools_return_read_only_data(db_session):
 def test_mcp_build_server_registers_tools():
     server = mcp_server.build_server()
     assert server is not None
+
+
+def test_mcp_dependency_stays_on_fastmcp_v1_contract():
+    pyproject = Path(__file__).parents[1] / "pyproject.toml"
+    dependencies = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
+    requirement = next(item for item in dependencies if item.startswith("mcp"))
+    assert ">=1.27.1" in requirement
+    assert "<2" in requirement
 
 
 # --- B6: tag confidence + review queue -------------------------------------

@@ -97,7 +97,7 @@ describe("QuestionBrowser a11y semantics", () => {
   });
 
   it("labels filters and keeps row actions outside the preview button", async () => {
-    bankBrowseMocks.loadBankQuestions.mockResolvedValue([item()]);
+    bankBrowseMocks.loadBankQuestions.mockResolvedValue({ items: [item()], usingSample: false });
 
     render(
       <MemoryRouter>
@@ -115,6 +115,10 @@ describe("QuestionBrowser a11y semantics", () => {
     expect(
       screen.getByRole("button", { name: "Difficulty filter" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Search questions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toHaveClass(
+      "min-h-10",
+    );
 
     const preview = screen.getByRole("button", {
       name: "Preview Inference question 1",
@@ -127,5 +131,23 @@ describe("QuestionBrowser a11y semantics", () => {
       screen.getByRole("button", { name: "Delete question 1" }),
     ).toBeInTheDocument();
     expect(document.querySelector('[role="button"][tabindex="0"]')).toBeNull();
+  });
+
+  it("excludes offline fixtures and withholds bank mutations", async () => {
+    bankBrowseMocks.loadBankQuestions.mockResolvedValue({ items: [item()], usingSample: true });
+
+    render(
+      <MemoryRouter>
+        <QuestionBrowser typeCounts={{ Inference: 1 }} />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText("Question bank is unavailable while the LSAT backend is offline."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Sample data excluded")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete question 1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tag-editor")).not.toBeInTheDocument();
   });
 });

@@ -18,10 +18,53 @@ import { Textarea } from "@lsat/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@lsat/lib/api";
 import { useAdaptivityPlan, useReadinessStatus } from "@lsat/lib/hooks";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 import { useSocraticStream } from "@lsat/hooks/useSocraticStream";
 import type { SocraticCitation, TutorSocraticContext } from "@lsat/lib/types";
 
 export const TUTOR_EMPTY_STATE = "Load an attempt to begin blind review and source-linked remediation.";
+
+export function TutorAdaptiveSignals({
+  usingSample,
+  readinessScore,
+  nextTask,
+  onRetry,
+}: {
+  usingSample: boolean;
+  readinessScore?: number | null;
+  nextTask?: string | null;
+  onRetry: () => void | Promise<void>;
+}) {
+  return (
+    <PageSection title="Adaptive signals" eyebrow="Plan">
+      {usingSample ? (
+        <SampleDataRecovery
+          section="Tutor adaptive signals"
+          compact
+          affectedSections={["Readiness score", "Next task recommendation"]}
+          onRetry={onRetry}
+        />
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2">
+          <Card className="border-border/80 bg-surface-1/60">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Readiness</p>
+              <p className="mt-1 text-2xl font-semibold">
+                {Math.round(readinessScore ?? 0)}/100
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-border/80 bg-surface-1/60">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Next task</p>
+              <p className="mt-1 font-medium">{nextTask ?? "Build more evidence"}</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </PageSection>
+  );
+}
 
 export function SocraticEvidence({
   context,
@@ -190,6 +233,7 @@ export default function Tutor() {
   const attemptNumber = Number(attemptId);
   const plan = useAdaptivityPlan(60);
   const readiness = useReadinessStatus();
+  const adaptiveSignalsAreSample = Boolean(plan.data?.usingSample || readiness.data?.usingSample);
   const why = useQuery({
     queryKey: ["why-loop", attemptNumber],
     queryFn: () => api.whyLoop(attemptNumber),
@@ -268,16 +312,20 @@ export default function Tutor() {
   return (
     <div className="page-container">
       <PageHeader
-        eyebrow="Socratic Blind Review"
+        eyebrow="Library · Blind Review"
         title="Tutor"
-        subtitle="Local-only why loops, rationale memory, Socratic turns, and concept-gap remediation."
+        subtitle="Build an evidence trail before you reveal an answer, then work through a source-linked local tutor loop."
         actions={<Button variant="outline" onClick={createCards} disabled={!why.data}><RotateCcw className="h-4 w-4" aria-hidden /> Create SRS cards</Button>}
       />
       <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Why loop</CardTitle>
+        <Card className="border-border/80 shadow-sm">
+          <CardHeader className="border-b bg-surface-1/70">
+            <div className="space-y-1">
+              <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Your evidence</p>
+              <CardTitle className="text-base">Why loop</CardTitle>
+              <p className="text-sm text-muted-foreground">Capture your reasoning before any explanation is shown.</p>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex gap-2">
@@ -289,7 +337,7 @@ export default function Tutor() {
               />
               <Button variant="outline" onClick={() => why.refetch()}>Load</Button>
             </div>
-            <div className="grid gap-2">
+            <div className="grid gap-2 rounded-card bg-surface-1/70 p-2">
               {(why.data?.steps ?? []).map((step) => (
                 <div key={step.key} className="flex items-center justify-between rounded-md border p-3 text-sm">
                   <span>{step.key.replace(/_/g, " ")}</span>
@@ -299,8 +347,9 @@ export default function Tutor() {
                 </div>
               ))}
             </div>
-            <div className="rounded-md bg-muted/45 p-3 text-sm">
-              Next: <span className="font-medium">{why.data?.next_step?.replace(/_/g, " ") ?? "load an attempt"}</span>
+            <div className="rounded-card border border-primary/15 bg-primary/5 p-3 text-sm">
+              <p className="lsat-tutor-next-step-label text-xs font-medium uppercase tracking-[0.12em]">Next step</p>
+              <p className="mt-1 font-medium">{why.data?.next_step?.replace(/_/g, " ") ?? "Load an attempt"}</p>
             </div>
             {!why.data && (
               <p className="text-sm text-muted-foreground">{TUTOR_EMPTY_STATE}</p>
@@ -345,15 +394,15 @@ export default function Tutor() {
         </Card>
 
         <div className="space-y-6">
-          <Card>
-            <CardHeader>
+          <Card className="border-border/80 shadow-sm">
+            <CardHeader className="border-b bg-surface-1/70">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Bot className="h-4 w-4 text-primary" aria-hidden />
                 Socratic conversation
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 rounded-card bg-surface-1/70 p-2">
                 <Button size="sm" variant="outline" onClick={startConversation} disabled={!why.data}>
                   <MessageSquare className="h-4 w-4" aria-hidden />
                   New local tutor loop
@@ -369,7 +418,7 @@ export default function Tutor() {
                   </Button>
                 ))}
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 rounded-card border bg-background/60 p-3">
                 {(activeConversation?.turns ?? []).map((t) => (
                   <div key={t.id} className="rounded-md border p-3 text-sm">
                     <Badge variant={t.role === "assistant" ? "secondary" : "outline"}>{t.role}</Badge>
@@ -398,9 +447,10 @@ export default function Tutor() {
                   </div>
                 ) : null}
                 {!activeConversation && (
-                  <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                    Start a local tutor loop after loading an attempt.
-                  </p>
+                  <div className="rounded-card border border-dashed bg-surface-1/40 p-5 text-sm text-muted-foreground">
+                    <p className="font-medium text-foreground">No tutor thread yet</p>
+                    <p className="mt-1">Load an attempt, then start a local tutor loop to keep the conversation attached to your blind-review evidence.</p>
+                  </div>
                 )}
               </div>
               <Textarea
@@ -434,26 +484,14 @@ export default function Tutor() {
             </CardContent>
           </Card>
 
-          <PageSection title="Adaptive signals" eyebrow="Plan">
-            <div className="grid gap-3 md:grid-cols-2">
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Readiness</p>
-                  <p className="mt-1 text-2xl font-semibold">
-                    {Math.round(readiness.data?.data.readiness_score ?? 0)}/100
-                  </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Next task</p>
-                  <p className="mt-1 font-medium">
-                    {plan.data?.data.tasks[0]?.label ?? "Build more evidence"}
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-          </PageSection>
+          <TutorAdaptiveSignals
+            usingSample={adaptiveSignalsAreSample}
+            readinessScore={readiness.data?.data.readiness_score}
+            nextTask={plan.data?.data.tasks[0]?.label}
+            onRetry={() =>
+              Promise.all([plan.refetch(), readiness.refetch()]).then(() => undefined)
+            }
+          />
         </div>
       </div>
       </div>

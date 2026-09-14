@@ -1,6 +1,6 @@
 import { Check, Monitor, Moon, Sun } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Label } from "@lsat/components/ui/label";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@lsat/components/ui/switch";
 import { Icon } from "@lsat/components/ui/icon";
 import { useTheme } from "@lsat/components/theme-provider";

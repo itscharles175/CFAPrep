@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, m, useReducedMotion } from "motion/react";
 import { CircleCheck, CircleX, Keyboard, Loader2, PlayCircle } from "lucide-react";
@@ -14,35 +14,19 @@ import { useAiHealth } from "@lsat/lib/hooks";
 import { useSaveSettings } from "@lsat/lib/mutations";
 import { fadeUp } from "@lsat/lib/motion";
 import { cn } from "@lsat/lib/utils";
-import {
-  daysUntil,
-  getGoal,
-  isOnboardingDone,
-  setGoal,
-  setOnboardingDone,
-} from "@lsat/lib/prefs";
-import {
-  isUnifiedOnboardingDismissed,
-  setUnifiedOnboardingDismissed,
-} from "@/lib/unifiedResume";
-import {
-  clearStudyContextOrigin,
-  readStudyContextOrigin,
-  stageStudyContextHandoff,
-  writeStudyContext,
-} from "@/lib/studyContext";
+import { daysUntil, getGoal, isOnboardingDone, setGoal, setOnboardingDone } from "@lsat/lib/prefs";
+import { isUnifiedOnboardingDismissed, setUnifiedOnboardingDismissed } from "@/lib/unifiedResume";
+import { clearStudyContextOrigin, readStudyContextOrigin, stageStudyContextHandoff, writeStudyContext } from "@/lib/studyContext";
 import { navigateDomain } from "@/lib/domainNav";
 
 /**
- * R9 F3.1 — "First Light" onboarding. A full-bleed dark stage with a breathing
- * aurora behind the brand mark; the goal score + exam date are captured as
- * engraved `StatNumber voice="numeric" aurora` that update live as the user
- * drags the slider / picks a date. The existing steps (goal → Ollama →
- * import/sample → baseline → keyboard) are staged as calm cross-fades on one
- * canvas. SAME data / flow / persistence as before — purely a visual reskin.
+ * First-entry LSAT setup. It keeps the existing goal → AI → import/sample →
+ * baseline → keyboard flow and persistence, but presents it as a StudyVault
+ * workspace panel rather than an isolated LSAT product. The cross-domain return
+ * handoff remains intentionally untouched.
  */
 export function onboardingAppliesToRoute(pathname: string) {
-  return pathname === "/" || pathname === "/dashboard";
+  return pathname === "/dashboard";
 }
 
 export function setFirstLightChromeState(active: boolean) {
@@ -74,12 +58,7 @@ export function OnboardingWizard() {
   // half of the two-way sync: a user who dismissed setup on the host never gets
   // the "First Light" wizard the first time they hop into /lsat.
   const [dismissedForSession, setDismissedForSession] = useState(false);
-  const open =
-    onboardingAppliesToRoute(location.pathname) &&
-    !dismissedForSession &&
-    !isOnboardingDone() &&
-    getGoal() == null &&
-    !isUnifiedOnboardingDismissed();
+  const open = onboardingAppliesToRoute(location.pathname) && !dismissedForSession && !isOnboardingDone() && getGoal() == null && !isUnifiedOnboardingDismissed();
   const [step, setStep] = useState(0);
   const [targetScore, setTargetScore] = useState(165);
   const [examDate, setExamDate] = useState("");
@@ -105,16 +84,6 @@ export function OnboardingWizard() {
     },
     [targetScore, examDate],
   );
-
-  // Esc skips out of the stage (parity with the old Dialog's dismiss).
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") finish(true);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, finish]);
 
   // Diagnostics can be useful once the workspace is visible, but a background
   // toast must not read as part of first-run setup or cover its primary action.
@@ -151,39 +120,21 @@ export function OnboardingWizard() {
       <AnimatePresence mode="wait" initial={false}>
         {step === 0 && (
           <Scene key="goal" reduce={!!reduce}>
-            <SceneHeader
-              eyebrow="First light"
-              title="Welcome to LSAT Lab"
-              description="Set a target score and exam date so your console and analytics can show whether you're on track. You can change these anytime."
-            />
+            <SceneHeader eyebrow="LSAT · Setup" title="Set the direction for your first study session" description="Add a target score and exam date. You can adjust both anytime from Settings." />
 
             {/* Engraved live numerals — the captured goal, breathing. */}
             <div className="grid grid-cols-2 gap-6">
-              <StatNumber
-                label="Target score"
-                value={targetScore}
-                size="stat-xl"
-                voice="numeric"
-                aurora
-              />
+              <StatNumber label="Target score" value={targetScore} size="stat-xl" voice="numeric" aurora />
               {examCountdown.value == null ? (
                 <div className="flex flex-col gap-1">
                   <span className="type-overline text-muted-foreground">{examCountdown.label}</span>
                   <div className="aurora">
                     <span className="stat type-numeric text-stat-xl leading-none font-semibold tabular-nums">—</span>
                   </div>
-                  <p className="type-counsel mt-1 max-w-prose text-sm text-muted-foreground">
-                    {examCountdown.status}
-                  </p>
+                  <p className="type-counsel mt-1 max-w-prose text-sm text-muted-foreground">{examCountdown.status}</p>
                 </div>
               ) : (
-                <StatNumber
-                  label={examCountdown.label}
-                  value={examCountdown.value}
-                  size="stat-xl"
-                  voice="numeric"
-                  aurora
-                />
+                <StatNumber label={examCountdown.label} value={examCountdown.value} size="stat-xl" voice="numeric" aurora />
               )}
             </div>
 
@@ -199,7 +150,7 @@ export function OnboardingWizard() {
                   max={180}
                   value={targetScore}
                   onChange={(e) => setTargetScore(Number(e.target.value))}
-                  className="w-full accent-[hsl(var(--primary))]"
+                  className="h-10 w-full accent-[hsl(var(--primary))]"
                 />
                 <div className="flex justify-between text-2xs tabular-nums text-muted-foreground">
                   <span>120</span>
@@ -210,20 +161,11 @@ export function OnboardingWizard() {
                 <Label htmlFor="onboard-date" className="type-overline text-muted-foreground">
                   Exam date
                 </Label>
-                <Input
-                  id="onboard-date"
-                  type="date"
-                  value={examDate}
-                  onChange={(e) => setExamDate(e.target.value)}
-                  className="bg-surface-2"
-                />
+                <Input id="onboard-date" type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} className="bg-surface-2" />
               </div>
             </div>
 
-            <StageActions
-              onSkip={() => finish(true)}
-              primary={<Button onClick={() => setStep(1)}>Next</Button>}
-            />
+            <StageActions primary={<Button onClick={() => setStep(1)}>Next</Button>} />
           </Scene>
         )}
 
@@ -241,7 +183,12 @@ export function OnboardingWizard() {
               description="Official questions anchor your score trend and blind-review workflow. You can import anytime from Setup."
             />
             <div className="flex flex-col gap-2.5">
-              <Button onClick={() => { finish(); navigate("/import"); }}>
+              <Button
+                onClick={() => {
+                  finish();
+                  navigate("/import");
+                }}
+              >
                 Go to Import
               </Button>
               {/* R7 6.4 — reach the core loop before importing anything. */}
@@ -264,11 +211,7 @@ export function OnboardingWizard() {
 
         {step === 3 && (
           <Scene key="baseline" reduce={!!reduce}>
-            <SceneHeader
-              eyebrow="Calibrate"
-              title="Baseline 5-question drill"
-              description="A quick untimed drill calibrates your starting point before full sections. Takes about 10 minutes."
-            />
+            <SceneHeader eyebrow="Calibrate" title="Baseline 5-question drill" description="A quick untimed drill calibrates your starting point before full sections. Takes about 10 minutes." />
             <div className="flex flex-col gap-2.5">
               <Button
                 onClick={() => {
@@ -287,11 +230,7 @@ export function OnboardingWizard() {
 
         {step === 4 && (
           <Scene key="keyboard" reduce={!!reduce}>
-            <SceneHeader
-              eyebrow="Move faster"
-              title="Keyboard shortcuts"
-              description="Press ? anytime during practice for the full map. Try it now or finish setup."
-            />
+            <SceneHeader eyebrow="Move faster" title="Keyboard shortcuts" description="Press ? anytime during practice for the full map. Try it now or finish setup." />
             <div className="flex flex-col gap-2.5">
               <Button
                 variant="outline"
@@ -321,7 +260,7 @@ export function OnboardingWizard() {
 // and a single column where the steps cross-fade.
 // ---------------------------------------------------------------------------
 
-function FirstLightStage({
+export function FirstLightStage({
   children,
   reduce,
   onSkip,
@@ -334,96 +273,147 @@ function FirstLightStage({
   onReturnToCurriculum?: () => void;
   returnLabel?: string;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onSkipRef = useRef(onSkip);
+  onSkipRef.current = onSkip;
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusInitialControl = () => {
+      const [initialControl] = getDialogFocusableElements(dialog);
+      (initialControl ?? dialog).focus();
+    };
+    const frame = window.requestAnimationFrame(focusInitialControl);
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onSkipRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = getDialogFocusableElements(dialog);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown, true);
+      const previousFocus = previousFocusRef.current;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+
   return (
     <m.div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="StudyVault LSAT setup"
+      tabIndex={-1}
       initial={reduce ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
-      // The whole stage is the dark "observatory" floor — token-driven so it
-      // re-themes across light / dark / focus-paper / high-contrast.
-      className="lsat-first-light-stage bg-surface-0 fixed inset-0 z-50 flex flex-col items-center justify-center overflow-y-auto p-6 print:hidden"
+      className="lsat-first-light-stage fixed inset-0 z-50 grid place-items-center bg-background/95 p-4 backdrop-blur-sm print:hidden sm:p-8"
     >
       <style>{'html[data-lsat-first-light="active"] [data-sonner-toaster]{display:none!important}'}</style>
-      <header className="absolute inset-x-0 top-0 flex items-center justify-between border-b border-border/70 bg-surface-0/90 px-5 py-3 backdrop-blur-sm sm:px-8">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <Logo className="h-6 w-6 shrink-0" />
-          <span className="type-overline truncate text-foreground">StudyVault</span>
-          <span aria-hidden className="text-muted-foreground">/</span>
-          <span className="truncate text-xs text-muted-foreground">LSAT setup</span>
-        </div>
-        <div className="flex items-center gap-1">
-          {onReturnToCurriculum && returnLabel && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onReturnToCurriculum}
-              title="Return to the curriculum you were studying"
-            >
-              {returnLabel}
+      <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-card border border-border bg-card shadow-[var(--elevation-3)] sm:max-h-[calc(100dvh-4rem)]">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface-1 px-5 py-4 sm:px-7">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-primary/10 text-primary">
+              <Logo className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <p className="type-overline truncate text-foreground">StudyVault · LSAT setup</p>
+              <p className="truncate text-xs text-muted-foreground">Personal setup</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            {onReturnToCurriculum && returnLabel && (
+              <Button variant="ghost" size="sm" className="min-h-10" onClick={onReturnToCurriculum} title="Return to the curriculum you were studying">
+                {returnLabel}
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" className="min-h-10" onClick={onSkip} aria-label="Skip onboarding">
+              Skip setup
             </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={onSkip}>
-            Skip setup
-          </Button>
+          </div>
+        </header>
+        <div
+          className="grid min-h-0 flex-1 gap-8 overflow-y-auto overscroll-contain px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-7 sm:py-8 lg:grid-cols-[minmax(0,1fr)_11rem] lg:items-start"
+          tabIndex={0}
+          role="region"
+          aria-label="LSAT setup steps"
+        >
+          <div className="min-w-0 space-y-8">{children}</div>
+          <aside className="order-first rounded-card border border-border bg-surface-1 p-4 lg:order-none">
+            <p className="type-overline text-muted-foreground">Your setup</p>
+            <p className="mt-2 text-sm font-medium">Build a plan from your own work.</p>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Goal, local tools, practice data, and shortcuts can all be updated later.</p>
+          </aside>
         </div>
-      </header>
-      {/* Brand mark catching the breathing aurora. */}
-      <div className="aurora mb-8 flex items-center justify-center">
-        <Logo className="h-14 w-14" />
       </div>
-      <div className="w-full max-w-md space-y-8">{children}</div>
     </m.div>
+  );
+}
+
+const focusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+export function getDialogFocusableElements(dialog: HTMLElement) {
+  return Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+    (element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true",
   );
 }
 
 function Scene({ children, reduce }: { children: ReactNode; reduce: boolean }) {
   return (
-    <m.div
-      variants={reduce ? undefined : fadeUp}
-      initial={reduce ? false : "hidden"}
-      animate="show"
-      exit={reduce ? undefined : "exit"}
-      className="space-y-7"
-    >
+    <m.div variants={reduce ? undefined : fadeUp} initial={reduce ? false : "hidden"} animate="show" exit={reduce ? undefined : "exit"} className="space-y-6">
       {children}
     </m.div>
   );
 }
 
-function SceneHeader({
-  eyebrow,
-  title,
-  description,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-}) {
+function SceneHeader({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
   return (
-    <div className="space-y-2 text-center">
+    <div className="space-y-2">
       <p className="type-overline text-muted-foreground">{eyebrow}</p>
       <h1 className="type-display text-3xl leading-tight">{title}</h1>
-      <p className="type-counsel mx-auto max-w-prose text-sm text-muted-foreground [text-wrap:pretty]">
-        {description}
-      </p>
+      <p className="type-counsel max-w-prose text-sm text-muted-foreground [text-wrap:pretty]">{description}</p>
     </div>
   );
 }
 
-function StageActions({
-  onSkip,
-  primary,
-}: {
-  onSkip: () => void;
-  primary: ReactNode;
-}) {
+function StageActions({ primary, secondary }: { primary: ReactNode; secondary?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <Button variant="ghost" onClick={onSkip}>
-        Skip
-      </Button>
+    <div className="flex items-center justify-end gap-2">
+      {secondary}
       {primary}
     </div>
   );
@@ -433,29 +423,13 @@ function StepDots({ count, current }: { count: number; current: number }) {
   return (
     <div className="mt-10 flex items-center gap-2" aria-hidden>
       {Array.from({ length: count }).map((_, i) => (
-        <span
-          key={i}
-          className={cn(
-            "h-1.5 rounded-full transition-all duration-300",
-            i === current
-              ? "w-6 bg-primary"
-              : i < current
-                ? "w-1.5 bg-primary/50"
-                : "w-1.5 bg-muted-foreground/30",
-          )}
-        />
+        <span key={i} className={cn("h-1.5 rounded-full transition-all duration-300", i === current ? "w-6 bg-primary" : i < current ? "w-1.5 bg-primary/50" : "w-1.5 bg-muted-foreground/30")} />
       ))}
     </div>
   );
 }
 
-export function OnboardingOllamaStep({
-  onNext,
-  onSkip,
-}: {
-  onNext: () => void;
-  onSkip: () => void;
-}) {
+export function OnboardingOllamaStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
   const health = useAiHealth();
   const h = health.data?.data;
   const saveProvider = useSaveSettings();
@@ -467,12 +441,7 @@ export function OnboardingOllamaStep({
   // flips the active provider in the ai-health cache (and refetches), so the copy
   // and status below follow the selection live. Reflect the in-flight choice now.
   const pendingProvider = saveProvider.variables?.local_provider;
-  const selectedProvider =
-    (saveProvider.isPending && typeof pendingProvider === "string"
-      ? pendingProvider
-      : null) ??
-    h?.provider ??
-    "ollama";
+  const selectedProvider = (saveProvider.isPending && typeof pendingProvider === "string" ? pendingProvider : null) ?? h?.provider ?? "ollama";
   const isLmStudio = selectedProvider === "lmstudio";
   const providerLabel = isLmStudio ? "LMStudio" : "Ollama";
   const models = h?.models ?? [];
@@ -500,11 +469,7 @@ export function OnboardingOllamaStep({
             className="overflow-hidden rounded-md border"
           >
             {(["ollama", "lmstudio"] as const).map((p) => (
-              <ToggleGroupItem
-                key={p}
-                value={p}
-                className="h-auto rounded-none px-3 py-1 text-xs font-medium data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
-              >
+              <ToggleGroupItem key={p} value={p} className="min-h-10 rounded-none px-3 py-1 text-xs font-medium data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
                 {p === "lmstudio" ? "LMStudio" : "Ollama"}
               </ToggleGroupItem>
             ))}
@@ -523,9 +488,7 @@ export function OnboardingOllamaStep({
         ) : (
           <p className="flex items-center justify-center gap-2 text-warning">
             <Icon as={CircleX} size="sm" />
-            {isLmStudio
-              ? "LMStudio server not detected — start it and load a model"
-              : "Ollama not detected on localhost:11434"}
+            {isLmStudio ? "LMStudio server not detected — start it and load a model" : "Ollama not detected on localhost:11434"}
           </p>
         )}
         <ul className="space-y-1.5 rounded-card bg-surface-1 p-4 text-muted-foreground">
@@ -533,43 +496,28 @@ export function OnboardingOllamaStep({
             <>
               <li>
                 Install:{" "}
-                <a
-                  href="https://lmstudio.ai"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline"
-                >
+                <a href="https://lmstudio.ai" target="_blank" rel="noreferrer" className="underline">
                   lmstudio.ai
                 </a>
               </li>
               <li>Load a chat model, then start the local server (the “Server” tab).</li>
               <li>
-                It serves an OpenAI-compatible endpoint at{" "}
-                <code className="rounded bg-surface-2 px-1">localhost:1234/v1</code>.
+                It serves an OpenAI-compatible endpoint at <code className="rounded bg-surface-2 px-1">localhost:1234/v1</code>.
               </li>
             </>
           ) : (
             <>
               <li>
                 Install:{" "}
-                <a
-                  href="https://ollama.com/download"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline"
-                >
+                <a href="https://ollama.com/download" target="_blank" rel="noreferrer" className="underline">
                   ollama.com/download
                 </a>
               </li>
               <li>
-                Then run:{" "}
-                <code className="rounded bg-surface-2 px-1">ollama pull qwen3:8b</code>
+                Then run: <code className="rounded bg-surface-2 px-1">ollama pull qwen3:8b</code>
               </li>
               <li>
-                Embeddings:{" "}
-                <code className="rounded bg-surface-2 px-1">
-                  ollama pull nomic-embed-text
-                </code>
+                Embeddings: <code className="rounded bg-surface-2 px-1">ollama pull nomic-embed-text</code>
               </li>
             </>
           )}
@@ -584,18 +532,17 @@ export function OnboardingOllamaStep({
         {isLmStudio && ready && (h?.missing_models?.length ?? 0) > 0 && (
           <p className="text-center text-xs text-warning">
             {h?.missing_models?.length} model role
-            {(h?.missing_models?.length ?? 0) === 1 ? "" : "s"} not loaded — open
-            Settings → AI &amp; system to assign a loaded model to each role.
+            {(h?.missing_models?.length ?? 0) === 1 ? "" : "s"} not loaded — open Settings → AI &amp; system to assign a loaded model to each role.
           </p>
         )}
       </div>
       <StageActions
-        onSkip={onSkip}
-        primary={
-          <Button onClick={onNext}>
-            {ready && (isLmStudio || hasExplain) ? "Continue" : "Continue anyway"}
+        secondary={
+          <Button variant="ghost" onClick={onSkip}>
+            Not now
           </Button>
         }
+        primary={<Button onClick={onNext}>{ready && (isLmStudio || hasExplain) ? "Continue" : "Continue anyway"}</Button>}
       />
     </>
   );

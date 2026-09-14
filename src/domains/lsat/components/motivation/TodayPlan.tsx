@@ -260,7 +260,7 @@ export function TodayPlan() {
 
   return (
     <Card>
-      <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
+      <CardHeader className="flex-row flex-wrap items-start justify-between gap-3 space-y-0">
         <CardTitle>Today&apos;s plan</CardTitle>
         {/* Budget arc — replaces the raw minutes <Input>; stepper adjusts it. */}
         {!allDone && (
@@ -287,7 +287,7 @@ export function TodayPlan() {
                 type="button"
                 aria-label="Increase minutes budget"
                 onClick={() => adjustBudget(15)}
-                className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Icon as={Plus} size="xs" />
               </button>
@@ -295,7 +295,7 @@ export function TodayPlan() {
                 type="button"
                 aria-label="Decrease minutes budget"
                 onClick={() => adjustBudget(-15)}
-                className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Icon as={Minus} size="xs" />
               </button>
@@ -331,7 +331,7 @@ export function TodayPlan() {
                 <div className="flex flex-col">
                   <button
                     type="button"
-                    className="rounded p-0.5 hover:bg-muted disabled:opacity-30"
+                    className="flex h-10 w-10 items-center justify-center rounded-md hover:bg-muted disabled:opacity-30"
                     disabled={idx === 0}
                     aria-label="Move up"
                     onClick={() => move(item.id, -1)}
@@ -340,7 +340,7 @@ export function TodayPlan() {
                   </button>
                   <button
                     type="button"
-                    className="rounded p-0.5 hover:bg-muted disabled:opacity-30"
+                    className="flex h-10 w-10 items-center justify-center rounded-md hover:bg-muted disabled:opacity-30"
                     disabled={idx === items.length - 1}
                     aria-label="Move down"
                     onClick={() => move(item.id, 1)}
@@ -356,7 +356,7 @@ export function TodayPlan() {
                   aria-label={`Mark "${item.label}" done`}
                   onClick={() => toggle(item.id)}
                   className={cn(
-                    "shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     isDone ? "text-success" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
@@ -396,7 +396,7 @@ export function TodayPlan() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 px-2"
+                  className="h-10 min-w-10 px-3"
                   onClick={() => navigate(item.to)}
                   aria-label={`Start ${item.label}`}
                 >

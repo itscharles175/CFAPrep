@@ -26,7 +26,7 @@ export const RecapShareCard = forwardRef<HTMLDivElement, RecapShareCardProps>(
         style={{ fontFamily: "system-ui, sans-serif" }}
       >
         <div className="text-xs font-semibold uppercase tracking-widest text-primary">
-          LSAT Lab
+          StudyVault · LSAT
         </div>
         <h2 className="mt-1 text-2xl font-bold">Session recap</h2>
         {sessionLabel && (

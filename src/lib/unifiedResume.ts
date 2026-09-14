@@ -174,6 +174,17 @@ export function lsatResumeCandidate(): UnifiedResume | null {
     return null;
   }
   if (!ptr || !ptr.updatedAt) return null;
+  // LSAT owns basename-relative routes because its router runs beneath
+  // `/lsat`. The unified resume card can render on the host Today route, where
+  // those same paths would otherwise resolve to the host 404. Normalize at this
+  // shared boundary so every consumer receives one app-root route contract.
+  const relativePath = `/${ptr.path.replace(/^\/+/, '')}`;
+  const path =
+    relativePath === '/lsat' || relativePath.startsWith('/lsat/')
+      ? relativePath
+      : relativePath === '/'
+        ? '/lsat'
+        : `/lsat${relativePath}`;
   const kindLabel =
     ptr.kind === 'exam'
       ? 'exam'
@@ -188,7 +199,7 @@ export function lsatResumeCandidate(): UnifiedResume | null {
     label: `Resume LSAT ${kindLabel}`,
     detail: ptr.label,
     at: ptr.updatedAt,
-    path: ptr.path,
+    path,
   };
 }
 

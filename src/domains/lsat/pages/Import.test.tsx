@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Import from './Import';
+import type { ImportParseResult, ParsedPrepTest } from '@lsat/lib/types';
 
 const mocks = vi.hoisted(() => ({
   importParse: vi.fn(),
@@ -54,7 +55,7 @@ vi.mock('@lsat/lib/toast', () => ({
   },
 }));
 
-const parsedPrepTest = {
+const parsedPrepTest: ParsedPrepTest = {
   name: 'PT 99',
   sections: [
     {
@@ -130,5 +131,41 @@ describe('Import page', () => {
     expect(await screen.findByText(/Commit failed before the import could be persisted/i)).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /Import complete/i })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('heading', { name: /Verify parsed structure/i })).toBeInTheDocument());
+  });
+
+  it('accepts a dropped PDF and ignores a duplicate drop while parsing', async () => {
+    let resolveParse!: (value: ImportParseResult) => void;
+    mocks.importParse.mockReturnValue(
+      new Promise((resolve) => {
+        resolveParse = resolve;
+      }),
+    );
+    renderImport();
+    const dropTarget = screen.getByRole('button', { name: /click to choose a pdf/i });
+    const file = new File(['official PDF bytes'], 'PT100.pdf', { type: 'application/pdf' });
+
+    const dataTransfer = { files: { 0: file, length: 1, item: () => file } };
+    fireEvent.drop(dropTarget, { dataTransfer });
+    fireEvent.drop(dropTarget, { dataTransfer });
+
+    await waitFor(() => expect(mocks.importParse).toHaveBeenCalledTimes(1));
+    resolveParse({ job_id: 100, warnings: [], parsed: parsedPrepTest });
+    expect(await screen.findByRole('heading', { name: /Verify parsed structure/i })).toBeInTheDocument();
+  });
+
+  it('keeps the failed file available for an explicit retry', async () => {
+    mocks.importParse.mockRejectedValueOnce(new TypeError('offline')).mockResolvedValueOnce({
+      job_id: 101,
+      warnings: [],
+      parsed: parsedPrepTest,
+    });
+
+    renderImport();
+    await userEvent.click(screen.getByRole('button', { name: /click to choose a pdf/i }));
+    expect(await screen.findByRole('button', { name: /retry parse/i })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /retry parse/i }));
+    expect(await screen.findByRole('heading', { name: /Verify parsed structure/i })).toBeInTheDocument();
+    expect(mocks.importParse).toHaveBeenCalledTimes(2);
   });
 });

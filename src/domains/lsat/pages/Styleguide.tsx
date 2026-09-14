@@ -253,7 +253,7 @@ export default function Styleguide() {
     >
       <m.div variants={fadeUp}>
         <p className="text-sm text-muted-foreground">
-          The visual contract for LSAT Lab (docs/07). Every wave is checked against this.
+          The visual contract for StudyVault’s LSAT workspace. Every release is checked against it.
         </p>
       </m.div>
 

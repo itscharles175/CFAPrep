@@ -1310,8 +1310,8 @@ async function hasStderrLine(logger, marker, timeoutMs = 5000) {
 
 // Starts a real watchdog whose Win32_Process snapshot can be broken ON DEMAND:
 // `breakSnapshot()` drops an unusable `powershell.exe` at the front of the
-// child's PATH. The stub is written only after readiness, so the child's startup
-// snapshot probe still resolves the genuine PowerShell.
+// child's PATH. The stub is written only after the tracked PID has passed its
+// targeted identity query; readiness itself does not require a full snapshot.
 async function watchdogWithBreakableSnapshot(t) {
   const stubDirectory = await temporaryDirectory(t);
   const logger = stderrRecordingLogger();
@@ -1390,9 +1390,10 @@ test('the parent probe never takes a process snapshot while the app is alive', a
     false,
   );
   // A discovery call on the interval blocks the child's event loop for seconds
-  // (spawnSync), so a prompt round trip is the second, independent signal.
+  // (spawnSync), so a prompt control round trip is the second signal. Untracking
+  // does not need a fresh identity query and remains valid after the sabotage.
   const startedAt = Date.now();
-  await watchdog.track(child.pid);
+  await watchdog.untrack(child.pid);
   assert.equal(Date.now() - startedAt < 2500, true);
   assert.equal(child.exitCode, null);
 });

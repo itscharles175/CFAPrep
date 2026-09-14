@@ -131,24 +131,34 @@ class PersonalReleaseTests(unittest.TestCase):
         self.assertIn("--dry-run --no-install", package["scripts"]["release:macos:personal:check"])
 
     def test_full_gate_uses_absolute_lsat_backend_python(self) -> None:
-        result = release.CommandResult(["probe"], 0.1, "")
-        signed_app = Path("/tmp/Signed StudyVault.app")
-        model_environment = {"LSATLAB_LOCAL_PROVIDER": "lmstudio"}
-        with patch.object(release, "run", return_value=result) as command_runner:
-            release.run_full_gates(signed_app, model_environment)
-        dependency_probe = command_runner.call_args_list[0].args[0]
-        command = command_runner.call_args_list[1].args[0]
-        python_index = command.index("--python") + 1
-        expected = release.REPO_ROOT / "services" / "lsat-backend" / ".venv" / "bin" / "python"
-        self.assertEqual(dependency_probe, [str(expected), "-c", "import sqlmodel"])
-        self.assertEqual(Path(command[python_index]), expected)
-        self.assertTrue(Path(command[python_index]).is_absolute())
-        for skip_flag in ("--skip-e2e", "--skip-electron", "--skip-sidecar-build", "--skip-packaged-smoke"):
-            self.assertNotIn(skip_flag, command)
-        self.assertEqual(command[command.index("--trust-tier") + 1], "packaged")
-        self.assertEqual(command[command.index("--personal-macos-app") + 1], str(signed_app.resolve()))
-        self.assertNotIn("release-signing.mjs", command)
-        self.assertEqual(command_runner.call_args_list[1].kwargs["env"], model_environment)
+        with tempfile.TemporaryDirectory() as raw:
+            repo_root = Path(raw).resolve()
+            expected = repo_root / "services" / "lsat-backend" / ".venv" / "bin" / "python"
+            expected.parent.mkdir(parents=True)
+            expected.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            expected.chmod(0o755)
+
+            result = release.CommandResult(["probe"], 0.1, "")
+            signed_app = repo_root / "Signed StudyVault.app"
+            model_environment = {"LSATLAB_LOCAL_PROVIDER": "lmstudio"}
+            with (
+                patch.object(release, "REPO_ROOT", repo_root),
+                patch.object(release, "run", return_value=result) as command_runner,
+            ):
+                release.run_full_gates(signed_app, model_environment)
+
+            dependency_probe = command_runner.call_args_list[0].args[0]
+            command = command_runner.call_args_list[1].args[0]
+            python_index = command.index("--python") + 1
+            self.assertEqual(dependency_probe, [str(expected), "-c", "import sqlmodel"])
+            self.assertEqual(Path(command[python_index]), expected)
+            self.assertTrue(Path(command[python_index]).is_absolute())
+            for skip_flag in ("--skip-e2e", "--skip-electron", "--skip-sidecar-build", "--skip-packaged-smoke"):
+                self.assertNotIn(skip_flag, command)
+            self.assertEqual(command[command.index("--trust-tier") + 1], "packaged")
+            self.assertEqual(command[command.index("--personal-macos-app") + 1], str(signed_app.resolve()))
+            self.assertNotIn("release-signing.mjs", command)
+            self.assertEqual(command_runner.call_args_list[1].kwargs["env"], model_environment)
 
     def test_lmstudio_discovery_wires_loaded_models_without_hardcoded_model(self) -> None:
         class Response:

@@ -42,19 +42,19 @@ describe('crumbsForPath — host plane', () => {
 
 describe('crumbsForPath — LSAT plane', () => {
   it('returns a single (label-only) crumb at the LSAT root (/lsat)', () => {
-    expect(crumbsForPath('/lsat')).toEqual([{ label: 'LSAT Lab' }]);
+    expect(crumbsForPath('/lsat')).toEqual([{ label: 'LSAT', to: '/lsat' }, { label: 'Library' }]);
   });
 
-  it('builds a LSAT Lab > <page> trail with the /lsat prefix on links', () => {
+  it('builds an LSAT > <page> trail with the /lsat prefix on links', () => {
     const crumbs = crumbsForPath('/lsat/srs');
-    expect(crumbs[0]).toEqual({ label: 'LSAT Lab', to: '/lsat' });
+    expect(crumbs[0]).toEqual({ label: 'LSAT', to: '/lsat' });
     expect(crumbs[crumbs.length - 1]).toEqual({ label: 'SRS' });
   });
 
   it('nests a deep LSAT screen under its PARENT (Session history under Review)', () => {
     const crumbs = crumbsForPath('/lsat/review/history');
     const labels = crumbs.map((c) => c.label);
-    expect(labels).toEqual(['LSAT Lab', 'Review', 'Session history']);
+    expect(labels).toEqual(['LSAT', 'Review', 'Session history']);
     // Parent link carries the /lsat prefix.
     expect(crumbs[1].to).toBe('/lsat/review');
   });
@@ -62,7 +62,7 @@ describe('crumbsForPath — LSAT plane', () => {
   it('resolves dynamic LSAT labels (/analytics/type/:type)', () => {
     const crumbs = crumbsForPath('/lsat/analytics/type/strengthen');
     const labels = crumbs.map((c) => c.label);
-    expect(labels).toEqual(['LSAT Lab', 'Analytics', 'Type analytics']);
+    expect(labels).toEqual(['LSAT', 'Analytics', 'Type analytics']);
   });
 });
 
@@ -70,6 +70,6 @@ describe('labelForPath', () => {
   it('returns the final crumb label for any plane', () => {
     expect(labelForPath('/analytics')).toBe('Analytics');
     expect(labelForPath('/lsat/srs')).toBe('SRS');
-    expect(labelForPath('/lsat')).toBe('LSAT Lab');
+    expect(labelForPath('/lsat')).toBe('Library');
   });
 });

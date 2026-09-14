@@ -61,22 +61,17 @@ export function ExamTimer({
 
   // Remaining fraction for the depleting hairline (0..1). Without a total we
   // keep the rail full so the instrument still reads as calm.
-  const remaining =
-    totalSec && totalSec > 0 ? Math.max(0, Math.min(1, timeLeft / totalSec)) : 1;
+  const remaining = totalSec && totalSec > 0 ? Math.max(0, Math.min(1, timeLeft / totalSec)) : 1;
 
   return (
     <div
       role="timer"
-      aria-label={
-        hidden
-          ? "Section timer hidden"
-          : `Time remaining ${formatClock(timeLeft)}`
-      }
-      className="flex flex-col items-stretch gap-1"
+      aria-label={hidden ? "Section timer hidden" : `Time remaining ${formatClock(timeLeft)}`}
+      className="flex min-w-[7.25rem] flex-col items-stretch gap-1 rounded-md border border-border/70 bg-surface-1 px-2 py-1.5"
     >
       <div
         className={cn(
-          "flex items-center gap-2 px-1 text-sm font-semibold tabular-nums transition-colors",
+          "flex items-center gap-2 px-0.5 text-sm font-semibold tabular-nums transition-colors",
           urgent ? "text-warning" : "text-foreground",
         )}
       >
@@ -91,7 +86,7 @@ export function ExamTimer({
           onClick={onToggleHidden}
           title={hidden ? "Show timer" : "Hide timer"}
           aria-label={hidden ? "Show timer" : "Hide timer"}
-          className="ml-auto text-muted-foreground hover:text-foreground"
+          className="-my-1 -mr-1 ml-auto inline-flex size-10 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
         >
           {hidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
         </button>
@@ -154,12 +149,9 @@ export function PaceBar({
   return (
     <>
       <div className="flex items-center gap-2" aria-hidden={hidden}>
-        <div className="relative h-1.5 w-40 overflow-hidden rounded-full bg-muted">
+        <div className="relative h-1.5 w-24 overflow-hidden rounded-full bg-muted sm:w-32">
           {/* Even-pace marker. */}
-          <div
-            className="absolute top-0 h-full w-px bg-foreground/40"
-            style={{ left: `${timeFrac * 100}%` }}
-          />
+          <div className="absolute top-0 h-full w-px bg-foreground/40" style={{ left: `${timeFrac * 100}%` }} />
           {/* Actual progress. */}
           <div
             className={cn(
@@ -186,13 +178,7 @@ export function PaceBar({
 }
 
 /** Announces pace only when the category changes (5.6). */
-function PaceAnnouncer({
-  category,
-  hint,
-}: {
-  category: "behind" | "ahead" | "on";
-  hint: string;
-}) {
+function PaceAnnouncer({ category, hint }: { category: "behind" | "ahead" | "on"; hint: string }) {
   const [message, setMessage] = useState("");
   const last = useRef<string | null>(null);
   useEffect(() => {
@@ -249,8 +235,11 @@ export function ResizableSplit({
   }, [dragging, onMove]);
 
   return (
-    <div ref={ref} className={cn("flex flex-1 overflow-hidden", className)}>
-      <div style={{ flexBasis: `${fraction * 100}%` }} className="min-w-0 overflow-y-auto border-r">
+    <div ref={ref} className={cn("lsat-resizable-split flex flex-1 overflow-hidden", className)}>
+      <div
+        style={{ "--split-basis": `${fraction * 100}%` } as React.CSSProperties}
+        className="lsat-split-pane lsat-split-pane-left min-w-0 overflow-y-auto border-r"
+      >
         {left}
       </div>
       {/*
@@ -284,13 +273,13 @@ export function ResizableSplit({
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         className={cn(
-          "group relative w-1.5 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none",
+          "lsat-split-divider group relative w-1.5 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none",
           dragging && "bg-primary",
         )}
       >
         <span className="absolute inset-y-0 left-1/2 w-3 -translate-x-1/2" />
       </div>
-      <div className="min-w-0 flex-1 overflow-y-auto">{right}</div>
+      <div className="lsat-split-pane lsat-split-pane-right min-w-0 flex-1 overflow-y-auto">{right}</div>
     </div>
   );
 }

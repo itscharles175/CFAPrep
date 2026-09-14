@@ -42,9 +42,9 @@ describe("routeManifest", () => {
     expect(sections.flatMap((section) => section.items).some((entry) => entry.path === "/settings")).toBe(true);
   });
 
-  it("keeps / as the canonical Notebook & Curriculum route and hides the /notebook alias from primary discovery", () => {
+  it("keeps / as the canonical LSAT Library route and hides the /notebook alias from primary discovery", () => {
     expect(canonicalRoutePath("/notebook")).toBe("/");
-    expect(routeCommandLabelFromManifest("/notebook")).toBe("Notebook & Curriculum");
+    expect(routeCommandLabelFromManifest("/notebook")).toBe("LSAT Library");
     expect(primaryRouteManifest("study").map((entry) => entry.path)).toContain("/");
     expect(primaryRouteManifest("study").map((entry) => entry.path)).not.toContain("/notebook");
   });

@@ -1,5 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
+import { useNavigate } from "react-router-dom";
 import { ServerOff } from "lucide-react";
+import { Button } from "@lsat/components/ui/button";
 import { SystemNotice } from "@lsat/components/system-notice";
 import { useAiHealth } from "@lsat/lib/hooks";
 import { getOfflineStatus, subscribeOfflineStatus } from "@lsat/lib/offline";
@@ -28,7 +30,8 @@ const PROVIDER_LABEL: Record<string, string> = {
  * instead of a bespoke `Alert`, so app-wide advisories all read alike.
  */
 export function AiPrereqBanner() {
-  const { data } = useAiHealth();
+  const { data, refetch, isFetching } = useAiHealth();
+  const navigate = useNavigate();
   // `withFallback` envelope: `data.usingSample` is true when the health request
   // itself failed (backend unreachable); `data.data` is the AI-health payload.
   const usingSample = data?.usingSample ?? false;
@@ -67,7 +70,22 @@ export function AiPrereqBanner() {
       <SystemNotice
         tone="warning"
         icon={ServerOff}
+        className="lsat-ai-prereq-notice"
         title="Live AI is off — running in sample-data mode"
+        action={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => void refetch()}
+              loading={isFetching}
+            >
+              Retry
+            </Button>
+            <Button onClick={() => navigate("/lsat/settings#ai-system")}>
+              Open AI settings
+            </Button>
+          </>
+        }
         onDismiss={dismiss}
       >
         {providerLabel} isn’t reachable, so explanations, the coach, and

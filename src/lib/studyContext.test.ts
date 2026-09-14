@@ -59,15 +59,19 @@ describe('study context', () => {
     const cfa = { domain: 'cfa', cfaLevel: 'level2', goal: 'balanced' } as const;
     expect(workspaceHref('practice', cfa)).toBe('/cfa/level2/mock');
     expect(workspaceHref('learn', cfa)).toBe('/cfa');
+    expect(workspaceHref('library', cfa)).toBe('/vault');
 
     const lsat = { ...cfa, domain: 'lsat' } as const;
     expect(workspaceHref('practice', lsat)).toBe('/lsat/practice');
     expect(workspaceHref('learn', lsat)).toBe('/lsat/dashboard');
     expect(workspaceHref('review', lsat)).toBe('/lsat/review');
     expect(workspaceHref('progress', lsat)).toBe('/lsat/analytics');
+    expect(workspaceHref('library', lsat)).toBe('/lsat');
 
     expect(workspaceHref('practice', { ...cfa, domain: 'quant' })).toBe('/quant/risk-management');
     expect(workspaceHref('practice', { ...cfa, domain: 'excel' })).toBe('/excel/dcf-modeling');
+    expect(workspaceHref('library', { ...cfa, domain: 'quant' })).toBe('/vault');
+    expect(workspaceHref('library', { ...cfa, domain: 'excel' })).toBe('/vault');
   });
 
   it('keeps a separate return point for each curriculum and workspace', () => {

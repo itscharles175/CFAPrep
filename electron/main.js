@@ -18,6 +18,7 @@ import {
   screen,
   session,
   shell,
+  utilityProcess,
 } from 'electron';
 import { IPC_CHANNELS, IPC_EVENTS, validateEvent } from './contracts.js';
 import { registerIpcHandlers } from './ipc.js';
@@ -367,6 +368,9 @@ if (!hasSingleInstanceLock) {
           scriptPath: path.join(electronDirectory, 'child-watchdog.cjs'),
           logger,
           nativeExecutable: process.platform === 'darwin' ? nativeWatchdogExecutable : null,
+          forkProcess: process.platform === 'darwin'
+            ? null
+            : (modulePath, args, options) => utilityProcess.fork(modulePath, args, options),
         });
       } catch (error) {
         logger.crash('watchdog_start_failed', { error });

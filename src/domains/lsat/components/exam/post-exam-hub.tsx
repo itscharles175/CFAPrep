@@ -8,6 +8,7 @@ import { BarChart3, Flag, PlayCircle, Target } from "lucide-react";
 import { Button } from "@lsat/components/ui/button";
 import { Badge } from "@lsat/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@lsat/components/ui/card";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 import { pct } from "@lsat/lib/utils";
 import type { SectionSummary } from "@lsat/lib/types";
 
@@ -28,7 +29,8 @@ export function PostExamHub({
   const lastIdx = sections.length - 1;
   const lastSid = examSessionId ?? sessionIds[lastIdx];
   const results = useSessionResults(lastSid ?? 0);
-  const outcomeItems = (results.data?.data.items ?? []).filter(
+  const resultsAreSample = results.data?.usingSample ?? false;
+  const outcomeItems = (resultsAreSample ? [] : results.data?.data.items ?? []).filter(
     (it) => it.attempt.outcome != null,
   );
   // C10 — combined PrepTest score across all sections (official questions only).
@@ -131,7 +133,26 @@ export function PostExamHub({
             })}
           </CardContent>
         </Card>
-        {outcomeItems.length > 0 && (
+        {resultsAreSample ? (
+          <SampleDataRecovery
+            section="Outcome breakdown"
+            onRetry={() => void results.refetch()}
+          />
+        ) : results.isError ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Outcome breakdown unavailable</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                Your completed exam is saved, but its outcome breakdown could not load.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => void results.refetch()}>
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        ) : outcomeItems.length > 0 ? (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Outcome breakdown</CardTitle>
@@ -140,7 +161,7 @@ export function PostExamHub({
               <OutcomeFunnel items={outcomeItems} />
             </CardContent>
           </Card>
-        )}
+        ) : null}
       </div>
     </Ceremony>
   );

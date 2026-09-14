@@ -120,7 +120,7 @@ function MasteryMatrixInner({
                   <td className="px-2 py-2 text-right">
                     <button
                       type="button"
-                      className="inline-flex items-center rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                       // Don't let the drill click also trigger the row's focus.
                       onClick={(e) => {
                         e.stopPropagation();

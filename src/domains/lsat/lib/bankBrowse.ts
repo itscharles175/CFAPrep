@@ -16,6 +16,15 @@ export interface BrowseQuestion
   approved?: boolean;
 }
 
+/**
+ * Bank rows always carry their origin envelope so callers never mistake the
+ * offline fixture for locally imported study material.
+ */
+export interface BankBrowseResult {
+  items: BrowseQuestion[];
+  usingSample: boolean;
+}
+
 /** Flatten bank export payload into browsable questions. */
 export function flattenBankExport(payload: Record<string, unknown>): BrowseQuestion[] {
   const out: BrowseQuestion[] = [];
@@ -53,13 +62,13 @@ const SAMPLE_BROWSE: BrowseQuestion[] = (sampleSectionLR.questions ?? []).map(
   }),
 );
 
-let cache: BrowseQuestion[] | null = null;
+let cache: BankBrowseResult | null = null;
 
-export function setBankQuestionsCache(next: BrowseQuestion[]) {
-  cache = next;
+export function setBankQuestionsCache(next: BrowseQuestion[], usingSample = false) {
+  cache = { items: next, usingSample };
 }
 
-export async function loadBankQuestions(force = false): Promise<BrowseQuestion[]> {
+export async function loadBankQuestions(force = false): Promise<BankBrowseResult> {
   if (cache && !force) return cache;
   try {
     const out: BrowseQuestion[] = [];
@@ -86,9 +95,11 @@ export async function loadBankQuestions(force = false): Promise<BrowseQuestion[]
       if (!page.next_cursor) break;
       cursor = page.next_cursor;
     }
-    cache = out.length ? out : SAMPLE_BROWSE;
+    // A reachable, empty bank is an honest empty state. Only an unreachable
+    // backend is allowed to return the fixture, and that state is explicit.
+    cache = { items: out, usingSample: false };
   } catch {
-    cache = SAMPLE_BROWSE;
+    cache = { items: SAMPLE_BROWSE, usingSample: true };
   }
   return cache;
 }

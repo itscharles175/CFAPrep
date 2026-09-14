@@ -7,6 +7,7 @@ import {
   setOnboardingStep,
   isResumePromptDismissed,
 } from '../../lib/onboardingProgress';
+import { setResume } from '../../domains/lsat/lib/resume';
 
 describe('OnboardingResume', () => {
   beforeEach(() => {
@@ -52,5 +53,20 @@ describe('OnboardingResume', () => {
     localStorage.setItem('qv-onboarding-resume-dismissed', '1');
     const { container } = render(<OnboardingResume />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('continues an LSAT resume through the app-root LSAT route', async () => {
+    const onResumeSession = vi.fn();
+    setResume({
+      kind: 'section',
+      label: 'PT 73 · LR Section 1',
+      path: '/take/73',
+      updatedAt: '2026-09-14T12:00:00.000Z',
+    });
+
+    render(<OnboardingResume onResumeSession={onResumeSession} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
+    expect(onResumeSession).toHaveBeenCalledWith('/lsat/take/73');
   });
 });

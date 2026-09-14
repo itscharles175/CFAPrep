@@ -9,7 +9,9 @@ dependencies = [
     "fastapi>=0.136.1",
     "fsrs>=6.3.1",
     "httpx>=0.28.1",
-    "mcp>=1.27.1",
+    # mcp 2.x replaces FastMCP with MCPServer and changes the registration and
+    # transport APIs. This server intentionally targets the stable v1 contract.
+    "mcp>=1.27.1,<2",
     "pymupdf>=1.27.2.3",
     "python-multipart>=0.0.29",
     "sqlite-vec>=0.1.9",

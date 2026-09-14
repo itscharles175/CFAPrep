@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { SocraticEvidence, TUTOR_EMPTY_STATE } from "./Tutor";
+import { describe, expect, it, vi } from "vitest";
+import { SocraticEvidence, TUTOR_EMPTY_STATE, TutorAdaptiveSignals } from "./Tutor";
 
 describe("SocraticEvidence", () => {
   it("uses a clear no-attempt instruction", () => {
@@ -75,5 +75,25 @@ describe("SocraticEvidence", () => {
     expect(screen.getByText("Persisted turn context")).toBeInTheDocument();
     expect(screen.getByText(/Which actor does the passage keep fixed/)).toBeInTheDocument();
     expect(screen.queryByText(/correct_answer/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("TutorAdaptiveSignals", () => {
+  it("does not present fallback readiness as learner evidence", () => {
+    render(
+      <TutorAdaptiveSignals
+        usingSample
+        readinessScore={0}
+        nextTask="Build more evidence"
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("Tutor adaptive signals is unavailable while the LSAT backend is offline."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByText("0/100")).not.toBeInTheDocument();
+    expect(screen.queryByText("Build more evidence")).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
-import { Card } from "@lsat/components/ui/card";
-import { StatNumber, Sparkline } from "@lsat/components/viz";
+import { Card } from '@lsat/components/ui/card';
+import { StatNumber, Sparkline } from '@lsat/components/viz';
 
 export interface KpiRowProps {
   predictedScore: number | null | undefined;
@@ -16,6 +16,10 @@ export interface KpiRowProps {
     timeDeltaSec?: number;
     brGapDelta?: number;
   };
+  /** Keep empty analytics from presenting zeroes as measured performance. */
+  hasAttempts?: boolean;
+  hasScoreHistory?: boolean;
+  hasBlindReview?: boolean;
 }
 
 /**
@@ -36,6 +40,9 @@ export function KpiRow({
   brGap,
   trend,
   compare,
+  hasAttempts = true,
+  hasScoreHistory = true,
+  hasBlindReview = true,
 }: KpiRowProps) {
   const avgSec = Math.round(avgTimeMsPerQ / 1000);
   const accPct = Math.round(accuracy * 100);
@@ -44,93 +51,90 @@ export function KpiRow({
   const scoreDelta = compare?.scoreDelta ?? scoreDelta30d ?? 0;
 
   // --- Derived one-line counsel per instrument (no new data). ----------------
-  const predictedSub =
-    !hasScoreDelta
-      ? "Set a timed baseline to start the score trend."
-      : scoreDelta > 0
+  const predictedSub = !hasScoreDelta
+    ? 'Set a timed baseline to start the score trend.'
+    : scoreDelta > 0
       ? `Trending up ${scoreDelta} pts — keep the cadence.`
       : scoreDelta < 0
         ? `Down ${Math.abs(scoreDelta)} pts lately — protect your routine.`
-        : "Holding steady — push for the next band.";
+        : 'Holding steady — push for the next band.';
 
-  const accuracySub =
-    accPct >= 80
-      ? "Strong command across types."
+  const accuracySub = !hasAttempts
+    ? 'Answer real questions to establish accuracy.'
+    : accPct >= 80
+      ? 'Strong command across types.'
       : accPct >= 65
-        ? "Solid base; the misses are findable."
-        : "Accuracy is the lever right now.";
+        ? 'Solid base; the misses are findable.'
+        : 'Accuracy is the lever right now.';
 
-  const paceSub =
-    avgSec === 0
-      ? "No timed pace yet."
+  const paceSub = !hasAttempts
+    ? 'Complete a timed section to establish pace.'
+    : avgSec === 0
+      ? 'No timed pace yet.'
       : avgSec <= 60
         ? `${avgSec}s/Q — comfortably inside the clock.`
         : avgSec <= 85
           ? `${avgSec}s/Q — near the budget; trim the long ones.`
           : `${avgSec}s/Q — pace is eating your score.`;
 
-  const gapSub =
-    gapPts >= 8
-      ? "Big timed→BR gap: timing, not understanding."
+  const gapSub = !hasBlindReview
+    ? 'Complete blind review to measure the gap.'
+    : gapPts >= 8
+      ? 'Big timed→BR gap: timing, not understanding.'
       : gapPts >= 3
-        ? "Small recovery in review — tighten pacing."
-        : "Timed and review accuracy agree.";
+        ? 'Small recovery in review — tighten pacing.'
+        : 'Timed and review accuracy agree.';
 
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div className="analytics-kpi-band" role="group" aria-label="Progress metrics">
       {/* Primary instrument — predicted score spans the full row top on lg. */}
-      <Card className="col-span-2 flex items-center justify-between gap-4 bg-surface-1 p-5 shadow-e2 lg:col-span-4">
+      <Card className="analytics-kpi-primary">
         <StatNumber
+          className="analytics-kpi-primary-stat"
           label="Predicted score"
-          value={predictedScore}
+          value={hasScoreHistory ? predictedScore : null}
           size="stat-xl"
           voice="numeric"
           aurora
           delta={scoreDelta}
-          deltaSuffix={compare?.scoreDelta != null ? " vs prior" : undefined}
+          deltaSuffix={compare?.scoreDelta != null ? ' vs prior' : undefined}
           subline={predictedSub}
         />
         {trend.length > 1 && (
-          <Sparkline
-            data={trend}
-            fill
-            width={140}
-            height={56}
-            className="hidden shrink-0 self-center sm:block"
-          />
+          <Sparkline data={trend} fill width={140} height={56} className="hidden shrink-0 self-center sm:block" />
         )}
       </Card>
 
-      <Card className="p-4 shadow-e1">
+      <Card className="analytics-kpi-secondary">
         <StatNumber
           label="Accuracy"
-          value={accPct}
-          suffix="%"
+          value={hasAttempts ? accPct : null}
+          suffix={hasAttempts ? '%' : ''}
           voice="numeric"
           delta={compare?.accuracyDelta}
-          deltaSuffix={compare?.accuracyDelta != null ? "%" : undefined}
+          deltaSuffix={compare?.accuracyDelta != null ? '%' : undefined}
           subline={accuracySub}
         />
       </Card>
-      <Card className="p-4 shadow-e1">
+      <Card className="analytics-kpi-secondary">
         <StatNumber
           label="Avg time / question"
-          value={avgSec}
-          suffix="s"
+          value={hasAttempts ? avgSec : null}
+          suffix={hasAttempts ? 's' : ''}
           voice="numeric"
           delta={compare?.timeDeltaSec}
-          deltaSuffix={compare?.timeDeltaSec != null ? "s" : undefined}
+          deltaSuffix={compare?.timeDeltaSec != null ? 's' : undefined}
           subline={paceSub}
         />
       </Card>
-      <Card className="p-4 shadow-e1">
+      <Card className="analytics-kpi-secondary">
         <StatNumber
           label="Blind-review gap"
-          value={gapPts}
-          suffix="pts"
+          value={hasBlindReview ? gapPts : null}
+          suffix={hasBlindReview ? 'pts' : ''}
           voice="numeric"
           delta={compare?.brGapDelta}
-          deltaSuffix={compare?.brGapDelta != null ? "pts" : undefined}
+          deltaSuffix={compare?.brGapDelta != null ? 'pts' : undefined}
           subline={gapSub}
         />
       </Card>

@@ -62,15 +62,17 @@ export function QuestionOverview({
     }, 0);
 
     function handleFocusKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         event.preventDefault();
         onCloseRef.current();
         return;
       }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      ));
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
       if (!focusable.length) {
         event.preventDefault();
         dialogRef.current.focus();
@@ -87,10 +89,10 @@ export function QuestionOverview({
       }
     }
 
-    window.addEventListener('keydown', handleFocusKeyDown);
+    window.addEventListener("keydown", handleFocusKeyDown);
     return () => {
       window.clearTimeout(focusTimer);
-      window.removeEventListener('keydown', handleFocusKeyDown);
+      window.removeEventListener("keydown", handleFocusKeyDown);
       if (previous && previous.isConnected) previous.focus({ preventScroll: true });
     };
   }, [open]);
@@ -113,7 +115,7 @@ export function QuestionOverview({
             type="button"
             aria-label="Close overview"
             tabIndex={-1}
-            className="absolute inset-0 bg-background/70 backdrop-blur-sm"
+            className="absolute inset-0 bg-background/80 backdrop-blur-[3px]"
             onClick={onClose}
           />
 
@@ -123,7 +125,7 @@ export function QuestionOverview({
             aria-modal="true"
             aria-label="Question overview"
             tabIndex={-1}
-            className="glass relative flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-card border shadow-e4"
+            className="glass relative flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-card border border-border/80 shadow-e4"
             // Modal-enter unified on the shared `scaleIn` variant (R11 5.1).
             variants={scaleIn}
             initial={reduce ? false : "hidden"}
@@ -131,10 +133,10 @@ export function QuestionOverview({
             exit="exit"
           >
             {/* Header — pacing summary (no correctness). */}
-            <div className="flex items-start justify-between gap-3 border-b p-5">
+            <div className="flex items-start justify-between gap-4 border-b border-border/80 bg-surface-1 p-4 sm:p-5">
               <div className="space-y-1">
                 <p className="type-overline text-muted-foreground">Overview</p>
-                <h2 className="type-display text-xl leading-tight">All questions</h2>
+                <h2 className="type-display text-xl leading-tight tracking-[-0.02em]">All questions</h2>
                 <p className="text-sm text-muted-foreground">
                   <span className="type-numeric text-foreground">{answered}</span> of{" "}
                   <span className="type-numeric">{items.length}</span> answered
@@ -151,6 +153,27 @@ export function QuestionOverview({
                     </>
                   )}
                 </p>
+                <div
+                  className="mt-3 flex items-center gap-3"
+                  aria-label={`${answered} of ${items.length} questions answered`}
+                >
+                  <div
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={items.length}
+                    aria-valuenow={answered}
+                    aria-label="Questions answered"
+                    className="h-1.5 min-w-32 flex-1 overflow-hidden rounded-full bg-foreground/10"
+                  >
+                    <div
+                      className="h-full rounded-full bg-primary transition-[width]"
+                      style={{ width: `${items.length > 0 ? (answered / items.length) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <span className="type-numeric text-xs text-muted-foreground">
+                    {items.length > 0 ? Math.round((answered / items.length) * 100) : 0}%
+                  </span>
+                </div>
               </div>
               <Button variant="ghost" size="icon" aria-label="Close overview" onClick={onClose}>
                 <X className="h-4 w-4" />
@@ -158,7 +181,7 @@ export function QuestionOverview({
             </div>
 
             {/* The grid. */}
-            <div className="scroll-thin grid grid-cols-5 gap-2 overflow-y-auto p-5 sm:grid-cols-8">
+            <div className="scroll-thin grid grid-cols-4 gap-2.5 overflow-y-auto bg-background/20 p-4 sm:grid-cols-6 sm:p-5 lg:grid-cols-8">
               {items.map((it, i) => {
                 const isCurrent = i === current;
                 const dot = it.qType ? typeColor(it.qType) : undefined;
@@ -169,13 +192,11 @@ export function QuestionOverview({
                     onClick={() => onJump(i)}
                     aria-label={`Question ${i + 1}${it.flagged ? ", flagged" : ""}${
                       it.answered ? ", answered" : ", unanswered"
-                    }${it.hasEliminations ? ", has eliminations" : ""}${
-                      isCurrent ? ", current" : ""
-                    }`}
+                    }${it.hasEliminations ? ", has eliminations" : ""}${isCurrent ? ", current" : ""}`}
                     aria-current={isCurrent ? "true" : undefined}
                     title={it.qType ? qTypeLabel(it.qType) : undefined}
                     className={cn(
-                      "group relative flex aspect-square flex-col items-center justify-center rounded-card border text-sm font-medium tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "group relative flex aspect-square min-h-14 flex-col items-center justify-center rounded-md border text-sm font-medium tabular-nums transition-[border-color,background-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                       isCurrent && "ring-2 ring-primary ring-offset-1 ring-offset-background",
                       it.flagged
                         ? "border-warning/50 bg-warning/15 text-warning"
@@ -191,14 +212,9 @@ export function QuestionOverview({
                       </span>
                     )}
                     {/* Flag + elimination markers (progress only). */}
-                    {it.flagged && (
-                      <Flag className="absolute right-1 top-1 h-2.5 w-2.5" aria-hidden />
-                    )}
+                    {it.flagged && <Flag className="absolute right-1 top-1 h-2.5 w-2.5" aria-hidden />}
                     {it.hasEliminations && !it.flagged && (
-                      <Scissors
-                        className="absolute right-1 top-1 h-2.5 w-2.5 text-muted-foreground"
-                        aria-hidden
-                      />
+                      <Scissors className="absolute right-1 top-1 h-2.5 w-2.5 text-muted-foreground" aria-hidden />
                     )}
                     {dot && (
                       <span
@@ -213,7 +229,7 @@ export function QuestionOverview({
             </div>
 
             {/* Legend — strictly progress vocabulary, never correctness. */}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t p-4 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border/80 bg-surface-2 p-3.5 text-xs text-muted-foreground sm:p-4">
               <span className="flex items-center gap-1.5">
                 <span className="h-3 w-3 rounded-sm border border-primary/40 bg-primary/10" />
                 Answered

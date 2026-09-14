@@ -5,10 +5,10 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@lsat/components/ui/card";
-import { Button } from "@lsat/components/ui/button";
-import { Input } from "@lsat/components/ui/input";
-import { Label } from "@lsat/components/ui/label";
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { toast } from "@lsat/lib/toast";
 import {
   type ExamKeyAction,
@@ -67,13 +67,19 @@ export function KeyboardSettings() {
                   setMap((m) => ({ ...m, [action]: e.target.value }))
                 }
                 onKeyDown={(e) => {
-                  e.preventDefault();
                   const k = e.key;
+                  // Shortcut capture must not turn these fields into a focus
+                  // trap. Tab (and its reverse variant) retain their native
+                  // behavior so keyboard users can continue through Settings.
+                  if (k === "Tab") return;
+
                   if (k === "Backspace") {
+                    e.preventDefault();
                     setMap((m) => ({ ...m, [action]: "" }));
                     return;
                   }
                   if (k.length === 1 || k.startsWith("Arrow")) {
+                    e.preventDefault();
                     setMap((m) => ({ ...m, [action]: k }));
                   }
                 }}

@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "LSAT Lab Backend",
+    "title": "StudyVault LSAT Service",
     "version": "1.0.0"
   },
   "paths": {

@@ -29,7 +29,8 @@ describe('bundle baseline policy', () => {
     expect(stableAssetKey('ContentOps-CKQ-AJ2A.js')).toBe('ContentOps-[hash].js');
     expect(stableAssetKey('storage-Czi-DerV.js')).toBe('storage-[hash].js');
     expect(stableAssetKey('surrealDriver-Dokp1U_-.js')).toBe('surrealDriver-[hash].js');
-    expect(stableAssetKey('ai-markdown-pVvpNdp-.js')).toBe('ai-markdown-pVvpNdp-.js');
+    expect(stableAssetKey('ai-markdown-pVvpNdp-.js')).toBe('ai-markdown-[hash].js');
+    expect(stableAssetKey('Settings-DMhalre-.js')).toBe('Settings-[hash].js');
   });
 
   it('builds a committed baseline from present bundle checks only', () => {

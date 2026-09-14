@@ -143,12 +143,22 @@ export function RecommendationInbox() {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <Button size="sm" onClick={() => navigate(item.to)} aria-label={`Start ${item.label}`}>
+                <Button
+                  size="sm"
+                  className="min-h-10 min-w-10"
+                  onClick={() => navigate(item.to)}
+                  aria-label={`Start ${item.label}`}
+                >
                   <Icon as={Play} size="xs" />
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="More actions">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10 shrink-0"
+                      aria-label="More actions"
+                    >
                       <Icon as={MoreHorizontal} size="sm" />
                     </Button>
                   </DropdownMenuTrigger>

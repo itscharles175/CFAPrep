@@ -14,6 +14,7 @@ import { ProgressRing } from "@lsat/components/viz";
 import { getPtProgress } from "@lsat/lib/ptProgress";
 import { PageLayout } from "@lsat/components/page-layout";
 import { IllustrationPrepTests } from "@lsat/components/illustrations";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 import { LoadingState, ErrorState, EmptyState } from "@lsat/components/states";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -24,6 +25,7 @@ import {
   usePrepTestProgress,
 } from "@lsat/lib/hooks";
 import type { PrepTestSummary } from "@lsat/lib/types";
+import "./selection-pages.css";
 
 export default function PrepTests() {
   const navigate = useNavigate();
@@ -38,26 +40,34 @@ export default function PrepTests() {
       eyebrow="LIBRARY"
       icon={FileText}
       description="Your imported official tests — track section progress and start full timed exams."
-      width="xl"
+      width="2xl"
+      className="lsat-selection-page lsat-preptests-page"
       actions={
         data.usingSample ? (
           <Badge variant="outline" className="text-muted-foreground">
-            Sample data
+            Offline
           </Badge>
         ) : undefined
       }
     >
-      {tests.length === 0 ? (
+      {data.usingSample ? (
+        <SampleDataRecovery
+          section="PrepTests"
+          affectedSections={["Imported tests", "Section progress", "Timed exams"]}
+          onRetry={() => refetch().then(() => undefined)}
+        />
+      ) : tests.length === 0 ? (
         <EmptyState
           illustration={<IllustrationPrepTests />}
+          className="lsat-empty-state"
           title="No PrepTests yet"
-          description="Import a PDF to add your first official test."
+          description="Import an official PDF to add your first test."
           action={
             <Button onClick={() => navigate("/import")}>Go to Import</Button>
           }
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="lsat-preptests-grid">
           {tests.map((t) => (
             <PrepTestCard key={t.id} test={t} />
           ))}
@@ -93,7 +103,7 @@ function PrepTestCard({ test }: { test: PrepTestSummary }) {
   );
 
   return (
-    <Card className="flex flex-col">
+    <Card className="lsat-selection-card lsat-preptest-card flex flex-col">
       <CardHeader>
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="min-w-0 truncate text-base">{test.name}</CardTitle>

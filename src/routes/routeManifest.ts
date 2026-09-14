@@ -552,7 +552,7 @@ const LSAT_ROUTE_PREFIX = '/lsat';
 // included in the gates; one absent (or that maps to a non-stable heading) is
 // skipped. Keyed by the LSAT-manifest path (app-relative, no /lsat prefix).
 const lsatRouteExpectedText: Record<string, string> = {
-  '/': 'Notebook & Curriculum',
+  '/': 'LSAT Library',
   '/practice': 'Practice',
   '/preptests': 'PrepTests',
   '/drills': 'Drills',
@@ -697,8 +697,8 @@ const lsatIconKeys = new Map<LsatRouteManifestEntry['icon'], string>([
 // gate crawl itself still derives from `lsatGateRoutes` above, so these dynamic
 // entries never enter the screenshot/smoke sets (they need a started session).
 const lsatDynamicExpectedText: Record<string, string> = {
-  '/dashboard': 'Dashboard',
-  '/notebook': 'Notebook & Curriculum',
+  '/dashboard': 'LSAT Curriculum',
+  '/notebook': 'LSAT Library',
   '/tutor': 'Tutor',
   '/review/history': 'Session history',
   '/bank/tag-review': 'Tag review',
@@ -719,18 +719,18 @@ function lsatExpectedTextFor(manifestPath: string): string {
 function lsatWorkspaceFor(id: LsatRouteId, navGroup: string): StudyWorkspace {
   if (id === 'lsat-review' || id === 'lsat-review-history' || id === 'lsat-srs' || id === 'lsat-blind-review') return 'review';
   if (id === 'lsat-analytics' || id === 'lsat-analytics-type' || id === 'lsat-analytics-pt') return 'progress';
-  if (id === 'lsat-tutor' || id === 'lsat-notebook' || id === 'lsat-bank' || id === 'lsat-playlists' || id === 'lsat-explanation') return 'library';
+  if (id === 'lsat-home' || id === 'lsat-tutor' || id === 'lsat-notebook' || id === 'lsat-explanation') return 'library';
   if (navGroup === 'practice') return 'practice';
   if (navGroup === 'ops') return 'utility';
   return 'learn';
 }
 
-// Breadcrumb trail for an LSAT entry: always rooted at the LSAT plane home
-// (`/lsat` -> "LSAT Lab"), then the entry itself. Aliases and the home route
-// collapse to a single crumb.
+// Breadcrumb trail for an LSAT entry: the curriculum is the stable context and
+// the current workspace is explicit. This prevents Library from appearing to
+// contain Curriculum, Practice, Review, and Progress.
 function lsatBreadcrumbsFor(hostPath: string, label: string): AppRoute['breadcrumbs'] {
-  const root = { label: 'LSAT Lab', path: LSAT_ROUTE_PREFIX };
-  if (hostPath === LSAT_ROUTE_PREFIX) return [root];
+  const root = { label: 'LSAT', path: LSAT_ROUTE_PREFIX };
+  if (hostPath === LSAT_ROUTE_PREFIX) return [root, { label: 'Library', path: hostPath }];
   return [root, { label, path: hostPath }];
 }
 

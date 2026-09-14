@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -7,7 +7,12 @@ vi.mock('../lib/studyDirector', () => ({
   buildStudyPlan: vi.fn(),
 }));
 
+vi.mock('../lib/lsatSidecarClient', () => ({
+  fetchLsatSidecarJson: vi.fn(),
+}));
+
 import { buildStudyPlan } from '../lib/studyDirector';
+import { fetchLsatSidecarJson } from '../lib/lsatSidecarClient';
 import Today, {
   createDomainFallbackPlan,
   summarizeTodayWorkload,
@@ -19,6 +24,10 @@ import { StudySessionProvider } from '../components/session';
 afterEach(() => {
   window.localStorage.removeItem('studyvault:study-context:v1');
   window.localStorage.removeItem('studyvault.focus-session.v1');
+});
+
+beforeEach(() => {
+  fetchLsatSidecarJson.mockResolvedValue({ reachable: true, ok: true, status: 200, data: {} });
 });
 
 function renderToday() {
@@ -46,9 +55,27 @@ describe('Today focus-mode landing', () => {
       weakCount: 1,
       peakReviewDay: { date: '2026-05-30', count: 9 },
       actions: [
-        { kind: 'review', title: 'Modified duration', path: '/review', reason: 'Scheduled by FSRS — 42% retention remaining.', priority: 100 },
-        { kind: 'weak-topic', title: 'Equity Investments', path: '/cfa/level1/equity', reason: 'Topic readiness is only 58% — needs reinforcement.', priority: 70 },
-        { kind: 'forecast-spike', title: 'Upcoming review spike', path: '/cfa', reason: '9 items due on 2026-05-30 — review ahead to reduce load.', priority: 55 },
+        {
+          kind: 'review',
+          title: 'Modified duration',
+          path: '/review',
+          reason: 'Scheduled by FSRS — 42% retention remaining.',
+          priority: 100,
+        },
+        {
+          kind: 'weak-topic',
+          title: 'Equity Investments',
+          path: '/cfa/level1/equity',
+          reason: 'Topic readiness is only 58% — needs reinforcement.',
+          priority: 70,
+        },
+        {
+          kind: 'forecast-spike',
+          title: 'Upcoming review spike',
+          path: '/cfa',
+          reason: '9 items due on 2026-05-30 — review ahead to reduce load.',
+          priority: 55,
+        },
       ],
     });
     renderToday();
@@ -81,7 +108,13 @@ describe('Today focus-mode landing', () => {
       weakCount: 0,
       peakReviewDay: null,
       actions: [
-        { kind: 'continue', title: 'Continue studying', path: '/cfa', reason: 'No urgent reviews or weak areas — keep building momentum.', priority: 30 },
+        {
+          kind: 'continue',
+          title: 'Continue studying',
+          path: '/cfa',
+          reason: 'No urgent reviews or weak areas — keep building momentum.',
+          priority: 30,
+        },
       ],
     });
     renderToday();
@@ -113,7 +146,10 @@ describe('Today focus-mode landing', () => {
       expect(screen.getByText(/About 35 min now · Then 15 min review/)).toBeInTheDocument();
       expect(screen.getByText('2 activities · 50 min total')).toBeInTheDocument();
     }
-    expect(screen.getAllByText(new RegExp(`${domain === 'lsat' ? 'LSAT' : domain[0].toUpperCase() + domain.slice(1)} ·`)).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(new RegExp(`${domain === 'lsat' ? 'LSAT' : domain[0].toUpperCase() + domain.slice(1)} ·`))
+        .length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByText(/Cross-domain plan unavailable/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/What to study next/i)).not.toBeInTheDocument();
   });
@@ -134,29 +170,78 @@ describe('Today focus-mode landing', () => {
     expect(screen.getByText(/LSAT · Your next exam focused step/i)).toBeInTheDocument();
   });
 
+  it('surfaces an unavailable LSAT local service before the launch action', async () => {
+    window.localStorage.setItem(
+      'studyvault:study-context:v1',
+      JSON.stringify({ domain: 'lsat', cfaLevel: 'level1', goal: 'balanced' }),
+    );
+    fetchLsatSidecarJson.mockResolvedValue({ reachable: false, ok: false, status: 0, data: null });
+
+    renderToday();
+
+    const notice = await screen.findByText(/LSAT local service unavailable/i);
+    const launch = screen.getByRole('link', { name: /Start activity/i });
+    expect(notice.compareDocumentPosition(launch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('makes a paused same-domain session the explicit hero action', async () => {
     window.localStorage.setItem(
       'studyvault:study-context:v1',
       JSON.stringify({ domain: 'lsat', cfaLevel: 'level1', goal: 'balanced' }),
     );
-    window.localStorage.setItem('studyvault.focus-session.v1', JSON.stringify({
-      version: 1,
-      sessionId: 'paused-lsat',
-      status: 'paused',
-      domain: 'lsat',
-      topic: 'lsat:section',
-      startedAt: '2026-09-14T12:00:00.000Z',
-      segmentStartedAtMs: null,
-      accumulatedMs: 420000,
-      questionsAnswered: 7,
-      score: 5,
-      updatedAt: '2026-09-14T12:07:00.000Z',
-      saveError: null,
-    }));
+    window.localStorage.setItem(
+      'studyvault.focus-session.v1',
+      JSON.stringify({
+        version: 1,
+        sessionId: 'paused-lsat',
+        status: 'paused',
+        domain: 'lsat',
+        topic: 'lsat:section',
+        startedAt: '2026-09-14T12:00:00.000Z',
+        segmentStartedAtMs: null,
+        accumulatedMs: 420000,
+        questionsAnswered: 7,
+        score: 5,
+        updatedAt: '2026-09-14T12:07:00.000Z',
+        saveError: null,
+      }),
+    );
     renderToday();
 
     expect(await screen.findByText('Resume LSAT section')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Resume activity/i })).toBeInTheDocument();
+  });
+
+  it('attributes a mismatched paused focus session and requires a curriculum switch before resume', async () => {
+    window.localStorage.setItem(
+      'studyvault:study-context:v1',
+      JSON.stringify({ domain: 'cfa', cfaLevel: 'level1', goal: 'balanced' }),
+    );
+    window.localStorage.setItem(
+      'studyvault.focus-session.v1',
+      JSON.stringify({
+        version: 1,
+        sessionId: 'paused-lsat',
+        status: 'paused',
+        domain: 'lsat',
+        topic: 'lsat:section',
+        startedAt: '2026-09-14T12:00:00.000Z',
+        segmentStartedAtMs: null,
+        accumulatedMs: 420000,
+        questionsAnswered: 7,
+        score: 5,
+        updatedAt: '2026-09-14T12:07:00.000Z',
+        saveError: null,
+      }),
+    );
+    renderToday();
+
+    await userEvent.click(await screen.findByText('Session tools'));
+    expect(screen.getByText('Paused · LSAT session')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Resume$/i })).not.toBeInTheDocument();
+    const switchButton = screen.getByRole('button', { name: /Switch to LSAT to resume/i });
+    await userEvent.click(switchButton);
+    expect(window.localStorage.getItem('studyvault:study-context:v1')).toContain('"domain":"lsat"');
   });
 
   it('builds deterministic non-CFA plans with goal-specific rationale', () => {
@@ -184,19 +269,27 @@ describe('Today focus-mode landing', () => {
 
   it('names broad workspace destinations honestly and reflects a resumable session', () => {
     expect(todayPrimaryActionLabel({ domain: 'cfa', path: '/cfa', sessionStatus: 'none' })).toBe('Open CFA workspace');
-    expect(todayPrimaryActionLabel({ domain: 'quant', path: '/quant', sessionStatus: 'none' })).toBe('Open Quant workspace');
-    expect(todayPrimaryActionLabel({ domain: 'lsat', path: '/lsat/practice', sessionStatus: 'none' })).toBe('Start activity');
-    expect(todayHeroTitle({
-      domain: 'lsat',
-      title: 'Practice an LSAT section',
-      sessionStatus: 'paused',
-      sessionDomain: 'lsat',
-    })).toBe('Resume LSAT section');
-    expect(todayHeroTitle({
-      domain: 'cfa',
-      title: 'Continue studying',
-      sessionStatus: 'paused',
-      sessionDomain: 'lsat',
-    })).toBe('Continue studying');
+    expect(todayPrimaryActionLabel({ domain: 'quant', path: '/quant', sessionStatus: 'none' })).toBe(
+      'Open Quant workspace',
+    );
+    expect(todayPrimaryActionLabel({ domain: 'lsat', path: '/lsat/practice', sessionStatus: 'none' })).toBe(
+      'Start activity',
+    );
+    expect(
+      todayHeroTitle({
+        domain: 'lsat',
+        title: 'Practice an LSAT section',
+        sessionStatus: 'paused',
+        sessionDomain: 'lsat',
+      }),
+    ).toBe('Resume LSAT section');
+    expect(
+      todayHeroTitle({
+        domain: 'cfa',
+        title: 'Continue studying',
+        sessionStatus: 'paused',
+        sessionDomain: 'lsat',
+      }),
+    ).toBe('Continue studying');
   });
 });

@@ -619,10 +619,7 @@ export function SectionRunner({
 
   const stimulusBlock = (
     <PassageScrollPane scrollRef={passageScrollRef}>
-      <div
-        ref={passagePaneRef}
-        className={cn('relative', isRC ? 'p-8' : focusMode ? 'p-4 sm:p-5' : 'p-5 sm:p-6')}
-      >
+      <div ref={passagePaneRef} className={cn('relative', isRC ? 'p-8' : focusMode ? 'p-4 sm:p-5' : 'p-5 sm:p-6')}>
         <div className="type-overline mb-2 flex items-center justify-between gap-2 text-muted-foreground">
           <span>{isRC ? `Passage${passage?.topic ? ` · ${passage.topic}` : ''}` : 'Stimulus'}</span>
           <div className="flex items-center gap-2">
@@ -724,7 +721,13 @@ export function SectionRunner({
   );
 
   return (
-    <div className={cn('flex h-screen flex-col bg-background', reading.focusTheme && 'theme-focus')}>
+    <main
+      className={cn(
+        'assessment-runner flex h-screen min-w-0 flex-col bg-background text-[15px]',
+        reading.focusTheme && 'theme-focus',
+      )}
+      aria-label="LSAT assessment"
+    >
       {/* 5.6 — polite announcement of the current question for screen readers. */}
       <LiveRegion message={`Question ${index + 1} of ${questions.length}`} />
       {/* Calm Test-Mode header: NO correctness/analytics while the clock runs.
@@ -733,12 +736,12 @@ export function SectionRunner({
           screen; any input wakes it. The reduced-motion net flattens the fade. */}
       <header
         className={cn(
-          `${EXAM_RUNNER_HEADER_CLASS} flex items-center justify-between border-b transition-opacity duration-500`,
-          focusMode ? 'min-h-11 gap-2 px-3 py-1.5' : 'h-14 gap-3 px-6',
+          `${EXAM_RUNNER_HEADER_CLASS} chrome-glass sticky top-0 z-30 flex items-center justify-between border-b border-border/80 shadow-e1 transition-opacity duration-500`,
+          focusMode ? 'min-h-11 gap-2 px-3 py-1.5' : 'min-h-14 gap-3 px-4 py-2 sm:px-6',
           focusMode && !chromeVisible && 'pointer-events-none opacity-0',
         )}
       >
-        <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+        <div className="flex min-w-0 items-center gap-2 text-[13px] font-medium tracking-[-0.01em]">
           <Logo className="h-5 w-5" />
           <span className="truncate">
             {headerLabel} · Q {index + 1} of {questions.length}
@@ -749,7 +752,7 @@ export function SectionRunner({
             </Badge>
           )}
         </div>
-        <div className="flex min-w-0 items-center gap-1 sm:gap-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2.5">
           {!focusMode && (
             <ClockPaceBar clock={clock} total={questions.length} answered={answeredCount} totalSec={limitSec} />
           )}
@@ -764,19 +767,22 @@ export function SectionRunner({
           />
           <ReadingControls prefs={reading} onChange={setReading} />
           {timed ? (
-            <ClockExamTimer
-              clock={clock}
-              totalSec={limitSec}
-              hidden={timerHidden}
-              onToggleHidden={() => setTimerHidden((h) => !h)}
-              announce
-            />
+            !focusMode && (
+              <ClockExamTimer
+                clock={clock}
+                totalSec={limitSec}
+                hidden={timerHidden}
+                onToggleHidden={() => setTimerHidden((h) => !h)}
+                announce
+              />
+            )
           ) : (
             <span className="text-xs text-muted-foreground">Untimed</span>
           )}
           <Button
             variant={cur.flagged ? 'default' : 'outline'}
             size="sm"
+            className="shrink-0"
             onClick={() => setCur({ flagged: !cur.flagged })}
           >
             <Flag className="h-4 w-4" />
@@ -812,20 +818,14 @@ export function SectionRunner({
       {focusMode && (
         <>
           {timed && <FocusHairline clock={clock} limitSec={limitSec} />}
-          {/* A small clock the user can summon back by moving the mouse, so the
-              time is reachable without leaving focus mode. It is `aria-hidden`:
-              the header's ExamTimer (still in the a11y tree though visually
-              dimmed) remains the single `role="timer"` + the sole threshold
-              announcer, so screen readers get exactly one timer, not two. */}
+          {/* Keep one compact timer reachable throughout focus mode. It sits
+              above the bottom navigator so it never competes with the
+              annotation toolbar in the exam header. */}
           {timed && (
             <div
-              aria-hidden
-              className={cn(
-                'fixed right-4 top-3 z-40 transition-opacity duration-500',
-                chromeVisible ? 'opacity-100' : 'pointer-events-none opacity-0',
-              )}
+              className="lsat-focus-clock fixed bottom-[4.5rem] right-3 z-40"
             >
-              <div className="rounded-full bg-surface-1/80 px-2 py-0.5 shadow-e1 backdrop-blur">
+              <div className="rounded-full bg-surface-1/90 px-2 py-0.5 shadow-e1 backdrop-blur">
                 <ClockExamTimer
                   clock={clock}
                   totalSec={limitSec}
@@ -867,8 +867,8 @@ export function SectionRunner({
           page except the question and the ambient hairline. */}
       <footer
         className={cn(
-          'flex items-center border-t transition-opacity duration-500',
-          focusMode ? 'gap-2 px-3 py-2' : 'gap-4 px-6 py-3',
+          'chrome-glass sticky bottom-0 z-20 flex items-center border-t border-border/80 shadow-e2 transition-opacity duration-500',
+          focusMode ? 'gap-2 px-3 py-2' : 'gap-3 px-4 py-2.5 sm:gap-4 sm:px-6 sm:py-3',
           focusMode && !chromeVisible && 'pointer-events-none opacity-0',
         )}
       >
@@ -915,7 +915,7 @@ export function SectionRunner({
           go(i);
         }}
       />
-    </div>
+    </main>
   );
 }
 
@@ -978,7 +978,7 @@ function ClockPaceBar({
 function FocusHairline({ clock, limitSec }: { clock: ClockStore; limitSec: number }) {
   const timeLeft = useClockTime(clock);
   return (
-    <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 z-40 h-0.5 bg-transparent">
+    <div aria-hidden className="lsat-focus-hairline pointer-events-none fixed inset-x-0 top-0 z-40 h-0.5 bg-transparent">
       <div
         className={cn(
           'h-full transition-[width,background-color] duration-500',

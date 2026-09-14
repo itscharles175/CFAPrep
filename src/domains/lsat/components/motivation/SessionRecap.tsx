@@ -153,12 +153,13 @@ export function SessionRecap({ results, summary, streakDays }: SessionRecapProps
       animate="show"
     >
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex flex-col items-stretch gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle voice="display">Last session recap</CardTitle>
-          <div className="flex items-center gap-2">
+          <div data-testid="session-recap-actions" className="flex flex-wrap items-center gap-2 sm:justify-end">
           <Button
             variant="outline"
             size="sm"
+            className="min-h-10"
             disabled={exporting}
             onClick={() => void exportShare("png")}
           >
@@ -168,6 +169,7 @@ export function SessionRecap({ results, summary, streakDays }: SessionRecapProps
           <Button
             variant="outline"
             size="sm"
+            className="min-h-10"
             disabled={exporting}
             onClick={() => void exportShare("svg")}
           >
@@ -176,6 +178,7 @@ export function SessionRecap({ results, summary, streakDays }: SessionRecapProps
           <Button
             variant={showCard ? "secondary" : "outline"}
             size="sm"
+            className="min-h-10"
             aria-pressed={showCard}
             onClick={() => setShowCard((v) => !v)}
           >
@@ -184,6 +187,7 @@ export function SessionRecap({ results, summary, streakDays }: SessionRecapProps
           <Button
             variant="outline"
             size="sm"
+            className="min-h-10"
             onClick={() => {
               const el = document.getElementById("session-recap-print");
               if (!el) return;

@@ -1,0 +1,282 @@
+/* Utility page skin: scoped to LSAT settings, content operations, and
+   generation quarantine. This deliberately reuses StudyVault host primitives
+   and tokens without changing SharedLayout or the global palette. */
+.lsat-utility-page {
+  min-width: 0;
+}
+
+.lsat-utility-page .page-header {
+  margin-bottom: calc(var(--space-unit) * 7);
+  padding-bottom: calc(var(--space-unit) * 5);
+}
+
+.lsat-utility-page .page-header h1 {
+  max-width: 24ch;
+  font-size: clamp(2.25rem, 5vw, 4.25rem);
+  line-height: 0.98;
+}
+
+.lsat-utility-page .page-header p {
+  max-width: 72ch;
+  font-size: 0.975rem;
+  line-height: 1.6;
+}
+
+.lsat-utility-page .page-header .action-bar {
+  align-items: flex-start;
+}
+
+.lsat-utility-page .lsat-utility-section {
+  padding-top: calc(var(--space-unit) * 5);
+  border-top: 1px solid hsl(var(--border));
+}
+
+.lsat-utility-page .lsat-utility-section .type-overline {
+  color: hsl(var(--muted-foreground));
+}
+
+.lsat-utility-page .qv-card,
+.lsat-utility-page .rounded-card {
+  min-width: 0;
+}
+
+.lsat-utility-page .qv-card-header,
+.lsat-utility-page .qv-card-content {
+  min-width: 0;
+}
+
+.lsat-utility-page .qv-card-title,
+.lsat-utility-page .text-base {
+  line-height: 1.25;
+}
+
+.lsat-utility-page .utility-metric-grid {
+  align-items: stretch;
+}
+
+.lsat-utility-page .utility-metric-grid > * {
+  min-width: 0;
+}
+
+.lsat-settings-page .lsat-settings-grid {
+  align-items: start;
+}
+
+.lsat-settings-page .lsat-settings-rail {
+  border-right: 1px solid hsl(var(--border));
+  padding-right: calc(var(--space-unit) * 4);
+}
+
+.lsat-settings-page .lsat-settings-rail a {
+  min-height: 40px;
+}
+
+.lsat-settings-page form.grid-cols-2,
+.lsat-settings-page .grid-cols-2 {
+  min-width: 0;
+}
+
+.lsat-settings-page input,
+.lsat-settings-page select,
+.lsat-settings-page textarea {
+  max-width: 100%;
+}
+
+/* Native range tracks are visually slim by design, but their interactive box
+   still needs a reliable finger-sized target. Keep the track centred in the
+   taller control rather than making the slider look heavier. */
+.lsat-settings-page #target-score {
+  block-size: 44px;
+  min-block-size: 44px;
+}
+
+/* Model names are edited most often when the local provider is unavailable.
+   Keep the text input, picker, and their adjacent actions equally reachable
+   on touch devices without changing the desktop row layout. */
+.lsat-settings-page .settings-model-role-actions :is(
+  input,
+  button,
+  [data-radix-select-trigger]
+) {
+  min-block-size: 44px;
+}
+
+.lsat-settings-page [role="switch"] {
+  min-height: 40px;
+  min-width: 44px;
+}
+
+.lsat-settings-page .settings-model-role-row,
+.lsat-settings-page .settings-model-role-actions {
+  min-width: 0;
+}
+
+.lsat-settings-page .settings-table-scroll {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  outline-offset: 3px;
+}
+
+.lsat-settings-page .settings-table-scroll > .qv-table-wrapper {
+  overflow-x: visible;
+}
+
+.lsat-settings-page .settings-table-scroll .qv-table {
+  min-width: 36rem;
+}
+
+.lsat-utility-page :is(button, a, input, select, textarea, [role="button"], [role="radio"], [role="switch"]):focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.lsat-content-ops-page .lsat-utility-flow {
+  display: grid;
+  gap: calc(var(--space-unit) * 7);
+}
+
+.lsat-content-ops-page .lsat-utility-section > .grid,
+.lsat-content-ops-page > .lsat-utility-flow > .grid {
+  min-width: 0;
+}
+
+.lsat-content-ops-page .rounded-md.border,
+.lsat-content-ops-page .rounded-md.bg-surface-2 {
+  min-width: 0;
+}
+
+.lsat-content-ops-page .content-ops-filter-panel {
+  display: grid;
+  gap: calc(var(--space-unit) * 2);
+}
+
+.lsat-content-ops-page .content-ops-filter-panel input {
+  min-width: min(100%, 16rem);
+}
+
+.lsat-quarantine-page .quarantine-summary {
+  border-color: hsl(var(--border));
+  background: hsl(var(--surface-1));
+  box-shadow: var(--elevation-1);
+}
+
+.lsat-quarantine-page .quarantine-list {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+  outline-offset: 3px;
+}
+
+.lsat-quarantine-page .quarantine-card .qv-card-header {
+  gap: calc(var(--space-unit) * 3);
+}
+
+.lsat-quarantine-page .quarantine-card .qv-card-content {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .lsat-utility-page .page-header {
+    align-items: start;
+    gap: calc(var(--space-unit) * 4);
+  }
+
+  .lsat-utility-page .page-header .action-bar {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .lsat-utility-page .page-header .action-bar > * {
+    max-width: 100%;
+  }
+
+  .lsat-settings-page .lsat-settings-grid {
+    grid-template-columns: 1fr;
+    gap: calc(var(--space-unit) * 5);
+  }
+
+  .lsat-settings-page .lsat-settings-rail {
+    border-right: 0;
+    border-bottom: 1px solid hsl(var(--border));
+    padding: 0 0 calc(var(--space-unit) * 3);
+  }
+
+  .lsat-settings-page .lsat-settings-rail ul {
+    display: flex;
+    gap: calc(var(--space-unit) * 1);
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .lsat-settings-page .lsat-settings-rail li {
+    flex: 0 0 auto;
+  }
+
+  .lsat-settings-page .lsat-settings-rail a {
+    white-space: nowrap;
+  }
+
+  .lsat-content-ops-page .lsat-utility-flow {
+    gap: calc(var(--space-unit) * 5);
+  }
+
+  .lsat-quarantine-page .qv-card-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .lsat-quarantine-page .quarantine-card-actions {
+    width: 100%;
+  }
+
+  .lsat-quarantine-page .quarantine-card-actions > * {
+    flex: 1 1 8rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .lsat-settings-page .grid-cols-2,
+  .lsat-settings-page form.grid-cols-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .lsat-settings-page .grid-cols-2 > .col-span-2 {
+    grid-column: auto;
+  }
+
+  .lsat-utility-page .page-header h1 {
+    font-size: clamp(2rem, 12vw, 3rem);
+  }
+
+  .lsat-content-ops-page .content-ops-filter-panel input {
+    width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .lsat-settings-page .settings-model-role-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .lsat-settings-page .settings-model-role-actions {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .lsat-settings-page .settings-model-role-actions input,
+  .lsat-settings-page .settings-model-role-actions [data-radix-select-trigger] {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .lsat-settings-page .settings-model-role-actions input {
+    flex: 1 1 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lsat-utility-page .qv-card-interactive {
+    transition: none;
+  }
+}

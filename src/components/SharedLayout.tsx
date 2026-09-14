@@ -29,6 +29,7 @@ import { ThemeProvider } from '../context/ThemeContext';
 import { ToastProvider } from '../context/ToastContext';
 import { OfflineProvider } from '../context/OfflineContext';
 import { getDesktopBridge, registerDesktopSubscription } from '../lib/desktopBridge';
+import { domainForLocation, useStudyContext } from '../lib/studyContext';
 
 interface SharedLayoutProps {
   /** Optional content. When omitted, a routed <Outlet/> is rendered (so this can
@@ -78,6 +79,12 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
   // Both the Sidebar's LSAT section and the TopBar mode toggle read/write it.
   const [lsatMode, setLsatMode] = useState<LsatShellMode>('study');
   const location = useLocation();
+  const [, updateStudyContext] = useStudyContext();
+  // LSAT assessment surfaces own a compact, full-viewport frame. Keep the
+  // shared providers mounted for route data and theme state, but do not let the
+  // host rail/top bar consume viewport space while a timed session is active.
+  const lsatFullBleed = /^\/lsat\/(?:take|exam|blind-review|popout)(?:\/|$)/.test(location.pathname);
+  const content = children ?? <Outlet />;
   const mobileNavHidden = mobileViewport && !mobileNavOpen;
   const mobileDrawerOpen = mobileViewport && mobileNavOpen;
 
@@ -181,6 +188,15 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
     return undefined;
   }, [location.pathname]);
 
+  // Sidebar normally keeps the persisted selected curriculum aligned with the
+  // URL. Full-bleed assessment routes deliberately omit the sidebar, however,
+  // so this shared layout must own that same invariant for cold deep links and
+  // universal-resume navigation into `/lsat/take`, `/exam`, and blind review.
+  useEffect(() => {
+    const routeDomain = domainForLocation(location.pathname);
+    if (routeDomain) updateStudyContext({ domain: routeDomain });
+  }, [location.pathname, updateStudyContext]);
+
   // K4 cutover fix: SharedLayout is the LSAT plane's host chrome, and the host
   // <Sidebar>/<TopBar> it renders consume host contexts — TopBar's `useTheme()`
   // (and any host shared primitive's `useToast`/`useOfflineStatus`). On /lsat the
@@ -193,7 +209,7 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
     <ThemeProvider>
     <ToastProvider>
     <OfflineProvider>
-    <div className="app-layout">
+    {lsatFullBleed ? content : <div className="app-layout">
       <a href="#main" className="skip-to-main">
         Skip to main content
       </a>
@@ -224,12 +240,12 @@ export default function SharedLayout({ children }: SharedLayoutProps) {
         id="main"
         className={`main-content ${sidebarCollapsed ? 'collapsed' : ''}`}
         role="main"
-        tabIndex={-1}
+        tabIndex={location.pathname === '/lsat/quarantine' ? 0 : -1}
       >
-        {children ?? <Outlet />}
+        {content}
       </main>
       <MobileWorkspaceNav />
-    </div>
+    </div>}
     </OfflineProvider>
     </ToastProvider>
     </ThemeProvider>

@@ -71,16 +71,15 @@ describe('SharedLayout (K4-6) — unified shell', () => {
     renderWithShell(<SharedLayout />);
     const user = userEvent.setup();
     await user.selectOptions(screen.getByRole('combobox', { name: 'Track' }), 'lsat');
-    await user.click(screen.getByRole('link', { name: /^LSAT/i }));
+    await user.click(screen.getByRole('button', { name: 'Expand specialized LSAT tools' }));
     // A representative LSAT row from the merged manifest appears, /lsat-prefixed.
     const srs = await screen.findByRole('link', { name: 'SRS' });
     expect(srs).toHaveAttribute('href', '/lsat/srs');
-    // Grouped headings (Practice / Insight / Setup) are present. ("Practice" is
-    // also a route label, so scope to the section-label heading specifically.)
-    const headings = screen.getAllByText('Insight');
+    // Secondary headings separate exercises, study tools, and maintenance.
+    const headings = screen.getAllByText('Study tools');
     expect(headings.length).toBeGreaterThan(0);
     expect(headings[0]).toHaveClass('sidebar-section-label');
-    // The Setup group's 'Settings' row resolves to its /lsat path too.
+    // The Maintenance group's Settings row resolves to its /lsat path too.
     expect(screen.getAllByRole('link', { name: 'Settings' }).find((link) => link.getAttribute('href') === '/lsat/settings')).toBeDefined();
   });
 
@@ -117,9 +116,10 @@ describe('SharedLayout (K4-6) — unified shell', () => {
     const user = userEvent.setup();
     await user.selectOptions(screen.getByRole('combobox', { name: 'Track' }), 'lsat');
     await user.click(within(screen.getByRole('group', { name: 'App mode' })).getByRole('button', { name: 'Test' }));
-    await user.click(screen.getByRole('link', { name: /^LSAT/i }));
-    // 'Practice' (not hideInTest) survives; 'SRS' (hideInTest) is hidden.
-    expect((await screen.findAllByRole('link', { name: 'Practice' })).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole('button', { name: 'Expand specialized LSAT tools' }));
+    // LSAT-specific practice rows survive, while shared workspaces own the
+    // generic Practice destination. Study-only SRS remains hidden.
+    expect(await screen.findByRole('link', { name: 'PrepTests' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'SRS' })).toBeNull();
   });
 

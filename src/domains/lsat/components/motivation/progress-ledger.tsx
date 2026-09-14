@@ -200,7 +200,7 @@ export function ProgressLedger({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
+                  className="min-h-10 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
                   disabled={exporting}
                   onClick={() => void shareRow(row)}
                   aria-label={`Share ${row.label}`}

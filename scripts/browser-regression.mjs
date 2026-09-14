@@ -229,7 +229,7 @@ try {
   console.log('OK offline badge path');
 
   startBrowserStep('browser:offline-reload', '/', 'production offline reload');
-  await page.goto(new URL('/', address).toString(), { waitUntil: 'networkidle' });
+  await page.goto(new URL('/?pwa-qa=1', address).toString(), { waitUntil: 'networkidle' });
   let serviceWorkerReady = await waitForServiceWorkerReady(page);
   if (!serviceWorkerReady) {
     await page.reload({ waitUntil: 'networkidle' });

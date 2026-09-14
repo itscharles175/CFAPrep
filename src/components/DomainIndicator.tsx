@@ -28,7 +28,7 @@ const PLANE_LABEL: Record<Plane, string> = {
 
 const PLANE_DESCRIPTION: Record<Plane, string> = {
   cfa: 'CFA Program',
-  lsat: 'LSAT Lab',
+  lsat: 'LSAT study workspace',
   quant: 'Quant Finance',
   excel: 'Excel Training',
   vault: 'Vault',

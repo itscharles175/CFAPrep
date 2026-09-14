@@ -58,6 +58,7 @@ import { startAutoFlush } from '@lsat/lib/offlineQueue';
 import { RebasedLsatRouter } from './RebasedLsatRouter';
 import SharedLayout from './SharedLayout';
 import '@lsat/index.css';
+import '@lsat/components/error-state-touch-target.css';
 
 /** Mirrors `LsatRoot.makeQueryClient` exactly so the unified path's data-layer
  *  behavior (retry/refetch/throwOnError policy) matches the legacy path. */

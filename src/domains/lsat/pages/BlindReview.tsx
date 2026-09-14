@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { setResume } from "@lsat/lib/resume";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 import {
   buildBrWorksheetHtml,
   downloadBrWorksheet,
@@ -123,6 +124,21 @@ export default function BlindReview() {
       <BrShell>
         <div className="mx-auto max-w-2xl p-8">
           <ErrorState error={error} onRetry={refetch} />
+        </div>
+      </BrShell>
+    );
+  // The query falls back to a built-in section when the LSAT service is
+  // unreachable. That section is useful for keeping the shell paintable, but
+  // it is not a learner attempt and must never enter blind review or grading.
+  if (data.usingSample)
+    return (
+      <BrShell>
+        <div className="mx-auto max-w-2xl p-8">
+          <SampleDataRecovery
+            section="Blind review"
+            affectedSections={["Timed answers", "Blind-review answers", "Review outcomes"]}
+            onRetry={() => refetch().then(() => undefined)}
+          />
         </div>
       </BrShell>
     );
@@ -251,15 +267,23 @@ export default function BlindReview() {
   const rcls = readingClasses(reading);
 
   return (
-    <div className={cn("flex h-full flex-col bg-background", reading.focusTheme && "theme-focus")}>
-      <header className="flex h-14 items-center justify-between border-b px-6">
-        <div className="flex items-center gap-2 text-sm font-medium">
+    <div
+      className={cn(
+        "assessment-runner flex h-full min-w-0 flex-col bg-background",
+        reading.focusTheme && "theme-focus",
+      )}
+    >
+      <header className="flex h-14 min-w-0 items-center justify-between gap-3 border-b px-3 sm:px-6">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
           <Logo className="h-5 w-5" />
-          <h1 className="text-sm font-medium">Blind Review · No timer · Redo flagged + unsure</h1>
+          <h1 className="min-w-0 truncate text-sm font-medium">
+            <span className="hidden sm:inline">Blind Review · No timer · Redo flagged + unsure</span>
+            <span className="sm:hidden">Blind Review</span>
+          </h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
           <Select value={filter} onValueChange={(v) => setFilter(v as BrFilter)}>
-            <SelectTrigger className="w-32 h-8 text-xs">
+            <SelectTrigger className="h-10 w-20 text-xs sm:h-8 sm:w-32">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -272,7 +296,7 @@ export default function BlindReview() {
           <Button
             variant="outline"
             size="sm"
-            className="h-8 gap-1 text-xs"
+            className="h-10 gap-1 px-2 text-xs sm:h-8 sm:px-3"
             onClick={() => {
               const html = buildBrWorksheetHtml(
                 `Session ${id}`,
@@ -285,9 +309,9 @@ export default function BlindReview() {
             }}
           >
             <Download className="h-3.5 w-3.5" />
-            Worksheet
+            <span className="hidden sm:inline">Worksheet</span>
           </Button>
-          <div className="text-sm text-muted-foreground tabular-nums">
+          <div className="text-xs text-muted-foreground tabular-nums sm:text-sm">
             {index + 1} / {queue.length}
           </div>
         </div>

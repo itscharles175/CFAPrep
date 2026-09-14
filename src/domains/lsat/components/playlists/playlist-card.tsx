@@ -85,8 +85,8 @@ export function PlaylistCard({
   const empty = p.count === 0;
 
   return (
-    <Card>
-      <CardContent className="flex items-stretch gap-4 py-4">
+    <Card className="lsat-selection-card lsat-playlist-card">
+      <CardContent className="flex flex-col items-stretch gap-4 py-4 sm:flex-row">
         {/* Cover treatment — smart vs manual read differently at a glance.
             Smart sets carry a verdict-accented edge + aurora glow; manual sets
             are a calm graphite tile. */}
@@ -134,7 +134,7 @@ export function PlaylistCard({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex w-full shrink-0 items-center justify-end gap-1 sm:w-auto">
           <Button size="sm" disabled={empty} loading={playing} onClick={onPlay}>
             {!playing && <Icon as={PlayCircle} size="sm" />}
             Play

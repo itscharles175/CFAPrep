@@ -38,6 +38,7 @@ import type {
   RcType,
   SectionType,
 } from "@lsat/lib/types";
+import "./selection-pages.css";
 
 const LR_TYPES: LrType[] = [
   "MainPoint", "NecessaryAssumption", "SufficientAssumption", "Strengthen",
@@ -138,20 +139,20 @@ export default function Drills() {
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container lsat-selection-page lsat-drills-page">
       <PageHeader
         eyebrow="Targeted practice"
         title="Drills"
         subtitle="Build a focused set by type and difficulty."
       />
-      <div className="mx-auto max-w-2xl space-y-[calc(var(--space-unit)*4)]">
+      <div className="lsat-drill-layout">
       {err && (
         <ErrorState
           error={new Error(err)}
           onRetry={() => setErr(null)}
         />
       )}
-      <Card>
+      <Card className="lsat-selection-card lsat-drill-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Icon as={Target} size="md" /> Build a drill set
@@ -160,7 +161,7 @@ export default function Drills() {
         <CardContent className="space-y-5">
           <Field label="Describe it (optional)">
             {(id) => (
-            <div className="flex gap-2">
+            <div className="lsat-drill-intent">
               <Input
                 id={id}
                 value={intentText}
@@ -184,7 +185,7 @@ export default function Drills() {
             </div>
             )}
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="lsat-drill-fields">
             <Field label="Section">
               {(id) => (
               <Select
@@ -277,39 +278,48 @@ export default function Drills() {
             )}
           </Field>
 
-          <div className="flex items-center gap-2 text-sm">
-            <Switch
-              checked={timed}
-              onCheckedChange={setTimed}
-              aria-label="Timed drill"
-            />
-            Timed
+          <div className="lsat-drill-mode">
+            <div className="lsat-drill-mode-copy">
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <Switch
+                  checked={timed}
+                  onCheckedChange={setTimed}
+                  aria-label="Timed drill"
+                  className="lsat-drill-switch"
+                />
+                Timed drill
+              </label>
+              <p>Use a time cap to build pacing discipline.</p>
+            </div>
+            {timed && (
+              <Field label="Time cap (minutes, optional)">
+                {(id) => (
+                <Select
+                  value={timeCapMin === "" ? "none" : String(timeCapMin)}
+                  onValueChange={(v) =>
+                    setTimeCapMin(v === "none" ? "" : Number(v))
+                  }
+                >
+                  <SelectTrigger id={id} className="lsat-drill-time-cap">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent
+                    className="lsat-drill-time-cap-menu"
+                    side="top"
+                    sideOffset={20}
+                  >
+                    <SelectItem value="none">Section default</SelectItem>
+                    {[10, 15, 20, 25, 35].map((m) => (
+                      <SelectItem key={m} value={String(m)}>
+                        {m} minutes
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                )}
+              </Field>
+            )}
           </div>
-
-          {timed && (
-            <Field label="Time cap (minutes, optional)">
-              {(id) => (
-              <Select
-                value={timeCapMin === "" ? "none" : String(timeCapMin)}
-                onValueChange={(v) =>
-                  setTimeCapMin(v === "none" ? "" : Number(v))
-                }
-              >
-                <SelectTrigger id={id}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Section default</SelectItem>
-                  {[10, 15, 20, 25, 35].map((m) => (
-                    <SelectItem key={m} value={String(m)}>
-                      {m} minutes
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              )}
-            </Field>
-          )}
 
           <Button className="w-full" onClick={start} disabled={createDrill.isPending}>
             {createDrill.isPending ? "Building…" : "Start drill"}
@@ -317,9 +327,11 @@ export default function Drills() {
         </CardContent>
       </Card>
 
+      <div className="lsat-drill-support">
+      <h2>Keep improving</h2>
       <WeakTypeRecommender />
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="lsat-drill-support-grid">
         <PacingBudgetCard
           budgets={pacing.data?.data.budgets ?? []}
           overBudgetCount={pacing.data?.data.over_budget_count}
@@ -328,6 +340,7 @@ export default function Drills() {
       </div>
 
       <TrapSpiralCard />
+      </div>
       </div>
     </div>
   );

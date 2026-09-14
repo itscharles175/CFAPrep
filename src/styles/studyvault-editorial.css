@@ -712,6 +712,17 @@ details:not([open]) > :not(summary) {
   padding: 12px;
 }
 
+.sidebar-current-track {
+  margin: 0 -2px 18px;
+  padding: 12px 2px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-current-track .sidebar-section-label {
+  padding-left: 10px;
+}
+
 .sidebar-section {
   margin-bottom: 20px;
 }
@@ -1017,25 +1028,6 @@ details:not([open]) > :not(summary) {
   }
 
   .topbar--compact .topbar-breadcrumb {
-    min-width: 0;
-  }
-
-  .topbar--compact .topbar-breadcrumb .breadcrumb-item:not(:last-child),
-  .topbar--compact .topbar-breadcrumb .breadcrumb-separator {
-    display: none;
-  }
-
-  .topbar--compact .topbar-breadcrumb .breadcrumb-current,
-  .topbar--compact .topbar-breadcrumb .breadcrumb-link {
-    display: block;
-    min-width: 0;
-    max-width: 13ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .topbar--compact.topbar--neutral .topbar-breadcrumb {
     display: none;
   }
 
@@ -1086,6 +1078,16 @@ details:not([open]) > :not(summary) {
   .topbar--compact .topbar-mode-toggle {
     display: none;
   }
+}
+
+/* Keep the two mode choices atomic when the 264px rail leaves a compact
+   696px toolbar. A label may wrap or shrink to a single character otherwise,
+   which makes the control look broken at the 960px desktop minimum. */
+.topbar--compact .topbar-mode-option {
+  flex-shrink: 0;
+  min-width: 44px;
+  padding-inline: 8px;
+  white-space: nowrap;
 }
 
 :root[data-theme="light"] .topbar {
@@ -1478,7 +1480,10 @@ details:not([open]) > :not(summary) {
     gap: 0;
     padding: 5px max(5px, env(safe-area-inset-right, 0px)) calc(5px + env(safe-area-inset-bottom, 0px)) max(5px, env(safe-area-inset-left, 0px));
     border-top: 1px solid var(--border);
-    background: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
+    /* The bar sits over arbitrary study content. An opaque surface gives the
+       label/icon contrast a stable backing instead of depending on whatever
+       scrolls beneath the navigation. */
+    background: var(--bg-secondary);
     box-shadow: 0 -10px 32px rgba(0, 0, 0, 0.12);
     backdrop-filter: blur(18px) saturate(125%);
     -webkit-backdrop-filter: blur(18px) saturate(125%);
@@ -1493,7 +1498,7 @@ details:not([open]) > :not(summary) {
     align-content: center;
     gap: 3px;
     border-radius: 4px;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 0.72rem;
     font-weight: 650;
     cursor: pointer;
@@ -1512,8 +1517,9 @@ details:not([open]) > :not(summary) {
 
   .mobile-workspace-nav > a.active,
   .mobile-workspace-more > summary.active {
-    color: var(--accent);
-    background: var(--surface-soft);
+    /* `--accent-hover` is the high-contrast accent in both theme modes. */
+    color: var(--accent-hover);
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg-secondary));
   }
 
   .mobile-workspace-nav > a:active,

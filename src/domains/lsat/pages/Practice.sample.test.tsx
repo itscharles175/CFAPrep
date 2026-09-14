@@ -23,8 +23,8 @@ vi.mock("@lsat/lib/hooks", () => ({
 }));
 
 vi.mock("@lsat/components/page-layout", () => ({
-  PageLayout: ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <main><h1>{title}</h1>{children}</main>
+  PageLayout: ({ title, className, children }: { title: string; className?: string; children: React.ReactNode }) => (
+    <main className={className}><h1>{title}</h1>{children}</main>
   ),
 }));
 vi.mock("@lsat/components/practice/resume-banner", () => ({ ResumeBanner: () => null }));
@@ -57,5 +57,31 @@ describe("Practice sample provenance", () => {
     expect(screen.getByText(/Practice is unavailable while the LSAT backend is offline/i)).toBeInTheDocument();
     expect(screen.queryByText("Sample Diagnostic")).not.toBeInTheDocument();
     expect(screen.queryByText(/14 SRS due/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveClass("lsat-selection-page", "lsat-practice-page");
+  });
+
+  it("keeps a real empty PrepTest bank empty without requesting an invented id", () => {
+    mocks.usePrepTests.mockReturnValue(query([]));
+    mocks.useSrsDue.mockReturnValue(query({ due_count: 0 }));
+
+    render(<MemoryRouter><Practice /></MemoryRouter>);
+
+    expect(mocks.usePrepTest).not.toHaveBeenCalled();
+    expect(screen.getByText("No sections available yet.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import a PrepTest" })).toBeInTheDocument();
+  });
+
+  it("keeps a real detail mismatch visible instead of treating it as an empty bank", () => {
+    mocks.usePrepTests.mockReturnValue(query([{ id: 73, name: "Saved PrepTest" }]));
+    mocks.usePrepTest.mockReturnValue({
+      ...query(undefined),
+      isError: true,
+      error: new Error("PrepTest not found"),
+    });
+
+    render(<MemoryRouter><Practice /></MemoryRouter>);
+
+    expect(mocks.usePrepTest).toHaveBeenCalledWith(73);
+    expect(screen.getByText("Error")).toBeInTheDocument();
   });
 });

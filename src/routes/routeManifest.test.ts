@@ -191,7 +191,7 @@ describe('K4-5 merged LSAT routes', () => {
   it('resolves merged-tree lookups by path and label', () => {
     expect(routeByPath('/lsat/srs')?.id).toBe('lsat-srs');
     expect(routeByPath('/cfa')?.id).toBe('cfa-dashboard');
-    expect(routeLabel('/lsat/notebook')).toBe('Notebook & Curriculum'); // canonical-aware
+    expect(routeLabel('/lsat/notebook')).toBe('LSAT Library'); // canonical-aware
     expect(routeLabel('/lsat/srs')).toBe('SRS');
   });
 

@@ -35,6 +35,7 @@ import { PageLayout } from "@lsat/components/page-layout";
 import { DockedCoach } from "@lsat/components/coach/docked-coach";
 import { WidgetBoundary } from "@lsat/components/error-boundary";
 import { EmptyState, LoadingState } from "@lsat/components/states";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 import {
   streamExplain,
   type NotebookContextMeta,
@@ -145,6 +146,19 @@ export default function Explanation() {
   const brAnswer = attemptItem?.attempt.br_answer ?? null;
 
   if (loading) return <LoadingState label="Loading explanation…" />;
+  // Question data falls back to a built-in example when the LSAT service is
+  // unreachable. Do not expose its answer, explanation, or mutation actions as
+  // if they belonged to the learner's attempt.
+  if (questionQuery.data?.usingSample)
+    return (
+      <PageLayout title="Explanation" width="lg">
+        <SampleDataRecovery
+          section="Explanation"
+          affectedSections={["Question context", "Source-linked explanation", "Error logging"]}
+          onRetry={() => questionQuery.refetch().then(() => undefined)}
+        />
+      </PageLayout>
+    );
   if (!question)
     return (
       <PageLayout title="Explanation" width="lg">

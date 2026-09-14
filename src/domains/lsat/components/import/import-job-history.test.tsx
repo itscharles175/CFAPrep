@@ -70,7 +70,10 @@ describe("ImportJobHistory", () => {
       await screen.findByText("Could not load import history"),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry).toHaveClass("min-h-10");
+
+    fireEvent.click(retry);
 
     expect(await screen.findByText("PT 91.pdf")).toBeInTheDocument();
   });

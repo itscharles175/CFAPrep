@@ -1,0 +1,25 @@
+/*
+ * Review owns a long, scrollable queue. At compact widths the shared mobile
+ * workspace bar already occupies the viewport edge, so a floating coach
+ * affordance can sit on top of queue controls while the user scrolls. Keep
+ * the coach available in the review flow, but place it in document flow where
+ * the queue has a stable, unobstructed hit area.
+ */
+@media (max-width: 900px) {
+  .lsat-review-page {
+    padding-bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .lsat-review-page .lsat-docked-coach-trigger {
+    position: static !important;
+    display: flex;
+    margin: var(--space-5) 0 0 auto;
+  }
+
+  .lsat-review-page .lsat-docked-coach-panel {
+    position: static !important;
+    width: min(100%, 32rem);
+    max-height: none;
+    margin: var(--space-4) 0 0 auto;
+  }
+}

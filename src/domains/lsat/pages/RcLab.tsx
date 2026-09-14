@@ -12,14 +12,22 @@ import { Icon } from "@lsat/components/ui/icon";
 import { api } from "@lsat/lib/api";
 import { useRCDashboard, useRCPassageMaps } from "@lsat/lib/hooks";
 import { pct } from "@lsat/lib/utils";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 
 export default function RcLab() {
   const qc = useQueryClient();
   const dashboard = useRCDashboard();
   const maps = useRCPassageMaps();
   const d = dashboard.data?.data;
-  const usingSample = dashboard.data?.usingSample || maps.data?.usingSample;
+  const dashboardIsSample = dashboard.data?.usingSample ?? false;
+  const mapsAreSample = maps.data?.usingSample ?? false;
+  const usingSample = dashboardIsSample || mapsAreSample;
   const hasQueryError = dashboard.isError || maps.isError;
+  const showLiveData = !usingSample && !hasQueryError;
+
+  function retry() {
+    void Promise.all([dashboard.refetch(), maps.refetch()]);
+  }
 
   async function refreshMap(passageId: number) {
     await api.rcPassageMap(passageId, true);
@@ -42,24 +50,27 @@ export default function RcLab() {
     <div className="page-container">
       <div className="mx-auto max-w-6xl space-y-[calc(var(--space-unit)*4)]">
         <PageHeader
-          badge="Content intelligence"
+          badge="Library · Passage analysis"
           title="RC Lab"
-          subtitle="Passage structure, paragraph roles, and RC timing evidence in one reader-first workspace."
+          subtitle="A reader-first view of passage structure, timing evidence, and traceable line anchors."
         />
-        {(usingSample || hasQueryError) && (
-        <div
-          role="status"
-          className={
-            hasQueryError
-              ? "rounded-md border border-destructive/35 bg-destructive/10 p-3 text-sm text-destructive"
-              : "rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-foreground"
-          }
-        >
-          {hasQueryError
-            ? "RC Lab could not load current backend passage evidence."
-            : "RC Lab is showing offline fallback data until the backend responds."}
-        </div>
-      )}
+        {usingSample ? (
+          <SampleDataRecovery
+            section="RC Lab"
+            affectedSections={["Readiness signals", "Passage maps", "Passage generation"]}
+            onRetry={retry}
+          />
+        ) : hasQueryError ? (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/35 bg-destructive/10 p-3 text-sm text-destructive"
+          >
+            <span>RC Lab could not load current passage evidence.</span>
+            <Button variant="outline" size="sm" onClick={retry}>Retry</Button>
+          </div>
+        ) : null}
+        {showLiveData && (
+        <>
       <div className="grid gap-4 md:grid-cols-5">
         <Metric label="Passages" value={d?.passages ?? 0} />
         <Metric label="Questions" value={d?.questions ?? 0} />
@@ -68,14 +79,14 @@ export default function RcLab() {
         <Metric label="Tagged" value={pct(d?.tag_coverage?.coverage ?? 0)} />
       </div>
 
-      <Card>
-        <CardHeader>
+      <Card className="border-border/80 shadow-sm">
+        <CardHeader className="border-b bg-surface-1/70">
           <CardTitle className="flex items-center gap-2 text-base">
             <Icon as={Clock} size="sm" />
             RC readiness signals
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           <Progress value={Math.round((d?.coverage ?? 0) * 100)} />
           <div className="grid gap-3 text-sm md:grid-cols-3">
             <div>
@@ -121,14 +132,15 @@ export default function RcLab() {
 
       <PassageFirstGenerator />
 
-      <PageSection title="Passage maps" eyebrow="Structure">
+      <PageSection title="Passage maps" eyebrow="Reader notes" description="Paragraph roles remain visible; line-level support is available when you need to inspect it.">
         <div className="grid gap-3">
           {(maps.data?.data ?? []).map((map) => (
-            <Card key={map.passage_id}>
+            <Card key={map.passage_id} className="border-border/80 shadow-sm">
               <CardContent className="space-y-4 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-medium">
+                    <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Passage map</p>
+                    <h3 className="mt-1 font-medium">
                       Passage {map.passage_id}{map.topic ? ` · ${map.topic}` : ""}
                     </h3>
                     <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
@@ -140,7 +152,7 @@ export default function RcLab() {
                     Refresh
                   </Button>
                 </div>
-                <div className="grid gap-2 md:grid-cols-2">
+                <div className="grid gap-2 rounded-card bg-surface-1/60 p-2 md:grid-cols-2">
                   {map.paragraph_roles.map((role) => (
                     <div key={role.index} className="rounded-md border bg-surface-1 p-3">
                       <div className="flex items-center justify-between gap-2">
@@ -166,12 +178,12 @@ export default function RcLab() {
                   ))}
                 </div>
                 {!!map.evidence_refs?.length && (
-                  <div className="rounded-md border bg-surface-2 p-3">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <SearchCheck className="h-4 w-4" aria-hidden />
-                      Evidence anchors
-                    </div>
-                    <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  <details className="rounded-card border bg-surface-1/60 p-3">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-medium marker:content-none">
+                      <span className="flex items-center gap-2"><SearchCheck className="h-4 w-4 text-primary" aria-hidden /> Evidence anchors</span>
+                      <Badge variant="outline">{map.evidence_refs.length} refs</Badge>
+                    </summary>
+                    <div className="mt-3 grid gap-2 border-t pt-3 md:grid-cols-2">
                       {map.evidence_refs.slice(0, 4).map((ref) => (
                         <div key={`${ref.line_ref}-${ref.marker}`} className="text-sm">
                           <div className="flex flex-wrap items-center gap-1.5">
@@ -183,7 +195,7 @@ export default function RcLab() {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </details>
                 )}
                 {!!map.question_tags?.length && (
                   <div className="flex flex-wrap gap-2">
@@ -199,14 +211,17 @@ export default function RcLab() {
             </Card>
           ))}
           {!maps.data?.data.length && (
-            <Card>
-              <CardContent className="p-4 text-sm text-muted-foreground">
-                Import or seed RC passages to generate structure maps.
+            <Card className="border-dashed bg-surface-1/40">
+              <CardContent className="p-6 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">No passage maps yet</p>
+                <p className="mt-1">Import or seed RC passages to generate structure maps and line-level evidence anchors.</p>
               </CardContent>
             </Card>
           )}
         </div>
         </PageSection>
+        </>
+        )}
       </div>
     </div>
   );
@@ -214,11 +229,11 @@ export default function RcLab() {
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <Card>
+    <Card className="border-border/80 bg-surface-1/60 shadow-sm">
       <CardContent className="p-4">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Map className="h-4 w-4" aria-hidden />
-          <p className="text-xs uppercase tracking-normal">{label}</p>
+          <p className="text-xs uppercase tracking-[0.12em]">{label}</p>
         </div>
         <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
       </CardContent>
@@ -246,6 +261,8 @@ function PassageFirstGenerator() {
   const [count, setCount] = useState(4);
   const [job, setJob] = useState<{ id: number; status: string; pct: number } | null>(null);
   const pollRef = useRef<number | undefined>(undefined);
+  const pollAbortRef = useRef<AbortController | null>(null);
+  const [actionPending, setActionPending] = useState<"cancel" | "retry" | null>(null);
   // Guards every post-await state write / interval creation. Without it, a job
   // started just before unmount would resolve AFTER cleanup ran (so there is no
   // interval to clear yet) and install a permanent interval + setState on a dead
@@ -257,70 +274,116 @@ function PassageFirstGenerator() {
     () => () => {
       mountedRef.current = false;
       if (pollRef.current) window.clearInterval(pollRef.current);
+      pollAbortRef.current?.abort();
+      pollAbortRef.current = null;
     },
     [],
   );
 
+  function stopPolling() {
+    if (pollRef.current) window.clearInterval(pollRef.current);
+    pollRef.current = undefined;
+    pollAbortRef.current?.abort();
+    pollAbortRef.current = null;
+  }
+
+  function beginPolling(jobId: number) {
+    stopPolling();
+    const controller = new AbortController();
+    pollAbortRef.current = controller;
+    const poll = async () => {
+      try {
+        const p = await api.passageJobProgress(jobId, controller.signal);
+        if (!mountedRef.current || controller.signal.aborted) return;
+        setJob({ id: jobId, status: p.status, pct: Math.round(p.progress_pct ?? 0) });
+        if (TERMINAL.has(p.status)) {
+          stopPolling();
+          if (p.status === "done") {
+            toast.success(`Passage generated — ${p.accepted ?? 0} question(s) added to the bank`);
+          } else if (p.status === "failed") {
+            toast.error("Passage generation failed. You can retry this job.");
+          }
+        }
+      } catch {
+        if (!mountedRef.current || controller.signal.aborted) return;
+        // Keep the job visible so an interrupted network request can be retried
+        // without losing the user's selected generation settings.
+        stopPolling();
+        setJob((current) => (current?.id === jobId ? { ...current, status: "failed" } : current));
+        toast.error("Lost contact with the passage-generation job. Retry when the backend is available.");
+      }
+    };
+    void poll();
+    pollRef.current = window.setInterval(() => void poll(), 2500);
+  }
+
   async function start() {
+    if (busy || actionPending) return;
     try {
       const res = await api.createPassageJob(qType, count);
       if (!mountedRef.current) return; // unmounted while the create was in flight
       setJob({ id: res.job_id, status: res.status, pct: 0 });
       toast.success(`Queued passage-first job #${res.job_id}`);
-      if (pollRef.current) window.clearInterval(pollRef.current);
-      pollRef.current = window.setInterval(async () => {
-        try {
-          const p = await api.passageJobProgress(res.job_id);
-          if (!mountedRef.current) {
-            if (pollRef.current) window.clearInterval(pollRef.current);
-            pollRef.current = undefined;
-            return;
-          }
-          setJob({ id: res.job_id, status: p.status, pct: Math.round(p.progress_pct ?? 0) });
-          if (TERMINAL.has(p.status)) {
-            if (pollRef.current) window.clearInterval(pollRef.current);
-            pollRef.current = undefined;
-            if (p.status === "done") {
-              toast.success(`Passage generated — ${p.accepted ?? 0} question(s) added to the bank`);
-            } else {
-              toast.error(`Passage generation ${p.status}`);
-            }
-          }
-        } catch {
-          if (pollRef.current) window.clearInterval(pollRef.current);
-          pollRef.current = undefined;
-          if (!mountedRef.current) return; // unmounted during the failing poll
-          setJob(null);
-          toast.error("Lost contact with the passage-generation job");
-        }
-      }, 2500);
+      beginPolling(res.job_id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not start passage generation");
     }
   }
 
+  async function cancel() {
+    if (!job || !busy || actionPending) return;
+    setActionPending("cancel");
+    try {
+      const result = await api.cancelPassageJob(job.id);
+      if (!result.ok) throw new Error(result.reason || "The backend did not accept cancellation");
+      stopPolling();
+      setJob((current) => (current?.id === job.id ? { ...current, status: "cancelled" } : current));
+      toast.success(`Passage job #${job.id} cancelled`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not cancel passage generation");
+    } finally {
+      if (mountedRef.current) setActionPending(null);
+    }
+  }
+
+  async function retry() {
+    if (!job || busy || actionPending) return;
+    setActionPending("retry");
+    try {
+      const result = await api.retryPassageJob(job.id);
+      if (!result.ok) throw new Error(result.reason || "The backend did not accept retry");
+      setJob((current) => (current?.id === job.id ? { ...current, status: result.status || "pending", pct: 0 } : current));
+      toast.success(`Retrying passage job #${job.id}`);
+      beginPolling(job.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not retry passage generation");
+    } finally {
+      if (mountedRef.current) setActionPending(null);
+    }
+  }
+
   return (
-    <Card>
-      <CardHeader>
+    <Card className="border-border/80 shadow-sm">
+      <CardHeader className="border-b bg-surface-1/70">
         <CardTitle className="flex items-center gap-2 text-base">
           <Icon as={Sparkles} size="sm" />
           Passage-first generation
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
           Generate one coherent RC passage with a varied question set built around a
           lead question type. The durable worker drains the job; new questions land in
           the bank for review.
         </p>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-3 rounded-card bg-surface-1/60 p-3">
           <label className="text-sm">
             <span className="mb-1 block text-muted-foreground">Lead question type</span>
             <select
               value={qType}
               onChange={(e) => setQType(e.target.value)}
               disabled={busy}
-              className="rounded-md border bg-background px-2 py-1.5 text-sm"
+              className="min-h-10 rounded-md border bg-background px-2 py-1.5 text-sm"
             >
               {RC_LEAD_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -338,7 +401,7 @@ function PassageFirstGenerator() {
               value={count}
               disabled={busy}
               onChange={(e) => setCount(Math.max(1, Math.min(8, Number(e.target.value) || 1)))}
-              className="w-20 rounded-md border bg-background px-2 py-1.5 text-sm"
+              className="min-h-10 w-20 rounded-md border bg-background px-2 py-1.5 text-sm"
             />
           </label>
           <Button size="sm" onClick={start} disabled={busy}>
@@ -347,11 +410,25 @@ function PassageFirstGenerator() {
           </Button>
         </div>
         {job && (
-          <div className="space-y-1">
+          <div className="space-y-2" role="status" aria-live="polite">
             <Progress value={job.pct} aria-label={`Passage generation ${job.pct}%`} />
-            <p className="text-xs text-muted-foreground tabular-nums">
-              Job #{job.id} · {job.status} · {job.pct}%
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground tabular-nums">
+                Job #{job.id} · {formatLabel(job.status)} · {job.pct}%
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {busy && (
+                  <Button size="sm" variant="outline" onClick={() => void cancel()} disabled={actionPending !== null}>
+                    {actionPending === "cancel" ? "Cancelling…" : "Cancel generation"}
+                  </Button>
+                )}
+                {!busy && (job.status === "failed" || job.status === "cancelled") && (
+                  <Button size="sm" variant="outline" onClick={() => void retry()} disabled={actionPending !== null}>
+                    {actionPending === "retry" ? "Retrying…" : "Retry generation"}
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </CardContent>

@@ -1,35 +1,36 @@
-import { useRef, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
-import { m, useReducedMotion } from "motion/react";
-import { BookOpen, Check, RotateCcw, Sparkles } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { PageHeader } from "@/components/ui/Primitives";
-import { Icon } from "@lsat/components/ui/icon";
-import { ChoiceList } from "@lsat/components/question/choice-list";
-import { IllustrationSrsCaughtUp } from "@lsat/components/illustrations";
-import { LoadingState, ErrorState, EmptyState } from "@lsat/components/states";
-import { useSrsDue } from "@lsat/lib/hooks";
-import { api } from "@lsat/lib/api";
-import { generateConceptGapCards, isGapCard } from "@lsat/lib/gapCards";
-import { enqueue } from "@lsat/lib/offlineQueue";
-import { qTypeLabel, srsOriginLabel } from "@lsat/lib/labels";
-import { toast } from "@lsat/lib/toast";
-import { cn } from "@lsat/lib/utils";
-import { duration, easing } from "@lsat/lib/motion";
+import { useRef, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { m, useReducedMotion } from 'motion/react';
+import { BookOpen, Check, RotateCcw, Sparkles } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { PageHeader } from '@/components/ui/Primitives';
+import { Icon } from '@lsat/components/ui/icon';
+import { ChoiceList } from '@lsat/components/question/choice-list';
+import { IllustrationSrsCaughtUp } from '@lsat/components/illustrations';
+import { LoadingState, ErrorState, EmptyState } from '@lsat/components/states';
+import { SampleDataRecovery } from '@lsat/components/sample-data-recovery';
+import { useSrsDue } from '@lsat/lib/hooks';
+import { api } from '@lsat/lib/api';
+import { generateConceptGapCards, isGapCard } from '@lsat/lib/gapCards';
+import { enqueue } from '@lsat/lib/offlineQueue';
+import { qTypeLabel, srsOriginLabel } from '@lsat/lib/labels';
+import { toast } from '@lsat/lib/toast';
+import { cn } from '@lsat/lib/utils';
+import { duration, easing } from '@lsat/lib/motion';
 
 const RATINGS: { value: 1 | 2 | 3 | 4; label: string; hint: string }[] = [
-  { value: 1, label: "Again", hint: "Forgot — see it soon" },
-  { value: 2, label: "Hard", hint: "Recalled with effort" },
-  { value: 3, label: "Good", hint: "Recalled correctly" },
-  { value: 4, label: "Easy", hint: "Instant recall" },
+  { value: 1, label: 'Again', hint: 'Forgot — see it soon' },
+  { value: 2, label: 'Hard', hint: 'Recalled with effort' },
+  { value: 3, label: 'Good', hint: 'Recalled correctly' },
+  { value: 4, label: 'Easy', hint: 'Instant recall' },
 ];
 
 /** Format a predicted interval (days) compactly. */
 function fmtInterval(days: number): string {
-  if (days < 1) return "<1d";
+  if (days < 1) return '<1d';
   if (days < 30) return `${Math.round(days)}d`;
   if (days < 365) return `${Math.round(days / 30)}mo`;
   return `${(days / 365).toFixed(days < 730 ? 1 : 0)}y`;
@@ -55,13 +56,8 @@ function SrsShell({
 }) {
   return (
     <div className="page-container">
-      <div className="mx-auto max-w-2xl space-y-[calc(var(--space-unit)*4)]">
-        <PageHeader
-          badge="Spaced repetition"
-          title="SRS"
-          subtitle={description}
-          actions={actions}
-        />
+      <div className="mx-auto max-w-3xl space-y-[calc(var(--space-unit)*4)]">
+        <PageHeader badge="REVIEW CADENCE" title="SRS" subtitle={description} actions={actions} />
         {children}
       </div>
     </div>
@@ -93,15 +89,13 @@ export default function Srs() {
     try {
       const res = await generateConceptGapCards();
       if (res.generated > 0) {
-        toast.success(
-          `Built ${res.generated} gap card${res.generated === 1 ? "" : "s"}`,
-        );
-        void qc.invalidateQueries({ queryKey: ["srs-due"] });
+        toast.success(`Built ${res.generated} gap card${res.generated === 1 ? '' : 's'}`);
+        void qc.invalidateQueries({ queryKey: ['srs-due'] });
       } else {
-        toast.success("No new concept gaps to turn into cards");
+        toast.success('No new concept gaps to turn into cards');
       }
     } catch {
-      toast.error("Could not build gap cards (backend offline)");
+      toast.error('Could not build gap cards (backend offline)');
     } finally {
       setGeneratingGaps(false);
     }
@@ -109,56 +103,76 @@ export default function Srs() {
 
   if (isLoading)
     return (
-      <SrsShell>
-        <LoadingState label="Loading due cards…" />
+      <SrsShell description="Loading the questions scheduled to return to your memory.">
+        <SrsQueueFrame label="PREPARING YOUR QUEUE" title="Finding the next recall prompt">
+          <LoadingState label="Loading due cards…" />
+        </SrsQueueFrame>
       </SrsShell>
     );
   if (isError || !data)
     return (
-      <SrsShell>
-        <ErrorState error={error} onRetry={refetch} />
+      <SrsShell description="Your retention queue stays separate from the diagnosis work in Review.">
+        <SrsQueueFrame label="QUEUE UNAVAILABLE" title="Could not load scheduled cards">
+          <ErrorState error={error} onRetry={refetch} />
+        </SrsQueueFrame>
+      </SrsShell>
+    );
+
+  // Connectivity fallbacks are useful for keeping the shell renderable, but
+  // sample cards are never learner-owned review evidence. Stop before the
+  // grading surface so an offline queue cannot be mistaken for real due work.
+  if (data.usingSample)
+    return (
+      <SrsShell description="Your retention queue stays separate from the diagnosis work in Review.">
+        <SrsQueueFrame label="QUEUE UNAVAILABLE" title="SRS is unavailable offline">
+          <SampleDataRecovery
+            section="SRS"
+            affectedSections={["Due cards", "Recall grading", "Gap card generation"]}
+            onRetry={() => refetch().then(() => undefined)}
+          />
+        </SrsQueueFrame>
       </SrsShell>
     );
 
   const cards = data.data.cards;
   if (cards.length === 0)
     return (
-      <SrsShell description="Missed questions resurface here on the spaced-repetition schedule.">
-        <EmptyState
-          illustration={<IllustrationSrsCaughtUp />}
-          title="No cards due"
-          description="Nothing to review right now. Missed questions resurface here on the spaced-repetition schedule."
-          action={
-            <Button
-              variant="outline"
-              onClick={() => void generateGapCards()}
-              loading={generatingGaps}
-            >
-              {!generatingGaps && <Sparkles className="h-4 w-4" />}
-              {generatingGaps ? "Building…" : "Build gap cards"}
-            </Button>
-          }
-        />
+      <SrsShell description="Missed questions resurface here after you identify what needs to be retained.">
+        <SrsQueueFrame label="QUEUE CLEAR" title="No cards are due right now">
+          <EmptyState
+            illustration={<IllustrationSrsCaughtUp />}
+            title="You are caught up"
+            description="Nothing is scheduled for recall. Misses will return here after you have worked through their blind-review diagnosis."
+            action={
+              <Button variant="outline" onClick={() => void generateGapCards()} loading={generatingGaps}>
+                {!generatingGaps && <Sparkles className="h-4 w-4" />}
+                {generatingGaps ? 'Building…' : 'Build gap cards'}
+              </Button>
+            }
+          />
+        </SrsQueueFrame>
       </SrsShell>
     );
 
   if (index >= cards.length)
     return (
-      <SrsShell>
-        <EmptyState
-          title={`Reviewed ${completed} card${completed === 1 ? "" : "s"}`}
-          description="You're done for today. The schedule will resurface the next batch when it's due."
-          action={
-            <Button
-              onClick={() => {
-                setIndex(0);
-                setCompleted(0);
-              }}
-            >
-              <RotateCcw className="h-4 w-4" /> Review again
-            </Button>
-          }
-        />
+      <SrsShell description="Rate recall from memory, then let the schedule decide when it returns.">
+        <SrsQueueFrame label="SESSION COMPLETE" title={`Reviewed ${completed} card${completed === 1 ? '' : 's'}`}>
+          <EmptyState
+            title="Your queue is clear"
+            description="You are done for today. The schedule will surface the next batch when it is due."
+            action={
+              <Button
+                onClick={() => {
+                  setIndex(0);
+                  setCompleted(0);
+                }}
+              >
+                <RotateCcw className="h-4 w-4" /> Review again
+              </Button>
+            }
+          />
+        </SrsQueueFrame>
       </SrsShell>
     );
 
@@ -166,7 +180,7 @@ export default function Srs() {
   // LSAT-3 — an auto-cloze "Gap" card gets its own short badge rather than the
   // auto-title-cased origin label; the cloze body is rendered below.
   const isGap = isGapCard(card.origin);
-  const originLabel = isGap ? "Gap" : srsOriginLabel(card.origin);
+  const originLabel = isGap ? 'Gap' : srsOriginLabel(card.origin);
   // Interval preview comes from the due payload when the backend precomputes it.
   const previews = card.predicted_intervals ?? null;
   const gotItRight = revealed && selected === card.correct_answer;
@@ -192,9 +206,7 @@ export default function Srs() {
     // Optimistic "next due" from the precomputed preview, if the backend sent
     // one; otherwise stay silent until the real interval lands.
     const predicted = card.predicted_intervals?.[String(rating)];
-    setLastResult(
-      predicted != null ? `Next due in about ${fmtInterval(predicted)}.` : null,
-    );
+    setLastResult(predicted != null ? `Next due in about ${fmtInterval(predicted)}.` : null);
 
     // Advance immediately — the grade no longer waits on the round-trip.
     setCompleted((c) => c + 1);
@@ -214,15 +226,15 @@ export default function Srs() {
         }
       })
       .catch(() => {
-        enqueue({ kind: "srsReview", cardId: gradedCardId, rating });
+        enqueue({ kind: 'srsReview', cardId: gradedCardId, rating });
         if (reviewToken.current === token) {
-          setLastResult("Saved (offline — schedule will sync when backend is up).");
+          setLastResult('Saved (offline — schedule will sync when backend is up).');
         }
       });
 
-    toast.success("Rating saved", {
+    toast.success('Rating saved', {
       action: {
-        label: "Undo",
+        label: 'Undo',
         onClick: () => {
           // Invalidate the in-flight result line so its late response is ignored.
           reviewToken.current++;
@@ -247,10 +259,20 @@ export default function Srs() {
     >
       <div className="space-y-4">
         {lastResult && (
-          <p className="text-xs text-muted-foreground" role="status">
+          <div
+            className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground"
+            role="status"
+          >
             {lastResult}
-          </p>
+          </div>
         )}
+        <section className="grid gap-2 rounded-[var(--radius-lg)] border border-border/80 bg-muted/30 p-4 text-sm sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+          <span className="type-overline text-primary">RECALL, THEN RATE</span>
+          <p className="leading-6 text-muted-foreground">
+            Choose an answer from memory before revealing it. Your grade controls the next interval; it does not change
+            the original timed result.
+          </p>
+        </section>
 
         {/* The card. On reveal it settles (a brief lift + glow-verdict) and the
             verdict + grade surface slides up under the recall side. */}
@@ -263,22 +285,22 @@ export default function Srs() {
         >
           <Card
             className={cn(
-              "overflow-hidden transition-shadow duration-500",
-              revealed && "glow-verdict",
+              'overflow-hidden border-border/80 bg-card shadow-sm transition-shadow duration-500',
+              revealed && 'glow-verdict',
             )}
           >
-            <CardContent className="space-y-4 p-[var(--card-pad)]">
+            <CardContent className="space-y-5 p-4 sm:p-[var(--card-pad)]">
               {/* Card identity row. */}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="type-display text-base">{qTypeLabel(card.q_type)}</span>
                   {originLabel && (
                     <Badge
-                      variant={isGap ? "secondary" : "outline"}
-                      className={cn(isGap && "gap-1")}
+                      variant={isGap ? 'secondary' : 'outline'}
+                      className={cn(isGap && 'gap-1')}
                       title={
                         isGap
-                          ? "Auto-generated from a concept gap — recall the reasoning move"
+                          ? 'Auto-generated from a concept gap — recall the reasoning move'
                           : "Why you're reviewing this"
                       }
                     >
@@ -299,9 +321,7 @@ export default function Srs() {
               </div>
 
               {/* Recall side. */}
-              {card.stem && (
-                <p className="whitespace-pre-wrap text-sm leading-relaxed">{card.stem}</p>
-              )}
+              {card.stem && <p className="whitespace-pre-wrap text-sm leading-relaxed">{card.stem}</p>}
               <p className="font-medium">{card.prompt}</p>
               <ChoiceList
                 choices={card.choices}
@@ -314,11 +334,7 @@ export default function Srs() {
               />
 
               {!revealed ? (
-                <Button
-                  className="w-full"
-                  disabled={!selected}
-                  onClick={() => setRevealed(true)}
-                >
+                <Button className="w-full" disabled={!selected} onClick={() => setRevealed(true)}>
                   Reveal &amp; rate
                 </Button>
               ) : (
@@ -400,20 +416,20 @@ function GradeSurface({
   const knob = pointAt(fill);
 
   return (
-    <div className="space-y-4 border-t pt-4">
+    <div className="space-y-4 rounded-[var(--radius-lg)] border border-border/80 bg-muted/30 p-4">
       {/* One-line serif verdict. Neutral guidance — never shaming. */}
       <div className="flex items-center gap-2">
         <span
           className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-            gotItRight ? "bg-success-subtle text-success" : "bg-warning-subtle text-warning",
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-full',
+            gotItRight ? 'bg-success-subtle text-success' : 'bg-warning-subtle text-warning',
           )}
         >
           <Icon as={gotItRight ? Check : RotateCcw} size="sm" />
         </span>
         <p className="type-counsel text-sm">
           {gotItRight
-            ? "Recalled it. How hard was that?"
+            ? 'Recalled it. How hard was that?'
             : "Missed it — that's the point of review. Grade your recall honestly."}
         </p>
       </div>
@@ -433,13 +449,7 @@ function GradeSurface({
           }
         >
           {/* Track. */}
-          <path
-            d={arcPath(0, 1)}
-            fill="none"
-            stroke="hsl(var(--border))"
-            strokeWidth={6}
-            strokeLinecap="round"
-          />
+          <path d={arcPath(0, 1)} fill="none" stroke="hsl(var(--border))" strokeWidth={6} strokeLinecap="round" />
           {/* Filled sweep — grows with the grade. */}
           <m.path
             d={arcPath(0, Math.max(0.001, fill))}
@@ -464,14 +474,14 @@ function GradeSurface({
         </svg>
         <div className="-mt-2 text-center">
           <div className="type-numeric text-2xl font-semibold text-primary">
-            {activePreview != null ? fmtInterval(activePreview) : "—"}
+            {activePreview != null ? fmtInterval(activePreview) : '—'}
           </div>
           <div className="type-overline text-muted-foreground">next review</div>
         </div>
       </div>
 
       {/* Grade buttons — Again → Easy, the interval as the primary numeral. */}
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {ratings.map((r) => {
           const preview = previews?.[String(r.value)];
           const isActive = activeGrade === r.value;
@@ -486,20 +496,13 @@ function GradeSurface({
               onBlur={() => onHover(null)}
               title={r.hint}
               className={cn(
-                "flex flex-col items-center gap-0.5 rounded-card border px-1 py-2.5 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                isActive
-                  ? "border-primary bg-primary/10"
-                  : "border-border hover:bg-accent",
+                'flex min-h-16 flex-col items-center justify-center gap-0.5 rounded-card border px-2 py-2.5 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                isActive ? 'border-primary bg-primary/10' : 'border-border hover:bg-accent',
               )}
             >
               <span className="text-sm font-medium">{r.label}</span>
               {preview != null && (
-                <span
-                  className={cn(
-                    "type-numeric text-xs",
-                    isActive ? "text-primary" : "text-muted-foreground",
-                  )}
-                >
+                <span className={cn('type-numeric text-xs', isActive ? 'text-primary' : 'text-muted-foreground')}>
                   {fmtInterval(preview)}
                 </span>
               )}
@@ -508,5 +511,17 @@ function GradeSurface({
         })}
       </div>
     </div>
+  );
+}
+
+function SrsQueueFrame({ label, title, children }: { label: string; title: string; children: ReactNode }) {
+  return (
+    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border/80 bg-card shadow-sm">
+      <div className="border-b border-border bg-muted/30 px-5 py-4">
+        <p className="type-overline text-primary">{label}</p>
+        <h2 className="type-display mt-1 text-xl">{title}</h2>
+      </div>
+      <div className="p-4 sm:p-6">{children}</div>
+    </section>
   );
 }

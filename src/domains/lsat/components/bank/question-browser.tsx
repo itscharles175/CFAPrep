@@ -17,6 +17,7 @@ import {
 import { ChoiceList } from "@lsat/components/question/choice-list";
 import { Sheet, SheetContent } from "@lsat/components/ui/sheet";
 import { EmptyState, ErrorState, SkeletonList } from "@lsat/components/states";
+import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
 import { IllustrationPrepTests } from "@lsat/components/illustrations";
 import { VirtualList } from "@lsat/components/ui/virtual-list";
 import { TagEditor } from "@lsat/components/bank/tag-editor";
@@ -44,6 +45,7 @@ export function QuestionBrowser({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [items, setItems] = useState<BrowseQuestion[]>([]);
+  const [usingSample, setUsingSample] = useState(false);
   const [qType, setQType] = useState<string>("all");
   const [difficulty, setDifficulty] = useState<string>("all");
   const [query, setQuery] = useState("");
@@ -53,13 +55,18 @@ export function QuestionBrowser({
   const [preview, setPreview] = useState<BrowseQuestion | null>(null);
   const deleteQuestion = useDeleteQuestion();
 
-  function load(force = false) {
+  async function load(force = false) {
     setLoading(true);
     setLoadError(null);
-    loadBankQuestions(force)
-      .then((q) => setItems(q))
-      .catch((e: unknown) => setLoadError(e))
-      .finally(() => setLoading(false));
+    try {
+      const result = await loadBankQuestions(force);
+      setItems(result.items);
+      setUsingSample(result.usingSample);
+    } catch (e: unknown) {
+      setLoadError(e);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -69,6 +76,7 @@ export function QuestionBrowser({
   // D5 — soft-delete: optimistically drop the row, restore it on failure, and
   // re-insert it (at its original position) when the user hits Undo.
   function handleDelete(item: BrowseQuestion) {
+    if (usingSample) return;
     const index = items.findIndex((q) => q.id === item.id);
     setItems((prev) => prev.filter((q) => q.id !== item.id));
     setPreview((p) => (p?.id === item.id ? null : p));
@@ -118,11 +126,13 @@ export function QuestionBrowser({
   }
 
   function handleTagsUpdated(next: BrowseQuestion[]) {
+    if (usingSample) return;
     setItems(next);
     setBankQuestionsCache(next);
   }
 
   function openPreview(item: BrowseQuestion) {
+    if (usingSample) return;
     setPreview(item);
     // Bank browse has no attempt context, so a reveal fetch 403s; keep
     // the test-mode preview already set above and swallow the failure
@@ -144,6 +154,15 @@ export function QuestionBrowser({
   if (loading) return <SkeletonList rows={6} />;
   if (loadError)
     return <ErrorState error={loadError} onRetry={() => load(true)} />;
+  if (usingSample) {
+    return (
+      <SampleDataRecovery
+        section="Question bank"
+        affectedSections={["Browsing", "Question preview", "Tags and deletion"]}
+        onRetry={() => load(true)}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -161,6 +180,7 @@ export function QuestionBrowser({
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               className="pl-9"
+              aria-label="Search questions"
               placeholder="Search stem or type…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -194,7 +214,7 @@ export function QuestionBrowser({
           </Select>
           <Label
             htmlFor="browse-training-only"
-            className={`flex items-center gap-2 rounded-md border px-3 text-xs ${
+            className={`flex min-h-10 items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${
               trainingCount === 0 ? "opacity-50" : "cursor-pointer"
             }`}
           >
@@ -204,10 +224,11 @@ export function QuestionBrowser({
               checked={trainingOnly}
               onCheckedChange={(v) => setTrainingOnly(v === true)}
               disabled={trainingCount === 0}
+              className="h-10 w-10 shrink-0"
             />
             Training corpus only ({trainingCount})
           </Label>
-          <Button variant="outline" size="sm" onClick={() => load(true)}>
+          <Button variant="outline" size="sm" className="min-h-10" onClick={() => load(true)}>
             Refresh
           </Button>
         </CardContent>
@@ -253,12 +274,10 @@ export function QuestionBrowser({
         maxHeight="min(65vh, 640px)"
         className="rounded-md border"
         renderItem={(item) => (
-          <div
-            className="flex items-center justify-between border-b p-3 last:border-b-0 hover:bg-accent/50"
-          >
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b p-3 last:border-b-0 hover:bg-accent/50">
             <button
               type="button"
-              className="min-w-0 flex-1 space-y-1 rounded-sm pr-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              className="min-w-0 overflow-hidden space-y-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               onClick={() => openPreview(item)}
               aria-label={`Preview ${qTypeLabel(item.q_type)} question ${item.id}`}
             >
@@ -277,9 +296,9 @@ export function QuestionBrowser({
                   </span>
                 )}
               </div>
-              <p className="truncate text-sm">{item.prompt || item.stem}</p>
+              <p className="w-full truncate text-sm">{item.prompt || item.stem}</p>
             </button>
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex shrink-0 items-center gap-2">
               <Button
                 size="sm"
                 variant="outline"
@@ -290,7 +309,7 @@ export function QuestionBrowser({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                className="h-10 w-10 text-muted-foreground hover:text-destructive"
                 onClick={() => handleDelete(item)}
                 aria-label={`Delete question ${item.id}`}
                 title="Soft-delete (recoverable)"

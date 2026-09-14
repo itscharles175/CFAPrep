@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, FileText, FileUp, GraduationCap, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,6 +57,7 @@ export default function Import() {
   const location = useLocation();
   const [step, setStep] = useState<Step>('upload');
   const [parsing, setParsing] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [parsed, setParsed] = useState<ImportParseResult | null>(null);
   const [edited, setEdited] = useState<ParsedPrepTest | null>(null);
   const [rawText, setRawText] = useState('');
@@ -71,6 +72,9 @@ export default function Import() {
   // D1 — integrity gate: populated when commit returns HTTP 409.
   const [integrityIssues, setIntegrityIssues] = useState<ImportIntegrityIssue[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const parsingRef = useRef(false);
+  const choosePendingRef = useRef(false);
+  const selectedFileRef = useRef<File | null>(null);
   // 4.3 — guards the "open-with" handoff so we read+parse the launch file at
   // most once even though the route may re-render. Holds the current handleFile.
   const handleFileRef = useRef<(file: File) => void>(() => {});
@@ -85,6 +89,9 @@ export default function Import() {
   }, [countMismatch, rawText]);
 
   async function handleFile(file: File) {
+    if (parsingRef.current) return;
+    parsingRef.current = true;
+    selectedFileRef.current = file;
     setParsing(true);
     setError(null);
     setIntegrityIssues(null);
@@ -109,6 +116,7 @@ export default function Import() {
       setError(message);
       toast.error(message);
     } finally {
+      parsingRef.current = false;
       setParsing(false);
     }
   }
@@ -133,12 +141,42 @@ export default function Import() {
   }, [location.state, location.pathname, navigate]);
 
   async function chooseFile() {
-    const desktopFile = await pickPdfFile();
-    if (desktopFile) {
-      void handleFile(desktopFile);
+    if (parsingRef.current || choosePendingRef.current) return;
+    choosePendingRef.current = true;
+    try {
+      const desktopFile = await pickPdfFile();
+      if (desktopFile) {
+        void handleFile(desktopFile);
+        return;
+      }
+      fileRef.current?.click();
+    } finally {
+      choosePendingRef.current = false;
+    }
+  }
+
+  function isSupportedFile(file: File) {
+    return file.type === 'application/pdf' || /\.(pdf|txt)$/i.test(file.name);
+  }
+
+  function handleDrop(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setDragActive(false);
+    if (parsingRef.current) return;
+    const file = event.dataTransfer.files?.[0];
+    if (!file) return;
+    if (!isSupportedFile(file)) {
+      const message = 'Choose a PDF or plain-text PrepTest file.';
+      setError(message);
+      toast.error(message);
       return;
     }
-    fileRef.current?.click();
+    void handleFile(file);
+  }
+
+  function retryParse() {
+    const file = selectedFileRef.current;
+    if (file && !parsingRef.current) void handleFile(file);
   }
 
   async function resumeJob(jobId: number) {
@@ -212,9 +250,9 @@ export default function Import() {
 
   if (step === 'done')
     return (
-      <PageLayout title="Import complete" eyebrow="IMPORT" icon={FileUp} width="md">
+      <PageLayout title="Import complete" eyebrow="Library · Import" icon={FileUp} width="md">
         <ImportStepper current="done" className="mb-6" />
-        <div className="pt-4 text-center">
+        <div className="rounded-card border bg-card p-8 text-center shadow-sm">
           <CheckCircle2 className="mx-auto h-12 w-12 text-success" />
           <p className="mt-4 text-sm text-muted-foreground">
             {committedId != null ? `Created PrepTest #${committedId}.` : (error ?? 'Committed.')}
@@ -233,7 +271,7 @@ export default function Import() {
     return (
       <PageLayout
         title="Verify parsed structure"
-        eyebrow="IMPORT"
+        eyebrow="Library · Import"
         icon={FileUp}
         width="2xl"
         actions={
@@ -291,7 +329,7 @@ export default function Import() {
             never flows into the LoRA training set; the user explicitly toggles
             it when they're importing a vouched-for PDF (e.g. PT they own).
             Raised to the integrity-gate's visual grade (rounded-card + bg-card). */}
-          <div className="rounded-card border bg-card p-4">
+          <div className="rounded-card border bg-surface-1/60 p-4">
             <div className="flex items-start gap-3">
               <Checkbox
                 id="trainingEligible"
@@ -331,7 +369,7 @@ export default function Import() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card className="flex flex-col">
+            <Card className="flex flex-col border-border/80 shadow-sm">
               <CardHeader className="flex-row items-center gap-2 space-y-0">
                 <Icon as={FileText} size="sm" className="text-muted-foreground" />
                 <CardTitle className="text-base">Raw extracted text</CardTitle>
@@ -343,7 +381,7 @@ export default function Import() {
               </CardContent>
             </Card>
 
-            <Card className="flex flex-col">
+            <Card className="flex flex-col border-border/80 shadow-sm">
               <CardHeader>
                 <CardTitle className="text-base">Parsed structure (editable)</CardTitle>
               </CardHeader>
@@ -369,7 +407,7 @@ export default function Import() {
   return (
     <PageLayout
       title="Import a PrepTest"
-      eyebrow="IMPORT"
+      eyebrow="Library · Import"
       icon={FileUp}
       description="Upload a PDF you own (your purchased PrepTests) or one LSAC has publicly posted — we extract text and propose structure for your review, fully on-device."
       width="md"
@@ -377,22 +415,39 @@ export default function Import() {
       <div className="space-y-4">
         <ImportStepper current="upload" />
         <ImportJobHistory onResume={(id) => void resumeJob(id)} />
-        <Card>
+        <Card className="border-border/80 shadow-sm">
           <CardContent className="pt-[var(--card-pad)]">
             <button
               type="button"
               onClick={() => void chooseFile()}
-              className="flex w-full flex-col items-center gap-3 rounded-card border-2 border-dashed p-12 text-center transition-colors hover:bg-surface-2"
+              onDragEnter={(event) => {
+                event.preventDefault();
+                if (!parsingRef.current) setDragActive(true);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                setDragActive(false);
+              }}
+              onDrop={handleDrop}
+              aria-busy={parsing}
+              aria-label="Click to choose a PDF, or drop one here"
+              className={`flex w-full flex-col items-center gap-3 rounded-card border-2 border-dashed p-12 text-center transition-colors ${
+                dragActive ? 'border-primary bg-primary/10' : 'bg-surface-1/40 hover:bg-surface-2'
+              }`}
             >
               {parsing ? (
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
               ) : (
                 <FileUp className="h-8 w-8 text-muted-foreground" />
               )}
-              <span className="text-sm font-medium">{parsing ? 'Parsing…' : 'Click to choose a PDF'}</span>
+              <span className="text-sm font-medium">
+                {parsing ? 'Parsing…' : dragActive ? 'Drop to parse this file' : 'Choose or drop a PDF'}
+              </span>
               <span className="text-xs text-muted-foreground">
-                PDFs you own or that LSAC publicly posted. We extract text, then an offline on-device AI pass proposes
-                the question/passage layout for your review — nothing leaves your machine.
+                PDFs you own or that LSAC publicly posted. Drop a PDF here or choose one from disk; we extract text,
+                then an offline on-device AI pass proposes the question/passage layout for your review — nothing
+                leaves your machine.
               </span>
             </button>
             <input
@@ -402,10 +457,20 @@ export default function Import() {
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
+                e.target.value = '';
                 if (f) void handleFile(f);
               }}
             />
-            {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
+            {error && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/25 bg-destructive/5 p-3 text-xs text-destructive">
+                <p>{error}</p>
+                {selectedFileRef.current && (
+                  <Button type="button" size="sm" variant="outline" onClick={retryParse} disabled={parsing}>
+                    {parsing ? 'Retrying…' : 'Retry parse'}
+                  </Button>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

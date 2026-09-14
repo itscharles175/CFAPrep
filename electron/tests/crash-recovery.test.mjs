@@ -134,11 +134,8 @@ test('the liveness poll alone reaps a tracked child after the guarded parent is 
 
 test('the watchdog refuses to kill a tracked pid the OS says is not its parent’s child', async (t) => {
   // The ownership guard, and the reason the poll test above needs a real
-  // parent/child pair. A pid can be tracked in error, or reused by an unrelated
-  // process between track and reap; killing on the tracked pid alone would then
-  // take down something that was never ours. The watchdog only vetoes on a
-  // snapshot that POSITIVELY identifies the pid as parented elsewhere — a missing
-  // or unavailable snapshot must still reap, which is the leak fixed separately.
+  // parent/child pair. Parentage is verified before the PID enters the tracked
+  // set, so a later full-snapshot failure cannot turn an unowned PID into a kill.
   if (process.platform !== 'win32') {
     t.skip('Parentage is established from the Win32_Process snapshot; POSIX uses the start fingerprint');
     return;
@@ -161,14 +158,14 @@ test('the watchdog refuses to kill a tracked pid the OS says is not its parent�
     parentPid: owner.pid,
   });
   t.after(() => watchdog.close());
-  await watchdog.track(bystander.pid);
+  await assert.rejects(() => watchdog.track(bystander.pid), /rejected the operation/);
 
   owner.kill('SIGKILL');
   await once(owner, 'exit');
 
-  // Give the reap the same budget the positive cases get, then assert the
-  // bystander is STILL alive.
-  await delay(20_000);
+  // Give the liveness poll time to reap its empty set, then assert the bystander
+  // is still alive.
+  await delay(3000);
   assert.equal(
     isAlive(bystander.pid),
     true,

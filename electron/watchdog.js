@@ -56,7 +56,7 @@ export class OwnedChildWatchdog {
           stdio: 'pipe',
         })
       : spawnProcess(executable, [scriptPath, String(parentPid)], {
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+          env: { ...process.env },
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
           detached: true,

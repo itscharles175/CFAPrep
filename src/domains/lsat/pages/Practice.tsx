@@ -20,23 +20,20 @@ import {
   usePrepTests,
   useSrsDue,
 } from "@lsat/lib/hooks";
+import type { PrepTestDetail, PrepTestSummary } from "@lsat/lib/types";
 import { StudyPtWizard } from "@lsat/components/practice/study-pt-wizard";
 import { formatClock } from "@lsat/lib/utils";
 import { SampleDataRecovery } from "@lsat/components/sample-data-recovery";
+import "./selection-pages.css";
 
 /** R4-B1 — unified practice hub. */
 export default function Practice() {
-  const navigate = useNavigate();
-  const qc = useQueryClient();
   const pts = usePrepTests();
   const srs = useSrsDue();
   const srsIsSample = srs.data?.usingSample ?? false;
   const list = pts.data?.data ?? [];
-  const primaryId = list[0]?.id ?? 1;
-  const primary = usePrepTest(primaryId);
-  const [wizardOpen, setWizardOpen] = useState(false);
 
-  if (pts.isLoading || primary.isLoading) {
+  if (pts.isLoading) {
     return <SkeletonListPage width="lg" />;
   }
   if (pts.isError) {
@@ -47,22 +44,75 @@ export default function Practice() {
     );
   }
 
+  const primaryId = list[0]?.id;
+  if (primaryId == null) {
+    return (
+      <PracticeWorkspace
+        list={list}
+        srsIsSample={srsIsSample}
+      />
+    );
+  }
+
+  return (
+    <PracticeWithPrimary
+      list={list}
+      primaryId={primaryId}
+      listIsSample={pts.data?.usingSample ?? false}
+      srsIsSample={srsIsSample}
+      onRetry={() => Promise.all([pts.refetch(), srs.refetch()]).then(() => undefined)}
+    />
+  );
+}
+
+/**
+ * Keep the detail query mounted only when the list supplied a real server id.
+ * An empty personal bank is a normal state; inventing id=1 here used to turn
+ * it into a misleading `GET /api/preptests/1` 404.
+ */
+function PracticeWithPrimary({
+  list,
+  primaryId,
+  listIsSample,
+  srsIsSample,
+  onRetry,
+}: {
+  list: PrepTestSummary[];
+  primaryId: number;
+  listIsSample: boolean;
+  srsIsSample: boolean;
+  onRetry: () => Promise<void>;
+}) {
+  const primary = usePrepTest(primaryId);
+
+  if (primary.isLoading) {
+    return <SkeletonListPage width="lg" />;
+  }
+  if (primary.isError) {
+    return (
+      <PageLayout title="Practice" width="lg">
+        <ErrorState error={primary.error} onRetry={primary.refetch} />
+      </PageLayout>
+    );
+  }
+
   // A fallback PrepTest/SRS envelope is useful to exercise the renderer, not
   // evidence that the learner has a due queue or a diagnostic. Keep the hub
   // recoverable and quiet until the sidecar returns real data.
-  const prepTestsAreSample = pts.data?.usingSample || primary.data?.usingSample;
+  const prepTestsAreSample = listIsSample || primary.data?.usingSample;
   if (prepTestsAreSample) {
     return (
       <PageLayout
         title="Practice"
         description="Timed sections, drills, SRS, and blind review — one place to start."
-        width="lg"
+        width="2xl"
+        className="lsat-selection-page lsat-practice-page"
       >
         <SampleDataRecovery
           section="Practice"
           affectedSections={["PrepTests and timed sections", "Review queue", "SRS workload"]}
           onRetry={() => {
-            return Promise.all([pts.refetch(), primary.refetch(), srs.refetch()]).then(() => undefined);
+            return Promise.all([onRetry(), primary.refetch()]).then(() => undefined);
           }}
         />
       </PageLayout>
@@ -71,15 +121,32 @@ export default function Practice() {
 
   const detail = primary.data?.data;
 
+  return <PracticeWorkspace list={list} detail={detail} srsIsSample={srsIsSample} />;
+}
+
+function PracticeWorkspace({
+  list,
+  detail,
+  srsIsSample,
+}: {
+  list: PrepTestSummary[];
+  detail?: PrepTestDetail;
+  srsIsSample: boolean;
+}) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [wizardOpen, setWizardOpen] = useState(false);
+
   return (
     <PageLayout
       title="Practice"
       description="Timed sections, drills, SRS, and blind review — one place to start."
-      width="lg"
+      width="2xl"
+      className="lsat-selection-page lsat-practice-page"
     >
       <ResumeBanner />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="lsat-practice-actions">
         <ActionCard
           icon={<Clock className="h-5 w-5" />}
           title="Timed section"
@@ -134,7 +201,7 @@ export default function Practice() {
         </Card>
       )}
 
-      <Card id="pt-sections">
+      <Card id="pt-sections" className="lsat-selection-card lsat-practice-sections">
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">
             {detail?.name ?? "PrepTest"} · sections
@@ -155,12 +222,13 @@ export default function Practice() {
             </div>
           )}
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="lsat-section-list">
           {detail?.sections?.length ? (
-            detail.sections.map((s) => (
+            <div className="lsat-section-list">
+            {detail.sections.map((s) => (
               <div
                 key={s.id}
-                className="flex items-center justify-between rounded-md border p-3"
+                className="lsat-section-row"
               >
                 <div className="flex items-center gap-3">
                   <Badge variant="secondary">{s.type}</Badge>
@@ -178,14 +246,15 @@ export default function Practice() {
                   Start timed
                 </Button>
               </div>
-            ))
+            ))}
+            </div>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              No sections available.{" "}
+            <div className="lsat-inline-empty">
+              <span>No sections available yet.</span>
               <Button variant="link" className="h-auto p-0" onClick={() => navigate("/import")}>
                 Import a PrepTest
               </Button>
-            </p>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -215,7 +284,7 @@ function ActionCard({
   onClick?: () => void;
 }) {
   return (
-    <Card className="flex flex-col">
+    <Card className="lsat-selection-card lsat-action-card flex flex-col" interactive>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           {icon}

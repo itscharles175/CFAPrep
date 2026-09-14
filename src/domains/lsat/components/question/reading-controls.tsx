@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Minus, Plus, Type } from "lucide-react";
 import { cn } from "@lsat/lib/utils";
 import { Icon } from "@lsat/components/ui/icon";
@@ -41,6 +41,11 @@ export function ReadingControls({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+  const triggerId = useId();
+  const [panelTop, setPanelTop] = useState<number | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -48,7 +53,10 @@ export function ReadingControls({
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus({ preventScroll: true });
+      }
     }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -58,23 +66,59 @@ export function ReadingControls({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    const updatePanelPosition = () => {
+      const trigger = triggerRef.current;
+      const panel = panelRef.current;
+      if (!trigger || !panel || window.innerWidth > 640) return;
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const panelHeight = panel.getBoundingClientRect().height;
+      const gutter = 12;
+      const preferredTop = triggerRect.bottom + 6;
+      const maxTop = Math.max(gutter, window.innerHeight - panelHeight - gutter);
+      setPanelTop(Math.min(preferredTop, maxTop));
+    };
+
+    updatePanelPosition();
+    window.addEventListener("resize", updatePanelPosition);
+    window.addEventListener("scroll", updatePanelPosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePanelPosition);
+      window.removeEventListener("scroll", updatePanelPosition, true);
+    };
+  }, [open]);
+
   const measureCh = prefs.measureCh ?? 66;
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative" data-reading-controls>
       <button
+        ref={triggerRef}
+        type="button"
+        id={triggerId}
         onClick={() => setOpen((o) => !o)}
         title="Reading display"
         aria-label="Reading display options"
         aria-expanded={open}
-        className="flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-sm hover:bg-accent"
+        aria-controls={panelId}
+        className="flex min-h-10 min-w-10 items-center justify-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-sm hover:bg-accent"
       >
         <Type className="h-4 w-4" />
         <span className="font-mono">{SIZE_LABEL[prefs.size]}</span>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1.5 w-80 overflow-hidden rounded-card border bg-popover text-sm shadow-e3">
+        <div
+          ref={panelRef}
+          id={panelId}
+          role="region"
+          aria-labelledby={triggerId}
+          style={panelTop == null ? undefined : ({ "--reading-panel-top": `${panelTop}px` } as React.CSSProperties)}
+          className="lsat-reading-popover absolute right-0 top-full z-30 mt-1.5 w-80 overflow-hidden rounded-card border bg-popover text-sm shadow-e3"
+        >
           {/* Live type specimen — re-renders as the controls change. */}
           <div className="border-b bg-surface-1 p-4">
             <p className="type-overline mb-2 text-muted-foreground">Preview</p>
@@ -93,7 +137,7 @@ export function ReadingControls({
             </p>
           </div>
 
-          <div className="max-h-[60vh] space-y-4 overflow-y-auto p-4">
+          <div tabIndex={0} className="max-h-[60vh] space-y-4 overflow-y-auto p-4">
             {/* Size — stepper + segmented. */}
             <Section title="Text size">
               <div className="flex items-center gap-2">
@@ -102,7 +146,7 @@ export function ReadingControls({
                   aria-label="Decrease text size"
                   onClick={() => onChange({ size: stepSize(prefs.size, -1) })}
                   disabled={prefs.size === "sm"}
-                  className="flex h-8 w-8 items-center justify-center rounded-md border hover:bg-accent disabled:opacity-40"
+                  className="flex h-10 w-10 items-center justify-center rounded-md border hover:bg-accent disabled:opacity-40"
                 >
                   <Icon as={Minus} size="sm" />
                 </button>
@@ -110,6 +154,7 @@ export function ReadingControls({
                   {READING_SIZES.map((s) => (
                     <button
                       key={s}
+                      type="button"
                       onClick={() => onChange({ size: s })}
                       aria-pressed={prefs.size === s}
                       className={cn(
@@ -128,7 +173,7 @@ export function ReadingControls({
                   aria-label="Increase text size"
                   onClick={() => onChange({ size: stepSize(prefs.size, 1) })}
                   disabled={prefs.size === "lg"}
-                  className="flex h-8 w-8 items-center justify-center rounded-md border hover:bg-accent disabled:opacity-40"
+                  className="flex h-10 w-10 items-center justify-center rounded-md border hover:bg-accent disabled:opacity-40"
                 >
                   <Icon as={Plus} size="sm" />
                 </button>

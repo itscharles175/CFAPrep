@@ -164,6 +164,10 @@
     --success-foreground: 231 30% 7%;
     --warning: 38 92% 50%;
     --warning-foreground: 229 26% 11%;
+    /* Keep warning text bright on dark tinted surfaces. The light palette
+       intentionally uses a darker amber, but that value is inherited unless
+       the dark text token is explicit. */
+    --warning-text: 45 100% 70%;
     --info: 200 85% 46%;
     --info-foreground: 231 30% 7%;
     /* graphite-800 */
@@ -393,7 +397,63 @@
 /* First Light must sit above the host rail and top bar; its modal contract
  * otherwise exposes controls beneath an unrelated navigation surface. */
 .lsat-first-light-stage {
-  z-index: 140;
+  z-index: var(--z-modal);
+}
+
+/* The host's main frame supplies the viewport bounds while the LSAT scroll
+ * region owns its route-level scroll restoration. Without this bound, the
+ * mounted LSAT root's screen-height flex frame exceeds the host's padded main
+ * area and creates a second, mostly-empty document scroll range. */
+body[data-domain='lsat'] .main-content:has([data-app-root]) {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The breadcrumb already names the LSAT context. Repeating the domain badge
+ * consumes scarce toolbar width and can collide with longer route labels. */
+body[data-domain='lsat'] .topbar-domain {
+  display: none;
+}
+
+body[data-domain='lsat'] .lsat-split-pane-left {
+  flex-basis: var(--split-basis);
+}
+
+@media (min-width: 901px) {
+  body[data-domain='lsat'] .main-content:has([data-app-root]) {
+    height: calc(100dvh - var(--topbar-height) - 1px);
+    margin-top: calc(var(--topbar-height) + 1px);
+  }
+}
+
+/* Portal layers belong above the unified host rail (100) and toolbar (90).
+ * Keep lightweight popovers in the dropdown band and reserve the modal band
+ * for every blocking overlay. The selectors are LSAT-scoped so host dialogs
+ * keep their existing stacking contracts. */
+body[data-domain='lsat'] [data-radix-popper-content-wrapper] {
+  z-index: var(--z-dropdown) !important;
+}
+
+body[data-domain='lsat'] .fixed.inset-0.z-50,
+body[data-domain='lsat'] [role='dialog'].z-50 {
+  z-index: var(--z-modal) !important;
+}
+
+/* Full-bleed assessments bypass SharedLayout's native toolbar. Reserve the
+ * same inset here, then move the two fixed focus affordances into that safe
+ * region instead of drawing beneath macOS traffic lights. */
+:root[data-native-shell='macos-unified'] body[data-domain='lsat'] .assessment-runner {
+  height: 100dvh;
+  padding-top: var(--native-titlebar-inset);
+}
+
+:root[data-native-shell='macos-unified'] body[data-domain='lsat'] .lsat-focus-hairline {
+  top: var(--native-titlebar-inset);
+}
+
+:root[data-native-shell='macos-unified'] body[data-domain='lsat'] .lsat-focus-clock {
+  top: auto;
+  bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* Preserve the 40px interaction floor used by the native shell for compact
@@ -404,6 +464,16 @@ body[data-domain='lsat'] .qv-select-trigger,
 body[data-domain='lsat'] .qv-btn.btn-sm,
 body[data-domain='lsat'] [role='radio'] {
   min-height: 40px;
+}
+
+/* The host-styled button bridge uses a box-shadow focus ring, which can be
+ * visually lost against the warm editorial surfaces on the empty Practice
+ * state. Pair it with an explicit outline so keyboard focus is observable on
+ * every bridged LSAT action, including Import a PrepTest. */
+body[data-domain='lsat'] .btn.qv-btn:focus-visible {
+  outline: 3px solid hsl(var(--ring));
+  outline-offset: 3px;
+  box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 5px hsl(var(--ring));
 }
 
 @media (max-width: 900px) {
@@ -422,6 +492,51 @@ body[data-domain='lsat'] [role='radio'] {
 }
 
 @media (max-width: 640px) {
+  /* The focus timer occupies the quiet lower-left pocket of the compact exam
+   * header. Keeping it in the chrome prevents it from covering answer choices
+   * while the header's annotation controls remain available above. */
+  body[data-domain='lsat'] .lsat-focus-clock {
+    top: 5.5rem;
+    right: auto;
+    bottom: auto;
+    left: 1rem;
+  }
+
+  /* Reading comprehension gets full-width stacked panes on phones. Two
+   * 195px columns preserve the split mechanically but make both the passage
+   * and answer choices needlessly hard to read. */
+  body[data-domain='lsat'] .lsat-resizable-split {
+    flex-direction: column;
+  }
+
+  body[data-domain='lsat'] .lsat-split-pane {
+    width: 100%;
+    min-height: 0;
+    flex: 1 1 0;
+    border-right: 0;
+  }
+
+  body[data-domain='lsat'] .lsat-split-pane-left {
+    border-bottom: 1px solid hsl(var(--border));
+  }
+
+  body[data-domain='lsat'] .lsat-split-divider {
+    display: none;
+  }
+
+  /* Reading preferences are a viewport-level surface on phones. The trigger
+     often lives in a compact exam toolbar, so anchoring the panel to that
+     narrow flex item would place most of the 320px panel off-canvas. */
+  body[data-domain='lsat'] .lsat-reading-popover {
+    position: fixed;
+    top: var(--reading-panel-top, 4rem);
+    right: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    max-width: calc(100vw - 1.5rem);
+    margin-top: 0;
+  }
+
   /* Keep every Review category immediately legible rather than presenting a
    * clipped, un-signposted horizontal tab strip. */
   body[data-domain='lsat'] .lsat-review-tabs {
@@ -715,7 +830,7 @@ body[data-domain='lsat'] [role='radio'] {
     pointer-events: none;
   }
   .card-interactive:hover {
-    transform: translateY(-2px);
+    transform: translateY(-1px);
   }
   .card-interactive:hover::after {
     opacity: 1;
@@ -1117,5 +1232,289 @@ html.theme-transition *::after {
   svg text {
     fill: CanvasText !important;
     stroke: none !important;
+  }
+}
+
+/* ===========================================================================
+   StudyVault editorial bridge
+
+   The unified shell imports its global tokens without a cascade layer. LSAT's
+   Tailwind vocabulary is intentionally bare HSL triplets and lives in
+   `@layer base`, so shared unlayered tokens could otherwise win before LSAT's
+   semantic values reach a mounted LSAT page. Keep the bridge strictly scoped
+   to LSAT's `data-app-root`: the host chrome and every other domain retain
+   their own palette, while LSAT receives one dependable editorial token
+   contract.
+   =========================================================================== */
+html[data-theme='light'] body[data-domain='lsat'] [data-app-root] {
+  /* StudyVault editorial type scale and voices. The base UI stays in the host
+     sans voice; Newsreader is reserved below for actual narratives and h1-level
+     editorial moments, while scores retain the shared tabular mono voice. */
+  --lsat-font-sans: var(--font-sans);
+  --lsat-font-serif: var(--font-serif);
+  --lsat-font-mono: var(--font-mono);
+  --lsat-type-xs: var(--fs-xs);
+  --lsat-type-sm: var(--fs-sm);
+  --lsat-type-base: var(--fs-base);
+  --lsat-type-md: var(--fs-md);
+  --lsat-type-lg: var(--fs-lg);
+  --lsat-type-xl: var(--fs-xl);
+  --lsat-type-2xl: var(--fs-2xl);
+  --lsat-type-3xl: var(--fs-3xl);
+  --lsat-type-4xl: var(--fs-4xl);
+  --lsat-leading-tight: var(--lh-tight);
+  --lsat-leading-snug: var(--lh-snug);
+  --lsat-leading-normal: var(--lh-normal);
+  --lsat-leading-relaxed: var(--lh-relaxed);
+
+  /* Explicit light editorial environment. These remain bare triplets because LSAT's
+     Tailwind primitives consume them through `hsl(var(--token))`. */
+  --background: 41.53846 35.13514% 92.74510%; /* host --bg-primary: #f3efe6 */
+  --foreground: 60 4.22535% 13.92157%; /* host --text-primary: #252522 */
+  --card: 42 55.55556% 96.47059%; /* host --bg-card: #fbf8f1 */
+  --card-foreground: 60 4.22535% 13.92157%;
+  --popover: 42 55.55556% 96.47059%;
+  --popover-foreground: 60 4.22535% 13.92157%;
+  /* Light editorial primary clears AA for 11px overline text on the
+     recommendation card's warm tinted surface (4.71:1 at 58%). */
+  --primary: 262 83% 58%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 38.82353 29.82456% 88.82353%; /* host --bg-secondary: #ebe5da */
+  --secondary-foreground: 60 4.22535% 13.92157%;
+  --muted: 40 42.85714% 94.50980%; /* host --surface-panel: #f7f3eb */
+  --muted-foreground: 46.66667 4.52261% 39.01961%; /* host --text-muted: #68665f */
+  --accent: 38.18182 16.92308% 84.70588%; /* host --bg-hover: #e4ded2 */
+  --accent-foreground: 60 4.22535% 13.92157%;
+  --destructive: 0 73.7% 41.8%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 162.9 93.5% 24.3%;
+  --success-foreground: 0 0% 100%;
+  --warning: 22.7 82.5% 31.4%;
+  --warning-foreground: 0 0% 100%;
+  --warning-text: 22.7 82.5% 31.4%;
+  --info: 194.4 69.6% 27.1%;
+  --info-foreground: 0 0% 100%;
+  --border: 47.14286 6.14035% 84.31373%;
+  --input: 42.85714 100% 98.62745%; /* host --input-bg: #fffdf8 */
+  --ring: 262 83% 60%;
+
+  /* Shared geometry: the LSAT primitive radius aligns with StudyVault's
+     `--radius-sm`; the explicit aliases let host-shaped primitives sit beside
+     LSAT cards without a corner or elevation seam. */
+  --radius: var(--radius-sm);
+  --lsat-radius-xs: var(--radius-xs);
+  --lsat-radius-sm: var(--radius-sm);
+  --lsat-radius-md: var(--radius-md);
+  --lsat-radius-lg: var(--radius-lg);
+  --lsat-radius-xl: var(--radius-xl);
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(49, 44, 35, 0.07);
+  --elevation-2: 0 4px 12px rgba(49, 44, 35, 0.08);
+  --elevation-3: 0 9px 28px rgba(49, 44, 35, 0.09);
+  --elevation-4: 0 20px 56px rgba(49, 44, 35, 0.11);
+
+  --surface-0: 41.53846 35.13514% 92.74510%; /* host --bg-primary */
+  --surface-1: 42 55.55556% 96.47059%; /* host --surface-raised */
+  --surface-2: 40 42.85714% 94.50980%; /* host --surface-panel */
+  --surface-3: 38.82353 29.82456% 88.82353%; /* host --bg-secondary */
+  --glass-bg: 42 55.55556% 96.47059%;
+  --glass-alpha: 0.72;
+  --glass-blur: 12px;
+  --aurora: 262 83% 60%;
+  --aurora-strength: 0.06;
+  --glow: 262 83% 60%;
+  --glow-strength: 0.16;
+
+  /* LSAT's compact controls use their own density multiplier while host
+     spacing remains governed by the shared density preference. */
+  --lsat-density-unit: 4px;
+  --space-unit: var(--lsat-density-unit);
+  --card-pad: calc(var(--lsat-density-unit) * 6);
+  --row-h: calc(var(--lsat-density-unit) * 9);
+  --measure: 66ch;
+}
+
+/* The host's system preference deliberately removes `data-theme`; its default
+   palette is dark. Match that default, plus an explicit dark choice, rather
+   than allowing the LSAT bridge to select light on its own. */
+html:not([data-theme='light']) body[data-domain='lsat'] [data-app-root] {
+  --background: 90 5.55556% 7.05882%; /* host --bg-primary: #121311 */
+  --foreground: 45 35.29412% 93.33333%; /* host --text-primary: #f4f1e8 */
+  --card: 80 5.26316% 11.17647%; /* host --bg-card: #1d1e1b */
+  --card-foreground: 45 35.29412% 93.33333%;
+  --popover: 80 5.45455% 10.78431%; /* host --surface-raised: #1c1d1a */
+  --popover-foreground: 45 35.29412% 93.33333%;
+  --primary: 258 92% 70%;
+  --primary-foreground: 90 5.55556% 7.05882%;
+  --secondary: 80 6.12245% 9.60784%; /* host --bg-secondary: #191a17 */
+  --secondary-foreground: 45 35.29412% 93.33333%;
+  --muted: 80 6.38298% 9.21569%; /* host --surface-panel: #181916 */
+  --muted-foreground: 48 4.34783% 54.90196%; /* host --text-muted: #918f87 */
+  --accent: 75 5% 15.68627%; /* host --bg-hover: #292a26 */
+  --accent-foreground: 45 35.29412% 93.33333%;
+  --destructive: 0 90% 70%;
+  --destructive-foreground: 90 5.55556% 7.05882%;
+  --success: 160.1 84.1% 39.4%;
+  --success-foreground: 90 5.55556% 7.05882%;
+  --warning: 37.7 92.1% 50.2%;
+  --warning-foreground: 90 5.55556% 7.05882%;
+  --warning-text: 37.7 92.1% 50.2%;
+  --info: 188.7 94.5% 42.7%;
+  --info-foreground: 90 5.55556% 7.05882%;
+  --border: 45 6.45161% 20.19608%;
+  --input: 80 7.31707% 8.03922%; /* host --input-bg: #151613 */
+  --ring: 258 92% 70%;
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.28);
+  --elevation-3: 0 8px 22px rgba(0, 0, 0, 0.30);
+  --elevation-4: 0 18px 44px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(148, 163, 184, 0.08);
+  --surface-0: 90 5.55556% 7.05882%; /* host --bg-primary */
+  --surface-1: 80 5.26316% 11.17647%; /* host --bg-card */
+  --surface-2: 80 5.45455% 10.78431%; /* host --surface-raised */
+  --surface-3: 80 6.12245% 9.60784%; /* host --bg-secondary */
+  --glass-bg: 80 6.12245% 9.60784%;
+  --glass-alpha: 0.92;
+  --glass-blur: 8px;
+  --aurora: 258 92% 70%;
+  --aurora-strength: 0.1;
+  --glow: 258 92% 70%;
+  --glow-strength: 0.26;
+}
+
+html[data-density='compact'] body[data-domain='lsat'] [data-app-root] {
+  --lsat-density-unit: 3px;
+}
+
+/* Preserve the existing high-contrast guarantees after the scoped bridge has
+   established the normal environment. */
+html.high-contrast body[data-domain='lsat'] [data-app-root] {
+  --foreground: 0 0% 0%;
+  --background: 0 0% 100%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 0%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 0%;
+  --muted-foreground: 0 0% 25%;
+  --secondary-foreground: 0 0% 0%;
+  --accent-foreground: 0 0% 0%;
+  --border: 0 0% 0%;
+  --input: 0 0% 0%;
+  --primary: 262 100% 35%;
+  --ring: 262 100% 35%;
+  --success: 152 100% 22%;
+  --warning: 38 100% 30%;
+  --info: 200 100% 28%;
+  --destructive: 358 90% 40%;
+  --aurora-strength: 0;
+  --glow-strength: 0;
+  --surface-1: 0 0% 100%;
+  --surface-2: 0 0% 96%;
+  --surface-3: 0 0% 92%;
+}
+
+html:not([data-theme='light']).high-contrast body[data-domain='lsat'] [data-app-root] {
+  --foreground: 0 0% 100%;
+  --background: 0 0% 0%;
+  --card: 0 0% 8%;
+  --card-foreground: 0 0% 100%;
+  --popover: 0 0% 8%;
+  --popover-foreground: 0 0% 100%;
+  --muted-foreground: 0 0% 80%;
+  --secondary-foreground: 0 0% 100%;
+  --accent-foreground: 0 0% 100%;
+  --border: 0 0% 100%;
+  --input: 0 0% 100%;
+  --primary: 258 100% 82%;
+  --ring: 258 100% 82%;
+  --success: 152 70% 62%;
+  --warning: 45 100% 62%;
+  --info: 200 90% 66%;
+  --aurora-strength: 0;
+  --glow-strength: 0;
+  --surface-1: 0 0% 8%;
+  --surface-2: 0 0% 14%;
+  --surface-3: 0 0% 20%;
+}
+
+body[data-domain='lsat'] [data-app-root],
+body[data-domain='lsat'] [data-app-root] input,
+body[data-domain='lsat'] [data-app-root] textarea,
+body[data-domain='lsat'] [data-app-root] select,
+body[data-domain='lsat'] [data-app-root] button {
+  font-family: var(--lsat-font-sans);
+}
+
+body[data-domain='lsat'] [data-app-root] .reading-serif {
+  font-family: var(--lsat-font-serif);
+}
+
+/* A label inside the violet tutor callout needs the darker editorial violet in
+ * light mode; the default primary token is intentionally brighter for fills. */
+body[data-domain='lsat'] [data-app-root] .lsat-tutor-next-step-label {
+  color: hsl(var(--verdict-700));
+}
+
+html:not([data-theme='light']) body[data-domain='lsat'] [data-app-root] .lsat-tutor-next-step-label {
+  color: hsl(var(--verdict-300));
+}
+
+/* Routine panel and section headings follow StudyVault's compact sans scale;
+   serif remains intentional rather than becoming incidental card decoration. */
+body[data-domain='lsat'] [data-app-root] .type-display,
+body[data-domain='lsat'] [data-app-root] .type-counsel {
+  font-family: var(--lsat-font-sans);
+}
+
+body[data-domain='lsat'] [data-app-root] h1.type-display,
+body[data-domain='lsat'] [data-app-root] p.type-counsel,
+body[data-domain='lsat'] [data-app-root] blockquote.type-counsel {
+  font-family: var(--lsat-font-serif);
+}
+
+body[data-domain='lsat'] [data-app-root] .type-numeric {
+  font-family: var(--lsat-font-mono);
+}
+
+/* The AI prerequisite notice has two actions and a dismiss control. At narrow
+   widths, keeping those controls in the inline flex row steals the message's
+   measure and can collapse the copy into one-word lines. Give the message the
+   first row, then let the action group wrap below it. The desktop flex layout
+   remains unchanged. */
+@media (max-width: 640px) {
+  body[data-domain='lsat'] [data-app-root] .lsat-ai-prereq-notice {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: 0.75rem;
+    row-gap: 0.5rem;
+    align-items: start;
+  }
+
+  body[data-domain='lsat'] [data-app-root] .lsat-ai-prereq-notice > :nth-child(1) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  body[data-domain='lsat'] [data-app-root] .lsat-ai-prereq-notice > :nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  body[data-domain='lsat'] [data-app-root] .lsat-ai-prereq-notice > :nth-child(3) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: flex;
+    width: 100%;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  body[data-domain='lsat'] [data-app-root] .lsat-ai-prereq-notice > :nth-child(3) > button {
+    min-height: 40px;
+  }
+
+  body[data-domain='lsat'] [data-app-root] .lsat-ai-prereq-notice > :nth-child(4) {
+    grid-column: 3;
+    grid-row: 1;
   }
 }

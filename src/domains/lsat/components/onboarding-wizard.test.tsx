@@ -1,6 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OnboardingOllamaStep, examCountdownPresentation, onboardingAppliesToRoute, setFirstLightChromeState } from "./onboarding-wizard";
+import {
+  FirstLightStage,
+  OnboardingOllamaStep,
+  examCountdownPresentation,
+  getDialogFocusableElements,
+  onboardingAppliesToRoute,
+  setFirstLightChromeState,
+} from "./onboarding-wizard";
 
 const mocks = vi.hoisted(() => ({
   useAiHealth: vi.fn(),
@@ -58,13 +65,9 @@ describe("OnboardingOllamaStep provider selection", () => {
 
     renderStep();
 
-    expect(
-      screen.getByRole("heading", { name: "Local AI (Ollama)" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Local AI (Ollama)" })).toBeInTheDocument();
     expect(screen.getByText(/Ollama not detected/i)).toBeInTheDocument();
-    expect(
-      screen.queryByText(/LMStudio server not detected/i),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/LMStudio server not detected/i)).not.toBeInTheDocument();
   });
 
   it("uses the requested provider while the save is pending", () => {
@@ -73,18 +76,21 @@ describe("OnboardingOllamaStep provider selection", () => {
 
     renderStep();
 
-    expect(
-      screen.getByRole("heading", { name: "Local AI (LMStudio)" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/LMStudio server not detected/i),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Local AI (LMStudio)" })).toBeInTheDocument();
+    expect(screen.getByText(/LMStudio server not detected/i)).toBeInTheDocument();
+  });
+
+  it("labels provider deferral separately from leaving setup", () => {
+    renderStep();
+
+    expect(screen.getByRole("button", { name: "Not now" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument();
   });
 });
 
 describe("onboarding route eligibility", () => {
-  it("keeps first-light setup on LSAT learn surfaces without covering deep links", () => {
-    expect(onboardingAppliesToRoute("/")).toBe(true);
+  it("keeps setup on LSAT Curriculum without covering the library or deep links", () => {
+    expect(onboardingAppliesToRoute("/")).toBe(false);
     expect(onboardingAppliesToRoute("/dashboard")).toBe(true);
     expect(onboardingAppliesToRoute("/tutor")).toBe(false);
     expect(onboardingAppliesToRoute("/practice")).toBe(false);
@@ -115,4 +121,59 @@ describe("onboarding route eligibility", () => {
   });
 });
 
-afterEach(() => setFirstLightChromeState(false));
+describe("FirstLightStage dialog contract", () => {
+  function renderStage(onSkip = vi.fn()) {
+    const trigger = document.createElement("button");
+    trigger.dataset.onboardingTrigger = "true";
+    trigger.textContent = "Open setup";
+    document.body.append(trigger);
+    trigger.focus();
+
+    const result = render(
+      <FirstLightStage reduce onSkip={onSkip}>
+        <button type="button">Continue</button>
+      </FirstLightStage>,
+    );
+    return { ...result, onSkip, trigger };
+  }
+
+  it("exposes a stable dismiss selector and moves focus into the dialog", async () => {
+    const { trigger } = renderStage();
+
+    const dismiss = screen.getByLabelText("Skip onboarding");
+    expect(dismiss).toHaveTextContent("Skip setup");
+    await waitFor(() => expect(dismiss).toHaveFocus());
+    expect(trigger).not.toHaveFocus();
+  });
+
+  it("keeps Tab navigation inside the dialog and restores the prior focus on close", async () => {
+    const { unmount, trigger } = renderStage();
+    const dialog = screen.getByRole("dialog", { name: "StudyVault LSAT setup" });
+    const focusable = getDialogFocusableElements(dialog);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    last.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(first).toHaveFocus();
+
+    first.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(last).toHaveFocus();
+
+    unmount();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("treats Escape as a dismiss action", () => {
+    const { onSkip } = renderStage();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onSkip).toHaveBeenCalledTimes(1);
+  });
+});
+
+afterEach(() => {
+  setFirstLightChromeState(false);
+  document.querySelectorAll("[data-onboarding-trigger='true']").forEach((trigger) => trigger.remove());
+});

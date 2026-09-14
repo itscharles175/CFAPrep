@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   CheckCircle2,
+  ChevronDown,
   Database,
   Download,
   HardDriveDownload,
@@ -222,11 +223,12 @@ export default function Bank() {
   return (
     <div className="page-container">
       <PageHeader
+        eyebrow="Library · Question Sources"
         title="Question bank"
-        subtitle="Import research datasets, auto-tag, and grow toward your target size."
+        subtitle="Browse provenance-aware questions, then open source and maintenance tools only when you need them."
       />
     <Tabs defaultValue="browse">
-      <TabsList>
+      <TabsList aria-label="Question bank views">
         <TabsTrigger value="browse">Browse</TabsTrigger>
         <TabsTrigger value="quality">Quality</TabsTrigger>
         <TabsTrigger value="ops">Operations</TabsTrigger>
@@ -242,7 +244,7 @@ export default function Bank() {
 
       {/* Headline counts */}
       <PageSection eyebrow="OVERVIEW" title="Bank summary">
-        <Card>
+        <Card className="border-border/80 shadow-sm">
           <CardContent className="space-y-4 pt-[var(--card-pad)]">
             <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
               {bankStats.isLoading ? (
@@ -281,8 +283,8 @@ export default function Bank() {
         eyebrow="GROW THE BANK"
         title="Import research datasets"
       >
-      <Card>
-        <CardHeader className="flex-row items-center gap-2 space-y-0">
+      <Card className="border-border/80 shadow-sm">
+        <CardHeader className="flex-row items-center gap-2 border-b bg-surface-1/70 space-y-0">
           <Icon as={Database} size="sm" className="text-primary" />
           <CardTitle className="text-base">Hugging Face sources</CardTitle>
         </CardHeader>
@@ -292,7 +294,7 @@ export default function Bank() {
             the bank are skipped by external id or content hash. Sources marked
             non-commercial (ReClor) require a local file you supply yourself.
           </p>
-          <div className="space-y-2">
+          <div className="space-y-2 rounded-card bg-surface-1/60 p-2">
             {sources.map((src) => {
               const needsLocal = !!src.requires_local_path;
               const provenance = src.question_source ?? src.key;
@@ -429,8 +431,14 @@ export default function Bank() {
       </PageSection>
 
       {/* Auto-tag */}
+      <details className="group rounded-card border bg-card shadow-sm">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 marker:content-none">
+          <span><span className="block text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Source maintenance</span><span className="mt-1 block font-medium">Tag and generate questions</span></span>
+          <span className="flex items-center gap-2"><Badge variant="outline">Optional</Badge><ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden /></span>
+        </summary>
+        <div className="space-y-6 border-t p-4">
       <PageSection eyebrow="GROW THE BANK" title="Auto-tag research items">
-      <Card>
+      <Card className="border-border/80 bg-surface-1/40">
         <CardHeader className="flex-row items-center gap-2 space-y-0">
           <Icon as={Wand2} size="sm" className="text-primary" />
           <CardTitle className="text-base">Type &amp; difficulty pass</CardTitle>
@@ -456,7 +464,7 @@ export default function Bank() {
 
       {/* Bootstrap orchestrator */}
       <PageSection eyebrow="GROW THE BANK" title="Bootstrap to target">
-      <Card>
+      <Card className="border-border/80 bg-surface-1/40">
         <CardHeader className="flex-row items-center gap-2 space-y-0">
           <Icon as={CheckCircle2} size="sm" className="text-primary" />
           <CardTitle className="text-base">Generation plan</CardTitle>
@@ -505,11 +513,13 @@ export default function Bank() {
         </CardContent>
       </Card>
       </PageSection>
+        </div>
+      </details>
 
       {/* Source breakdown */}
       {stats && Object.keys(stats.by_source).length > 0 && (
         <PageSection eyebrow="MAINTENANCE" title="By source">
-        <Card>
+        <Card className="border-border/80 shadow-sm">
           <CardContent className="space-y-3 pt-[var(--card-pad)] text-sm">
             <div className="space-y-1.5">
               {Object.entries(stats.by_source)
@@ -533,8 +543,14 @@ export default function Bank() {
       )}
 
       {/* Backup / restore */}
+      <details className="rounded-card border bg-card shadow-sm">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 marker:content-none">
+          <span><span className="block text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Maintenance</span><span className="mt-1 block font-medium">Backup and restore</span></span>
+          <span className="flex items-center gap-2"><Badge variant="outline">Local JSON</Badge><ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden /></span>
+        </summary>
+        <div className="border-t p-4">
       <PageSection eyebrow="MAINTENANCE" title="Backup & restore">
-      <Card>
+      <Card className="border-border/80 bg-surface-1/40">
         <CardContent className="space-y-2 pt-[var(--card-pad)]">
           <p className="text-xs text-muted-foreground">
             Exports the entire bank (questions, choices, explanations, attempts,
@@ -575,6 +591,8 @@ export default function Bank() {
         </CardContent>
       </Card>
       </PageSection>
+        </div>
+      </details>
       </TabsContent>
     </Tabs>
     </div>
@@ -596,7 +614,7 @@ function BankAnnotationAuthoring() {
       eyebrow="NOTEBOOK"
       title="Author a note"
     >
-      <Card>
+      <Card className="border-border/80 shadow-sm">
         <CardContent className="space-y-3 pt-[var(--card-pad)]">
           <p className="text-xs text-muted-foreground">
             Write your own explanation + tags for a question. Notes are searchable
@@ -645,8 +663,8 @@ function Stat({
   accent?: boolean;
 }) {
   return (
-    <div className="rounded-md border bg-surface-1 p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div className="rounded-card border bg-surface-1/70 p-3">
+      <div className="text-xs uppercase tracking-[0.1em] text-muted-foreground">{label}</div>
       <div
         className={
           accent
