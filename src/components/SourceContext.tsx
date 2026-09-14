@@ -174,16 +174,18 @@ export interface SourceCoverageMeterProps {
   coverage?: Partial<CfaSourceMapStatus> | null;
   status?: Partial<CfaSourceMapStatus> | null;
   title?: string;
+  headingLevel?: 2 | 3;
 }
 
-export function SourceCoverageMeter({ coverage, status, title = 'Source Coverage' }: SourceCoverageMeterProps) {
+export function SourceCoverageMeter({ coverage, status, title = 'Source Coverage', headingLevel = 3 }: SourceCoverageMeterProps) {
   const officialPct = status?.documentCount ? Math.round(((status.officialDocumentCount ?? 0) / status.documentCount) * 100) : 0;
+  const Heading = headingLevel === 2 ? 'h2' : 'h3';
   return (
     <Surface tone="vault" density="compact" className="source-coverage-meter">
       <div className="source-rail-head">
         <div>
           <StatusBadge tone="success">private local only</StatusBadge>
-          <h3>{title}</h3>
+          <Heading>{title}</Heading>
           <p>{coverage?.documentCount || 0} documents · {coverage?.chunkCount || 0} searchable chunks · {status?.linkCount || 0} mapped links</p>
         </div>
       </div>

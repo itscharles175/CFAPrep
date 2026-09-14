@@ -122,6 +122,8 @@ export default function VaultCenter() {
     () => artifacts.filter((artifact) => (filter === 'all' || filter === 'artifact') && matchesQuery(artifact, query)),
     [artifacts, filter, query],
   );
+  const hasSavedLibraryItems = notes.length > 0 || bookmarks.length > 0 || artifacts.length > 0;
+  const hasAnyVaultItems = hasSavedLibraryItems || sourceDocuments.length > 0;
   const sourceMapTargets = useMemo(
     () =>
       [...new Set(sourceDocuments.flatMap((document) => document.topicIds || []))].slice(0, 28).map((topicId) => {
@@ -203,7 +205,7 @@ export default function VaultCenter() {
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container vault-page">
       <PageHeader
         badge="LOCAL VAULT"
         title="Notes, Bookmarks & Artifacts"
@@ -224,29 +226,36 @@ export default function VaultCenter() {
         />
       )}
 
-      <div className="grid-4 page-metrics">
-        <MetricCard label="Notes" value={notes.length} detail="Saved locally" icon={StickyNote} />
-        <MetricCard label="Bookmarks" value={bookmarks.length} detail="Marked lessons and questions" icon={Bookmark} tone="warning" />
-        <MetricCard label="Artifacts" value={artifacts.length} detail="Calculator and lab outputs" icon={Database} tone="accent" />
-        <MetricCard label="Sources" value={sourceDocuments.length} detail={`${sourceCoverage?.chunkCount || 0} private chunks`} icon={BookText} tone="success" />
-      </div>
+      {hasAnyVaultItems && (
+        <div className="grid-4 page-metrics vault-metrics">
+          {notes.length > 0 && <MetricCard label="Notes" value={notes.length} detail="Saved locally" icon={StickyNote} />}
+          {bookmarks.length > 0 && <MetricCard label="Bookmarks" value={bookmarks.length} detail="Marked lessons and questions" icon={Bookmark} tone="warning" />}
+          {artifacts.length > 0 && <MetricCard label="Artifacts" value={artifacts.length} detail="Calculator and lab outputs" icon={Database} tone="accent" />}
+          {sourceDocuments.length > 0 && <MetricCard label="Sources" value={sourceDocuments.length} detail={`${sourceCoverage?.chunkCount || 0} private chunks`} icon={BookText} tone="success" />}
+        </div>
+      )}
 
-      <Surface density="compact" className="filter-panel">
-        <label className="vault-search">
-          <Search size={16} />
-          <input
-            aria-label="Search local vault"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search notes, bookmarks, formulas, questions, artifacts..."
-          />
-        </label>
-      </Surface>
+      {hasSavedLibraryItems && (
+        <>
+          <Surface density="compact" className="filter-panel">
+            <label className="vault-search">
+              <Search size={16} />
+              <input
+                aria-label="Search local vault"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search notes, bookmarks, formulas, questions, artifacts..."
+              />
+            </label>
+          </Surface>
 
-      <SegmentedControl label="Vault filter" options={filters} value={filter} onChange={setFilter} />
+          <SegmentedControl label="Vault filter" options={filters} value={filter} onChange={setFilter} />
+        </>
+      )}
       {message && <p className="muted-copy">{message}</p>}
 
-      <Panel tone="vault" title="CFA Source Vault" className="vault-wide-panel">
+      <Panel tone="vault" className="vault-wide-panel">
+        <h2 className="vault-panel-title">CFA Source Vault</h2>
         <div className="action-row" style={{ marginBottom: 'var(--space-4)' }}>
           <label className="btn btn-primary">
             <FileUp size={16} /> Import .qvsource
@@ -317,8 +326,10 @@ export default function VaultCenter() {
         </div>
       </Panel>
 
-      <div className="grid-2 vault-section-grid">
-        <Panel tone="vault" title="Notes">
+      {hasSavedLibraryItems && (
+        <>
+          <div className="grid-2 vault-section-grid">
+            <Panel tone="vault" title="Notes">
           <div className="vault-list">
             {filteredNotes.length ? (
               filteredNotes.map((note) => (
@@ -356,9 +367,9 @@ export default function VaultCenter() {
               <p className="muted-copy">No notes match this vault slice.</p>
             )}
           </div>
-        </Panel>
+            </Panel>
 
-        <Panel tone="vault" title="Bookmarks">
+            <Panel tone="vault" title="Bookmarks">
           <div className="vault-list">
             {filteredBookmarks.length ? (
               filteredBookmarks.map((bookmark) => (
@@ -377,28 +388,30 @@ export default function VaultCenter() {
               <p className="muted-copy">No bookmarks match this vault slice.</p>
             )}
           </div>
-        </Panel>
-      </div>
+            </Panel>
+          </div>
 
-      <Panel tone="vault" title="Result Artifacts" className="vault-wide-panel">
-        <div className="vault-list">
-          {filteredArtifacts.length ? (
-            filteredArtifacts.map((artifact) => (
-              <div key={artifact.id} className="vault-row">
-                <div>
-                  <StatusBadge tone="exam">{artifact.type}</StatusBadge>
-                  <h4>{artifact.title}</h4>
-                  <p>{artifact.summary}</p>
-                  {artifact.path && <Link to={artifact.path}>Open tool</Link>}
-                </div>
-                <button className="btn btn-secondary btn-sm" onClick={() => createArtifactNote(artifact)}>Send to Notes</button>
-              </div>
-            ))
-          ) : (
-            <p className="muted-copy">No artifacts match this vault slice.</p>
-          )}
-        </div>
-      </Panel>
+          <Panel tone="vault" title="Result Artifacts" className="vault-wide-panel">
+            <div className="vault-list">
+              {filteredArtifacts.length ? (
+                filteredArtifacts.map((artifact) => (
+                  <div key={artifact.id} className="vault-row">
+                    <div>
+                      <StatusBadge tone="exam">{artifact.type}</StatusBadge>
+                      <h4>{artifact.title}</h4>
+                      <p>{artifact.summary}</p>
+                      {artifact.path && <Link to={artifact.path}>Open tool</Link>}
+                    </div>
+                    <button className="btn btn-secondary btn-sm" onClick={() => createArtifactNote(artifact)}>Send to Notes</button>
+                  </div>
+                ))
+              ) : (
+                <p className="muted-copy">No artifacts match this vault slice.</p>
+              )}
+            </div>
+          </Panel>
+        </>
+      )}
     </div>
   );
 }

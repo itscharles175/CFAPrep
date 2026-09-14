@@ -106,7 +106,7 @@ export default function CfaDashboard() {
   }, [activePathway, summary.questionsAnswered]);
 
   return (
-    <div className="page-container">
+    <div className="page-container cfa-dashboard-page">
       <PageHeader
         tone="exam"
         badge="CFA EXAM COCKPIT"
@@ -138,7 +138,7 @@ export default function CfaDashboard() {
           <div className="flex-between" style={{ gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
             <div>
               <StatusBadge tone="accent">Study Director</StatusBadge>
-              <h3 style={{ margin: 'var(--space-1) 0 0' }}>{studyPlan.headline}</h3>
+              <h2 className="cfa-dashboard-section-title" style={{ margin: 'var(--space-1) 0 0' }}>{studyPlan.headline}</h2>
               <p className="muted-copy" style={{ margin: 'var(--space-1) 0 0' }}>
                 Prioritized from your local FSRS queue, topic readiness, and upcoming review load.
               </p>
@@ -171,7 +171,7 @@ export default function CfaDashboard() {
         </Surface>
       )}
 
-      <SourceCoverageMeter coverage={sourceCoverage} status={sourceStatus} title="Native CFA Source Layer" />
+      <SourceCoverageMeter coverage={sourceCoverage} status={sourceStatus} title="Native CFA Source Layer" headingLevel={2} />
 
       <Surface tone="exam" density="compact" style={{ marginBottom: 'var(--space-6)' }}>
         <div className="flex-between" style={{ gap: 'var(--space-4)', alignItems: 'center' }}>

@@ -366,7 +366,7 @@ export default function Sidebar({
               <NavLink
                 key={workspace.id}
                 to={workspaceHref(workspace.id, studyContext)}
-                end={workspace.id === 'today'}
+                end
                 onClick={onNavigate}
                 aria-current={active ? 'page' : undefined}
                 className={`sidebar-link ${active ? 'active' : ''}`}

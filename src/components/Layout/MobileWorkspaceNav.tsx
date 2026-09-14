@@ -54,6 +54,13 @@ export default function MobileWorkspaceNav() {
     };
   }, [moreOpen]);
 
+  // Active CFA assessments own the compact screen. The route keeps its own
+  // explicit Back action, while removing the global bar prevents answers and
+  // the primary action from competing with unrelated workspace navigation.
+  if (/^\/cfa\/level[123]\/[^/]+\/(quiz|vignette|constructed-response)(?:\/|$)/.test(location.pathname)) {
+    return null;
+  }
+
   return (
     <nav className="mobile-workspace-nav" aria-label="Study workspaces">
       {workspaces.map((workspace) => {

@@ -472,28 +472,11 @@ export default function CfaQuiz() {
         <ArrowLeft size={16} /> Back to {topicData?.title || topic}
       </Link>
 
-      <h1 className="quiz-workspace-title">{topicData?.title || topic} Practice</h1>
-
       <div className="quiz-container">
-        <Surface tone="study" density="compact" style={{ marginBottom: 'var(--space-5)' }}>
-          <SegmentedControl
-            label="Quiz mode"
-            options={quizModes.map((item) => ({ value: item.id, label: item.label, icon: item.icon }))}
-            value={mode}
-            onChange={handleModeChange}
-            density="compact"
-          />
-          {usedFallback && (
-            <p className="qv-text-muted qv-fs-sm" style={{ margin: 'var(--space-3) 0 0' }}>
-              No targeted items are currently queued for this mode, so the full topic bank is loaded.
-            </p>
-          )}
-        </Surface>
-
         <div className="quiz-header">
           <div>
-            <div style={{ fontWeight: 700 }}>{topicData?.title || topic}</div>
-            <div className="qv-fs-xs qv-text-muted">Level {level?.toUpperCase()} · {modeLabel}</div>
+            <h1 className="quiz-workspace-title">{topicData?.title || topic} Practice</h1>
+            <div className="qv-fs-xs qv-text-muted">Level {level?.replace('level', '')} · {modeLabel} · {objectiveById.get(q.learningObjective)?.title || q.learningObjective}</div>
           </div>
           <div className="qv-row-4">
             <span className={`badge ${q.difficulty === 'foundation' ? 'badge-green' : q.difficulty === 'intermediate' ? 'badge-blue' : 'badge-purple'}`}>
@@ -505,35 +488,47 @@ export default function CfaQuiz() {
           </div>
         </div>
 
-        <ProgressRail
-          value={safeCurrent + (confirmed ? 1 : 0)}
-          max={questions.length}
-          label="Question progress"
-          detail={`${safeCurrent + 1}/${questions.length}`}
-          tone="exam"
-        />
+        <Surface tone="study" density="compact" className="quiz-mode-toolbar">
+          <div className="quiz-mode-toolbar-row">
+            <span className="quiz-mode-label">Practice mode</span>
+            <div className="quiz-mode-segments">
+              <SegmentedControl
+                label="Quiz mode"
+                options={quizModes.map((item) => ({ value: item.id, label: item.label, icon: item.icon }))}
+                value={mode}
+                onChange={handleModeChange}
+                density="compact"
+              />
+            </div>
+            <label className="quiz-mode-select">
+              <span className="sr-only">Quiz mode</span>
+              <select value={mode} onChange={(event) => handleModeChange(event.target.value)}>
+                {quizModes.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </label>
+          </div>
+          {usedFallback && (
+            <p className="quiz-mode-fallback">
+              No targeted items are currently queued for this mode, so the full topic bank is loaded.
+            </p>
+          )}
+        </Surface>
+
+        <div className="quiz-progress-compact">
+          <ProgressRail
+            value={safeCurrent + (confirmed ? 1 : 0)}
+            max={questions.length}
+            label="Question progress"
+            tone="exam"
+          />
+        </div>
 
         <QuestionStage
           key={`${mode}-${safeCurrent}`}
-          badge={q.difficulty?.toUpperCase()}
-          objective={objectiveById.get(q.learningObjective)?.title || q.learningObjective}
           question={q.question}
           status={confirmed ? (selected === q.correct ? 'success' : 'danger') : 'exam'}
           footer={<CommandHint keys={['A-D', 'Enter']} label="select and confirm" />}
         >
-
-          {/* A11Y-3: hands-free study controls. Untimed quiz, so a voice answer
-              applies directly (testMode={false}); read-aloud uses local TTS. The
-              strip self-hides when the browser lacks speech APIs. */}
-          {!confirmed && (
-            <HandsFreeController
-              question={q.question}
-              options={q.options.map((opt, idx) => ({ letter: letters[idx], text: opt }))}
-              onSelect={handleSelect}
-              testMode={false}
-              preface={`Question ${safeCurrent + 1} of ${questions.length}.`}
-            />
-          )}
 
           {/* A11Y-2: the shared accessible radiogroup primitive replaces the
               hand-rolled <button> list. Selection/confirmation stay controlled
@@ -611,9 +606,25 @@ export default function CfaQuiz() {
               </div>
             )}
           </AccessibleQuestionRunner>
+
+          {/* A11Y-3: these optional controls follow the answer group so compact
+              screens reach the choices first. Their disclosure stays keyboard
+              and screen-reader accessible. */}
+          {!confirmed && (
+            <details className="quiz-assistive-tools">
+              <summary>Listen or answer by voice</summary>
+              <HandsFreeController
+                question={q.question}
+                options={q.options.map((opt, idx) => ({ letter: letters[idx], text: opt }))}
+                onSelect={handleSelect}
+                testMode={false}
+                preface={`Question ${safeCurrent + 1} of ${questions.length}.`}
+              />
+            </details>
+          )}
         </QuestionStage>
 
-        <div className="qv-row-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-6)' }}>
+        <div className="qv-row-3 quiz-primary-action" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-6)' }}>
           {!confirmed ? (
             <button className="btn btn-primary btn-lg" onClick={handleConfirm} disabled={selected === null} style={{ opacity: selected === null ? 0.5 : 1 }}>
               Confirm Answer
